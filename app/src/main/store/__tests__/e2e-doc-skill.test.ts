@@ -8,6 +8,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import type { SkillContext } from '../../agent/registry.js'
 
 const { importSkillFromZip, listSkills, exportSkillToDir } = await import('../skills.js')
 const { invokeSkill } = await import('../../agent/registry.js')
@@ -68,8 +69,8 @@ test('e2e: invokeSkill 加载的 hint 包含 references 路径', async () => {
     console.log('[e2e] skip: 文档驱动开发 skill 未找到')
     return
   }
-  // 构造 ctx
-  const ctx = {
+  // 构造 ctx（显式标注 SkillContext，使 invokeSkill 回写的 additionalSystemHint 可被读取）
+  const ctx: SkillContext = {
     taskId: 'e2e-test',
     signal: new AbortController().signal,
     workspaceDir: '/tmp/e2e-ws',

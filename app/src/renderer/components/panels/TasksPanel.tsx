@@ -13,19 +13,34 @@ import { formatUpdatedAt } from '../../types'
 import type { Task, TaskStatus } from '../../types'
 import { Tooltip, EmptyState } from '../ui'
 
+/** v0.17.0 增强：任务状态筛选顺序（全部 + 六态） */
+const TASK_STATUS_ORDER: TaskStatus[] = ['pending', 'running', 'paused', 'done', 'failed', 'cancelled']
+
 export function TasksPanel() {
   const tasks = useStore((s) => s.tasks)
   const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all')
 
-  // 过滤 + 排序（收藏优先，再按更新时间倒序）
+  // 各状态任务计数（供筛选 chips 展示）
+  const countByStatus = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const t of tasks) m[t.status] = (m[t.status] ?? 0) + 1
+    return m
+  }, [tasks])
+
+  // 过滤（关键词 + 状态）+ 排序（收藏优先，再按更新时间倒序）
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const list = q ? tasks.filter((t) => t.title.toLowerCase().includes(q)) : tasks
+    const list = tasks.filter((t) => {
+      const matchQ = !q || t.title.toLowerCase().includes(q)
+      const matchS = statusFilter === 'all' || t.status === statusFilter
+      return matchQ && matchS
+    })
     return [...list].sort((a, b) => {
       if (!!a.starred !== !!b.starred) return a.starred ? -1 : 1
       return b.updatedAt - a.updatedAt
     })
-  }, [tasks, query])
+  }, [tasks, query, statusFilter])
 
   // 时间分组：今天 / 更早
   const groups = useMemo(() => groupByTime(filtered), [filtered])
@@ -56,6 +71,43 @@ export function TasksPanel() {
         </div>
       </div>
 
+      {/* v0.17.0 增强：状态筛选 chips（全部 + 六态） */}
+      <div className="flex items-center gap-1 px-2.5 pb-2 flex-shrink-0 flex-wrap">
+        <button
+          onClick={() => setStatusFilter('all')}
+          aria-pressed={statusFilter === 'all'}
+          className={`flex items-center gap-1 h-6 px-2 rounded-full text-2xs tabular transition-colors ${
+            statusFilter === 'all'
+              ? 'bg-bg-active text-text-primary'
+              : 'text-text-tertiary hover:bg-bg-hover hover:text-text-primary'
+          }`}
+        >
+          全部<span className="opacity-60">{tasks.length}</span>
+        </button>
+        {TASK_STATUS_ORDER.filter((st) => (countByStatus[st] ?? 0) > 0).map((st) => {
+          const active = statusFilter === st
+          return (
+            <button
+              key={st}
+              onClick={() => setStatusFilter(st)}
+              aria-pressed={active}
+              className={`flex items-center gap-1 h-6 px-2 rounded-full text-2xs tabular transition-colors ${
+                active
+                  ? 'bg-bg-active text-text-primary'
+                  : 'text-text-tertiary hover:bg-bg-hover hover:text-text-primary'
+              }`}
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ background: STATUS_COLOR[st] }}
+              />
+              {STATUS_LABEL[st]}
+              <span className="opacity-60">{countByStatus[st] ?? 0}</span>
+            </button>
+          )
+        })}
+      </div>
+
       {/* 任务列表 */}
       <div className="flex-1 overflow-y-auto px-2 pb-2">
         {tasks.length === 0 ? (
@@ -68,7 +120,7 @@ export function TasksPanel() {
           <EmptyState
             icon={<Icon.Search width={22} height={22} />}
             title="无匹配任务"
-            hint={`没有任务标题包含「${query.trim()}」`}
+            hint={statusFilter !== 'all' ? `没有「${STATUS_LABEL[statusFilter]}」状态的任务` : `没有任务标题包含「${query.trim()}」`}
           />
         ) : (
           groups.map((g) => (
@@ -108,6 +160,14 @@ function TaskRow({ task }: { task: Task }) {
   const [renaming, setRenaming] = useState(false)
   const [draftTitle, setDraftTitle] = useState(task.title)
   const active = task.id === selectedTaskId
+
+  // v0.17.0 增强：计划进度（任务清单六态聚合）
+  const planProgress = useMemo(() => {
+    const items = task.planItems
+    if (!items || items.length === 0) return null
+    const done = items.filter((p) => p.status === 'done').length
+    return { done, total: items.length, pct: Math.round((done / items.length) * 100) }
+  }, [task.planItems])
 
   const submitRename = async () => {
     const trimmed = draftTitle.trim()
@@ -165,9 +225,23 @@ function TaskRow({ task }: { task: Task }) {
           <span className="text-2xs text-text-tertiary tabular flex-shrink-0 pr-4">
             {formatUpdatedAt(task.updatedAt)}
           </span>
-          <span className="col-start-2 flex items-center gap-1 min-w-0 text-2xs text-text-tertiary">
-            <span>{STATUS_LABEL[task.status]}</span>
+          <span className="col-start-2 flex items-center gap-1.5 min-w-0 text-2xs text-text-tertiary">
+            <span className="flex-shrink-0">{STATUS_LABEL[task.status]}</span>
             {task.starred && <Icon.Star width={12} height={12} className="text-warning flex-shrink-0" />}
+            {planProgress && (
+              <span
+                className="inline-flex items-center gap-1 flex-shrink-0 tabular"
+                title={`计划进度 ${planProgress.done}/${planProgress.total}`}
+              >
+                <span className="w-8 h-1 rounded-full bg-bg-elevated overflow-hidden">
+                  <span
+                    className="block h-full rounded-full bg-success transition-all duration-300"
+                    style={{ width: `${planProgress.pct}%` }}
+                  />
+                </span>
+                <span className="text-text-tertiary">{planProgress.done}/{planProgress.total}</span>
+              </span>
+            )}
           </span>
         </button>
       )}
