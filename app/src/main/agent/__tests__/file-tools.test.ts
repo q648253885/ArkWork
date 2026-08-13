@@ -73,6 +73,38 @@ test('file-writer: 禁止写入受保护路径 .env', async () => {
   assert.equal((res as { status: string }).status, 'failed')
 })
 
+/* ---------- v0.17.5：content 非字符串友好错误 ---------- */
+
+test('v0.17.5: file-writer content 传对象 → 明确字段名提示', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'arkwork-file-tools-'))
+  // 模拟 LLM 误把多行代码塞进嵌套对象而非字符串
+  const res = (await fileWriter(
+    { path: 'bad.txt', content: { code: 'console.log("x")' } } as unknown as Parameters<typeof fileWriter>[0],
+    makeCtx(dir) as unknown as Parameters<typeof fileWriter>[1],
+  )) as { status: string; error: string }
+  assert.equal(res.status, 'failed')
+  assert.match(res.error, /content\s*必须是字符串/, '错误信息应明确提到 content 字段')
+  assert.match(res.error, /当前类型=object/, '错误信息应说明当前类型')
+})
+
+test('v0.17.5: file-writer content 传数组 → 明确字段名提示', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'arkwork-file-tools-'))
+  const res = (await fileWriter(
+    { path: 'bad2.txt', content: ['line1', 'line2'] as unknown as string } as unknown as Parameters<typeof fileWriter>[0],
+    makeCtx(dir) as unknown as Parameters<typeof fileWriter>[1],
+  )) as { status: string; error: string }
+  assert.equal(res.status, 'failed')
+  assert.match(res.error, /content\s*必须是字符串/, '错误信息应明确提到 content 字段')
+})
+
+test('v0.17.5: file-writer content 传字符串仍正常写入', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'arkwork-file-tools-'))
+  const text = '正常字符串'
+  const res = (await writeFileTest('ok.txt', text, dir)) as { bytes: number; created: boolean }
+  assert.ok(!('status' in res), '字符串 content 应成功')
+  assert.equal(res.bytes, Buffer.byteLength(text, 'utf-8'), 'bytes 字段应为 utf-8 字节数')
+})
+
 test('file-editor: 替换第一处匹配', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'arkwork-file-tools-'))
   await writeFileTest('src.js', 'foo foo foo', dir)
