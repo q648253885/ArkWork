@@ -13,8 +13,17 @@
  * ============================================================ */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { matchStageGate, isCoreSkillsEnabled, STAGE_GATES } from '../stage-gates.js'
-import { readFileSync } from 'node:fs'
+import {
+  matchStageGate,
+  isCoreSkillsEnabled,
+  STAGE_GATES,
+  computeAllowedStage,
+  matchForbiddenWritePath,
+  matchForbiddenShellCommand,
+} from '../stage-gates.js'
+import { readFileSync, mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 test('matchStageGate: 命中 5 个阶段产物路径', () => {
@@ -109,5 +118,77 @@ test('stage-gates.ts: 5 个阶段按 stageIndex 升序排列', () => {
       STAGE_GATES[i].stageIndex < STAGE_GATES[i + 1].stageIndex,
       `${STAGE_GATES[i].stage}(${STAGE_GATES[i].stageIndex}) 应 < ${STAGE_GATES[i + 1].stage}(${STAGE_GATES[i + 1].stageIndex})`,
     )
+  }
+})
+
+/* ============================================================
+ * v0.17.x — 阶段感知写入守卫单测
+ * ============================================================ */
+
+test('matchForbiddenWritePath: 文档阶段禁止写脚手架/源码', () => {
+  // 调研阶段（allowedStage=0）写 package.json / src 入口 / index.html 应被拦
+  assert.equal(matchForbiddenWritePath('package.json', 0).blocked, true)
+  assert.equal(matchForbiddenWritePath('src/index.tsx', 0).blocked, true)
+  assert.equal(matchForbiddenWritePath('index.html', 0).blocked, true)
+  assert.equal(matchForbiddenWritePath('vite.config.ts', 0).blocked, true)
+  assert.equal(matchForbiddenWritePath('src/App.test.tsx', 3).blocked, true)
+})
+
+test('matchForbiddenWritePath: 进入编码阶段后放行脚手架', () => {
+  assert.equal(matchForbiddenWritePath('package.json', 5).blocked, false)
+  assert.equal(matchForbiddenWritePath('src/index.tsx', 5).blocked, false)
+  assert.equal(matchForbiddenWritePath('index.html', 5).blocked, false)
+})
+
+test('matchForbiddenWritePath: 保留路径任何阶段都禁止', () => {
+  for (const stage of [0, 3, 5]) {
+    assert.equal(matchForbiddenWritePath('tasks.json', stage).blocked, true)
+    assert.equal(matchForbiddenWritePath('.arkwork/memory/l1.jsonl', stage).blocked, true)
+    assert.equal(matchForbiddenWritePath('.git/config', stage).blocked, true)
+  }
+})
+
+test('matchForbiddenWritePath: docs/ 产物区（含原型 index.html）放行', () => {
+  // 阶段二·五必须产出 docs/v1.0/prototype/index.html，不能被脚手架规则误伤
+  assert.equal(matchForbiddenWritePath('docs/v1.0/prototype/index.html', 3).blocked, false)
+  assert.equal(matchForbiddenWritePath('docs/v1.0/prototype/index.html', 4).blocked, false)
+  assert.equal(matchForbiddenWritePath('docs/v1.0/00-opensource-research.md', 0).blocked, false)
+  assert.equal(matchForbiddenWritePath('docs/v1.0/03-system-design.md', 4).blocked, false)
+})
+
+test('matchForbiddenShellCommand: 文档阶段禁止脚手架初始化命令', () => {
+  assert.equal(matchForbiddenShellCommand('npm create vite@latest .', 0).blocked, true)
+  assert.equal(matchForbiddenShellCommand('npx create-react-app myapp', 1).blocked, true)
+  assert.equal(matchForbiddenShellCommand('git clone https://github.com/x/y.git', 0).blocked, true)
+  assert.equal(matchForbiddenShellCommand('mkdir -p src', 2).blocked, true)
+  // 进入编码阶段放行
+  assert.equal(matchForbiddenShellCommand('npm create vite@latest .', 5).blocked, false)
+})
+
+test('matchForbiddenShellCommand: 保留路径 / docs 产物放行', () => {
+  assert.equal(matchForbiddenShellCommand('echo "{}" > tasks.json', 5).blocked, true)
+  assert.equal(matchForbiddenShellCommand('mkdir -p docs/v1.0/prototype', 3).blocked, false)
+  assert.equal(matchForbiddenShellCommand('ls -la', 0).blocked, false)
+})
+
+test('computeAllowedStage: 依据已产出文档推导阶段边界', () => {
+  const ws = mkdtempSync(join(tmpdir(), 'arkwork-gate-'))
+  try {
+    assert.equal(computeAllowedStage(ws), 0) // 无 docs 目录 → 调研
+    const docs = join(ws, 'docs', 'v1.0')
+    mkdirSync(docs, { recursive: true })
+    writeFileSync(join(docs, '00-opensource-research.md'), 'x')
+    assert.equal(computeAllowedStage(ws), 1) // 调研完成 → PRD
+    writeFileSync(join(docs, '01-prd.md'), 'x')
+    assert.equal(computeAllowedStage(ws), 2)
+    writeFileSync(join(docs, '02-interaction.md'), 'x')
+    assert.equal(computeAllowedStage(ws), 3)
+    mkdirSync(join(docs, 'prototype'), { recursive: true })
+    writeFileSync(join(docs, 'prototype', 'index.html'), 'x')
+    assert.equal(computeAllowedStage(ws), 4) // 原型完成 → 系统设计
+    writeFileSync(join(docs, '03-system-design.md'), 'x')
+    assert.equal(computeAllowedStage(ws), 5) // 系统设计冻结 → 编码
+  } finally {
+    rmSync(ws, { recursive: true, force: true })
   }
 })

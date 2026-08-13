@@ -14,7 +14,8 @@
  *
  * 触发对象：仅当任务的 skillIds / agent.defaultSkillIds 含 react-core-skills 时。
  * ============================================================ */
-import { dirname } from 'node:path'
+import { dirname, join, relative } from 'node:path'
+import { existsSync, readdirSync } from 'node:fs'
 
 /** react-core-skills 阶段定义（与 ProgressPanel.makeEmptyProgress 对齐） */
 export type CoreStageId =
@@ -173,4 +174,178 @@ export function safeJoinDir(filePath: string): string {
   } catch {
     return ''
   }
+}
+
+/* ============================================================
+ * v0.17.x：阶段感知写入守卫（清单 ↔ 阶段 关联）
+ *
+ * 背景：此前门禁只在「写完阶段产物文档后」被动暂停，无法阻止 Agent 在
+ * 调研阶段就越级搭建脚手架（mkdir src、写 package.json / index.html 等）。
+ * opencode / Claude Code 的清单关联思路是：每个计划项绑定到某个阶段，
+ * 当前阶段只允许执行该阶段对应的产物/工具，越级写入直接拦截。
+ *
+ * 本模块把「允许写什么」与「当前处于哪个阶段」绑定：
+ *   - 保留路径（tasks.json / .arkwork / .git）任何阶段都禁止写入；
+ *   - 脚手架/源码路径（src/、package.json、配置文件、入口文件、测试文件）
+ *     仅当系统设计冻结（allowedStage >= 5）后才允许写入。
+ * ============================================================ */
+
+/** 编码阶段（系统设计冻结前）禁止写入的「脚手架 / 源码」路径特征 */
+const SCAFFOLD_PATH_PATTERNS: RegExp[] = [
+  /(?:^|\/)src(?:\/|$)/i,
+  /(?:^|\/)package\.json$/i,
+  /(?:^|\/)(tsconfig|jsconfig)\.json$/i,
+  /(?:^|\/)(vite|webpack|rollup|esbuild|babel|next|nuxt|astro|vitest|playwright)\.config\.[a-z0-9]+$/i,
+  /(?:^|\/)\.eslintrc(?:\.(?:js|cjs|mjs|json|yaml|yml))?$/i,
+  /(?:^|\/)\.prettierrc(?:\.(?:js|cjs|mjs|json|yaml|yml))?$/i,
+  /(?:^|\/)index\.html$/i,
+  /(?:^|\/)(main|App|index)\.(tsx?|jsx?|vue)$/i,
+  /\.(test|spec)\.(tsx?|jsx?|vue|js)$/i,
+]
+
+/** 脚手架初始化命令（npm/yarn/pnpm create|init、npx create-*、degit、git clone） */
+const SCAFFOLD_INIT_RE =
+  /(?:^|[\s;&|()])(?:npx|npm|yarn|pnpm)\s+(?:create|init)\b|(?:^|[\s;&|()])(?:npx\s+create-[a-z0-9-]+|degit\b|git\s+clone\b)/i
+
+function normalizePathForGate(p: string): string {
+  return (p ?? '').replace(/\\/g, '/')
+}
+
+/** 递归收集目录下所有文件（同步，返回相对 base 的 posix 相对路径） */
+function listFilesSync(dir: string, base: string, out: string[]): void {
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const e of entries) {
+    const full = join(dir, e.name)
+    if (e.isDirectory()) {
+      listFilesSync(full, base, out)
+    } else {
+      out.push(relative(base, full).replace(/\\/g, '/'))
+    }
+  }
+}
+
+/**
+ * 依据工作区里已产出的阶段文档，推导当前允许推进到的阶段边界（0~5）。
+ * 返回值 = 「已通过的最高门禁」+1，即当前正在进行的阶段 index：
+ *   0 = 开源调研（只能写 00-opensource-research.md）
+ *   1 = PRD
+ *   2 = 交互文档
+ *   3 = HTML 原型
+ *   4 = 系统设计
+ *   5 = 编码（允许 src/、package.json 等脚手架）
+ * 未启用 react-core-skills 的任务无需调用。
+ */
+export function computeAllowedStage(workspaceDir: string): number {
+  const docsDir = join(workspaceDir, 'docs')
+  if (!existsSync(docsDir)) return 0
+  const rels: string[] = []
+  listFilesSync(docsDir, workspaceDir, rels)
+  let stage = 0
+  for (const gate of STAGE_GATES) {
+    if (rels.some((r) => gate.pattern.test(r))) {
+      stage = Math.max(stage, gate.stageIndex + 1)
+    }
+  }
+  return stage
+}
+
+export interface WriteGuardResult {
+  blocked: boolean
+  reason: string
+}
+
+function isReservedToken(token: string): boolean {
+  const t = normalizePathForGate(token)
+  return (
+    /(?:^|\/)tasks\.json$/i.test(t) ||
+    t.includes('.arkwork/') ||
+    t.includes('.git/')
+  )
+}
+
+/**
+ * docs/ 是文档驱动开发的唯一产物区（调研/PRD/交互/原型/系统设计）。
+ * 原型阶段要产出 docs/v1.0/prototype/index.html 等 HTML，这些是「设计稿」而非
+ * 编码脚手架，任何阶段都必须放行，否则会误伤阶段二·五的原型 index.html。
+ */
+function isDocsArtifact(p: string): boolean {
+  return /(?:^|\/)docs\//i.test(normalizePathForGate(p))
+}
+
+/**
+ * 检查 file-writer / file-editor 的目标路径在当前阶段是否允许写入。
+ *  - 保留路径（tasks.json / .arkwork / .git）任何阶段都禁止；
+ *  - 脚手架路径仅在进入编码阶段（allowedStage >= 5）后允许。
+ */
+export function matchForbiddenWritePath(
+  path: string,
+  allowedStage: number,
+): WriteGuardResult {
+  const norm = normalizePathForGate(path)
+  if (!norm) return { blocked: false, reason: '' }
+  if (isReservedToken(norm)) {
+    return {
+      blocked: true,
+      reason: `禁止写入 ArkWork 保留路径：${norm}（tasks.json / .arkwork / .git 由系统管理，请改用 docs/v*/ 存放清单与文档）`,
+    }
+  }
+  // docs/ 产物区（含原型 index.html）任何阶段放行，不属于脚手架拦截范围
+  if (isDocsArtifact(norm)) return { blocked: false, reason: '' }
+  if (allowedStage < 5) {
+    for (const re of SCAFFOLD_PATH_PATTERNS) {
+      if (re.test(norm)) {
+        return {
+          blocked: true,
+          reason: `阶段门禁：当前处于文档阶段（阶段 ${allowedStage}），禁止写入脚手架/源码 ${norm}。请先完成 调研→PRD→交互→原型→系统设计，待系统设计冻结后再进入编码。`,
+        }
+      }
+    }
+  }
+  return { blocked: false, reason: '' }
+}
+
+/**
+ * 检查 shell 命令在当前阶段是否允许执行。
+ *  - 保留路径任何阶段禁止；
+ *  - 脚手架初始化命令 / 脚手架路径仅在进入编码阶段后允许。
+ */
+export function matchForbiddenShellCommand(
+  command: string,
+  allowedStage: number,
+): WriteGuardResult {
+  const cmd = (command ?? '').trim()
+  if (!cmd) return { blocked: false, reason: '' }
+  if (allowedStage < 5 && SCAFFOLD_INIT_RE.test(cmd)) {
+    return {
+      blocked: true,
+      reason: `阶段门禁：当前处于文档阶段（阶段 ${allowedStage}），禁止执行项目脚手架命令。请先完成 调研→PRD→交互→原型→系统设计。`,
+    }
+  }
+  for (const raw of cmd.split(/[\s;&|()]+/).filter(Boolean)) {
+    const token = normalizePathForGate(raw.replace(/^["']|["']$/g, '').replace(/,$/g, ''))
+    if (!token || token.startsWith('-')) continue
+    if (isReservedToken(token)) {
+      return {
+        blocked: true,
+        reason: `禁止对 ArkWork 保留路径执行 shell 写操作：${token}（tasks.json / .arkwork / .git 由系统管理）`,
+      }
+    }
+    if (isDocsArtifact(token)) continue
+    if (allowedStage < 5) {
+      for (const re of SCAFFOLD_PATH_PATTERNS) {
+        if (re.test(token)) {
+          return {
+            blocked: true,
+            reason: `阶段门禁：当前处于文档阶段（阶段 ${allowedStage}），禁止通过 shell 创建/写入脚手架路径 ${token}。`,
+          }
+        }
+      }
+    }
+  }
+  return { blocked: false, reason: '' }
 }

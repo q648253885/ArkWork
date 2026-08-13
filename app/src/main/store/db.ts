@@ -84,7 +84,15 @@ export class JsonCollection<T extends { id: string }> {
   }
 
   async list(): Promise<T[]> {
-    return readJson<T[]>(this.filePath, this.seed)
+    const data = await readJson<unknown>(this.filePath, this.seed)
+    // v0.17.x 防御：tasks.json 可能被 Agent 误写为对象（如自建的清单 JSON），
+    // 此时 readJson 会成功 parse 出非数组对象，导致调用方 items.findIndex 抛
+    // "items.findIndex is not a function"。这里把非数组统一回退到 seed，避免崩溃。
+    if (!Array.isArray(data)) {
+      console.error(`[store] ${this.filePath} 不是 JSON 数组（可能被误写为对象），已回退到 seed`)
+      return this.seed
+    }
+    return data as T[]
   }
 
   async get(id: string): Promise<T | null> {

@@ -25,6 +25,9 @@ export const PROTECTED_PATHS: RegExp[] = [
   /(^|\/)package-lock\.json$/,
   /(^|\/)pnpm-lock\.yaml$/,
   /(^|\/)yarn\.lock$/,
+  // v0.17.x：工作区根目录 tasks.json 是 ArkWork 自身的任务存储，Agent 误写为
+  // 自建清单会覆盖任务列表并导致 store 解析崩溃（items.findIndex）。禁止写入。
+  /(?:^|\/)tasks\.json$/,
 ]
 
 /** 解析相对于工作区的绝对路径 */

@@ -20,6 +20,9 @@ import {
   isCoreSkillsEnabled,
   buildGateBlockObservation,
   describeGateForLog,
+  computeAllowedStage,
+  matchForbiddenWritePath,
+  matchForbiddenShellCommand,
   type StageGate,
 } from '../skills/builtin/react-core-skills/stage-gates.js'
 import { appendL1, listEnabledL1, listL1, totalTokens } from '../memory/l1-working.js'
@@ -241,7 +244,12 @@ export async function runReActLoop(
           const coreSkill = await getSkill(coreSkillId)
           if (coreSkill?.instructionMd) {
             const full = await readFile(coreSkill.instructionMd, 'utf-8')
-            preloadedCoreSkillHint = `## 文档驱动开发准则（自动注入 · ${coreSkill.name}）\n${full}`
+            preloadedCoreSkillHint =
+              `## 文档驱动开发准则（自动注入 · ${coreSkill.name}）\n${full}\n\n` +
+              `## 清单与阶段关联（硬约束 · v0.17.x）\n` +
+              `计划清单必须严格按文档驱动开发阶段顺序组织：开源调研 → PRD → 交互文档 → HTML 原型 → 系统设计 → 编码。` +
+              `在系统设计（03-system-design.md）冻结前，禁止在清单里安排任何编码/脚手架步骤（初始化项目、搭建 src、写 package.json、实现功能、写测试）。` +
+              `每个清单项都要标注所属阶段；编码类步骤只能出现在系统设计之后。`
             logger.info(
               'Tool',
               `react-core-skills preloaded (${full.length} chars) for task ${task.id}`,
@@ -255,6 +263,20 @@ export async function runReActLoop(
           `react-core-skills preload skipped: ${(err as Error).message}`,
           task.id,
         )
+      }
+    }
+
+    // v0.17.x：阶段感知写入守卫 —— 仅在 react-core-skills 启用时生效。
+    // 从工作区已产出的阶段文档推导「当前允许推进到的阶段」，越级脚手架写入（src/、
+    // package.json 等）在文档阶段会被拦截。对齐 opencode / Claude Code 的清单↔阶段关联。
+    const coreSkillsEnabled = isCoreSkillsEnabled(task, agent)
+    let allowedStage = 0
+    if (coreSkillsEnabled) {
+      try {
+        allowedStage = computeAllowedStage(getWorkspaceDir())
+        logger.info('Agent', `stage write guard on: allowedStage=${allowedStage}`, task.id)
+      } catch (err) {
+        logger.warn('Agent', `computeAllowedStage failed: ${(err as Error).message}`, task.id)
       }
     }
 
@@ -825,7 +847,7 @@ export async function runReActLoop(
       }
 
       // 并行执行所有 act 调用；已耗尽预算的工具跳过执行，返回合成结果
-      const actCtx: ActContext = { task, agent, signal }
+      const actCtx: ActContext = { task, agent, signal, coreSkillsEnabled, allowedStage }
       const actResults = await Promise.all(
         actions.map((a, i) => {
           if (exhaustedIndices.has(i)) {
@@ -1576,6 +1598,10 @@ interface ActContext {
   task: Task
   agent: Agent
   signal: AbortSignal
+  /** v0.17.x：react-core-skills 阶段写入守卫开关 */
+  coreSkillsEnabled?: boolean
+  /** v0.17.x：当前允许推进到的阶段（0~5），仅 coreSkillsEnabled 时有效 */
+  allowedStage?: number
 }
 
 async function executeAct(
@@ -1601,6 +1627,39 @@ async function executeAct(
   let ok = true
   let errorMessage: string | undefined
   try {
+    // v0.17.x：阶段感知写入守卫（react-core-skills 启用时）——
+    // 拦截文档阶段越级写脚手架/源码，或写入 ArkWork 保留路径（tasks.json / .arkwork / .git）。
+    if (ctx.coreSkillsEnabled) {
+      const allowedStage = ctx.allowedStage ?? 0
+      const actArgs = (action.args ?? {}) as Record<string, unknown>
+      let guard: { blocked: boolean; reason: string } = { blocked: false, reason: '' }
+      if (action.tool === 'file-writer' || action.tool === 'file-editor') {
+        guard = matchForbiddenWritePath(String(actArgs.path ?? ''), allowedStage)
+      } else if (action.tool === 'shell') {
+        guard = matchForbiddenShellCommand(String(actArgs.command ?? ''), allowedStage)
+      }
+      if (guard.blocked) {
+        const durationMs = Date.now() - actStartedAt
+        const blockedStep: ReActStep = {
+          ...placeholder,
+          result: { error: guard.reason },
+          resultSummary: guard.reason,
+          durationMs,
+          status: 'failed',
+          errorMessage: guard.reason,
+        }
+        logger.warn('Tool', `${action.tool} blocked by stage guard: ${guard.reason}`, placeholder.taskId)
+        return {
+          completedStep: blockedStep,
+          result: { error: guard.reason },
+          resultSummary: guard.reason,
+          durationMs,
+          ok: false,
+          errorMessage: guard.reason,
+        }
+      }
+    }
+
     // 找到 skill id：按 LLM 工具名匹配（v0.6.1：兼容 SkillHub 中文名技能，见 skillToolName）
     const skills = await listSkills()
     const skill = skills.find((s) => skillToolName(s) === action.tool)
