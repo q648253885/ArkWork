@@ -2,7 +2,7 @@
  * ArkWork — ReAct Engine
  * 设计文档 §9.1 — AsyncGenerator 推送事件流，可中断
  * ============================================================ */
-import type { Task } from '@shared/types/task'
+import type { Task, PlanItem } from '@shared/types/task'
 import type {
   ReActEvent,
   ReActAction,
@@ -293,6 +293,18 @@ export async function runReActLoop(
         plan = null
       }
       if (plan && plan.items.length > 0) {
+        // v0.17.3：把 PlanContent.items 转为 Task.planItems（带 id/status），
+        // 让 system prompt 能注入计划进度，UI 能展示计划状态。
+        const now = Date.now()
+        const planItems: PlanItem[] = plan.items.map((text, i) => ({
+          id: `plan_${i}_${now}`,
+          text,
+          status: 'pending' as const,
+          createdAt: now,
+          updatedAt: now,
+        }))
+        task.planItems = planItems
+        await updateTask(task.id, { planItems })
         // 真正成功 → 写 L1 + 广播事件 + 渲染
         await appendL1({
           taskId: task.id,
@@ -365,6 +377,24 @@ export async function runReActLoop(
       // -------- Reason --------
       await emitEvent({ type: 'reason_start', iteration })
 
+      // v0.17.3：计划项状态推进 — 把首个 pending 标为 running，让 system prompt 和 UI 能展示进度
+      if (task.planItems && task.planItems.length > 0) {
+        const firstPendingIdx = task.planItems.findIndex((it) => it.status === 'pending')
+        if (firstPendingIdx >= 0) {
+          // 先把所有 running 重置为 pending（上一轮没标 done 的视为未完成）
+          let changed = false
+          for (const it of task.planItems) {
+            if (it.status === 'running') { it.status = 'pending'; it.updatedAt = Date.now(); changed = true }
+          }
+          task.planItems[firstPendingIdx].status = 'running'
+          task.planItems[firstPendingIdx].updatedAt = Date.now()
+          changed = true
+          if (changed) {
+            await updateTask(task.id, { planItems: task.planItems })
+          }
+        }
+      }
+
       const startedAt = Date.now()
       // v0.15.0 Task 2 SubTask 2.5：Reactive Fallback 压缩后需重新组装，故用 let
       let messages = await assembleMessages(task, agent)
@@ -383,6 +413,23 @@ export async function runReActLoop(
       parts.push(wsHint)
       if (memoryInjection) parts.push(memoryInjection)
       if (pendingSystemHint) parts.push(`## 当前 Skill 指令\n${pendingSystemHint}`)
+      // v0.17.3：计划执行约束 — 任务有计划清单时，每轮 Reason 提醒 LLM 按计划执行。
+      // 对齐 Claude Code Plan Mode：LLM 必须声明当前执行第几步，禁止偏离计划。
+      if (task.planItems && task.planItems.length > 0) {
+        const planSummary = task.planItems
+          .map((it, i) => {
+            const mark = it.status === 'done' ? '[x]' : it.status === 'running' ? '[~]' : '[ ]'
+            return `${i + 1}. ${mark} ${it.text}`
+          })
+          .join('\n')
+        parts.push(
+          `## 计划执行约束（v0.17.3）\n` +
+          `你已生成以下计划清单，必须严格按此计划执行。当前进度：\n${planSummary}\n\n` +
+          `每步 Reason 必须在开头声明"正在执行计划第 N 步：xxx"。` +
+          `完成当前步骤后再进入下一步，禁止跳步或偏离计划。` +
+          `若发现计划需调整，先用 ask_user 向用户确认。`,
+        )
+      }
       const systemPrompt = parts.join('\n\n---\n')
       pendingSystemHint = undefined  // 用完即清，下一轮若不调用 skill 则不再注入
 
@@ -970,6 +1017,28 @@ export async function runReActLoop(
       })
       // 该 group 全部完成 → 清理进度聚合（避免 UI 上遗留 running）
       clearToolProgress(task.id, groupId)
+
+      // v0.17.3：计划项完成检测 — 本轮所有 act 成功后，标记当前 running 的计划项为 done。
+      // 对齐 Claude Code TodoWrite：工具执行成功 → 当前 todo 标 completed。
+      // 简单启发式：running 项在本轮 act 全部 ok 时标记完成。若 LLM 需要多轮完成一个步骤，
+      // 下一轮 Reason 会重新把第一个 pending 标为 running（见上方状态推进逻辑）。
+      if (task.planItems && task.planItems.length > 0) {
+        const allOk = actResults.every((r) => r.ok)
+        if (allOk) {
+          let planChanged = false
+          for (const it of task.planItems) {
+            if (it.status === 'running') {
+              it.status = 'done'
+              it.completedAt = Date.now()
+              it.updatedAt = Date.now()
+              planChanged = true
+            }
+          }
+          if (planChanged) {
+            await updateTask(task.id, { planItems: task.planItems })
+          }
+        }
+      }
 
       // v0.16.x：阶段门禁 — 写完产物后立即推 task_progress + milestone，并
       // 自动 ask_user + 暂停任务（强制门禁）。修复「写完文档没询问直接开始」。
@@ -1805,6 +1874,14 @@ async function assembleMessages(
     if (m.kind === 'system_prompt') continue // 由 adapter 单独处理
     if (m.role === 'user') {
       messages.push({ role: 'user', content: m.content })
+    } else if (m.role === 'assistant' && m.kind === 'plan') {
+      // v0.17.3：计划清单注入为 user 消息，让 LLM 在后续 Reason 轮次能看到自己生成的计划。
+      // 此前 kind='plan' 不匹配任何分支被静默丢弃，导致 LLM 生成计划后"忘记"计划内容，
+      // 执行动作与计划完全脱节。对齐 Claude Code TodoWrite 把清单注入每轮推理的做法。
+      messages.push({
+        role: 'user',
+        content: `[计划清单 — 请严格按此计划执行，每步完成后继续下一步]\n${m.content}`,
+      })
     } else if (m.role === 'assistant' && m.kind === 'reasoning') {
       // polish4 §A3.1：从 m.meta 解析 assistant 该轮的 actions（含 actionId + toolCallId）。
       // 支持三种 meta 形态：
