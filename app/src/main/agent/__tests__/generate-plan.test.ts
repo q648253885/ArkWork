@@ -297,3 +297,104 @@ test('v0.16.4: seed.ts 存在 upgradeTo0160 升级逻辑与强化 Skill/工具�
   assert.match(src, /glob-search/, '@default.defaultSkillIds 应包含 glob-search')
   assert.match(src, /grep-search/, '@default.defaultSkillIds 应包含 grep-search')
 })
+
+/* ---------- 6. v0.17.4 文档驱动计划 prompt 与阶段对齐验证 ---------- */
+
+test('v0.17.4: PLAN_SYSTEM_PROMPT_DOC_DRIVEN 包含全部 10 个阶段且顺序正确', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    'utf8',
+  )
+  const m = src.match(/const\s+PLAN_SYSTEM_PROMPT_DOC_DRIVEN\s*=\s*`([\s\S]*?)`/)
+  assert.ok(m, 'PLAN_SYSTEM_PROMPT_DOC_DRIVEN 应存在')
+  const prompt = m![1]!
+
+  // 10 个阶段必须按顺序出现
+  const stages = [
+    '1. 开源调研',
+    '2. PRD',
+    '3. 交互文档',
+    '4. HTML 原型',
+    '5. 系统设计',
+    '6. 编码',
+    '7. 功能测试',
+    '8. UI 测试',
+    '9. UX 校验',
+    '10. 交付打包',
+  ]
+  for (const s of stages) {
+    assert.ok(prompt.includes(s), `prompt 应包含阶段 "${s}"`)
+  }
+
+  // 验证顺序：各阶段在文本中的位置必须递增
+  let lastPos = -1
+  for (const s of stages) {
+    const pos = prompt.indexOf(s)
+    assert.ok(pos > lastPos, `阶段 "${s}" 应出现在前一个阶段之后 (pos=${pos}, lastPos=${lastPos})`)
+    lastPos = pos
+  }
+})
+
+test('v0.17.4: 文档驱动 prompt 明确 HTML 原型是设计文档不是编码', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    'utf8',
+  )
+  const m = src.match(/const\s+PLAN_SYSTEM_PROMPT_DOC_DRIVEN\s*=\s*`([\s\S]*?)`/)
+  const prompt = m![1]!
+  assert.match(prompt, /HTML 原型.*设计稿.*非编码/, '应明确 HTML 原型是设计稿非编码')
+  assert.match(prompt, /阶段 1~5 都是文档\/设计产出.*禁止.*编码/, '应禁止阶段 1~5 安排编码')
+  assert.match(prompt, /编码步骤只能出现在阶段 6/, '应限定编码只在阶段 6')
+})
+
+test('v0.17.4: 文档驱动 prompt 的产物路径与 STAGE_GATES 正则对齐', () => {
+  const engineSrc = readFileSync(
+    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    'utf8',
+  )
+  const promptMatch = engineSrc.match(/const\s+PLAN_SYSTEM_PROMPT_DOC_DRIVEN\s*=\s*`([\s\S]*?)`/)
+  const prompt = promptMatch![1]!
+
+  const gatesSrc = readFileSync(
+    fileURLToPath(new URL('../../skills/builtin/react-core-skills/stage-gates.ts', import.meta.url)),
+    'utf8',
+  )
+
+  // prompt 中每个阶段的产出文件，必须在 STAGE_GATES 有对应的正则
+  const expectedPairs = [
+    { stage: '开源调研', file: '00-opensource-research.md', gatePattern: '00-opensource-research\\.md' },
+    { stage: 'PRD', file: '01-prd.md', gatePattern: '01-prd\\.md' },
+    { stage: '交互文档', file: '02-interaction.md', gatePattern: '02-interaction\\.md' },
+    { stage: 'HTML 原型', file: 'prototype/index.html', gatePattern: 'prototype\\/.*\\.html?' },
+    { stage: '系统设计', file: '03-system-design.md', gatePattern: '03-system-design\\.md' },
+  ]
+  for (const { stage, file, gatePattern } of expectedPairs) {
+    assert.ok(prompt.includes(file), `prompt 阶段"${stage}"应包含产物路径 ${file}`)
+    assert.ok(
+      new RegExp(gatePattern).test(gatesSrc),
+      `STAGE_GATES 应包含匹配 ${file} 的正则 (${gatePattern})`,
+    )
+  }
+})
+
+test('v0.17.4: generatePlan 在 react-core-skills 启用时选择文档驱动 prompt', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    'utf8',
+  )
+  // 验证 generatePlan 内有 isCoreSkillsEnabled 判断 + basePrompt 选择逻辑
+  assert.match(src, /const\s+docDriven\s*=\s*isCoreSkillsEnabled\(task,\s*agent\)/, '应调用 isCoreSkillsEnabled 判断')
+  assert.match(src, /const\s+basePrompt\s*=\s*docDriven\s*\?\s*PLAN_SYSTEM_PROMPT_DOC_DRIVEN\s*:\s*PLAN_SYSTEM_PROMPT/, '应根据判断结果选择 prompt')
+  // 两次 tryGeneratePlan 都应使用 basePrompt（首次 + 加大预算重试）
+  const matches = src.match(/tryGeneratePlan\(\s*basePrompt/g)
+  assert.ok(matches && matches.length >= 2, '首次和重试都应使用 basePrompt')
+})
+
+test('v0.17.4: 清单与阶段关联 hint 明确原型非编码', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    'utf8',
+  )
+  assert.match(src, /HTML 原型是设计文档的一部分.*不是编码步骤/, 'hint 应明确原型非编码')
+  assert.match(src, /在系统设计.*冻结前.*禁止执行任何编码/, 'hint 应禁止系统设计冻结前编码')
+})
