@@ -1,0 +1,18 @@
+{
+  "id": "react-core-skills",
+  "version": "0.15.0",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "task": { "type": "string", "description": "软件开发任务描述（用于场景路由与文档链触发）" }
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": ["instruction"],
+    "properties": {
+      "instruction": { "type": "string", "description": "注入系统提示词的文档驱动开发准则" }
+    }
+  },
+  "requiredTools": ["file-reader", "shell"]
+}

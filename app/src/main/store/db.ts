@@ -1,0 +1,247 @@
+/* ============================================================
+ * ArkWork — JSON File Store
+ * 用 JSON 文件持久化 Task / Agent / Skill / Model 等，避免 better-sqlite3 原生编译开销（v1 简化方案）
+ * 设计文档 §8.6 列出的 SQLite 在 v2 切换
+ * ============================================================ */
+import { app } from 'electron'
+import { mkdir, readFile, writeFile, rm, copyFile, unlink, rename } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { randomBytes } from 'node:crypto'
+
+let arkworkDir = ''
+let workspaceDir = ''
+
+/** ArkWork 应用数据根目录：~/Library/Application Support/ArkWork (macOS) */
+export function getArkworkDir(): string {
+  if (!arkworkDir) {
+    arkworkDir = join(app.getPath('userData'), 'arkwork-data')
+  }
+  return arkworkDir
+}
+
+/** 当前工作区目录（用户可切换） */
+export function getWorkspaceDir(): string {
+  if (!workspaceDir) {
+    workspaceDir = join(getArkworkDir(), 'workspace', 'default')
+  }
+  return workspaceDir
+}
+
+export function setWorkspaceDir(path: string): void {
+  workspaceDir = path
+}
+
+/** 任务工作目录：{workspaceDir}/tasks/{taskId}/ */
+export function getTaskDir(taskId: string): string {
+  return join(getWorkspaceDir(), 'tasks', taskId)
+}
+
+/** 任务 L1 记忆目录：{workspaceDir}/.arkwork/memory/{taskId}/ */
+export function getTaskMemoryDir(taskId: string): string {
+  return join(getWorkspaceDir(), '.arkwork', 'memory', taskId)
+}
+
+async function ensureDir(path: string): Promise<void> {
+  if (!existsSync(path)) {
+    await mkdir(path, { recursive: true })
+  }
+}
+
+async function readJson<T>(path: string, fallback: T): Promise<T> {
+  try {
+    if (!existsSync(path)) return fallback
+    const raw = await readFile(path, 'utf-8')
+    return JSON.parse(raw) as T
+  } catch (err) {
+    console.error(`[store] failed to read ${path}:`, err)
+    return fallback
+  }
+}
+
+async function writeJson<T>(path: string, data: T): Promise<void> {
+  await ensureDir(dirname(path))
+  // v0.6.5 修复：原子写入——先写临时文件再 rename，防止并发读写时读到空文件
+  // 导致 readJson 返回 fallback []，进而丢失全部已有数据
+  const tmp = `${path}.${randomBytes(4).toString('hex')}.tmp`
+  await writeFile(tmp, JSON.stringify(data, null, 2), 'utf-8')
+  await rename(tmp, path)
+}
+
+/** 通用集合存储 — 单文件 JSON 数组 */
+export class JsonCollection<T extends { id: string }> {
+  constructor(private readonly filePath: string, private readonly seed: T[] = []) {}
+
+  // v0.6.5 修复：互斥锁——串行化 read-modify-write 操作，防止并发 upsert/delete
+  // 导致后写入者覆盖前者的结果（Lost Update），进而丢失 task 记录
+  private writeChain: Promise<unknown> = Promise.resolve()
+
+  /** 串行化读-改-写操作 */
+  private async runExclusive<R>(fn: () => Promise<R>): Promise<R> {
+    const next = this.writeChain.then(fn, fn)
+    this.writeChain = next.catch(() => {})
+    return next
+  }
+
+  async list(): Promise<T[]> {
+    return readJson<T[]>(this.filePath, this.seed)
+  }
+
+  async get(id: string): Promise<T | null> {
+    const items = await this.list()
+    return items.find((x) => x.id === id) ?? null
+  }
+
+  async upsert(item: T): Promise<void> {
+    await this.runExclusive(async () => {
+      const items = await this.list()
+      const idx = items.findIndex((x) => x.id === item.id)
+      if (idx >= 0) items[idx] = item
+      else items.push(item)
+      await writeJson(this.filePath, items)
+    })
+  }
+
+  async upsertMany(newItems: T[]): Promise<void> {
+    await this.runExclusive(async () => {
+      const items = await this.list()
+      for (const item of newItems) {
+        const idx = items.findIndex((x) => x.id === item.id)
+        if (idx >= 0) items[idx] = item
+        else items.push(item)
+      }
+      await writeJson(this.filePath, items)
+    })
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.runExclusive(async () => {
+      const items = await this.list()
+      const next = items.filter((x) => x.id !== id)
+      await writeJson(this.filePath, next)
+    })
+  }
+
+  async clear(): Promise<void> {
+    await this.runExclusive(async () => {
+      await writeJson(this.filePath, this.seed)
+    })
+  }
+}
+
+/** 单文件 JSON 对象存储 */
+export class JsonDoc<T> {
+  constructor(private readonly filePath: string, private readonly fallback: T) {}
+
+  async read(): Promise<T> {
+    return readJson<T>(this.filePath, this.fallback)
+  }
+
+  async write(data: T): Promise<void> {
+    await writeJson(this.filePath, data)
+  }
+
+  async patch(patch: Partial<T>): Promise<T> {
+    const current = await this.read()
+    const next = { ...current, ...patch }
+    await this.write(next)
+    return next
+  }
+}
+
+/** JSONL 行存储 — L1 Memory 等需要追加写入的场景 */
+export class JsonlCollection<T extends { id: string }> {
+  constructor(private readonly filePath: string) {}
+
+  async list(): Promise<T[]> {
+    if (!existsSync(this.filePath)) return []
+    try {
+      const raw = await readFile(this.filePath, 'utf-8')
+      return raw
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as T)
+    } catch (err) {
+      console.error(`[store] failed to read jsonl ${this.filePath}:`, err)
+      return []
+    }
+  }
+
+  async append(item: T): Promise<void> {
+    await ensureDir(dirname(this.filePath))
+    await writeFile(this.filePath, JSON.stringify(item) + '\n', { flag: 'a' })
+  }
+
+  async appendMany(items: T[]): Promise<void> {
+    if (items.length === 0) return
+    await ensureDir(dirname(this.filePath))
+    const block = items.map((i) => JSON.stringify(i)).join('\n') + '\n'
+    await writeFile(this.filePath, block, { flag: 'a' })
+  }
+
+  async rewrite(items: T[]): Promise<void> {
+    await ensureDir(dirname(this.filePath))
+    const block = items.map((i) => JSON.stringify(i)).join('\n') + '\n'
+    await writeFile(this.filePath, block, 'utf-8')
+  }
+
+  async delete(id: string): Promise<void> {
+    const items = await this.list()
+    const next = items.filter((x) => x.id !== id)
+    await this.rewrite(next)
+  }
+}
+
+/** 初始化存储目录 */
+export async function initStore(): Promise<void> {
+  await ensureDir(getArkworkDir())
+  await ensureDir(join(getArkworkDir(), 'config'))
+  await ensureDir(getWorkspaceDir())
+  await ensureDir(join(getWorkspaceDir(), 'tasks'))
+  await ensureDir(join(getWorkspaceDir(), '.arkwork', 'memory'))
+  await ensureDir(join(getWorkspaceDir(), 'shared'))
+  // v0.4.0-rev2 迁移：把旧全局 tasks.json 搬到 default 工作区目录
+  await migrateLegacyTasksJson()
+}
+
+/**
+ * v0.4.0-rev2 迁移：旧版 tasks.json 在 arkworkDir/tasks.json（全局共享），
+ * 新版每工作区独立 tasks.json。首次启动时把旧文件搬到 default 工作区目录，
+ * 避免用户丢失已有任务。仅当 default 工作区下没有 tasks.json 且旧文件存在时执行。
+ */
+async function migrateLegacyTasksJson(): Promise<void> {
+  const legacy = join(getArkworkDir(), 'tasks.json')
+  // 只在 default 工作区（workspaceDir 未被 activateWorkspace 改过）执行迁移
+  const isDefault = getWorkspaceDir().endsWith(join('workspace', 'default'))
+  if (!isDefault) return
+  const target = join(getWorkspaceDir(), 'tasks.json')
+  if (!existsSync(legacy) || existsSync(target)) return
+  try {
+    await copyFile(legacy, target)
+    await unlink(legacy)
+    console.log('[store] migrated legacy tasks.json to default workspace')
+  } catch (err) {
+    console.error('[store] migrate tasks.json failed:', err)
+  }
+}
+
+export async function ensureWorkspace(): Promise<void> {
+  await initStore()
+}
+
+/** 删除任务工作目录 */
+export async function removeTaskDir(taskId: string): Promise<void> {
+  const taskDir = getTaskDir(taskId)
+  const memDir = getTaskMemoryDir(taskId)
+  if (existsSync(taskDir)) await rm(taskDir, { recursive: true, force: true })
+  if (existsSync(memDir)) await rm(memDir, { recursive: true, force: true })
+}
+
+/** 解析为相对于工作区的路径（用于显示） */
+export function relativeToWorkspace(absolute: string): string {
+  const ws = resolve(getWorkspaceDir())
+  if (absolute.startsWith(ws)) {
+    return absolute.slice(ws.length + 1)
+  }
+  return absolute
+}

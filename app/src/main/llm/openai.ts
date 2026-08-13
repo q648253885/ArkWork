@@ -1,0 +1,166 @@
+/* ============================================================
+ * ArkWork — OpenAI Adapter (官方 SDK，同时用于 OpenAI 兼容端点)
+ * 设计文档 §10.3 — 支持 OpenAI / DeepSeek / Moonshot / 本地 Ollama 的 OpenAI 兼容接口
+ * ============================================================ */
+import OpenAI from 'openai'
+import type {
+  LlmAdapter,
+  LlmCompleteRequest,
+  LlmCompleteResponse,
+  LlmMessage,
+  LlmTool,
+} from './adapter.js'
+import type { ReActAction } from '@shared/types/react'
+
+export interface OpenAIOptions {
+  apiKey: string
+  /** 默认模型 ID，可在 req 中通过 metadata.modelId 覆盖（简化为每次显式传入） */
+  defaultModel: string
+  baseURL?: string
+  /** 用于显示的适配器名 */
+  name?: string
+  provider?: 'openai' | 'ollama' | 'custom-openai'
+}
+
+export class OpenAIAdapter implements LlmAdapter {
+  readonly name: string
+  readonly provider: 'openai' | 'ollama' | 'custom-openai'
+  private readonly client: OpenAI
+  private readonly defaultModel: string
+
+  constructor(opts: OpenAIOptions) {
+    this.name = opts.name ?? 'OpenAI'
+    this.provider = opts.provider ?? 'openai'
+    this.defaultModel = opts.defaultModel
+    this.client = new OpenAI({
+      apiKey: opts.apiKey || 'dummy',
+      baseURL: opts.baseURL,
+    })
+  }
+
+  async complete(req: LlmCompleteRequest): Promise<LlmCompleteResponse> {
+    const model = (req as LlmCompleteRequest & { modelId?: string }).modelId ?? this.defaultModel
+
+    // OpenAI 把 system 放进 messages 的第一条
+    const messages: Array<OpenAI.Chat.Completions.ChatCompletionMessageParam> = [
+      { role: 'system', content: req.system },
+      ...req.messages.map(toOpenAIMessage),
+    ]
+
+    const tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined = req.tools?.map(toOpenAITool)
+
+    const completion = await this.client.chat.completions.create(
+      {
+        model,
+        messages,
+        tools: tools as OpenAI.Chat.Completions.ChatCompletionTool[] | undefined,
+        tool_choice: tools ? 'auto' : undefined,
+        temperature: req.temperature ?? 0.5,
+        max_tokens: req.maxTokens,
+      },
+      { signal: req.signal },
+    )
+
+    const choice = completion.choices[0]
+    const message = choice.message
+    const content = message.content ?? ''
+    const toolCalls = message.tool_calls ?? []
+    // DeepSeek/o1 等思考模型返回的 reasoning_content，需原样传回
+    const reasoningContent = (message as unknown as Record<string, unknown>).reasoning_content as string | undefined
+
+    let action: ReActAction | null = null
+    let toolCallId: string | undefined
+    const actions: ReActAction[] = []
+    // polish4 §A1：收集全部 toolCall id，与 actions 一一对应
+    const toolCallIds: string[] = []
+
+    for (const call of toolCalls) {
+      toolCallIds.push(call.id)
+      try {
+        const args = JSON.parse(call.function.arguments || '{}')
+        actions.push({ tool: call.function.name, args })
+      } catch {
+        actions.push({ tool: call.function.name, args: { _raw: call.function.arguments } })
+      }
+    }
+    if (actions.length > 0) {
+      const first = actions[0]
+      action = first
+      toolCallId = toolCallIds[0]
+    }
+
+    return {
+      content,
+      thought: content,
+      action,
+      actions: actions.length > 0 ? actions : undefined,
+      toolCallIds: toolCallIds.length > 0 ? toolCallIds : undefined,
+      toolCallId,
+      tokensIn: completion.usage?.prompt_tokens ?? 0,
+      tokensOut: completion.usage?.completion_tokens ?? 0,
+      finishReason: mapFinishReason(choice.finish_reason),
+      reasoningContent,
+    }
+  }
+}
+
+function toOpenAIMessage(m: LlmMessage): OpenAI.Chat.Completions.ChatCompletionMessageParam {
+  if (m.role === 'tool') {
+    return {
+      role: 'tool',
+      content: m.content,
+      tool_call_id: m.toolCallId ?? '',
+    }
+  }
+  if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+    return {
+      role: 'assistant',
+      content: m.content || null,
+      tool_calls: m.toolCalls.map((tc) => ({
+        id: tc.id,
+        type: 'function',
+        function: { name: tc.function.name, arguments: tc.function.arguments },
+      })),
+      // DeepSeek 思考模式要求原样传回 reasoning_content；空串也要保留字段
+      // （服务端只校验字段存在性，缺字段会 400 "must be passed back"）
+      ...(m.reasoningContent !== undefined ? { reasoning_content: m.reasoningContent } : {}),
+    } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam
+  }
+  if (m.role === 'assistant') {
+    return {
+      role: 'assistant',
+      content: m.content,
+      ...(m.reasoningContent !== undefined ? { reasoning_content: m.reasoningContent } : {}),
+    } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam
+  }
+  return {
+    role: m.role as 'system' | 'user',
+    content: m.content,
+  }
+}
+
+function toOpenAITool(t: LlmTool): OpenAI.Chat.Completions.ChatCompletionTool {
+  return {
+    type: 'function',
+    function: {
+      name: t.function.name,
+      description: t.function.description,
+      parameters: t.function.parameters as unknown as Record<string, unknown>,
+    },
+  }
+}
+
+function mapFinishReason(
+  reason: string | null | undefined,
+): 'stop' | 'tool_calls' | 'length' | 'content_filter' {
+  switch (reason) {
+    case 'tool_calls':
+      return 'tool_calls'
+    case 'length':
+      return 'length'
+    case 'content_filter':
+      return 'content_filter'
+    default:
+      return 'stop'
+  }
+}

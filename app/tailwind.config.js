@@ -1,0 +1,101 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  // v0.4.0：class 模式（<html class="dark">）驱动浅深皮肤切换
+  darkMode: 'class',
+  content: ['./index.html', './src/**/*.{ts,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        // v0.13.0 — 3 层背景（stone warm gray）
+        'bg-base': 'var(--bg-base)',
+        'bg-surface': 'var(--bg-surface)',
+        'bg-surface-2': 'var(--bg-surface-2)',
+        'bg-overlay': 'var(--bg-overlay)',
+        // 语义化半透明叠加
+        'bg-hover': 'var(--bg-hover)',
+        'bg-active': 'var(--bg-active)',
+        // 兼容旧名
+        'bg-elevated': 'var(--bg-overlay)',
+        'bg-input': 'var(--bg-input)',
+
+        // 3 级边框（v0.13）
+        'border-subtle': 'var(--border-subtle)',
+        'border-default': 'var(--border-default)',
+        'border-strong': 'var(--border-strong)',
+
+        // 文字（v0.13 — 保留三级）
+        'text-primary': 'var(--text-primary)',
+        'text-secondary': 'var(--text-secondary)',
+        'text-tertiary': 'var(--text-tertiary)',
+        'text-inverse': 'var(--text-inverse)',
+
+        // Accent 6 档（v0.13 靛紫蓝 #4F46E5）
+        'accent-50': 'var(--accent-50)',
+        'accent-100': 'var(--accent-100)',
+        'accent-300': 'var(--accent-300)',
+        'accent-500': 'var(--accent-500)',
+        accent: 'var(--accent)',
+        'accent-600': 'var(--accent-600)',
+        'accent-700': 'var(--accent-700)',
+        'accent-hover': 'var(--accent-hover)',
+        'accent-soft': 'var(--accent-soft)',
+        success: 'var(--success)',
+        'success-soft': 'var(--success-soft)',
+        warning: 'var(--warning)',
+        'warning-soft': 'var(--warning-soft)',
+        danger: 'var(--danger)',
+        'danger-soft': 'var(--danger-soft)',
+        info: 'var(--info)',
+      },
+      fontFamily: {
+        sans: ['Inter Tight', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'PingFang SC', 'sans-serif'],
+        display: ['Inter Tight', 'Inter', '-apple-system', 'PingFang SC', 'sans-serif'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'SF Mono', 'Menlo', 'monospace'],
+      },
+      borderRadius: {
+        DEFAULT: '8px',
+        sm: '6px',
+        md: '8px',
+        lg: '12px',
+        xl: '16px',
+        '2xl': '20px',
+      },
+      fontSize: {
+        // v0.13.0 — Modular 1.2 scale，主体 15px（WorkBuddy 量级）
+        '2xs': ['11px', { lineHeight: '16px' }],   // caption
+        xs: ['12px', { lineHeight: '18px' }],       // meta
+        sm: ['13px', { lineHeight: '20px' }],       // 行号、标签
+        base: ['15px', { lineHeight: '24px' }],     // body（主体）
+        md: ['14px', { lineHeight: '22px' }],       // 次级正文
+        lg: ['17px', { lineHeight: '26px' }],       // 强调正文、卡标题
+        xl: ['20px', { lineHeight: '28px' }],       // 任务标题
+        '2xl': ['26px', { lineHeight: '34px' }],    // 页标题
+        '3xl': ['32px', { lineHeight: '40px' }],    // hero
+        '4xl': ['42px', { lineHeight: '50px' }],
+      },
+      spacing: {
+        0.5: '2px',
+        1.5: '6px',
+        2.5: '10px',
+        3.5: '14px',
+        8: '32px', // v0.3.0 对话流段落间距
+      },
+      boxShadow: {
+        // v0.4.0 — 阴影也由 CSS 变量驱动（浅深皮肤投影强度不同）
+        'sm': 'var(--shadow-sm)',
+        'md': 'var(--shadow-md)',
+        'lg': 'var(--shadow-lg)',
+        'accent': '0 0 0 3px var(--accent-soft)',
+        'panel': 'var(--shadow-panel)',
+      },
+      transitionDuration: {
+        DEFAULT: '150ms',
+        fast: '100ms',
+      },
+      transitionTimingFunction: {
+        smooth: 'cubic-bezier(0.16, 1, 0.3, 1)',
+      },
+    },
+  },
+  plugins: [],
+}
