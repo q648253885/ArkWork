@@ -328,7 +328,9 @@ function extractArtifacts(steps: ReActStep[]): Artifact[] {
         out.push({
           path,
           kind: detectRenderer(path),
-          size: Number(args.size ?? 0) || 0,
+          // 大小来自工具「结果」而非「入参」：file-reader 返回 size，file-writer 返回 bytes，
+          // 入参 args 里从没有 size 字段，此前恒为 0。
+          size: extractResultSize(s),
           step: s.iteration,
         })
       }
@@ -356,6 +358,14 @@ function isInternalL2Path(path: string): boolean {
 function parseArgs(toolArgs?: string): Record<string, unknown> {
   if (!toolArgs) return {}
   try { return JSON.parse(toolArgs) } catch { return {} }
+}
+
+/** 从工具结果中提取产物字节数：file-reader → size，file-writer → bytes，其余回退 0 */
+function extractResultSize(s: ReActStep): number {
+  const r = s.result as Record<string, unknown> | null | undefined
+  if (!r || typeof r !== 'object') return 0
+  if (s.toolName === 'file-writer') return Number(r.bytes ?? 0) || 0
+  return Number(r.size ?? 0) || 0
 }
 
 /* ============================================================

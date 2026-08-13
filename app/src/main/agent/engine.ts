@@ -230,8 +230,33 @@ export async function runReActLoop(
     // 但 SKILL.md 全文只在 invokeSkill 时按需加载。问题是 Agent 经常"知道要调用"却
     // 不立即调用，导致 SKILL.md 全文从未被注入——本轮准则失效。
     // 修复：run 入口检测 agent.skillIds 是否含 react-core-skills，有则提前把 instructionMd
-    // 全文写入 pendingSystemHint，强制下一轮 Reason 注入系统提示。
-    // preload 推迟到 pendingSystemHint 声明后执行（let 块级变量）。
+    // 全文加载到 preloadedCoreSkillHint——既注入首轮 Reason 系统提示，也注入计划生成，
+    // 保证「计划清单」与文档驱动开发阶段严格对齐（v0.17.x 修复清单与执行内容不匹配）。
+    let preloadedCoreSkillHint: string | undefined
+    if (startIter === 0) {
+      try {
+        const skills = (task.skillIds ?? agent.defaultSkillIds ?? []) as string[]
+        const coreSkillId = skills.find((id) => /react.core.skills/i.test(id))
+        if (coreSkillId) {
+          const coreSkill = await getSkill(coreSkillId)
+          if (coreSkill?.instructionMd) {
+            const full = await readFile(coreSkill.instructionMd, 'utf-8')
+            preloadedCoreSkillHint = `## 文档驱动开发准则（自动注入 · ${coreSkill.name}）\n${full}`
+            logger.info(
+              'Tool',
+              `react-core-skills preloaded (${full.length} chars) for task ${task.id}`,
+              task.id,
+            )
+          }
+        }
+      } catch (err) {
+        logger.warn(
+          'Tool',
+          `react-core-skills preload skipped: ${(err as Error).message}`,
+          task.id,
+        )
+      }
+    }
 
     // 任务计划清单必须先于记忆召回和任何 ReAct 思考/工具操作出现。
     // polish4 §B1：新任务流程必须经过 Plan，但 plan 生成失败时**不**写 fallback plan 到 L1，
@@ -240,7 +265,7 @@ export async function runReActLoop(
       const planStartedAt = Date.now()
       let plan: PlanContent | null = null
       try {
-        plan = await generatePlan(task, agent, opts.modelId, signal)
+        plan = await generatePlan(task, agent, opts.modelId, signal, preloadedCoreSkillHint)
       } catch (err) {
         logger.warn('Agent', `plan generation failed: ${(err as Error).message}`, task.id)
         plan = null
@@ -291,34 +316,9 @@ export async function runReActLoop(
     let iteration = startIter
     // v0.6.0：渐进式披露 — 上一轮 invokeSkill 加载的 instructionMd hint，
     // 在下一轮 Reason 时合并到 system prompt（仅持续一轮，避免无限累积 token）
-    let pendingSystemHint: string | undefined
-    // v0.16.7+：默认内置 @coder / @general 等系统提示词带 react-core-skills 摘要，
-    // 但 SKILL.md 全文只在 invokeSkill 时按需加载。这里在首轮 Reason 之前预加载
-    // instructionMd → pendingSystemHint，强制首轮 system prompt 含完整准则。
-    if (startIter === 0) {
-      try {
-        const skills = (task.skillIds ?? agent.defaultSkillIds ?? []) as string[]
-        const coreSkillId = skills.find((id) => /react.core.skills/i.test(id))
-        if (coreSkillId) {
-          const coreSkill = await getSkill(coreSkillId)
-          if (coreSkill?.instructionMd) {
-            const full = await readFile(coreSkill.instructionMd, 'utf-8')
-            pendingSystemHint = `## 文档驱动开发准则（自动注入 · ${coreSkill.name}）\n${full}`
-            logger.info(
-              'Tool',
-              `react-core-skills preloaded (${full.length} chars) for task ${task.id}`,
-              task.id,
-            )
-          }
-        }
-      } catch (err) {
-        logger.warn(
-          'Tool',
-          `react-core-skills preload skipped: ${(err as Error).message}`,
-          task.id,
-        )
-      }
-    }
+    // v0.17.x：skill 准则已在计划生成前预加载（preloadedCoreSkillHint），
+    // 这里直接复用为 pendingSystemHint，保证首轮 Reason 与计划生成看到同一份准则。
+    let pendingSystemHint: string | undefined = preloadedCoreSkillHint
     // v0.16.7+：续聊路径 plan 重评提示（紧跟 react-core-skills preload 后）
     if (startIter > 0) {
       const replanHint = `## 续聊计划重评（v0.16.7+ 硬约束）
@@ -975,18 +975,20 @@ export async function runReActLoop(
           label: gate.label,
           reachedAt: Date.now(),
         })
-        // 3) 写 L1 observation 让 LLM 知道必须 ask_user
+        // 3) 写 L1 user 消息让 LLM 在下一轮 Reason 知道必须通过门禁。
+        //    注意：不能写成 role:'tool' 的 observation —— 引擎自动 ask_user
+        //    并非 LLM 发起的 tool_call，写成 tool observation 会变成无配对
+        //    toolCallId 的孤立 tool 消息，导致 OpenAI 兼容端点 400 (2013)
+        //    "tool result's tool id not found"。
         await appendL1({
           taskId: task.id,
-          role: 'tool',
-          kind: 'observation',
+          role: 'user',
+          kind: 'user_message',
           content: buildGateBlockObservation(gate),
           iteration,
-          meta: JSON.stringify({ tool: 'react-core-skills-gate', gate: gate.stage }),
         })
         // 4) 同步广播 ask_user 事件并暂停任务（无需等 LLM 主动 ask_user，
-        //    引擎直接推送 + 暂停）。LLM 下一轮 Reason 看到 observation 会继续执行。
-        const tcId = `gate_${iteration}_${Date.now()}`
+        //    引擎直接推送 + 暂停）。LLM 下一轮 Reason 看到 user 消息会继续执行。
         await emitEvent({
           type: 'ask_user',
           iteration,
@@ -995,15 +997,6 @@ export async function runReActLoop(
         })
         await updateTask(task.id, { status: 'paused' })
         broadcastTaskStatus({ ...task, status: 'paused' })
-        // 写一条配对 observation 避免 tool_call 悬空
-        await appendL1({
-          taskId: task.id,
-          role: 'tool',
-          kind: 'observation',
-          content: '[stage-gate] 引擎已自动 ask_user，等待用户回复',
-          iteration,
-          meta: JSON.stringify({ tool: 'ask_user', toolCallId: tcId, gate: gate.stage }),
-        })
         return
       }
 
@@ -1365,14 +1358,19 @@ async function tryGeneratePlan(
   agent: Agent,
   modelId: string,
   signal: AbortSignal,
+  extraSystemHint?: string,
 ): Promise<PlanContent | null> {
   const messages = await assembleMessages(task, agent)
   const adapter = await getAdapter(modelId)
   const planModel = await getModel(modelId)
+  // v0.17.x：计划生成同样注入 skill 准则，保证计划项与文档驱动开发阶段对齐
+  const planSystemPrompt = extraSystemHint
+    ? `${systemPrompt}\n\n---\n${extraSystemHint}`
+    : systemPrompt
   await emitContextSizeReport({
     taskId: task.id,
     iteration: 0,
-    systemPrompt,
+    systemPrompt: planSystemPrompt,
     messages,
     tools: undefined,
     contextWindow: planModel?.contextWindow,
@@ -1381,7 +1379,7 @@ async function tryGeneratePlan(
   const response = await withLlmTimeout(
     (sig) =>
       adapter.complete({
-        system: systemPrompt,
+        system: planSystemPrompt,
         messages,
         temperature,
         maxTokens,
@@ -1411,6 +1409,7 @@ async function generatePlan(
   agent: Agent,
   modelId: string,
   signal: AbortSignal,
+  extraSystemHint?: string,
 ): Promise<PlanContent | null> {
   // 首次：完整 Spec/Plan/对话三模式 prompt。v0.9.x 由 maxTokens 400 提升至 1024，
   // 避免 Spec 级 12 步中文计划被截断导致 parsePlanItems 返回 null。
@@ -1422,6 +1421,7 @@ async function generatePlan(
     agent,
     modelId,
     signal,
+    extraSystemHint,
   )
   if (plan) return plan
   // v0.15.0：思考模型（deepseek-v4-flash 等）可能在 1024 输出预算内只完成思考
@@ -1435,6 +1435,7 @@ async function generatePlan(
     agent,
     modelId,
     signal,
+    extraSystemHint,
   )
   if (planBig) return planBig
   // 降级重试：精简 3~5 步 prompt + 512 maxTokens + 0.2 temperature
@@ -1447,6 +1448,7 @@ async function generatePlan(
     agent,
     modelId,
     signal,
+    extraSystemHint,
   )
 }
 
@@ -1485,7 +1487,9 @@ function buildObservationSummary(
       case 'fetch-url':
         return '\n\n💡 替代建议：1) 检查 URL 是否正确 2) 用 web-search 搜索相似内容 3) 尝试其他 URL。'
       case 'file-reader':
-        return '\n\n💡 替代建议：1) 用 shell 执行 ls 查看目录结构 2) 检查路径是否正确 3) 尝试相对路径。'
+        // v0.17.x：shell 的 ls/cat 已被文件工具守卫拦截，此处不得再建议 shell ls，
+        // 否则会形成「失败 → 建议 shell ls → 又被拦截」的死循环。改为指向专用文件工具。
+        return '\n\n💡 替代建议：1) 用 glob-search({ pattern: "<dir>/**/*" }) 列出目录/查找文件 2) 用 file-reader({ path: "." }) 列出工作区根目录 3) 检查路径是否正确（相对路径基于工作区根目录解析）。'
       case 'task_complete':
       case 'ask_user':
         return ''
