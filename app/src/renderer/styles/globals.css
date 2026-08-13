@@ -10,98 +10,202 @@
  * ============================================================ */
 :root {
   color-scheme: light;
-  /* v0.13.0 浅色 — 暖灰双层（stone-50 canvas / stone-100 surface） */
-  --bg-base: #FAFAF9;          /* canvas：暖纸灰 */
-  --bg-surface: #F5F5F4;       /* surface-1 */
-  --bg-surface-2: #EDEDEB;    /* surface-2（深一档） */
+  /* v0.17.0 浅色 — 暖纸白（warm paper white） */
+  --bg-base: #FAFAF8;          /* canvas：暖纸白 */
+  --bg-surface: #F4F4F1;       /* 表面 */
+  --bg-surface-2: #ECECE7;     /* 卡片 */
+  --bg-surface-3: #E2E2DC;     /* 更深档 */
   --bg-overlay: #FFFFFF;       /* 浮层 */
-  --bg-input: #F5F5F4;
-  --bg-hover: rgba(28, 25, 23, 0.05);
-  --bg-active: rgba(28, 25, 23, 0.09);
+  --bg-input: #F4F4F1;
 
-  /* 半透明暖色边框 */
-  --border-subtle: #E7E5E4;
-  --border-default: #D6D3D1;
-  --border-strong: #A8A29E;
+  /* 中性 hover/active/selected 阶梯 */
+  --bg-overlay-l1: rgba(20, 20, 24, 0.04);
+  --bg-overlay-l2: rgba(20, 20, 24, 0.06);
+  --bg-overlay-l3: rgba(20, 20, 24, 0.09);
+  --bg-overlay-l4: rgba(20, 20, 24, 0.12);
+  /* 兼容别名（既有组件引用） */
+  --bg-hover: var(--bg-overlay-l1);
+  --bg-active: var(--bg-overlay-l3);
 
-  /* 暖深色文字系 — 三级对比（stone palette） */
-  --text-primary: #1C1917;
-  --text-secondary: #57534E;
-  --text-tertiary: #6B625C;
-  --text-inverse: #FAFAF9;
+  /* 三级中性边框 */
+  --border-subtle: rgba(20, 20, 24, 0.08);
+  --border-default: rgba(20, 20, 24, 0.14);
+  --border-strong: rgba(20, 20, 24, 0.22);
 
-  /* v0.13.0 Accent：靛紫蓝 #4F46E5（替代青蓝） */
-  --accent: #4F46E5;
-  --accent-50: #EEF2FF;
-  --accent-100: #E0E7FF;
-  --accent-300: #A5B4FC;
-  --accent-500: #4F46E5;
-  --accent-600: #4338CA;
-  --accent-700: #3730A3;
-  --accent-hover: #4338CA;
-  --accent-soft: rgba(79, 70, 229, 0.10);
+  /* 文字 — 四级对比 */
+  --text-primary: #1B1B1F;
+  --text-secondary: #55555C;
+  --text-tertiary: #8A8A92;
+  --text-disabled: #B5B5BC;
+  --text-inverse: #FAFAF8;
 
-  --success: #10B981;
-  --success-soft: rgba(16, 185, 129, 0.10);
-  --warning: #F59E0B;
-  --warning-soft: rgba(245, 158, 11, 0.10);
-  --danger: #EF4444;
-  --danger-soft: rgba(239, 68, 68, 0.10);
-  --info: #0EA5E9;
+  /* v0.17.0 品牌 — 紫罗兰，稀缺使用 */
+  --accent: #7C3AED;
+  --accent-hover: #6D28D9;
+  --accent-active: #5B21B6;
+  --accent-soft: rgba(124, 58, 237, 0.10);
+  --accent-strong: rgba(124, 58, 237, 0.18);
+  --accent-50: #EDE9FE;
+  --accent-100: #DDD6FE;
+  --accent-300: #C4B5FD;
+  --accent-500: #8B5CF6;
+  --accent-600: #7C3AED;
+  --accent-700: #6D28D9;
 
-  /* 双层暖色投影——浅色模式阴影需更明显才有浮层感 */
-  --shadow-sm: 0 1px 2px rgba(60, 50, 30, 0.08), 0 1px 1px rgba(60, 50, 30, 0.04);
-  --shadow-md: 0 4px 12px rgba(60, 50, 30, 0.10), 0 2px 4px rgba(60, 50, 30, 0.06);
-  --shadow-lg: 0 8px 24px rgba(60, 50, 30, 0.14), 0 4px 8px rgba(60, 50, 30, 0.08);
-  --shadow-panel: 0 12px 32px rgba(60, 50, 30, 0.16), 0 4px 12px rgba(60, 50, 30, 0.08);
+  --success: #059669;
+  --success-soft: rgba(5, 150, 105, 0.10);
+  --warning: #D97706;
+  --warning-soft: rgba(217, 119, 6, 0.10);
+  --danger: #DC2626;
+  --danger-soft: rgba(220, 38, 38, 0.10);
+  --info: #2563EB;
+  --info-soft: rgba(37, 99, 235, 0.10);
 
-  /* 滚动条（暖灰） */
+  /* Shell 终端专属 */
+  --shell-bg: #121216;
+  --shell-fg: #E2E2E6;
+  --shell-stderr: #F87171;
+
+  /* 浅色阴影 */
+  --shadow-sm: 0 1px 2px rgba(30, 30, 40, 0.06), 0 1px 1px rgba(30, 30, 40, 0.04);
+  --shadow-md: 0 2px 4px rgba(30, 30, 40, 0.06), 0 4px 10px rgba(30, 30, 40, 0.06);
+  --shadow-lg: 0 4px 10px rgba(30, 30, 40, 0.08), 0 12px 26px rgba(30, 30, 40, 0.08);
+  --shadow-panel: 0 8px 18px rgba(30, 30, 40, 0.10), 0 24px 48px rgba(30, 30, 40, 0.10);
+
+  /* 滚动条 */
   --scrollbar-thumb: #C9C2B5;
   --scrollbar-thumb-hover: #A8A095;
 
   /* CtxRing 轨道色（浅色） */
-  --ring-track: rgba(60, 50, 30, 0.14);
+  --ring-track: rgba(20, 20, 24, 0.12);
+
+  /* ============================================================
+   * v0.17.0 圆角（Radius）—— 7 档
+   * ============================================================ */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-full: 999px;
+
+  /* 间距（Spacing）—— 8pt 栅格 */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* 动效（Motion）—— 克制 */
+  --dur-fast: 120ms;
+  --dur-normal: 180ms;
+  --dur-slow: 280ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* 层级（Z-index） */
+  --z-base: 0;
+  --z-panel: 20;
+  --z-palette: 40;
+  --z-onboarding: 45;
+  --z-dialog: 50;
+  --z-toast: 60;
+
+  /* 字体（Typography）—— Type-first */
+  --font-sans: 'Inter', system-ui, -apple-system, 'PingFang SC', 'Segoe UI', sans-serif;
+  --font-display: 'Inter', system-ui, -apple-system, 'PingFang SC', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* 运行状态语义（映射到 status token） */
+  --status-running: var(--accent);
+  --status-running-soft: var(--accent-soft);
+  --status-paused: var(--warning);
+  --status-paused-soft: var(--warning-soft);
+  --status-completed: var(--success);
+  --status-completed-soft: var(--success-soft);
+  --status-error: var(--danger);
+  --status-error-soft: var(--danger-soft);
+  --status-idle: var(--text-tertiary);
+
+  /* 反馈系统 */
+  --toast-bg: var(--bg-overlay);
+  --toast-border: var(--border-default);
+  --toast-shadow: var(--shadow-panel);
+  --chip-bg: var(--accent-soft);
+  --chip-text: var(--accent);
+  --error-card-bg: var(--danger-soft);
+  --error-card-border: var(--danger);
+
+  /* Tooltip 三层模型（浅色：深底白字） */
+  --tooltip-bg: #1D2129;
+  --tooltip-text: #FFFFFF;
+  --tooltip-kbd-bg: rgba(255, 255, 255, 0.16);
+  --tooltip-kbd-border: rgba(255, 255, 255, 0.22);
 }
 
 .dark {
   color-scheme: dark;
-  /* v0.13.0 深色 — 暖灰双层（stone/charcoal）三档明度 */
-  --bg-base: #0C0A09;          /* canvas：最暗 */
-  --bg-surface: #1C1917;       /* surface-0 */
-  --bg-surface-2: #292524;     /* surface-1（明度↑） */
-  --bg-surface-3: #44403C;     /* surface-2（最深档） */
-  --bg-overlay: #1C1917;
-  --bg-input: #1C1917;
-  --bg-hover: rgba(255, 255, 255, 0.05);
-  --bg-active: rgba(255, 255, 255, 0.09);
+  /* v0.17.0 深色 — 暖夜色（warm night，非纯黑） */
+  --bg-base: #17171C;          /* canvas（最外层） */
+  --bg-surface: #1E1E24;       /* 侧栏 / 面板表面 */
+  --bg-surface-2: #25252C;     /* 卡片 / 输入框 */
+  --bg-surface-3: #2D2D35;     /* 更深档（代码块底等） */
+  --bg-overlay: #1E1E24;
+  --bg-input: #25252C;
 
-  --border-subtle: #292524;
-  --border-default: #44403C;
-  --border-strong: #78716C;
+  /* 中性 hover/active/selected 阶梯 */
+  --bg-overlay-l1: rgba(255, 255, 255, 0.04);
+  --bg-overlay-l2: rgba(255, 255, 255, 0.06);
+  --bg-overlay-l3: rgba(255, 255, 255, 0.09);
+  --bg-overlay-l4: rgba(255, 255, 255, 0.12);
+  /* 兼容别名（既有组件引用） */
+  --bg-hover: var(--bg-overlay-l1);
+  --bg-active: var(--bg-overlay-l3);
 
-  --text-primary: #FAFAF9;
-  --text-secondary: #D6D3D1;
-  --text-tertiary: #78716C;
-  --text-inverse: #1C1917;
+  /* 三级中性边框 */
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-default: rgba(255, 255, 255, 0.14);
+  --border-strong: rgba(255, 255, 255, 0.22);
 
-  /* v0.13.0 深色 Accent：靛紫蓝（保持视觉一致） */
-  --accent: #6366F1;
-  --accent-50: #1E1B4B;
-  --accent-100: #312E81;
-  --accent-300: #818CF8;
-  --accent-500: #6366F1;
-  --accent-600: #4F46E5;
-  --accent-700: #4338CA;
-  --accent-hover: #818CF8;
-  --accent-soft: rgba(99, 102, 241, 0.18);
+  /* 文字 — 四级对比 */
+  --text-primary: #F2F2F5;
+  --text-secondary: #B8B8C0;
+  --text-tertiary: #7A7A85;
+  --text-disabled: #55555F;
+  --text-inverse: #17171C;
 
-  --success: #10B981;
-  --success-soft: rgba(16, 185, 129, 0.15);
-  --warning: #F59E0B;
-  --warning-soft: rgba(245, 158, 11, 0.15);
-  --danger: #EF4444;
-  --danger-soft: rgba(239, 68, 68, 0.15);
-  --info: #0EA5E9;
+  /* v0.17.0 品牌 — 紫罗兰，稀缺使用 */
+  --accent: #8B5CF6;
+  --accent-hover: #A78BFA;
+  --accent-active: #7C3AED;
+  --accent-soft: rgba(139, 92, 246, 0.16);
+  --accent-strong: rgba(139, 92, 246, 0.28);
+  --accent-50: #2A2140;
+  --accent-100: #3B2F5F;
+  --accent-300: #A78BFA;
+  --accent-500: #8B5CF6;
+  --accent-600: #7C3AED;
+  --accent-700: #6D28D9;
+
+  --success: #34D399;
+  --success-soft: rgba(52, 211, 153, 0.14);
+  --warning: #FBBF24;
+  --warning-soft: rgba(251, 191, 36, 0.14);
+  --danger: #F87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
+  --info: #60A5FA;
+  --info-soft: rgba(96, 165, 250, 0.14);
+
+  /* Shell 终端专属 */
+  --shell-bg: #121216;
+  --shell-fg: #D4D4DC;
+  --shell-stderr: #F87171;
 
   /* 深色阴影需要更重才有浮层感 */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
@@ -114,6 +218,38 @@
 
   /* CtxRing 轨道色（深色） */
   --ring-track: rgba(255, 255, 255, 0.12);
+
+  /* 运行状态 idle 复用中性 tertiary */
+  --status-idle: var(--text-tertiary);
+
+  /* Toast 深色阴影更重 */
+  --toast-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.4);
+
+  /* Tooltip（深色：浅底黑字） */
+  --tooltip-bg: #F1F3F5;
+  --tooltip-text: #1D2129;
+  --tooltip-kbd-bg: rgba(0, 0, 0, 0.10);
+  --tooltip-kbd-border: rgba(0, 0, 0, 0.14);
+}
+
+/* ============================================================
+ * v0.17.0 — 兼容别名（既有组件引用旧 token 名，映射到新 canonical）
+ * 新代码请直接用 canonical：--radius-* / --space-* / --dur-* / --ease-out
+ * ============================================================ */
+:root {
+  /* Radius 旧名 → 新名 */
+  --r-xs: var(--radius-xs);
+  --r-sm: var(--radius-sm);
+  --r-md: var(--radius-md);
+  --r-lg: var(--radius-lg);
+  --r-xl: var(--radius-xl);
+  --r-2xl: var(--radius-2xl);
+  /* Duration 旧名 → 新名 */
+  --duration-fast: var(--dur-fast);
+  --duration-base: var(--dur-normal);
+  --duration-slow: var(--dur-slow);
+  --ease-out-expo: var(--ease-out);
+  --ease-spring: var(--ease-out);
 }
 
 * {
@@ -131,7 +267,7 @@ body,
 
 body {
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.5;
   color: var(--text-primary);
   background: var(--bg-base);
@@ -527,61 +663,8 @@ textarea {
 }
 
 /* ============================================================
- * v0.5.0 — UX 重设计增量 token（配套 docs/ux-redesign/design-tokens.css）
- * 原则：不修改既有 token 值，只新增；组件一律引用变量，禁硬编码色值。
+ * v0.5.0 — 状态语义与反馈 token 已合并至顶部 :root / .dark（见文件头）
  * ============================================================ */
-:root {
-  /* 运行状态色 — 仅用于 RunConsole / 步骤流状态点 / 左栏任务徽标 */
-  --status-running: var(--accent);
-  --status-running-soft: var(--accent-soft);
-  --status-paused: var(--warning);
-  --status-paused-soft: var(--warning-soft);
-  --status-completed: var(--success);
-  --status-completed-soft: var(--success-soft);
-  --status-error: var(--danger);
-  --status-error-soft: var(--danger-soft);
-  --status-idle: var(--text-tertiary);
-
-  /* 反馈系统 */
-  --toast-bg: var(--bg-overlay);
-  --toast-border: var(--border-default);
-  --toast-shadow: var(--shadow-panel);
-  --chip-bg: var(--accent-soft);
-  --chip-text: var(--accent);
-  --error-card-bg: var(--danger-soft);
-  --error-card-border: var(--danger);
-
-  /* 间距栅格（8pt） */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-6: 24px;
-  --space-8: 32px;
-  --space-12: 48px;
-
-  /* 圆角三档 */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-
-  /* 动效三档 + 缓动 */
-  --duration-fast: 150ms;
-  --duration-base: 220ms;
-  --duration-slow: 320ms;
-  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-
-  /* z-index 层级 */
-  --z-panel: 20;
-  --z-palette: 40;
-  --z-onboarding: 45;
-  --z-dialog: 50;
-  --z-toast: 60;
-}
-
-.dark {
-  --toast-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.4);
-}
 
 /* ---------- RunConsole 运行控制台 ---------- */
 .run-console {
@@ -802,36 +885,12 @@ textarea {
 .error-card__retry:hover { background: var(--danger); color: #fff; }
 
 /* ============================================================
- * v0.13.0 — 浅色皮肤精简（移除冷色覆盖块，主 :root 已对齐 stone 暖灰）
+ * v0.13.0 — 浅色皮肤精简：已由顶部 :root 统一承载（见文件头）
  * ============================================================ */
-:root:not(.dark) {
-  /* status idle & shadow tone 微调（保留原字面色阶，不破坏主 :root） */
-  --status-idle: #A8A29E;
-
-  /* Shadow tone — 暖色 stone 风 */
-  --shadow-sm: 0 1px 2px rgba(28, 25, 23, 0.04), 0 1px 1px rgba(28, 25, 23, 0.02);
-  --shadow-md: 0 2px 4px rgba(28, 25, 23, 0.04), 0 4px 8px rgba(28, 25, 23, 0.04);
-  --shadow-lg: 0 4px 8px rgba(28, 25, 23, 0.06), 0 12px 24px rgba(28, 25, 23, 0.06);
-  --shadow-panel: 0 8px 16px rgba(28, 25, 23, 0.08), 0 24px 48px rgba(28, 25, 23, 0.08);
-}
 
 /* ============================================================
- * v0.11.0 — Tooltip 三层模型（F1101）
- * 高对比提示层：浅色主题深底白字 / 深色主题浅底黑字（≥7:1）
- * 用法：仅 Tooltip 组件消费，勿在其他组件硬编码。
+ * v0.11.0 — Tooltip 三层模型：已合并至顶部 :root / .dark（见文件头）
  * ============================================================ */
-:root:not(.dark) {
-  --tooltip-bg: #1D2129;
-  --tooltip-text: #FFFFFF;
-  --tooltip-kbd-bg: rgba(255, 255, 255, 0.16);
-  --tooltip-kbd-border: rgba(255, 255, 255, 0.22);
-}
-.dark {
-  --tooltip-bg: #F1F3F5;
-  --tooltip-text: #1D2129;
-  --tooltip-kbd-bg: rgba(0, 0, 0, 0.10);
-  --tooltip-kbd-border: rgba(0, 0, 0, 0.14);
-}
 
 /* Tooltip 浮层动画：120ms 淡入上移（350ms 延迟由组件 setTimeout 控制） */
 @keyframes tooltip-in {
@@ -843,24 +902,8 @@ textarea {
 }
 
 /* ============================================================
- * v0.13.0 — 全局动效 Token（一档 ease-out 与 GPU-only 准则）
+ * v0.13.0 — 全局动效 Token：已合并至顶部 :root（见文件头）
  * ============================================================ */
-:root {
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --dur-fast: 120ms;
-  --dur-normal: 180ms;
-  --dur-slow: 280ms;
-
-  /* Radius — 6 档，禁止混用 */
-  --r-xs: 4px;
-  --r-sm: 6px;
-  --r-md: 8px;
-  --r-lg: 12px;
-  --r-xl: 16px;
-  --r-2xl: 20px;
-}
 
 /* ============================================================
  * v0.13.0 — Plan Checklist 状态视觉
@@ -1168,6 +1211,39 @@ textarea {
   line-height: 1.7;
   white-space: pre-wrap;
 }
+/* v0.17.0 F6：思考块三态左条（running 紫罗兰 / failed 危险 / done 中性） */
+.react-reason {
+  position: relative;
+}
+.react-reason::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--border-default);
+  border-radius: 3px 0 0 3px;
+  pointer-events: none;
+}
+.react-reason[data-state="running"]::before {
+  background: var(--accent);
+}
+.react-reason[data-state="failed"]::before {
+  background: var(--danger);
+}
+.react-reason__chevron {
+  margin-left: 2px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.react-reason__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+}
 /* v0.15.x：去独立卡片边框/背景，仅保留左侧 2px 状态条 + 适度内边距 */
 .react-observation {
   /* 去掉独立卡片边框/背景 */
@@ -1348,11 +1424,11 @@ textarea {
   box-shadow: none;
 }
 .inspector-toolbar__item[data-active="true"] {
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--text-primary);
+  background: var(--bg-overlay-l2);
 }
 .inspector-toolbar__item[data-active="true"]:hover {
-  background: var(--accent-soft);
+  background: var(--bg-overlay-l2);
 }
 /* 选中态指示条 —— 位于标签项左侧（紧贴工具栏左缘） */
 .inspector-toolbar__indicator {
@@ -1665,12 +1741,7 @@ textarea {
   gap: 6px;
 }
 
-/* 通用命名字体（v0.13.0 规范） */
-:root {
-  --font-sans: 'Inter Tight', system-ui, -apple-system, 'PingFang SC', sans-serif;
-  --font-display: 'Inter Tight', system-ui, -apple-system, 'PingFang SC', sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-}
+/* 通用命名字体：已合并至顶部 :root（见文件头） */
 
 /* ============================================================
  * Task 8 — 功能日志条目两行布局

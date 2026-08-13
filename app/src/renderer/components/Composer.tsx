@@ -590,7 +590,7 @@ export function Composer() {
       {/* 输入框 — v0.9.1：Trae 式大圆角卡片 + 聚焦光晕（border-accent + accent-soft 外环） */}
       <div className="px-3 pt-2">
         <div
-          className={`flex items-start gap-2.5 bg-bg-input border rounded-xl px-3.5 py-3 focus-within:border-accent focus-within:shadow-accent transition-all duration-150 ${
+          className={`flex items-start gap-2.5 bg-bg-input border rounded-2xl px-3.5 py-3 focus-within:border-accent focus-within:shadow-accent transition-all duration-150 ${
             isFailed ? 'border-danger' : 'border-border-default'
           }`}
         >

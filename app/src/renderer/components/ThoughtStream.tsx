@@ -226,30 +226,52 @@ function ThinkBlock({ step, isActive }: { step: ReActStep; isActive?: boolean })
 
   if (!thought) return null
 
-  // 默认折叠（运行中也折叠，点击展开）
-  const showBody = showFull
+  // v0.17.0 F6：思考块三态 running / done / failed（数据契约 data-state）
+  const state = step.status === 'running' ? 'running' : step.status === 'failed' ? 'failed' : 'done'
+  const statusText = state === 'running' ? '思考中…' : state === 'failed' ? '思考失败' : '已完成思考'
+
+  const copyThought = async () => {
+    try {
+      await navigator.clipboard.writeText(thought)
+    } catch { /* ignore */ }
+  }
 
   return (
-    <div className="react-reason">
+    <div className="react-reason" data-state={state}>
       <button
         onClick={() => setShowFull((v) => !v)}
         className="react-reason__head"
+        aria-expanded={showFull}
       >
         <span className="react-reason__icon" aria-hidden="true">
           <Icon.Brain width={12} height={12} />
         </span>
-        <span>Reasoning</span>
+        <span className={state === 'failed' ? 'text-danger' : ''}>{statusText}</span>
         {isRunning && <span className="w-1 h-1 rounded-full bg-accent pulse-dot" />}
         <span className="react-reason__duration tabular">
           {isRunning ? '…' : duration > 0 ? `${(duration / 1000).toFixed(1)}s` : ''}
         </span>
+        <Icon.ChevronDown
+          width={12}
+          height={12}
+          className="react-reason__chevron"
+          style={{ transform: showFull ? 'none' : 'rotate(-90deg)' }}
+          aria-hidden="true"
+        />
       </button>
-      {showBody && (
+      {showFull && (
         <div className="react-reason__body">
           {thought}
           {isRunning && (
             <span className="inline-block w-0.5 h-3.5 bg-accent ml-0.5 animate-pulse" />
           )}
+        </div>
+      )}
+      {showFull && (
+        <div className="react-reason__footer">
+          <button onClick={copyThought} className="tool-card__btn">
+            复制
+          </button>
         </div>
       )}
     </div>
@@ -267,6 +289,7 @@ function ToolCard({ step, observation }: { step: ReActStep; observation?: ReActS
   const [resultOpen, setResultOpen] = useState(true) // v0.13.0：默认展开
   const parsedArgs = parseArgs(step.toolArgs)
   const display = getToolDisplay(step.toolName ?? '', parsedArgs)
+  const ToolIcon = Icon[display.icon]
   const argText = display.argSummary(parsedArgs)
   const isRunning = step.status === 'running'
   const isFailed = step.status === 'failed'
@@ -321,7 +344,8 @@ function ToolCard({ step, observation }: { step: ReActStep; observation?: ReActS
       >
         {/* 状态描述：图标 + 动词 + 关键参数（一行） */}
         <span className="tool-card__head-text">
-          {display.icon} {display.verb}
+          <ToolIcon width={14} height={14} className="flex-shrink-0" />
+          <span>{display.verb}</span>
           {argText && (
             <>
               <span className="tool-card__head-sep">·</span>
@@ -332,7 +356,8 @@ function ToolCard({ step, observation }: { step: ReActStep; observation?: ReActS
         {/* 耗时 */}
         {duration > 0 && (
           <span className="tool-card__duration tabular">
-            ⏱ {(duration / 1000).toFixed(1)}s
+            <Icon.Clock width={11} height={11} className="inline-block mr-0.5 -mt-px" aria-hidden="true" />
+            {(duration / 1000).toFixed(1)}s
           </span>
         )}
         {/* 状态图标 */}
@@ -492,7 +517,8 @@ function ParallelProgressBar({ progress }: { progress: ToolProgressEvent[] }) {
             )}
             {typeof p.durationMs === 'number' && p.durationMs > 0 && (
               <span className="ml-auto text-2xs text-text-tertiary tabular flex-shrink-0">
-                ⏱ {(p.durationMs / 1000).toFixed(1)}s
+                <Icon.Clock width={11} height={11} className="inline-block mr-0.5 -mt-px" aria-hidden="true" />
+                {(p.durationMs / 1000).toFixed(1)}s
               </span>
             )}
           </div>

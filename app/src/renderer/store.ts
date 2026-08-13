@@ -140,6 +140,31 @@ export const INSPECTOR_TAB_ORDER: InspectorTabId[] = ['todos', 'context', 'files
 /** Inspector 默认 Tab — 选 todos（最普适，Plan ↔ Todos 同步链路核心） */
 export const DEFAULT_INSPECTOR_TAB: InspectorTabId = 'todos'
 
+/** v0.17.0 F13：清洗持久化的 Tab 顺序（去重、补缺、剔除非法项，保证 5 个 Tab 齐全） */
+function sanitizeInspectorOrder(raw: unknown): InspectorTabId[] {
+  const valid = INSPECTOR_TAB_ORDER
+  if (!Array.isArray(raw)) return [...valid]
+  const seen = new Set<InspectorTabId>()
+  const out: InspectorTabId[] = []
+  for (const t of raw) {
+    if ((valid as string[]).includes(t as string) && !seen.has(t as InspectorTabId)) {
+      seen.add(t as InspectorTabId)
+      out.push(t as InspectorTabId)
+    }
+  }
+  for (const t of valid) if (!seen.has(t)) out.push(t)
+  return out
+}
+
+/** v0.17.0 F13：清洗持久化的隐藏 Tab（Browser 永远不可隐藏） */
+function sanitizeHiddenTabs(raw: unknown): InspectorTabId[] {
+  if (!Array.isArray(raw)) return []
+  const valid = INSPECTOR_TAB_ORDER
+  return raw.filter(
+    (t) => (valid as string[]).includes(t as string) && t !== 'browser',
+  ) as InspectorTabId[]
+}
+
 /** v0.9.0 F901：RightDock 用户偏好（按 工作区 × 智能体 记忆） */
 export interface DockPrefs {
   tabs: DockTabId[]
@@ -698,6 +723,13 @@ interface AppState {
   /** Inspector 当前选中 Tab（固定 5 个之一：todos / context / files / logs / browser） */
   inspectorTab: InspectorTabId
   setInspectorTab: (t: InspectorTabId) => void
+  /** v0.17.0 F13：可见 Tab 顺序（用户可拖动重排，持久化） */
+  inspectorTabOrder: InspectorTabId[]
+  /** v0.17.0 F13：被拖出隐藏的 Tab（收纳于工具栏底部「已隐藏」区） */
+  hiddenInspectorTabs: InspectorTabId[]
+  setInspectorTabOrder: (order: InspectorTabId[]) => void
+  hideInspectorTab: (tab: InspectorTabId) => void
+  restoreInspectorTab: (tab: InspectorTabId) => void
 
   // ============================================================
   // v0.9.0 F900 — 全局模块页（CenterStage 整页切换）
@@ -1107,6 +1139,31 @@ export const useStore = create<AppState>((set, get) => ({
   // fix-workspace-task-automation-memory Task 5：Inspector 默认 Todos
   inspectorTab: DEFAULT_INSPECTOR_TAB,
   setInspectorTab: (t) => set({ inspectorTab: t }),
+  inspectorTabOrder: sanitizeInspectorOrder(loadUiState('inspector-tab-order', INSPECTOR_TAB_ORDER)),
+  hiddenInspectorTabs: sanitizeHiddenTabs(loadUiState('inspector-tab-hidden', [])),
+  setInspectorTabOrder: (order) => {
+    const clean = sanitizeInspectorOrder(order)
+    saveUiState('inspector-tab-order', clean)
+    set({ inspectorTabOrder: clean })
+  },
+  hideInspectorTab: (tab) =>
+    set((s) => {
+      if (tab === 'browser' || s.hiddenInspectorTabs.includes(tab)) return {}
+      const hidden = [...s.hiddenInspectorTabs, tab]
+      saveUiState('inspector-tab-hidden', hidden)
+      // 隐藏当前激活 Tab 时，切到首个仍可见的 Tab
+      const nextInspectorTab =
+        s.inspectorTab === tab
+          ? (s.inspectorTabOrder.find((t) => t !== tab && !hidden.includes(t)) ?? 'todos')
+          : s.inspectorTab
+      return { hiddenInspectorTabs: hidden, inspectorTab: nextInspectorTab }
+    }),
+  restoreInspectorTab: (tab) =>
+    set((s) => {
+      const hidden = s.hiddenInspectorTabs.filter((t) => t !== tab)
+      saveUiState('inspector-tab-hidden', hidden)
+      return { hiddenInspectorTabs: hidden }
+    }),
   toggleRightDock: () =>
     set((s) => {
       const next = !s.rightDockCollapsed
@@ -1259,7 +1316,7 @@ export const useStore = create<AppState>((set, get) => ({
       const capsule: MinimizedCapsule = {
         id: pw.id,
         title: activeTab?.target.kind === 'file' ? activeTab.target.path.split('/').pop() || '预览' : '预览',
-        icon: '📄',
+        icon: 'File',
         tabCount: pw.tabs.length,
       }
       return {
@@ -1916,6 +1973,8 @@ export const useStore = create<AppState>((set, get) => ({
         rightDockWidth: clampWidth(loadUiState('rightdock-w', 360), 280, 480),
         sidePanelWidth: clampWidth(loadUiState('sidepanel-w', 240), 64, 320),
         dockPrefs: loadUiState<Record<string, DockPrefs>>('dockprefs', {}),
+        inspectorTabOrder: sanitizeInspectorOrder(loadUiState('inspector-tab-order', INSPECTOR_TAB_ORDER)),
+        hiddenInspectorTabs: sanitizeHiddenTabs(loadUiState('inspector-tab-hidden', [])),
       })
       // 同步当前智能体的 Dock 布局
       const agentId = get().selectedAgentId

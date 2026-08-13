@@ -748,14 +748,18 @@ function MinimizedCapsules() {
 
   return (
     <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[55] flex items-center gap-1.5 px-2 py-1.5 bg-bg-overlay border border-border-default rounded-xl shadow-panel scale-in">
-      {minimizedPreviews.map((c) => (
+      {minimizedPreviews.map((c) => {
+        const CapsuleIcon = Icon[c.icon as keyof typeof Icon] ?? Icon.File
+        return (
         <Tooltip label={`复：${c.title}`} desc="点击恢复最小化的预览窗口">
           <div
             key={c.id}
             className="group flex items-center gap-1.5 pl-2 pr-1 h-7 rounded-lg bg-bg-surface border border-border-subtle hover:bg-bg-hover transition-colors cursor-pointer"
             onClick={() => restoreMinimized(c.id)}
           >
-            <span className="text-sm leading-none">{c.icon}</span>
+            <span className="text-sm leading-none">
+              <CapsuleIcon width={14} height={14} className="text-text-secondary" aria-hidden="true" />
+            </span>
             <span className="text-2xs text-text-secondary truncate max-w-[160px]">{c.title}</span>
             {c.tabCount > 1 && (
               <span className="text-2xs text-text-tertiary tabular">{c.tabCount}</span>
@@ -776,7 +780,8 @@ function MinimizedCapsules() {
             </Tooltip>
           </div>
         </Tooltip>
-      ))}
+        )
+      })}
     </div>
   )
 }

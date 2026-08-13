@@ -4,6 +4,7 @@
  *         新增 TOOL_DISPLAY 工具人性化映射
  * ============================================================ */
 import type { TaskStatus } from './types'
+import type { IconName } from './icons'
 
 /**
  * v0.8.1：上下文「对话噪音」记忆 kind — 在上下文资源清单（L1 面板 / @ 记忆
@@ -20,13 +21,13 @@ export const CONTEXT_NOISE_KINDS: ReadonlySet<string> = new Set([
   'user_message',
 ])
 
-/** 状态色 — 全局唯一来源（done/cancelled/pending 归灰，符合交互文档 P2/P4）
+/** 状态色 — 全局唯一来源（done 用成功绿，cancelled/pending 归灰；v0.17.0 状态语义化）
  * v0.4.0：改用 CSS 变量，浅深皮肤自动适配 */
 export const STATUS_COLOR: Record<TaskStatus, string> = {
   pending: 'var(--text-tertiary)',
   running: 'var(--accent)',
   paused: 'var(--warning)',
-  done: 'var(--text-tertiary)',
+  done: 'var(--success)',
   failed: 'var(--danger)',
   cancelled: 'var(--text-tertiary)',
 }
@@ -62,7 +63,8 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
  * 废除工程视角直出（大写标签 + 时间戳 + 原始参数串）
  * ============================================================ */
 export interface ToolDisplay {
-  icon: string
+  /** v0.17.0：图标改为 Icon 组件名（零 emoji），组件层用 <Icon[name] /> 渲染 */
+  icon: IconName
   verb: string
   argSummary: (args: Record<string, unknown>) => string
 }
@@ -86,42 +88,42 @@ function hostOf(url: string): string {
 
 export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   'file-reader': {
-    icon: '📄',
+    icon: 'File',
     verb: '读取文件',
     argSummary: (a) => basename(String(a.path ?? '')),
   },
   'web-search': {
-    icon: '🔍',
+    icon: 'Search',
     verb: '搜索网页',
     argSummary: (a) => `“${truncate(String(a.query ?? ''), 24)}”`,
   },
   'fetch-url': {
-    icon: '🌐',
+    icon: 'ExternalLink',
     verb: '访问页面',
     argSummary: (a) => hostOf(String(a.url ?? '')),
   },
   shell: {
-    icon: '⌘',
+    icon: 'Terminal',
     verb: '运行命令',
     argSummary: (a) => truncate(String(a.command ?? ''), 32),
   },
   'delegate-agent': {
-    icon: '🤝',
+    icon: 'Bot',
     verb: '委派给',
     argSummary: (a) => String(a.agentId ?? ''),
   },
   'session-search': {
-    icon: '🗄',
+    icon: 'Clock',
     verb: '检索历史',
     argSummary: (a) => `“${truncate(String(a.query ?? ''), 24)}”`,
   },
   task_complete: {
-    icon: '🏁',
+    icon: 'Check',
     verb: '完成任务',
     argSummary: () => '',
   },
   ask_user: {
-    icon: '❓',
+    icon: 'Info',
     verb: '询问用户',
     argSummary: (a) => truncate(String(a.question ?? ''), 32),
   },
@@ -162,7 +164,7 @@ export function getToolDisplay(toolName: string, args: Record<string, unknown> =
   // 缺省：用工具名自身 + 第一个字符串参数
   const firstStr = Object.values(args).find((v) => typeof v === 'string') as string | undefined
   return {
-    icon: '⚡',
+    icon: 'Bolt',
     verb: toolName,
     argSummary: (a) => {
       const v = Object.values(a).find((val) => typeof val === 'string') as string | undefined

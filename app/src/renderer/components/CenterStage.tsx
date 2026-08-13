@@ -233,7 +233,10 @@ function TaskHeader({
         <span>·</span>
         <span className="tabular">{stepCount} steps</span>
         <span>·</span>
-        <span className="tabular">⏱ {formatUpdatedAt(task.updatedAt)}</span>
+        <span className="tabular flex items-center gap-1">
+          <Icon.Clock width={11} height={11} className="text-text-tertiary" aria-hidden="true" />
+          {formatUpdatedAt(task.updatedAt)}
+        </span>
         <span>·</span>
         <span>
           <kbd className="font-mono text-2xs px-1 py-0.5 rounded border border-border-subtle bg-bg-surface">⌘↵</kbd>{' '}

@@ -8,7 +8,7 @@
 import { useMemo, useState } from 'react'
 import { Icon } from '../../icons'
 import { useStore } from '../../store'
-import { Tooltip, EmptyState } from '../ui'
+import { EmptyState } from '../ui'
 interface ShellEntry {
   id: string
   command: string
@@ -52,6 +52,15 @@ export function TerminalPanel() {
 
   const runningCount = entries.filter((e) => e.status === 'running').length
 
+  const copyOutput = async (e: ShellEntry) => {
+    const text = [e.command, e.cwd ? `目录：${e.cwd}` : '', e.summary, e.error]
+      .filter(Boolean)
+      .join('\n')
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch { /* ignore */ }
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* 头部 */}
@@ -80,19 +89,20 @@ export function TerminalPanel() {
               return (
                 <div
                   key={e.id}
-                  className={`rounded-md border transition-colors ${
+                  data-state={e.status}
+                  className={`rounded-md border transition-colors overflow-hidden ${
                     e.status === 'failed'
-                      ? 'border-danger/30 bg-danger-soft/20'
+                      ? 'border-danger/40'
                       : e.status === 'running'
-                        ? 'border-accent/30 bg-accent-soft/10'
-                        : 'border-border-subtle bg-bg-surface'
+                        ? 'border-accent/40'
+                        : 'border-border-subtle'
                   }`}
                 >
-<Tooltip label="点击展开全文">
                   <button
                     onClick={() => setExpandedId(expanded ? null : e.id)}
-                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left group"
-
+                    aria-expanded={expanded}
+                    aria-label={`命令：${e.command}`}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left group bg-shell-bg"
                   >
                     <span
                       className={`flex-shrink-0 text-2xs font-mono w-7 text-center rounded px-0.5 py-px ${
@@ -105,7 +115,7 @@ export function TerminalPanel() {
                     >
                       {e.status === 'success' ? '0' : e.status === 'failed' ? '✕' : '···'}
                     </span>
-                    <span className="flex-1 min-w-0 truncate font-mono text-xs text-text-primary">
+                    <span className="flex-1 min-w-0 truncate font-mono text-xs text-shell-fg">
                       $ {e.command}
                     </span>
                     <span className="flex-shrink-0 text-2xs text-text-tertiary tabular">
@@ -117,19 +127,23 @@ export function TerminalPanel() {
                       <Icon.ChevronRight width={16} height={16} className="text-text-tertiary flex-shrink-0" />
                     )}
                   </button>
-</Tooltip>
 
                   {expanded && (
-                    <div className="px-2.5 pb-2 pt-0.5 space-y-1">
+                    <div className="px-2.5 pb-2 pt-0.5 space-y-1 bg-shell-bg">
                       {e.cwd && (
                         <div className="text-2xs text-text-tertiary font-mono truncate" title={e.cwd}>
                           目录：{e.cwd}
                         </div>
                       )}
-                      <pre className="text-xs text-text-secondary whitespace-pre-wrap break-all font-mono bg-bg-base/60 rounded px-2 py-1.5 max-h-48 overflow-y-auto">
+                      <pre className="text-xs text-shell-fg whitespace-pre-wrap break-all font-mono bg-bg-base/40 rounded px-2 py-1.5 max-h-48 overflow-y-auto">
                         {e.summary || '(无输出摘要)'}
                       </pre>
-                      {e.error && <div className="text-2xs text-danger">{e.error}</div>}
+                      {e.error && <div className="text-2xs text-shell-stderr">{e.error}</div>}
+                      <div className="flex justify-end">
+                        <button onClick={() => copyOutput(e)} className="tool-card__btn">
+                          复制输出
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

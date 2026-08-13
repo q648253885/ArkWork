@@ -10,10 +10,16 @@ export default {
         'bg-base': 'var(--bg-base)',
         'bg-surface': 'var(--bg-surface)',
         'bg-surface-2': 'var(--bg-surface-2)',
+        'bg-surface-3': 'var(--bg-surface-3)',
         'bg-overlay': 'var(--bg-overlay)',
         // 语义化半透明叠加
         'bg-hover': 'var(--bg-hover)',
         'bg-active': 'var(--bg-active)',
+        // v0.17.0 中性 overlay 阶梯（hover/active/selected）
+        'bg-overlay-l1': 'var(--bg-overlay-l1)',
+        'bg-overlay-l2': 'var(--bg-overlay-l2)',
+        'bg-overlay-l3': 'var(--bg-overlay-l3)',
+        'bg-overlay-l4': 'var(--bg-overlay-l4)',
         // 兼容旧名
         'bg-elevated': 'var(--bg-overlay)',
         'bg-input': 'var(--bg-input)',
@@ -27,6 +33,7 @@ export default {
         'text-primary': 'var(--text-primary)',
         'text-secondary': 'var(--text-secondary)',
         'text-tertiary': 'var(--text-tertiary)',
+        'text-disabled': 'var(--text-disabled)',
         'text-inverse': 'var(--text-inverse)',
 
         // Accent 6 档（v0.13 靛紫蓝 #4F46E5）
@@ -38,7 +45,9 @@ export default {
         'accent-600': 'var(--accent-600)',
         'accent-700': 'var(--accent-700)',
         'accent-hover': 'var(--accent-hover)',
+        'accent-active': 'var(--accent-active)',
         'accent-soft': 'var(--accent-soft)',
+        'accent-strong': 'var(--accent-strong)',
         success: 'var(--success)',
         'success-soft': 'var(--success-soft)',
         warning: 'var(--warning)',
@@ -46,10 +55,15 @@ export default {
         danger: 'var(--danger)',
         'danger-soft': 'var(--danger-soft)',
         info: 'var(--info)',
+        'info-soft': 'var(--info-soft)',
+        // v0.17.0 Shell 终端专属
+        'shell-bg': 'var(--shell-bg)',
+        'shell-fg': 'var(--shell-fg)',
+        'shell-stderr': 'var(--shell-stderr)',
       },
       fontFamily: {
-        sans: ['Inter Tight', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'PingFang SC', 'sans-serif'],
-        display: ['Inter Tight', 'Inter', '-apple-system', 'PingFang SC', 'sans-serif'],
+        sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'PingFang SC', 'Segoe UI', 'sans-serif'],
+        display: ['Inter', 'system-ui', '-apple-system', 'PingFang SC', 'Segoe UI', 'sans-serif'],
         mono: ['JetBrains Mono', 'ui-monospace', 'SF Mono', 'Menlo', 'monospace'],
       },
       borderRadius: {
@@ -65,7 +79,7 @@ export default {
         '2xs': ['11px', { lineHeight: '16px' }],   // caption
         xs: ['12px', { lineHeight: '18px' }],       // meta
         sm: ['13px', { lineHeight: '20px' }],       // 行号、标签
-        base: ['15px', { lineHeight: '24px' }],     // body（主体）
+        base: ['14px', { lineHeight: '20px' }],     // body（主体，v0.17.0 14px 基线）
         md: ['14px', { lineHeight: '22px' }],       // 次级正文
         lg: ['17px', { lineHeight: '26px' }],       // 强调正文、卡标题
         xl: ['20px', { lineHeight: '28px' }],       // 任务标题

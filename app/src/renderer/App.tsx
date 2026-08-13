@@ -20,7 +20,7 @@
  *   Esc    按优先级关闭浮层
  * ============================================================ */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useStore, INSPECTOR_TAB_ORDER, type InspectorTabId, type ModulePage } from './store'
+import { useStore, type InspectorTabId, type ModulePage } from './store'
 import type { PermissionMode } from '@shared/types/permission'
 import { Icon } from './icons'
 import { Tooltip } from './components/ui'
@@ -163,7 +163,9 @@ export default function App() {
         e.preventDefault()
         const s = useStore.getState()
         const idx = Number(e.key) - 1
-        const tab = INSPECTOR_TAB_ORDER[idx] as InspectorTabId | undefined
+        const tab = s.inspectorTabOrder.filter((t) => !s.hiddenInspectorTabs.includes(t))[idx] as
+          | InspectorTabId
+          | undefined
         if (tab) {
           s.setInspectorTab(tab)
           if (s.rightDockCollapsed) s.toggleRightDock()

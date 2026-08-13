@@ -15,6 +15,9 @@ import type { PlanItemState } from '@shared/types/conversation'
 import type { PlanItemStatus } from '@shared/types/task'
 import { PLAN_STATUS_META, planStatusTextClass, planItemToolSteps } from '../../utils/plan-status'
 
+/** v0.17.0 F8：状态筛选顺序（全部 + 六态） */
+const FILTER_ORDER: PlanItemStatus[] = ['pending', 'running', 'done', 'skipped', 'failed', 'cancelled']
+
 export function TodoPanel() {
   const conversation = useStore((s) => s.conversation)
   const steps = useStore((s) => s.steps)
@@ -22,7 +25,15 @@ export function TodoPanel() {
   // 才允许全部勾完；与对话内 PlanMessage 同一数据源、同一时刻一致
   const task = useStore((s) => s.tasks.find((t) => t.id === s.selectedTaskId))
   // v0.14.0 Task 8：行级六态展开详情（工具调用记录 / 结果摘要 / 异常标记）
-  const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
+  // v0.17.0：由单行展开改为集合，支持同时展开多行对照工具执行明细
+  const [expandedSet, setExpandedSet] = useState<Set<number>>(() => new Set())
+  const toggleExpand = (i: number) =>
+    setExpandedSet((prev) => {
+      const next = new Set(prev)
+      if (next.has(i)) next.delete(i)
+      else next.add(i)
+      return next
+    })
 
   // 与对话 PlanMessage 严格同源：优先取 conversation 内 plan 条目；
   // 即便 conversation 内还没有 plan item，也使用 store util 派生（与对话一致）
@@ -52,6 +63,21 @@ export function TodoPanel() {
     return derived
   }, [task?.planItems, items, planItem?.planStates, steps, task?.status])
   const doneCount = states.filter((s) => s === 'done').length
+
+  // v0.17.0 F8：状态筛选（全部 / 六态）
+  const [filter, setFilter] = useState<'all' | PlanItemStatus>('all')
+  const countBy = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const s of states) m[s] = (m[s] ?? 0) + 1
+    return m
+  }, [states])
+  const filteredIndices = useMemo(
+    () =>
+      items
+        .map((_, i) => i)
+        .filter((i) => filter === 'all' || (states[i] ?? 'pending') === filter),
+    [items, states, filter],
+  )
 
   const goal = planItem?.plan?.goal ?? '尚未生成计划'
 
@@ -89,7 +115,7 @@ export function TodoPanel() {
       <div className="flex items-center gap-2 px-3 h-9 flex-shrink-0 border-b border-border-subtle">
         <span className="text-sm text-text-primary font-medium truncate">{goal}</span>
         <span className="text-2xs text-text-tertiary tabular">
-          {doneCount}/{items.length} 完成
+          {doneCount} / {items.length}
         </span>
         <Tooltip label="定位到对话流中的计划卡片">
           <button
@@ -100,6 +126,43 @@ export function TodoPanel() {
             定位
           </button>
         </Tooltip>
+      </div>
+
+      {/* v0.17.0 F8：状态筛选 chips（全部 + 六态） */}
+      <div className="flex items-center gap-1 px-3 pt-2 flex-shrink-0 flex-wrap">
+        <button
+          onClick={() => setFilter('all')}
+          aria-pressed={filter === 'all'}
+          className={`flex items-center gap-1 h-6 px-2 rounded-full text-2xs tabular transition-colors ${
+            filter === 'all'
+              ? 'bg-bg-active text-text-primary'
+              : 'text-text-tertiary hover:bg-bg-hover hover:text-text-primary'
+          }`}
+        >
+          全部<span className="opacity-60">{items.length}</span>
+        </button>
+        {FILTER_ORDER.filter((st) => (countBy[st] ?? 0) > 0).map((st) => {
+          const active = filter === st
+          return (
+            <button
+              key={st}
+              onClick={() => setFilter(st)}
+              aria-pressed={active}
+              className={`flex items-center gap-1 h-6 px-2 rounded-full text-2xs tabular transition-colors ${
+                active
+                  ? 'bg-bg-active text-text-primary'
+                  : 'text-text-tertiary hover:bg-bg-hover hover:text-text-primary'
+              }`}
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ background: PLAN_STATUS_META[st].color }}
+              />
+              {PLAN_STATUS_META[st].label}
+              <span className="opacity-60">{countBy[st] ?? 0}</span>
+            </button>
+          )
+        })}
       </div>
 
       {/* 进度条 */}
@@ -116,13 +179,17 @@ export function TodoPanel() {
 
       {/* 清单 */}
       <div className="flex-1 overflow-y-auto px-2 py-2">
+        {filteredIndices.length === 0 && (
+          <div className="px-2 py-3 text-2xs text-text-tertiary">当前筛选下没有任务</div>
+        )}
         <ol className="space-y-1">
-          {items.map((item, i) => {
+          {filteredIndices.map((i) => {
+            const item = items[i]
             // v0.14.0 Task 8：行级六态（pending 灰 / running 蓝脉冲 / done 绿+删除线 /
             // failed 红 / cancelled 灰+删除线 / skipped 黄），映射表见 utils/plan-status.ts
             const st: PlanItemStatus = states[i] ?? 'pending'
             const meta = PLAN_STATUS_META[st]
-            const expanded = expandedIndex === i
+            const expanded = expandedSet.has(i)
             const toolSteps = planItemToolSteps(steps, i)
             return (
               <li key={i}>
@@ -134,11 +201,11 @@ export function TodoPanel() {
                   tabIndex={0}
                   aria-expanded={expanded}
                   aria-label={`计划步骤 ${i + 1}：${item}（状态：${meta.label}）`}
-                  onClick={() => setExpandedIndex((v) => (v === i ? null : i))}
+                  onClick={() => toggleExpand(i)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault()
-                      setExpandedIndex((v) => (v === i ? null : i))
+                      toggleExpand(i)
                     }
                   }}
                 >
@@ -174,6 +241,13 @@ export function TodoPanel() {
                   >
                     {meta.label}
                   </span>
+                  <span
+                    className="flex-shrink-0 mt-0.5 text-text-tertiary transition-transform"
+                    style={{ transform: expanded ? 'none' : 'rotate(-90deg)' }}
+                    aria-hidden="true"
+                  >
+                    <Icon.ChevronDown width={12} height={12} />
+                  </span>
                 </div>
 
                 {/* v0.14.0 Task 8：行级展开详情 — 工具调用记录 / 结果摘要 / 异常标记 */}
@@ -204,8 +278,9 @@ export function TodoPanel() {
                               <span className="text-danger flex-shrink-0">失败</span>
                             )}
                             {step.durationMs > 0 && (
-                              <span className="text-text-tertiary tabular flex-shrink-0">
-                                ⏱ {(step.durationMs / 1000).toFixed(2)}s
+                              <span className="text-text-tertiary tabular flex-shrink-0 flex items-center gap-0.5">
+                                <Icon.Clock width={10} height={10} />
+                                {(step.durationMs / 1000).toFixed(2)}s
                               </span>
                             )}
                           </div>

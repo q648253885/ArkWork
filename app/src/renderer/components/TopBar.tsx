@@ -116,7 +116,7 @@ function WorkspaceIdentifier() {
   // 顶部 chip 不再展示任务数 / 运行态;仅展示工作区名;tooltip 改为路径与切换说明。
   const wsCap = useMemo(() => {
     const path = activeWs?.path
-    return path ? `📁 ${path} ｜ 切换工作区` : '切换工作区'
+    return path ? `${path} ｜ 切换工作区` : '切换工作区'
   }, [activeWs?.path])
 
   useEffect(() => {

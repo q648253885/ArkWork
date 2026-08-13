@@ -10,8 +10,8 @@
  * - ⌥1~5 快捷键激活并展开对应标签（todos/context/files/logs/browser）
  * 设计文档：specs/fix-workspace-task-automation-memory §合并后的右侧工具窗口
  * ============================================================ */
-import { useCallback } from 'react'
-import { useStore, INSPECTOR_TAB_META, INSPECTOR_TAB_ORDER, type InspectorTabId } from '../store'
+import { useCallback, useRef, useState } from 'react'
+import { useStore, INSPECTOR_TAB_META, type InspectorTabId } from '../store'
 import { Icon, type IconName } from '../icons'
 import { Tooltip } from './ui'
 import { FilesPanel } from './panels/FilesPanel'
@@ -29,6 +29,11 @@ export function Inspector() {
   const toggleRightDock = useStore((s) => s.toggleRightDock)
   const rightDockWidth = useStore((s) => s.rightDockWidth)
   const setRightDockWidth = useStore((s) => s.setRightDockWidth)
+  const inspectorTabOrder = useStore((s) => s.inspectorTabOrder)
+  const hiddenInspectorTabs = useStore((s) => s.hiddenInspectorTabs)
+  const setInspectorTabOrder = useStore((s) => s.setInspectorTabOrder)
+  const hideInspectorTab = useStore((s) => s.hideInspectorTab)
+  const restoreInspectorTab = useStore((s) => s.restoreInspectorTab)
 
   // 标签点击状态机（Task 9：修复「折叠后再次点击无法弹起」回归）：
   // - 折叠态：点击任意标签（含当前激活标签）→ 展开对应面板（无延迟失焦）
@@ -72,6 +77,57 @@ export function Inspector() {
     },
     [rightDockWidth, setRightDockWidth],
   )
+
+  // v0.17.0 F13：Tab 拖动重排 + 拖出隐藏
+  const [dragOverTab, setDragOverTab] = useState<InspectorTabId | null>(null)
+  const draggedRef = useRef<InspectorTabId | null>(null)
+  const didDropRef = useRef(false)
+
+  const visibleTabs = inspectorTabOrder.filter((t) => !hiddenInspectorTabs.includes(t))
+
+  const handleDragStart = useCallback((e: React.DragEvent, tab: InspectorTabId) => {
+    draggedRef.current = tab
+    didDropRef.current = false
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', tab)
+  }, [])
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent, tab: InspectorTabId) => {
+      if (!draggedRef.current || draggedRef.current === tab) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      setDragOverTab(tab)
+    },
+    [],
+  )
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent, tab: InspectorTabId) => {
+      e.preventDefault()
+      const from = draggedRef.current
+      setDragOverTab(null)
+      if (!from || from === tab) return
+      const order = [...inspectorTabOrder]
+      const fromIdx = order.indexOf(from)
+      const toIdx = order.indexOf(tab)
+      if (fromIdx < 0 || toIdx < 0) return
+      order.splice(fromIdx, 1)
+      order.splice(toIdx, 0, from)
+      setInspectorTabOrder(order)
+      didDropRef.current = true
+    },
+    [inspectorTabOrder, setInspectorTabOrder],
+  )
+
+  const handleDragEnd = useCallback(() => {
+    const from = draggedRef.current
+    // 拖到工具栏之外（未落在任何 Tab 上）→ 隐藏该 Tab
+    if (from && !didDropRef.current) hideInspectorTab(from)
+    draggedRef.current = null
+    didDropRef.current = false
+    setDragOverTab(null)
+  }, [hideInspectorTab])
 
   return (
     <div
@@ -127,11 +183,11 @@ export function Inspector() {
         className="inspector-toolbar"
         style={{ width: TOOL_BAR_WIDTH }}
       >
-        {INSPECTOR_TAB_ORDER.map((tab) => {
+        {visibleTabs.map((tab) => {
           const meta = INSPECTOR_TAB_META[tab]
           const active = tab === inspectorTab
           const TabIcon = Icon[meta.icon as IconName] ?? Icon.Dot
-          // Browser 永远不隐藏（spec: Browser 始终可访问，不允许被隐藏或自定义移除）
+          const isDragOver = dragOverTab === tab
           return (
             <Tooltip key={tab} label={meta.label} kbd={meta.shortcut} placement="left" delay={150}>
               <button
@@ -140,9 +196,20 @@ export function Inspector() {
                 aria-expanded={active && !rightDockCollapsed}
                 aria-controls={`inspector-panel-${tab}`}
                 data-active={active}
-                aria-label={`${meta.label} ${meta.shortcut}`}
-                onClick={() => handleTabClick(tab as InspectorTabId)}
+                aria-label={`${meta.label} ${meta.shortcut}（可拖动重排，拖出工具栏可隐藏）`}
+                onClick={() => handleTabClick(tab)}
+                draggable
+                onDragStart={(e) => handleDragStart(e, tab)}
+                onDragOver={(e) => handleDragOver(e, tab)}
+                onDrop={(e) => handleDrop(e, tab)}
+                onDragEnd={handleDragEnd}
                 className="inspector-toolbar__item"
+                style={{
+                  cursor: 'grab',
+                  ...(isDragOver
+                    ? { outline: '1px dashed var(--accent)', outlineOffset: '-2px' }
+                    : null),
+                }}
               >
                 <span className="inspector-toolbar__indicator" aria-hidden="true" />
                 <TabIcon width={16} height={16} aria-hidden="true" className="flex-shrink-0" />
@@ -151,6 +218,50 @@ export function Inspector() {
             </Tooltip>
           )
         })}
+
+        {/* v0.17.0 F13：已隐藏区 — 被拖出的 Tab 收纳于此，点击恢复 */}
+        {hiddenInspectorTabs.length > 0 && (
+          <div
+            className="mt-1 pt-2 border-t border-border-subtle flex flex-col gap-1 px-1"
+            aria-label="已隐藏的标签"
+          >
+            {hiddenInspectorTabs.map((tab) => {
+              const meta = INSPECTOR_TAB_META[tab]
+              const TabIcon = Icon[meta.icon as IconName] ?? Icon.Dot
+              return (
+                <Tooltip key={tab} label={`恢复「${meta.label}」`} placement="left" delay={150}>
+                  <button
+                    onClick={() => restoreInspectorTab(tab)}
+                    aria-label={`恢复标签：${meta.label}`}
+                    className="flex items-center justify-center h-9 rounded-sm text-text-tertiary opacity-60 hover:opacity-100 hover:bg-bg-hover hover:text-text-primary transition-all focus-ring"
+                  >
+                    <TabIcon width={14} height={14} aria-hidden="true" />
+                  </button>
+                </Tooltip>
+              )
+            })}
+          </div>
+        )}
+
+        {/* v0.17.0 F13：整栏折叠/展开 */}
+        <Tooltip
+          label={rightDockCollapsed ? '展开右栏' : '折叠右栏'}
+          kbd="⌘J"
+          placement="left"
+          delay={150}
+        >
+          <button
+            onClick={() => toggleRightDock()}
+            aria-label={rightDockCollapsed ? '展开右栏' : '折叠右栏'}
+            className="mt-auto flex items-center justify-center h-9 rounded-sm text-text-tertiary hover:bg-bg-hover hover:text-text-primary transition-colors focus-ring"
+          >
+            {rightDockCollapsed ? (
+              <Icon.ChevronLeft width={16} height={16} />
+            ) : (
+              <Icon.ChevronRight width={16} height={16} />
+            )}
+          </button>
+        </Tooltip>
       </div>
     </div>
   )

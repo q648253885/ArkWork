@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useStore } from '../../store'
 import { formatTime } from '../../types'
 import { SectionLabel } from '../ui'
+import { Icon } from '../../icons'
 import { executionDescription, reasoningDescription } from '../../constants'
 
 /** v0.7.0：REACT_TYPE_COLOR/LABEL 已废除，StepList 为开发者视图，使用内联映射 */
@@ -94,7 +95,8 @@ export function StepList() {
                     <span className="text-2xs text-text-tertiary tabular">{formatTime(step.startedAt)}</span>
                     {step.durationMs > 0 && (
                       <span className="text-2xs text-text-tertiary tabular">
-                        ⏱ {(step.durationMs / 1000).toFixed(2)}s
+                        <Icon.Clock width={10} height={10} className="inline-block mr-0.5 -mt-px" aria-hidden="true" />
+                        {(step.durationMs / 1000).toFixed(2)}s
                       </span>
                     )}
                     {step.tokensIn && (
