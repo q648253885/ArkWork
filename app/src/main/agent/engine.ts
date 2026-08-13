@@ -246,10 +246,11 @@ export async function runReActLoop(
             const full = await readFile(coreSkill.instructionMd, 'utf-8')
             preloadedCoreSkillHint =
               `## 文档驱动开发准则（自动注入 · ${coreSkill.name}）\n${full}\n\n` +
-              `## 清单与阶段关联（硬约束 · v0.17.x）\n` +
-              `计划清单必须严格按文档驱动开发阶段顺序组织：开源调研 → PRD → 交互文档 → HTML 原型 → 系统设计 → 编码。` +
-              `在系统设计（03-system-design.md）冻结前，禁止在清单里安排任何编码/脚手架步骤（初始化项目、搭建 src、写 package.json、实现功能、写测试）。` +
-              `每个清单项都要标注所属阶段；编码类步骤只能出现在系统设计之后。`
+              `## 清单与阶段关联（硬约束 · v0.17.4）\n` +
+              `计划清单已按文档驱动开发阶段生成（开源调研 → PRD → 交互文档 → HTML 原型 → 系统设计 → 编码 → 功能测试 → UI 测试 → UX 校验 → 交付打包）。\n` +
+              `HTML 原型是设计文档的一部分（产出 docs/v1.0/prototype/*.html），不是编码步骤。\n` +
+              `在系统设计（03-system-design.md）冻结前，禁止执行任何编码/脚手架操作（初始化项目、搭建 src、写 package.json、实现功能、写测试）。\n` +
+              `每步执行前声明"正在执行计划第 N 步"，完成后继续下一步，禁止跳步。`
             logger.info(
               'Tool',
               `react-core-skills preloaded (${full.length} chars) for task ${task.id}`,
@@ -1429,6 +1430,37 @@ const PLAN_SYSTEM_PROMPT = `你是一个任务规划助手。你需要先评估�
 **示例输出（Plan 级）**：["定位 auth middleware 文件并梳理流程", "在 session.ts 中修复 token 校验逻辑", "补全单元测试覆盖回归用例", "运行 typecheck 与 lint 确认无回归"]
 **示例输出（Spec 级）**：["阶段 1：架构调研", "梳理现有模块依赖与边界", "输出 ADR 草案", "阶段 2：搭建脚手架", "初始化目录结构", "接入核心依赖", "阶段 3：实现核心能力", "实现 A 模块", "实现 B 模块", "阶段 4：联调与验收", "端到端测试", "文档与发布"]`
 
+/**
+ * v0.17.4：文档驱动开发专用计划 prompt。
+ * 当 react-core-skills 启用时替换通用 PLAN_SYSTEM_PROMPT，强制计划项 1:1 对齐
+ * 文档驱动开发阶段。解决「清单与执行内容不匹配」——旧 prompt 的 Spec 级示例
+ * 用自建阶段（架构调研→搭建脚手架→…），与文档驱动开发阶段完全不对齐。
+ */
+const PLAN_SYSTEM_PROMPT_DOC_DRIVEN = `你是文档驱动开发的任务规划助手。请将用户请求拆解为按文档驱动开发阶段排列的计划清单。
+
+**阶段清单（必须严格按此顺序，不得跳阶段、不得重命名阶段）**：
+1. 开源调研：搜索 GitHub 等开源社区类似项目，评估借鉴/自研，产出 docs/v1.0/00-opensource-research.md
+2. PRD：明确目标用户、核心问题、功能清单（P0/P1/P2），产出 docs/v1.0/01-prd.md
+3. 交互文档：页面清单、主流程图、五态设计、设计 token，产出 docs/v1.0/02-interaction.md
+4. HTML 原型：纯静态 HTML 交互原型（设计稿，非编码），产出 docs/v1.0/prototype/index.html
+5. 系统设计：技术选型、架构分层、数据模型、接口契约，产出 docs/v1.0/03-system-design.md
+6. 编码：按系统设计实现功能（此阶段才允许写 src/、package.json 等代码文件）
+7. 功能测试：冒烟→详测→验收，产出 docs/v1.0/04-function-test-report.md
+8. UI 测试：对照原型逐页验证，产出 docs/v1.0/05-ui-test-report.md
+9. UX 校验：用户视角走查，产出 docs/v1.0/06-ux-review-report.md
+10. 交付打包：构建产物 + 快速开始说明
+
+**关键约束**：
+- HTML 原型（阶段 4）是设计文档的一部分，不是编码。产出物是 docs/v1.0/prototype/*.html
+- 阶段 1~5 都是文档/设计产出，禁止在此期间安排任何编码步骤（初始化项目、搭建 src、写代码）
+- 编码步骤只能出现在阶段 6，测试步骤只能出现在阶段 7~9
+- 每个清单项格式："阶段 N：xxx"，N 对应上方阶段编号
+- 小型功能允许合并阶段 1~5 为一份精简设计文档，但阶段顺序不变
+
+**只输出 JSON 字符串数组，不要任何解释、前后缀或代码块标记**
+
+**示例**：["阶段 1：搜索 GitHub 上类似的前端赛车游戏项目，评估技术栈与设计借鉴", "阶段 2：产出 PRD，明确核心玩法、操作方式、关卡设计 P0/P1 功能清单", "阶段 3：产出交互文档，定义页面布局、操作手势、游戏状态流转", "阶段 4：产出 HTML 原型，展示游戏界面、菜单、暂停等核心页面", "阶段 5：产出系统设计，确定渲染引擎、物理模型、目录结构、核心接口", "阶段 6：按系统设计实现游戏核心功能", "阶段 7：功能测试，冒烟+详测+验收", "阶段 8：UI 测试，对照原型逐页验证", "阶段 9：UX 校验，用户视角走查", "阶段 10：构建打包交付"]`
+
 /** v0.9.x：generatePlan 首次解析失败时的降级精简 prompt（强制 3~5 步紧凑清单） */
 const PLAN_SYSTEM_PROMPT_RETRY = `你是一个任务规划助手。请将用户请求拆解为 3~5 个简短、可执行的步骤清单。
 要求：
@@ -1502,10 +1534,15 @@ async function generatePlan(
   signal: AbortSignal,
   extraSystemHint?: string,
 ): Promise<PlanContent | null> {
+  // v0.17.4：react-core-skills 启用时，用文档驱动开发专用 prompt 替换通用 prompt。
+  // 通用 prompt 的 Spec 级示例用自建阶段（架构调研→搭建脚手架→…），与文档驱动
+  // 开发阶段完全不对齐，导致清单与执行内容脱节。
+  const docDriven = isCoreSkillsEnabled(task, agent)
+  const basePrompt = docDriven ? PLAN_SYSTEM_PROMPT_DOC_DRIVEN : PLAN_SYSTEM_PROMPT
   // 首次：完整 Spec/Plan/对话三模式 prompt。v0.9.x 由 maxTokens 400 提升至 1024，
   // 避免 Spec 级 12 步中文计划被截断导致 parsePlanItems 返回 null。
   const plan = await tryGeneratePlan(
-    PLAN_SYSTEM_PROMPT,
+    basePrompt,
     1024,
     0.3,
     task,
@@ -1519,7 +1556,7 @@ async function generatePlan(
   // （finish=length、content 空、plan 解析失败）。此时加大输出预算重试一次；
   // 旧的 512 降级重试对思考模型只会更快耗尽预算，故放在最后兜底。
   const planBig = await tryGeneratePlan(
-    PLAN_SYSTEM_PROMPT,
+    basePrompt,
     4096,
     0.3,
     task,

@@ -228,11 +228,15 @@ test('v0.9.1: generatePlan 首轮使用 maxTokens 1024（非 400）', () => {
     fileURLToPath(new URL('../engine.ts', import.meta.url)),
     'utf8',
   )
+  // v0.17.4：react-core-skills 启用时用 PLAN_SYSTEM_PROMPT_DOC_DRIVEN 替换 PLAN_SYSTEM_PROMPT，
+  // 两者都通过 basePrompt 变量传入 tryGeneratePlan，maxTokens 仍为 1024。
   assert.match(
     src,
-    /tryGeneratePlan\(\s*PLAN_SYSTEM_PROMPT,\s*1024/,
+    /tryGeneratePlan\(\s*basePrompt,\s*1024/,
     'generatePlan 首次尝试应传 maxTokens 1024（v0.9.x 由 400 提升）',
   )
+  // 同时确认 PLAN_SYSTEM_PROMPT_DOC_DRIVEN 常量存在
+  assert.match(src, /const\s+PLAN_SYSTEM_PROMPT_DOC_DRIVEN\s*=/, '应定义文档驱动专用计划 prompt')
 })
 
 test('v0.9.1: PLAN_SYSTEM_PROMPT_RETRY 常量存在且要求 3~5 步', () => {
