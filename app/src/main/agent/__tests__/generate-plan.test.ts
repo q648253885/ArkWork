@@ -382,12 +382,37 @@ test('v0.17.4: generatePlan 在 react-core-skills 启用时选择文档驱动 pr
     fileURLToPath(new URL('../engine.ts', import.meta.url)),
     'utf8',
   )
-  // 验证 generatePlan 内有 isCoreSkillsEnabled 判断 + basePrompt 选择逻辑
-  assert.match(src, /const\s+docDriven\s*=\s*isCoreSkillsEnabled\(task,\s*agent\)/, '应调用 isCoreSkillsEnabled 判断')
-  assert.match(src, /const\s+basePrompt\s*=\s*docDriven\s*\?\s*PLAN_SYSTEM_PROMPT_DOC_DRIVEN\s*:\s*PLAN_SYSTEM_PROMPT/, '应根据判断结果选择 prompt')
+  // v0.17.5：docDriven 由引擎层传入（getSkill 名称匹配），兜底 isCoreSkillsEnabled
+  assert.match(src, /const\s+useDocDriven\s*=\s*docDriven\s*\?\?\s*isCoreSkillsEnabled\(task,\s*agent\)/, '应调用 isCoreSkillsEnabled 兜底判断')
+  assert.match(src, /const\s+basePrompt\s*=\s*useDocDriven\s*\?\s*PLAN_SYSTEM_PROMPT_DOC_DRIVEN\s*:\s*PLAN_SYSTEM_PROMPT/, '应根据判断结果选择 prompt')
   // 两次 tryGeneratePlan 都应使用 basePrompt（首次 + 加大预算重试）
   const matches = src.match(/tryGeneratePlan\(\s*basePrompt/g)
   assert.ok(matches && matches.length >= 2, '首次和重试都应使用 basePrompt')
+})
+
+test('v0.17.5: findPlanItemForStage 按阶段匹配计划项', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    'utf8',
+  )
+  assert.match(src, /function\s+findPlanItemForStage/, '应定义 findPlanItemForStage 辅助函数')
+  // 关键词映射覆盖 5 个文档驱动阶段
+  assert.match(src, /research:\s*\/调研\|research\/i/, 'research 阶段应匹配调研关键词')
+  assert.match(src, /prd:\s*\/PRD\|产品\|需求\/i/, 'prd 阶段应匹配 PRD 关键词')
+  assert.match(src, /interaction:\s*\/交互\|interaction\/i/, 'interaction 阶段应匹配交互关键词')
+  assert.match(src, /prototype:\s*\/原型\|prototype\/i/, 'prototype 阶段应匹配原型关键词')
+  assert.match(src, /'system-design':\s*\/系统设计\|system\.\?design\|架构\|技术选型\/i/, 'system-design 阶段应匹配系统设计关键词')
+})
+
+test('v0.17.5: 计划项完成检测改为阶段门禁驱动（移除激进 auto-advance）', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    'utf8',
+  )
+  // 不应再有「act 全部成功 → running 标 done」的激进逻辑
+  assert.doesNotMatch(src, /actResults\.every\(\(r\) => r\.ok\)/, '不应再有 actResults.every 自动标 done')
+  // 应改为阶段门禁驱动
+  assert.match(src, /findPlanItemForStage\(task\.planItems,\s*gate\.stage\)/, '阶段门禁触发时应用 findPlanItemForStage 标 done')
 })
 
 test('v0.17.4: 清单与阶段关联 hint 明确原型非编码', () => {

@@ -236,27 +236,52 @@ export async function runReActLoop(
     // 全文加载到 preloadedCoreSkillHint——既注入首轮 Reason 系统提示，也注入计划生成，
     // 保证「计划清单」与文档驱动开发阶段严格对齐（v0.17.x 修复清单与执行内容不匹配）。
     let preloadedCoreSkillHint: string | undefined
-    if (startIter === 0) {
+    // v0.17.5：docDriven 标记 —— 供 generatePlan 选择文档驱动 prompt 与阶段写入守卫。
+    // 每次 run 都检测（不只在首轮），确保续聊时写入守卫持续生效。
+    // 通过 getSkill() 查找技能对象，检查名称（不只看 ID），解决中文名技能匹配失败问题。
+    let docDriven = false
+    let coreSkillId: string | undefined
+    try {
+      const skillIds = (task.skillIds ?? agent.defaultSkillIds ?? []) as string[]
+      // 先按 ID 快速匹配
+      coreSkillId = skillIds.find((id) =>
+        /react.core.skills|文档驱动|doc.?driven|structured.?dev/i.test(id)
+      )
+      // ID 匹配失败时，逐个 getSkill 检查名称（中文名技能的 ID 会被剥离中文）
+      if (!coreSkillId) {
+        for (const sid of skillIds) {
+          try {
+            const s = await getSkill(sid)
+            if (s && /文档驱动|react.core.skills|doc.?driven|structured.?dev/i.test(s.name)) {
+              coreSkillId = sid
+              break
+            }
+          } catch { /* ignore */ }
+        }
+      }
+      docDriven = !!coreSkillId
+    } catch (err) {
+      logger.warn('Tool', `docDriven detect skipped: ${(err as Error).message}`, task.id)
+    }
+
+    // v0.17.5：仅首轮加载完整技能指令（preloadedCoreSkillHint 供 generatePlan 注入）
+    if (startIter === 0 && coreSkillId) {
       try {
-        const skills = (task.skillIds ?? agent.defaultSkillIds ?? []) as string[]
-        const coreSkillId = skills.find((id) => /react.core.skills/i.test(id))
-        if (coreSkillId) {
-          const coreSkill = await getSkill(coreSkillId)
-          if (coreSkill?.instructionMd) {
-            const full = await readFile(coreSkill.instructionMd, 'utf-8')
-            preloadedCoreSkillHint =
-              `## 文档驱动开发准则（自动注入 · ${coreSkill.name}）\n${full}\n\n` +
-              `## 清单与阶段关联（硬约束 · v0.17.4）\n` +
-              `计划清单已按文档驱动开发阶段生成（开源调研 → PRD → 交互文档 → HTML 原型 → 系统设计 → 编码 → 功能测试 → UI 测试 → UX 校验 → 交付打包）。\n` +
-              `HTML 原型是设计文档的一部分（产出 docs/v1.0/prototype/*.html），不是编码步骤。\n` +
-              `在系统设计（03-system-design.md）冻结前，禁止执行任何编码/脚手架操作（初始化项目、搭建 src、写 package.json、实现功能、写测试）。\n` +
-              `每步执行前声明"正在执行计划第 N 步"，完成后继续下一步，禁止跳步。`
-            logger.info(
-              'Tool',
-              `react-core-skills preloaded (${full.length} chars) for task ${task.id}`,
-              task.id,
-            )
-          }
+        const coreSkill = await getSkill(coreSkillId)
+        if (coreSkill?.instructionMd) {
+          const full = await readFile(coreSkill.instructionMd, 'utf-8')
+          preloadedCoreSkillHint =
+            `## 文档驱动开发准则（自动注入 · ${coreSkill.name}）\n${full}\n\n` +
+            `## 清单与阶段关联（硬约束 · v0.17.4）\n` +
+            `计划清单已按文档驱动开发阶段生成（开源调研 → PRD → 交互文档 → HTML 原型 → 系统设计 → 编码 → 功能测试 → UI 测试 → UX 校验 → 交付打包）。\n` +
+            `HTML 原型是设计文档的一部分（产出 docs/v1.0/prototype/*.html），不是编码步骤。\n` +
+            `在系统设计（03-system-design.md）冻结前，禁止执行任何编码/脚手架操作（初始化项目、搭建 src、写 package.json、实现功能、写测试）。\n` +
+            `每步执行前声明"正在执行计划第 N 步"，完成后继续下一步，禁止跳步。`
+          logger.info(
+            'Tool',
+            `react-core-skills preloaded (${full.length} chars) for task ${task.id}`,
+            task.id,
+          )
         }
       } catch (err) {
         logger.warn(
@@ -270,7 +295,8 @@ export async function runReActLoop(
     // v0.17.x：阶段感知写入守卫 —— 仅在 react-core-skills 启用时生效。
     // 从工作区已产出的阶段文档推导「当前允许推进到的阶段」，越级脚手架写入（src/、
     // package.json 等）在文档阶段会被拦截。对齐 opencode / Claude Code 的清单↔阶段关联。
-    const coreSkillsEnabled = isCoreSkillsEnabled(task, agent)
+    // v0.17.5：优先使用 docDriven（已通过 getSkill 名称匹配），兜底 isCoreSkillsEnabled
+    const coreSkillsEnabled = docDriven || isCoreSkillsEnabled(task, agent)
     let allowedStage = 0
     if (coreSkillsEnabled) {
       try {
@@ -288,7 +314,7 @@ export async function runReActLoop(
       const planStartedAt = Date.now()
       let plan: PlanContent | null = null
       try {
-        plan = await generatePlan(task, agent, opts.modelId, signal, preloadedCoreSkillHint)
+        plan = await generatePlan(task, agent, opts.modelId, signal, preloadedCoreSkillHint, docDriven)
       } catch (err) {
         logger.warn('Agent', `plan generation failed: ${(err as Error).message}`, task.id)
         plan = null
@@ -378,21 +404,15 @@ export async function runReActLoop(
       // -------- Reason --------
       await emitEvent({ type: 'reason_start', iteration })
 
-      // v0.17.3：计划项状态推进 — 把首个 pending 标为 running，让 system prompt 和 UI 能展示进度
-      if (task.planItems && task.planItems.length > 0) {
+      // v0.17.5：计划项状态推进 — 仅在首轮把第一个 pending 标为 running。
+      // 后续轮次不再自动推进/重置，改由 LLM reasoning 声明驱动（见 act 后的逻辑）。
+      // 此前每轮都把 running 重置为 pending 再标下一个，导致状态频繁跳动且与实际执行脱节。
+      if (iteration === 0 && task.planItems && task.planItems.length > 0) {
         const firstPendingIdx = task.planItems.findIndex((it) => it.status === 'pending')
         if (firstPendingIdx >= 0) {
-          // 先把所有 running 重置为 pending（上一轮没标 done 的视为未完成）
-          let changed = false
-          for (const it of task.planItems) {
-            if (it.status === 'running') { it.status = 'pending'; it.updatedAt = Date.now(); changed = true }
-          }
           task.planItems[firstPendingIdx].status = 'running'
           task.planItems[firstPendingIdx].updatedAt = Date.now()
-          changed = true
-          if (changed) {
-            await updateTask(task.id, { planItems: task.planItems })
-          }
+          await updateTask(task.id, { planItems: task.planItems })
         }
       }
 
@@ -424,11 +444,13 @@ export async function runReActLoop(
           })
           .join('\n')
         parts.push(
-          `## 计划执行约束（v0.17.3）\n` +
+          `## 计划执行约束（v0.17.5）\n` +
           `你已生成以下计划清单，必须严格按此计划执行。当前进度：\n${planSummary}\n\n` +
           `每步 Reason 必须在开头声明"正在执行计划第 N 步：xxx"。` +
-          `完成当前步骤后再进入下一步，禁止跳步或偏离计划。` +
-          `若发现计划需调整，先用 ask_user 向用户确认。`,
+          `完成一个阶段性操作后，必须调用 todo-update 工具标记该步为 done 并说明下一步，` +
+          `禁止全凭感觉推进或批量打标。` +
+          `发现偏离计划或需跳过某步时，也调用 todo-update（skipped/failed）+ 说明原因。` +
+          `若发现计划本身需调整，先用 ask_user 向用户确认。`,
         )
       }
       const systemPrompt = parts.join('\n\n---\n')
@@ -1019,27 +1041,12 @@ export async function runReActLoop(
       // 该 group 全部完成 → 清理进度聚合（避免 UI 上遗留 running）
       clearToolProgress(task.id, groupId)
 
-      // v0.17.3：计划项完成检测 — 本轮所有 act 成功后，标记当前 running 的计划项为 done。
-      // 对齐 Claude Code TodoWrite：工具执行成功 → 当前 todo 标 completed。
-      // 简单启发式：running 项在本轮 act 全部 ok 时标记完成。若 LLM 需要多轮完成一个步骤，
-      // 下一轮 Reason 会重新把第一个 pending 标为 running（见上方状态推进逻辑）。
-      if (task.planItems && task.planItems.length > 0) {
-        const allOk = actResults.every((r) => r.ok)
-        if (allOk) {
-          let planChanged = false
-          for (const it of task.planItems) {
-            if (it.status === 'running') {
-              it.status = 'done'
-              it.completedAt = Date.now()
-              it.updatedAt = Date.now()
-              planChanged = true
-            }
-          }
-          if (planChanged) {
-            await updateTask(task.id, { planItems: task.planItems })
-          }
-        }
-      }
+      // v0.17.5：计划项完成检测改为「阶段门禁驱动」。
+      // 此前 v0.17.3 的激进方案是「本轮 act 全部成功 → running 项标 done」，
+      // 导致 file-reader 列个目录、shell ls 都被当作完成一步，清单与实际进度
+      // 严重脱节（调研阶段就跳到"设计关卡布局"）。
+      // 现在改为：只有阶段门禁（产物文档真正写完）触发时才标 done，
+      // 对齐 TraeWork「tasks.md 状态随产物落地自动更新」的做法。
 
       // v0.16.x：阶段门禁 — 写完产物后立即推 task_progress + milestone，并
       // 自动 ask_user + 暂停任务（强制门禁）。修复「写完文档没询问直接开始」。
@@ -1050,6 +1057,20 @@ export async function runReActLoop(
           `react-core-skills 阶段门禁触发：${describeGateForLog(gate)}`,
           task.id,
         )
+        // v0.17.5：把对应阶段的 planItem 标 done，下一个标 running（清单↔阶段产物对齐）
+        if (task.planItems && task.planItems.length > 0) {
+          const doneIdx = findPlanItemForStage(task.planItems, gate.stage)
+          if (doneIdx >= 0) {
+            task.planItems[doneIdx].status = 'done'
+            task.planItems[doneIdx].completedAt = Date.now()
+            task.planItems[doneIdx].updatedAt = Date.now()
+            if (doneIdx + 1 < task.planItems.length && task.planItems[doneIdx + 1].status === 'pending') {
+              task.planItems[doneIdx + 1].status = 'running'
+              task.planItems[doneIdx + 1].updatedAt = Date.now()
+            }
+            await updateTask(task.id, { planItems: task.planItems })
+          }
+        }
         // 1) 推进 ProgressPanel 阶段显示
         await emitProgress({
           type: 'task_progress',
@@ -1533,12 +1554,12 @@ async function generatePlan(
   modelId: string,
   signal: AbortSignal,
   extraSystemHint?: string,
+  docDriven?: boolean,
 ): Promise<PlanContent | null> {
   // v0.17.4：react-core-skills 启用时，用文档驱动开发专用 prompt 替换通用 prompt。
-  // 通用 prompt 的 Spec 级示例用自建阶段（架构调研→搭建脚手架→…），与文档驱动
-  // 开发阶段完全不对齐，导致清单与执行内容脱节。
-  const docDriven = isCoreSkillsEnabled(task, agent)
-  const basePrompt = docDriven ? PLAN_SYSTEM_PROMPT_DOC_DRIVEN : PLAN_SYSTEM_PROMPT
+  // v0.17.5：docDriven 由引擎层传入（已通过 getSkill 名称匹配），兜底 isCoreSkillsEnabled
+  const useDocDriven = docDriven ?? isCoreSkillsEnabled(task, agent)
+  const basePrompt = useDocDriven ? PLAN_SYSTEM_PROMPT_DOC_DRIVEN : PLAN_SYSTEM_PROMPT
   // 首次：完整 Spec/Plan/对话三模式 prompt。v0.9.x 由 maxTokens 400 提升至 1024，
   // 避免 Spec 级 12 步中文计划被截断导致 parsePlanItems 返回 null。
   const plan = await tryGeneratePlan(
@@ -1597,6 +1618,50 @@ function parsePlanItems(raw: string): string[] | null {
   } catch {
     return null
   }
+}
+
+/**
+ * v0.17.5：根据文档驱动开发阶段（CoreStageId）匹配 planItem 的索引。
+ * 阶段门禁触发时，把对应阶段的计划项标 done。匹配策略：
+ *  1. 优先文本关键词（"调研"/"PRD"/"交互"/"原型"/"系统设计"）
+ *  2. 兜底"阶段 N"编号（N 对应阶段序号）
+ * 返回 -1 表示未匹配（可能计划项未按阶段标注，或该阶段被合并）。
+ */
+function findPlanItemForStage(planItems: PlanItem[], stage: string): number {
+  const keywordMap: Record<string, RegExp> = {
+    research: /调研|research/i,
+    prd: /PRD|产品|需求/i,
+    interaction: /交互|interaction/i,
+    prototype: /原型|prototype/i,
+    'system-design': /系统设计|system.?design|架构|技术选型/i,
+  }
+  const stageNumMap: Record<string, number> = {
+    research: 1,
+    prd: 2,
+    interaction: 3,
+    prototype: 4,
+    'system-design': 5,
+  }
+  const keyword = keywordMap[stage]
+  const stageNum = stageNumMap[stage]
+  // 第一遍：关键词匹配（从前往后，取第一个未完成的）
+  if (keyword) {
+    for (let i = 0; i < planItems.length; i++) {
+      if (keyword.test(planItems[i].text)) return i
+    }
+  }
+  // 第二遍：编号匹配（"阶段 N" 或 "第 N 步"）
+  if (stageNum) {
+    const numRe = new RegExp(`(?:阶段|phase|step)\\s*${stageNum}(?:\\s*[:：]|\\b)`, 'i')
+    for (let i = 0; i < planItems.length; i++) {
+      if (numRe.test(planItems[i].text)) return i
+    }
+  }
+  // 第三遍：顺序兜底 —— 若 planItem 数量等于阶段数，用 stageNum-1 作为索引
+  if (stageNum && stageNum - 1 < planItems.length) {
+    return stageNum - 1
+  }
+  return -1
 }
 
 function buildObservationSummary(
@@ -1763,6 +1828,63 @@ async function executeAct(
           ok: false,
           errorMessage: guard.reason,
         }
+      }
+    }
+
+    // v0.17.5：todo_update — LLM 主动更新清单状态（对齐 Claude Code TodoWrite）。
+    // 引擎层不再全凭感觉自动打标，改为 LLM 每完成一个阶段操作后主动调用本工具。
+    // 在 invokeSkill 之前拦截（todo_update 是控制类工具，不走普通 skill 调用）。
+    if (action.tool === 'todo-update' || action.tool === 'todo_update') {
+      const args = (action.args ?? {}) as Record<string, unknown>
+      const itemIndex = typeof args.item_index === 'number' ? args.item_index : Number(args.item_index)
+      const status = String(args.status ?? '')
+      const comment = typeof args.comment === 'string' ? args.comment : ''
+      const VALID_STATUSES = new Set(['done', 'running', 'pending', 'skipped', 'failed'])
+      const planItems = ctx.task.planItems ?? []
+      const durationMs = Date.now() - actStartedAt
+
+      // 校验：索引越界或状态非法 → 返回失败，让 LLM 下一轮修正
+      if (!Number.isInteger(itemIndex) || itemIndex < 0 || itemIndex >= planItems.length) {
+        const errMsg = `todo_update 参数非法：item_index=${itemIndex} 越界（清单共 ${planItems.length} 项，索引 0~${planItems.length - 1}）`
+        logger.warn('Agent', errMsg, placeholder.taskId)
+        return {
+          completedStep: { ...placeholder, result: { error: errMsg }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg },
+          result: { error: errMsg }, resultSummary: errMsg, durationMs, ok: false, errorMessage: errMsg,
+        }
+      }
+      if (!VALID_STATUSES.has(status)) {
+        const errMsg = `todo_update 参数非法：status=${status}（合法值 done/running/pending/skipped/failed）`
+        logger.warn('Agent', errMsg, placeholder.taskId)
+        return {
+          completedStep: { ...placeholder, result: { error: errMsg }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg },
+          result: { error: errMsg }, resultSummary: errMsg, durationMs, ok: false, errorMessage: errMsg,
+        }
+      }
+
+      // 更新目标项 + 自动推进（标 done 时把下一项标 running）
+      const target = planItems[itemIndex]
+      target.status = status as PlanItem['status']
+      target.updatedAt = Date.now()
+      if (status === 'done') target.completedAt = Date.now()
+      if (status === 'done' && itemIndex + 1 < planItems.length && planItems[itemIndex + 1].status === 'pending') {
+        planItems[itemIndex + 1].status = 'running'
+        planItems[itemIndex + 1].updatedAt = Date.now()
+      }
+      await updateTask(placeholder.taskId, { planItems })
+
+      // 构造清单概览（反馈给 LLM，让它知道更新后的状态）
+      const overview = planItems.map((p, i) => {
+        const mark = p.status === 'done' ? '[x]' : p.status === 'running' ? '[~]' : '[ ]'
+        return `${mark} ${i + 1}. ${p.text}`
+      }).join('\n')
+      const summary = `已更新清单第 ${itemIndex + 1} 项为「${status}」${comment ? `：${comment}` : ''}\n当前清单：\n${overview}`
+      logger.info('Agent', `todo_update: item=${itemIndex} status=${status}`, placeholder.taskId)
+      return {
+        completedStep: { ...placeholder, result: { item_index: itemIndex, status, overview }, resultSummary: summary, durationMs, status: 'success' },
+        result: { item_index: itemIndex, status, overview },
+        resultSummary: summary,
+        durationMs,
+        ok: true,
       }
     }
 

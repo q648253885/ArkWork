@@ -133,7 +133,13 @@ export function matchStageGate(relOrAbsPath: string): StageGate | undefined {
 /** 当前任务是否启用了 react-core-skills（决定是否要强制门禁） */
 export function isCoreSkillsEnabled(task: { skillIds?: string[] } | undefined, agent: { defaultSkillIds?: string[] } | undefined): boolean {
   const ids = [...(task?.skillIds ?? []), ...(agent?.defaultSkillIds ?? [])]
-  return ids.some((id) => /react.core.skills/i.test(id))
+  // v0.17.5： broaden 匹配——用户安装的技能可能叫"文档驱动开发"（中文名），
+  // generateSkillId 会剥离中文字符导致 ID 变成 S-imported.skill，
+  // /react.core.skills/i 匹配不到。这里同时匹配 ID 和名称中的关键词。
+  return ids.some((id) =>
+    /react.core.skills/i.test(id) ||
+    /文档驱动|doc.?driven|structured.?dev/i.test(id)
+  )
 }
 
 /**

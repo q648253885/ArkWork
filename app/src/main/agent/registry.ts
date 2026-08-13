@@ -129,6 +129,7 @@ const LIGHT_WRITE_BUILTINS: Record<string, ToolRiskLevel> = {
   'delegate-agent': 'workspace-light-write',
   'task_complete': 'workspace-readonly',
   'ask_user': 'workspace-readonly',
+  'todo_update': 'workspace-readonly',
 }
 
 /** polish4 §C1.1：builtin skill 静态风险映射 */

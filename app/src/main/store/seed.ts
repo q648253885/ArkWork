@@ -99,23 +99,24 @@ const BUILTIN_AGENTS: Agent[] = [
 2. 如果工具返回错误/空/与预期不符，是换参数重试、换工具，还是基于已有信息继续？
 3. 本次调用是否重复了之前同一参数？如果是，立即改策略，禁止再次调用。
 
-## 6. 任务清单（TodoWrite）
+## 6. 任务清单（TodoWrite / todo-update）
 - 多步骤任务首轮必须创建 TodoWrite 清单；简单一问一答可省略。
-- 每完成一个具体步骤立即标记完成，禁止批量标记多个任务后再继续。
-- 中断续聊时先核对当前 Todo 状态；若发现与实际进度冲突，立即修正并告知用户。
+- 每完成一个具体步骤，立即调用 todo-update 工具标记该步 done 并说明下一步，禁止批量标记多个任务后再继续。
+- 每完成一个阶段性操作后，都要自己检查清单和后续要做的事，及时用 todo-update 更新、及时反馈。
+- 中断续聊时先核对当前 Todo 状态；若发现与实际进度冲突，立即用 todo-update 修正并告知用户。
 - 最终交付前检查清单是否全部完成。
 
 ## 7. 终止与交付
 - 任务完成调用 task_complete，参数包含：改了什么 / 验证结果 / 遗留风险。
 - 需要用户输入或门禁确认时调用 ask_user。
 - 最多 60 次迭代；单次工具超时 30 秒。工具调用预算按签名/类别动态管控（写入类 40、只读类 16），避免重复调用。`,
-    defaultSkillIds: ['S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.web-search', 'S-core.fetch-url', 'S-core.shell'],
+    defaultSkillIds: ['S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.web-search', 'S-core.fetch-url', 'S-core.shell', 'S-core.todo-update'],
     defaultMcpIds: [],
     defaultModelId: '',
     defaultKbIds: [],
     defaultConfig: { temperature: 0.5, maxIterations: 60 },
     isBuiltin: true,
-    version: '0.16.4',
+    version: '0.17.5',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
   },
@@ -197,23 +198,24 @@ const BUILTIN_AGENTS: Agent[] = [
 - 改后必测：修改后跑测试或冒烟验证；UI 改动对照原型 1:1 还原。
 - 文档/注释/实现三者一致，禁止静默分叉。
 
-## 7. 任务清单（TodoWrite）
+## 7. 任务清单（TodoWrite / todo-update）
 - 收到软件工程任务后，首轮思考创建 TodoWrite 清单（场景 A 还要列出文档链阶段）。
-- 每完成一个具体步骤立即标记完成，禁止批量标记多个任务后再继续。
-- 中断续聊时，先读取当前 Todo 状态；若发现"全部完成却又继续"的冲突，立即修正并告知用户。
+- 每完成一个具体步骤，立即调用 todo-update 工具标记该步 done 并说明下一步，禁止批量标记多个任务后再继续。
+- 每完成一个阶段性操作后，都要自己检查清单和后续要做的事，及时用 todo-update 更新、及时反馈。
+- 中断续聊时，先读取当前 Todo 状态；若发现"全部完成却又继续"的冲突，立即用 todo-update 修正并告知用户。
 - 最终交付前检查清单全部完成，并在 task_complete 摘要中说明验证结果与文档同步情况。
 
 ## 8. 终止与交付
 - 任务完成调用 task_complete，参数包含：改了什么 / 验证结果 / 文档同步情况 / 遗留风险。
 - 需要用户输入或门禁确认时调用 ask_user。
 - 最多 80 次迭代；单次工具超时 30 秒。工具调用预算按签名/类别动态管控（写入类 40、只读类 16），避免重复调用。`,
-    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix'],
+    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.todo-update'],
     defaultMcpIds: [],
     defaultModelId: '',
     defaultKbIds: [],
     defaultConfig: { temperature: 0.3, maxIterations: 80 },
     isBuiltin: true,
-    version: '0.16.4',
+    version: '0.17.5',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
     // v0.15.0 Task 6：@coder 默认 acceptEdits —— 工作区内轻写（sed -i/tee/mkdir/cp/...）不再每次弹确认；
@@ -460,6 +462,31 @@ const BUILTIN_SKILLS: Skill[] = [
       required: ['question', 'suggestions'],
     },
     timeout: 60_000,
+    needsConfirmation: false,
+    enabled: true,
+    tags: ['control'],
+  },
+  {
+    // v0.17.5：todo_update — 让 LLM 主动更新任务清单状态（对齐 Claude Code TodoWrite）。
+    // 引擎层不再全凭感觉自动打标，改为 LLM 每完成一个阶段操作后主动调用本工具
+    // 更新清单 + 说明下一步，实现「执行 → 检查 → 更新 → 反馈」闭环。
+    id: 'S-core.todo-update',
+    name: 'todo_update',
+    description:
+      '更新任务清单（planItems）中某一项的状态。每完成一个阶段性操作后必须调用，把当前项标为 done 并说明下一步；发现偏离计划或需跳过时也要调用。item_index 是清单中的 0-based 序号，status 取值 done/running/pending/skipped/failed。',
+    namespace: 'core',
+    source: 'builtin',
+    builtinHandler: 'todo_update',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        item_index: { type: 'number', description: '要更新的清单项索引（0-based，对应清单顺序）' },
+        status: { type: 'string', description: '目标状态：done（已完成）/ running（进行中）/ pending（待办）/ skipped（跳过）/ failed（失败）' },
+        comment: { type: 'string', description: '进度说明：完成了什么、下一步要做什么、或偏离原因' },
+      },
+      required: ['item_index', 'status'],
+    },
+    timeout: 5_000,
     needsConfirmation: false,
     enabled: true,
     tags: ['control'],

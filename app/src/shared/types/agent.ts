@@ -91,6 +91,7 @@ export type BuiltinHandler =
   | 'plan'
   | 'bugfix'
   | 'react-core-skills'
+  | 'todo_update'
 
 export interface Skill {
   id: string                    // S-core.web-search
