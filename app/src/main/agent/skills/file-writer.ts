@@ -60,6 +60,15 @@ export async function fileWriter(
   try {
     await ensureParentDir(abs)
     const content = args.content ?? ''
+    // v0.17.5：防御 LLM 把 content 传成对象（错误地把代码块塞进对象而非字符串），
+    // writeFile 此时会抛 "data argument must be of type string"，错误信息对模型不友好。
+    // 提前拦截并给出明确的字段名提示，让下一轮直接修复。
+    if (typeof content !== 'string') {
+      const detail = `file-writer: 参数 content 必须是字符串（当前类型=${typeof content}）。` +
+        `请检查 JSON 参数序列化——多行代码/反引号字符串必须放在 "content" 字段的字符串值里，不要嵌套对象/数组。`
+      await logError('Tool', detail, ctx.taskId)
+      return { status: 'failed', error: detail }
+    }
     await writeFile(abs, content, 'utf-8')
     const lines = content.split('\n').length
     await logInfo('Tool', `file-writer: ${rawPath} (${content.length} bytes, ${existed ? '覆盖' : '新建'})`, ctx.taskId)
@@ -71,7 +80,13 @@ export async function fileWriter(
     }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
-    await logError('Tool', `file-writer failed: ${error}`, ctx.taskId)
-    return { status: 'failed', error: `file-writer: ${error}` }
+    // v0.17.5：把 Node 原始错误转成对 LLM 友好的字段名提示
+    const friendly =
+      /data argument/i.test(error) || /must be of type string/i.test(error)
+        ? `file-writer: 写入失败——参数 content 类型/格式不合法（${error}）。` +
+          `请确认 content 是字符串而不是对象/数组，必要时把代码块用 \\n 拼接后放入 content 字符串。`
+        : `file-writer: ${error}`
+    await logError('Tool', `file-writer failed: ${friendly}`, ctx.taskId)
+    return { status: 'failed', error: friendly }
   }
 }

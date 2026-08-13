@@ -322,8 +322,11 @@ export async function runReActLoop(
       if (plan && plan.items.length > 0) {
         // v0.17.3：把 PlanContent.items 转为 Task.planItems（带 id/status），
         // 让 system prompt 能注入计划进度，UI 能展示计划状态。
+        // v0.17.5：过滤纯阶段标题型条目（"阶段 N：xxx" 这种总结性条目不应该是可勾选项，
+        // 否则 LLM 调一次 file-reader 就把整阶段标 done）。只保留含具体动作动词的子项。
+        const filteredItems = plan.items.filter((text) => !isPhaseHeader(text))
         const now = Date.now()
-        const planItems: PlanItem[] = plan.items.map((text, i) => ({
+        const planItems: PlanItem[] = filteredItems.map((text, i) => ({
           id: `plan_${i}_${now}`,
           text,
           status: 'pending' as const,
@@ -332,6 +335,13 @@ export async function runReActLoop(
         }))
         task.planItems = planItems
         await updateTask(task.id, { planItems })
+        if (filteredItems.length < plan.items.length) {
+          logger.warn(
+            'Agent',
+            `plan filtered: kept ${filteredItems.length}/${plan.items.length} (removed ${plan.items.length - filteredItems.length} phase-header items)`,
+            task.id,
+          )
+        }
         // 真正成功 → 写 L1 + 广播事件 + 渲染
         await appendL1({
           taskId: task.id,
@@ -1441,6 +1451,10 @@ const PLAN_SYSTEM_PROMPT = `你是一个任务规划助手。你需要先评估�
 - 适用：系统级、跨多模块、架构改动、新项目搭建、技术选型
 - 判断依据：跨多文件/多模块、需架构决策、边界待澄清、工作量大
 - 输出：按"阶段"组织的详细计划，每阶段含子步骤；阶段标题前置"阶段 N："或"Phase N："，子步骤紧跟其后
+- **关键约束（v0.17.5）**：
+  - 阶段标题（"阶段 1：技术选型与架构设计"）只是分组标签，**不要作为可勾选清单项**——只列出该阶段下可验证的子步骤（如"调研 GitHub 热门项目并提炼玩法机制"）
+  - 每个清单项必须包含具体动作动词（调研/写/实现/测试/打包/运行/...），描述"做什么"而不是"是什么阶段"
+  - 子步骤应是单次或少数几次工具调用就能完成的可验证动作，不要过于宽泛
 
 **通用要求**：
 - 步骤必须基于对项目代码（文件、模块、调用关系）的分析，禁止使用通用模板或凭空想象
@@ -1662,6 +1676,28 @@ function findPlanItemForStage(planItems: PlanItem[], stage: string): number {
     return stageNum - 1
   }
   return -1
+}
+
+/**
+ * v0.17.5：判断 planItem 文本是否为「阶段标题型」总结性条目（不可勾选）。
+ * 阶段标题只是把若干子项打包成组的标签，模型一旦把阶段标题当成可勾选项，
+ * 调一次工具就把整阶段都标 done，与真实执行进度脱节。
+ *
+ * 命中规则（满足任一即视为阶段标题）：
+ *  - 以 "阶段 N" / "Phase N" 开头且没有具体动作动词（调研/写/实现/测试/...）
+ *  - 文本中没有可识别的动词，仅含"技术选型/架构设计/搭建脚手架"等抽象总结词
+ */
+function isPhaseHeader(text: string): boolean {
+  const t = text.trim()
+  // 规则 1：纯阶段标题前缀（如 "阶段 1：xxx" / "Phase 1: xxx"），后面无任何动作动词
+  const phasePrefix = /^(阶段|phase|step|step\s*\d+)\s*\d*\s*[:：、]?\s*/i
+  if (!phasePrefix.test(t)) return false
+  const afterPrefix = t.replace(phasePrefix, '').trim()
+  // 阶段标题通常 ≤ 20 字且不含具体动作动词
+  if (afterPrefix.length > 30) return false
+  const actionVerbs =
+    /调研|搜索|写|实现|开发|编码|测试|部署|打包|封装|接入|初始化|创建|搭建|执行|产出|读取|列出|修复|补|跑|运行|完成|确认|导出|下载|配置/i
+  return !actionVerbs.test(afterPrefix)
 }
 
 function buildObservationSummary(
@@ -1908,6 +1944,28 @@ async function executeAct(
     result = { error: errorMessage }
     resultSummary = `failed: ${errorMessage}`
     logger.error('Tool', `${action.tool} failed: ${errorMessage}`, placeholder.taskId)
+  }
+  // v0.17.5：工具失败兜底——若当前有 running 项且 LLM 没显式调 todo_update，
+  // 自动把该项标 failed 并在 resultSummary 末尾追加清单概览，避免模型反复同错误。
+  if (!ok && ctx.task.planItems && ctx.task.planItems.length > 0) {
+    try {
+      const items = ctx.task.planItems
+      const runningIdx = items.findIndex((p) => p.status === 'running')
+      if (runningIdx >= 0) {
+        items[runningIdx].status = 'failed'
+        items[runningIdx].updatedAt = Date.now()
+        items[runningIdx].completedAt = Date.now()
+        await updateTask(placeholder.taskId, { planItems: items })
+        const overview = items.map((p, i) => {
+          const mark = p.status === 'done' ? '[x]' : p.status === 'running' ? '[~]' : p.status === 'failed' ? '[!]' : '[ ]'
+          return `${mark} ${i + 1}. ${p.text}`
+        }).join('\n')
+        resultSummary += `\n\n[engine-auto] 工具调用失败，已自动把清单第 ${runningIdx + 1} 项标为 failed：\n${overview}\n请立即：(1) 检查 ${action.tool} 的参数是否合法；(2) 用 todo_update 更新该项或用不同参数重试。`
+        logger.warn('Agent', `engine-auto-mark-failed: item=${runningIdx} tool=${action.tool} err=${errorMessage}`, placeholder.taskId)
+      }
+    } catch (markErr) {
+      logger.warn('Agent', `engine-auto-mark-failed skipped: ${(markErr as Error).message}`, placeholder.taskId)
+    }
   }
   const durationMs = Date.now() - actStartedAt
   return {
