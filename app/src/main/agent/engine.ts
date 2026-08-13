@@ -426,6 +426,16 @@ export async function runReActLoop(
         }
       }
 
+      // v0.17.6：每轮 Reason 前注入引擎独立判断的清单状态（独立 user 消息，非 system prompt 文本）。
+      // 模型必须以这条消息为准，避免"LLM 自报已完成"的失真。
+      if (task.planItems && task.planItems.length > 0) {
+        try {
+          await emitPlanStatus(task, iteration, '迭代开始')
+        } catch (e) {
+          logger.warn('Agent', `emitPlanStatus skipped: ${(e as Error).message}`, task.id)
+        }
+      }
+
       const startedAt = Date.now()
       // v0.15.0 Task 2 SubTask 2.5：Reactive Fallback 压缩后需重新组装，故用 let
       let messages = await assembleMessages(task, agent)
@@ -1679,6 +1689,144 @@ function findPlanItemForStage(planItems: PlanItem[], stage: string): number {
 }
 
 /**
+ * v0.17.6：判断一个工具名是否属于"产成性"工具——成功调用通常意味着清单项可标 done。
+ * 非产成性工具（只读探索 / 信息检索）成功后由 LLM 自行决定是否推进清单。
+ *
+ * 产成性：file-writer / file-editor / shell / todo-update / task_complete / ask_user 等
+ * 只读性：file-reader / glob-search / grep-search / web-search / fetch-url / kb-search / session-search 等
+ */
+function isProductiveTool(tool: string): boolean {
+  const PRODUCTIVE = new Set([
+    'file-writer', 'file-editor', 'shell',
+    'todo-update', 'todo_update',
+    'task_complete', 'ask_user', 'spec', 'plan', 'bugfix', 'react-core-skills',
+  ])
+  return PRODUCTIVE.has(tool)
+}
+
+/**
+ * v0.17.6：基于 act 结果独立推进清单状态，**不依赖 LLM 自调 todo_update**。
+ *
+ * 决策规则（优先级从高到低）：
+ *  1. act 失败 → running 项自动 failed（reason 来自 errorMessage）
+ *  2. act 成功 + 产成性工具 → running 项自动 done + 自动推进下一项为 running
+ *  3. act 成功 + 只读工具 → 保持 running，让 LLM 在下一轮决定
+ *  4. 当前无 running 项 → 不动
+ *
+ * 同时把判断结果与原 planItems 差异记入 "engineDecision" 字段，让 LLM 看到机器视角的判断。
+ */
+function decidePlanAdvance(
+  planItems: PlanItem[],
+  toolName: string,
+  ok: boolean,
+  errorMessage?: string,
+): {
+  planItems: PlanItem[]
+  decisions: Array<{ index: number; before: PlanItem['status']; after: PlanItem['status']; reason: string }>
+} {
+  const next = planItems.map((p) => ({ ...p }))
+  const decisions: Array<{ index: number; before: PlanItem['status']; after: PlanItem['status']; reason: string }> = []
+  const runningIdx = next.findIndex((p) => p.status === 'running')
+  if (runningIdx < 0) return { planItems: next, decisions }
+
+  const before = next[runningIdx].status
+  if (!ok) {
+    next[runningIdx].status = 'failed'
+    next[runningIdx].updatedAt = Date.now()
+    next[runningIdx].completedAt = Date.now()
+    decisions.push({
+      index: runningIdx,
+      before,
+      after: 'failed',
+      reason: `${toolName} 调用失败：${(errorMessage ?? '').slice(0, 120)}`,
+    })
+  } else if (isProductiveTool(toolName)) {
+    next[runningIdx].status = 'done'
+    next[runningIdx].updatedAt = Date.now()
+    next[runningIdx].completedAt = Date.now()
+    decisions.push({
+      index: runningIdx,
+      before,
+      after: 'done',
+      reason: `${toolName} 调用成功，引擎判定该项已完成`,
+    })
+    // 自动推进下一项
+    if (runningIdx + 1 < next.length && next[runningIdx + 1].status === 'pending') {
+      next[runningIdx + 1].status = 'running'
+      next[runningIdx + 1].updatedAt = Date.now()
+      decisions.push({
+        index: runningIdx + 1,
+        before: 'pending',
+        after: 'running',
+        reason: `引擎自动推进（上一项已完成）`,
+      })
+    }
+  } else {
+    // 只读工具成功：保持 running，让 LLM 决定
+    decisions.push({
+      index: runningIdx,
+      before,
+      after: 'running',
+      reason: `${toolName} 为只读探索，引擎不自动推进；等待 LLM 在下一轮确认进度`,
+    })
+  }
+  return { planItems: next, decisions }
+}
+
+/**
+ * v0.17.6：把引擎独立判断后的 planItems 状态写入 L1 + 持久化 planItems。
+ * 写入的 kind='plan_status' 在 assembleMessages 时被注入为独立 user 消息，LLM 必须以它为准。
+ */
+async function emitPlanStatus(
+  task: Task,
+  iteration: number,
+  trigger: string,
+): Promise<void> {
+  if (!task.planItems || task.planItems.length === 0) return
+  const items = task.planItems.map((p, i) => {
+    const mark =
+      p.status === 'done'
+        ? '[x]'
+        : p.status === 'running'
+          ? '[~]'
+          : p.status === 'failed'
+            ? '[!]'
+            : p.status === 'skipped'
+              ? '[-]'
+              : '[ ]'
+    return `${i + 1}. ${mark} ${p.text}`
+  })
+  const counts = task.planItems.reduce(
+    (acc, p) => {
+      acc[p.status] = (acc[p.status] ?? 0) + 1
+      return acc
+    },
+    {} as Record<string, number>,
+  )
+  const runningIdx = task.planItems.findIndex((p) => p.status === 'running')
+  const content =
+    `（触发点：${trigger}）\n` +
+    `总项数=${task.planItems.length}  done=${counts.done ?? 0}  ` +
+    `running=${counts.running ?? 0}  pending=${counts.pending ?? 0}  ` +
+    `failed=${counts.failed ?? 0}  skipped=${counts.skipped ?? 0}\n` +
+    `当前运行：${runningIdx >= 0 ? `第 ${runningIdx + 1} 项` : '无'}\n\n` +
+    items.join('\n')
+  await appendL1({
+    taskId: task.id,
+    role: 'assistant',
+    kind: 'plan_status',
+    iteration,
+    content,
+    meta: JSON.stringify({
+      trigger,
+      runningIndex: runningIdx,
+      counts,
+      total: task.planItems.length,
+    }),
+  })
+}
+
+/**
  * v0.17.5：判断 planItem 文本是否为「阶段标题型」总结性条目（不可勾选）。
  * 阶段标题只是把若干子项打包成组的标签，模型一旦把阶段标题当成可勾选项，
  * 调一次工具就把整阶段都标 done，与真实执行进度脱节。
@@ -1945,26 +2093,50 @@ async function executeAct(
     resultSummary = `failed: ${errorMessage}`
     logger.error('Tool', `${action.tool} failed: ${errorMessage}`, placeholder.taskId)
   }
-  // v0.17.5：工具失败兜底——若当前有 running 项且 LLM 没显式调 todo_update，
-  // 自动把该项标 failed 并在 resultSummary 末尾追加清单概览，避免模型反复同错误。
-  if (!ok && ctx.task.planItems && ctx.task.planItems.length > 0) {
+  // v0.17.6：引擎独立决策——基于 act 结果推进清单状态，**不依赖 LLM 自调 todo_update**。
+  // 决策规则（详见 decidePlanAdvance）：
+  //   1. act 失败 → running 项自动 failed
+  //   2. act 成功 + 产成性工具（file-writer / file-editor / shell / spec / ...）→ running 项自动 done 并推进下一项
+  //   3. act 成功 + 只读工具（file-reader / web-search / ...）→ 保持 running，让 LLM 决定
+  if (ctx.task.planItems && ctx.task.planItems.length > 0 && action.tool !== 'todo-update' && action.tool !== 'todo_update') {
     try {
-      const items = ctx.task.planItems
-      const runningIdx = items.findIndex((p) => p.status === 'running')
-      if (runningIdx >= 0) {
-        items[runningIdx].status = 'failed'
-        items[runningIdx].updatedAt = Date.now()
-        items[runningIdx].completedAt = Date.now()
-        await updateTask(placeholder.taskId, { planItems: items })
-        const overview = items.map((p, i) => {
-          const mark = p.status === 'done' ? '[x]' : p.status === 'running' ? '[~]' : p.status === 'failed' ? '[!]' : '[ ]'
+      const { planItems: nextItems, decisions } = decidePlanAdvance(
+        ctx.task.planItems,
+        action.tool,
+        ok,
+        errorMessage,
+      )
+      if (decisions.length > 0) {
+        ctx.task.planItems = nextItems
+        await updateTask(placeholder.taskId, { planItems: nextItems })
+        const overview = nextItems.map((p, i) => {
+          const mark =
+            p.status === 'done'
+              ? '[x]'
+              : p.status === 'running'
+                ? '[~]'
+                : p.status === 'failed'
+                  ? '[!]'
+                  : p.status === 'skipped'
+                    ? '[-]'
+                    : '[ ]'
           return `${mark} ${i + 1}. ${p.text}`
         }).join('\n')
-        resultSummary += `\n\n[engine-auto] 工具调用失败，已自动把清单第 ${runningIdx + 1} 项标为 failed：\n${overview}\n请立即：(1) 检查 ${action.tool} 的参数是否合法；(2) 用 todo_update 更新该项或用不同参数重试。`
-        logger.warn('Agent', `engine-auto-mark-failed: item=${runningIdx} tool=${action.tool} err=${errorMessage}`, placeholder.taskId)
+        const decisionList = decisions
+          .map((d) => `  - 第 ${d.index + 1} 项：${d.before} → ${d.after}（${d.reason}）`)
+          .join('\n')
+        resultSummary += `\n\n[engine-decision] 引擎独立判断清单状态：\n${decisionList}\n\n当前清单：\n${overview}`
+        // 记日志
+        if (decisions.some((d) => d.after === 'done' || d.after === 'failed')) {
+          logger.info(
+            'Agent',
+            `engine-decision tool=${action.tool} ok=${ok} ${decisions.map((d) => `${d.index}:${d.before}->${d.after}`).join(',')}`,
+            placeholder.taskId,
+          )
+        }
       }
-    } catch (markErr) {
-      logger.warn('Agent', `engine-auto-mark-failed skipped: ${(markErr as Error).message}`, placeholder.taskId)
+    } catch (decideErr) {
+      logger.warn('Agent', `engine-decide skipped: ${(decideErr as Error).message}`, placeholder.taskId)
     }
   }
   const durationMs = Date.now() - actStartedAt
@@ -2098,6 +2270,15 @@ async function assembleMessages(
       messages.push({
         role: 'user',
         content: `[计划清单 — 请严格按此计划执行，每步完成后继续下一步]\n${m.content}`,
+      })
+    } else if (m.role === 'assistant' && m.kind === 'plan_status') {
+      // v0.17.6：引擎独立判断的清单状态（结构化），覆盖文本版 system prompt 注入。
+      // 每轮 act 后引擎会写入一条 plan_status（kind='plan_status'），LLM 必须读取此处的
+      // 机器判断结果，而不是从自己上轮的记忆里拼凑。结构化字段：
+      //   { items: [{i, text, status, engineDecision, reason}], runningIndex, doneCount }
+      messages.push({
+        role: 'user',
+        content: `[清单状态 — 引擎独立判断（不是 LLM 自报），你必须以此为准]\n${m.content}`,
       })
     } else if (m.role === 'assistant' && m.kind === 'reasoning') {
       // polish4 §A3.1：从 m.meta 解析 assistant 该轮的 actions（含 actionId + toolCallId）。

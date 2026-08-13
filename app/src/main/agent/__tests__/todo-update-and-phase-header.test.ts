@@ -126,26 +126,29 @@ test('seed.ts: @default / @coder systemPrompt 强制 todo-update 自检', () => 
 
 /* ---------- 4. 工具失败自动标 failed（源码契约） ---------- */
 
-test('engine.ts: 工具失败时自动把 running 项标 failed', () => {
+test('engine.ts: 工具失败时自动把 running 项标 failed（v0.17.6 改用 decidePlanAdvance）', () => {
+  // v0.17.6：旧版"if !ok 兜底"已被 decidePlanAdvance 取代
+  // 失败场景由 decidePlanAdvance 内部判断分支处理：act 失败 → running 项自动 failed
   assert.match(
     engineSrc,
-    /if\s*\(\s*!ok\s*&&\s*ctx\.task\.planItems/,
-    '工具失败时若 planItems 存在，应进入自动标 failed 分支',
+    /decidePlanAdvance\(\s*ctx\.task\.planItems,\s*action\.tool,\s*ok/,
+    '应使用 decidePlanAdvance 综合判断（失败/成功均进入）',
+  )
+  // decidePlanAdvance 内部：!ok 分支应标 failed
+  assert.match(
+    engineSrc,
+    /!\s*ok[\s\S]{0,200}status\s*=\s*['"]failed['"]/,
+    'decidePlanAdvance 内部：act 失败应把 running 项标 failed',
   )
   assert.match(
     engineSrc,
-    /items\[runningIdx\]\.status\s*=\s*['"]failed['"]/,
-    '应把 running 项 status 改为 failed',
+    /engine-decision|engine-decide/,
+    '应在 resultSummary 追加 engine-decision 标记',
   )
   assert.match(
     engineSrc,
-    /engine-auto-mark-failed/,
-    '应在 resultSummary 追加 engine-auto-mark-failed 标记 + 清单概览',
-  )
-  assert.match(
-    engineSrc,
-    /请立即.*检查.*参数|检查.*参数/,
-    '应在追加内容中提示模型检查参数',
+    /决策规则|决策日志|decidePlanAdvance/,
+    '应保留决策规则说明',
   )
 })
 
@@ -175,4 +178,80 @@ test('engine.ts: todo_update 处理逻辑完整（校验 + 自动推进 + 概览
   )
   // 生成清单概览
   assert.match(engineSrc, /\[\s*x\s*\][\s\S]*\[\s*~\s*\][\s\S]*\[\s*!/, '清单概览应含 done/running/failed 三种 mark')
+})
+
+/* ---------- 7. v0.17.6 引擎独立判断（不依赖 LLM 自调 todo_update） ---------- */
+
+test('v0.17.6: 引擎独立判断函数 decidePlanAdvance 存在', () => {
+  assert.match(engineSrc, /function\s+decidePlanAdvance\(/, '应定义 decidePlanAdvance 函数')
+  assert.match(engineSrc, /function\s+isProductiveTool\(/, '应定义 isProductiveTool 函数')
+  assert.match(engineSrc, /function\s+emitPlanStatus\(/, '应定义 emitPlanStatus 函数')
+})
+
+test('v0.17.6: 产成性工具白名单含 file-writer/file-editor/shell', () => {
+  assert.match(engineSrc, /isProductiveTool[\s\S]{0,400}'file-writer'[\s\S]{0,400}'file-editor'[\s\S]{0,400}'shell'/, 'isProductiveTool 应含 file-writer/file-editor/shell')
+  assert.match(engineSrc, /'task_complete'/, 'isProductiveTool 应含 task_complete')
+  assert.match(engineSrc, /'spec'[\s\S]{0,80}'plan'[\s\S]{0,80}'bugfix'/, 'isProductiveTool 应含 spec/plan/bugfix')
+})
+
+test('v0.17.6: 引擎兜底取代 LLM 自调 todo_update（act 结果驱动）', () => {
+  // 旧版：只有 !ok 时兜底；新版：ok 时也根据工具类型自动判断
+  assert.doesNotMatch(
+    engineSrc,
+    /!\s*ok\s*&&\s*ctx\.task\.planItems[\s\S]{0,200}engine-auto-mark-failed/,
+    '旧版"仅失败兜底"逻辑应被替换',
+  )
+  assert.match(
+    engineSrc,
+    /decidePlanAdvance\(\s*ctx\.task\.planItems,\s*action\.tool,\s*ok/,
+    '应使用 decidePlanAdvance 综合判断（ok 也可触发推进）',
+  )
+  // 不应对 todo_update 自己再调 decidePlanAdvance（避免循环）
+  assert.match(
+    engineSrc,
+    /action\.tool\s*!==\s*['"]todo-update['"][\s\S]{0,40}action\.tool\s*!==\s*['"]todo_update['"]/,
+    '应排除 todo_update 自身避免循环',
+  )
+})
+
+test('v0.17.6: 每轮 Reason 前注入 plan_status（独立 user 消息）', () => {
+  // emitPlanStatus 应在 reason_start 之后调用
+  const reasonIdx = engineSrc.search(/await\s+emitEvent\(\s*\{\s*type:\s*['"]reason_start['"]/)
+  const emitIdx = engineSrc.indexOf('emitPlanStatus(task, iteration', reasonIdx)
+  assert.ok(reasonIdx > 0, '应先有 reason_start 事件')
+  assert.ok(emitIdx > reasonIdx, 'emitPlanStatus 应在 reason_start 之后调用')
+  assert.ok(emitIdx - reasonIdx < 2000, 'emitPlanStatus 距离 reason_start 不应过远')
+})
+
+test('v0.17.6: plan_status 在 assembleMessages 时作为独立 user 消息注入', () => {
+  // assembleMessages 应识别 kind='plan_status' 并注入为 user 消息
+  assert.match(
+    engineSrc,
+    /kind:\s*['"]plan_status['"]/,
+    'assembleMessages 应识别 plan_status 类型',
+  )
+  // 注入内容必须明确"引擎独立判断"
+  assert.match(
+    engineSrc,
+    /plan_status[\s\S]{0,400}引擎独立判断/,
+    'plan_status 注入文本应含"引擎独立判断"',
+  )
+  // 必须以 user 角色注入
+  assert.match(
+    engineSrc,
+    /plan_status[\s\S]{0,400}role:\s*['"]user['"]/,
+    'plan_status 应以 user 角色注入',
+  )
+})
+
+test('v0.17.6: MemoryKind 新增 plan_status', () => {
+  const memSrc = readFileSync(
+    fileURLToPath(new URL('../../../shared/types/memory.ts', import.meta.url)),
+    'utf-8',
+  )
+  assert.match(
+    memSrc,
+    /'plan_status'\s*[\s\S]{0,80}v0\.17\.6/,
+    'MemoryKind 应新增 plan_status 枚举值',
+  )
 })

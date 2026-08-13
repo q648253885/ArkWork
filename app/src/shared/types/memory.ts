@@ -17,6 +17,7 @@ export type MemoryKind =
   | 'system_prompt'
   | 'user_message'
   | 'plan'                    // polish4 §B1：ReAct 计划清单（assistant 输出）
+  | 'plan_status'             // v0.17.6：引擎独立判断后的清单状态（结构化注入每轮推理）
   // v0.7.0 新增：记忆→技能/智能体转化管线相关 kind
   | 'curated_fact'           // 被蒸馏进 L3 的事实
   | 'profile_observation'    // 被识别为画像观察的片段
