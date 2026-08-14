@@ -286,3 +286,45 @@ test('migrateTasks: missing planItem id/createdAt/updatedAt are filled in', () =
   assert.equal(typeof item.updatedAt, 'number')
   assert.ok(migratedCount >= 1)
 })
+
+/* ----------------------------------------------------------
+ * 9. v0.18.0 (V018-002)：迁移透传新增可选字段 source
+ * -------------------------------------------------------- */
+test('migrateTasks: v0.18.0 source passthrough (V018-002 regression)', () => {
+  const input = [
+    {
+      id: 'T-20260101-000009',
+      workspaceId: 'default',
+      title: 'v0.18.0 source task',
+      status: 'in_progress',
+      agentId: 'a1',
+      skillIds: [],
+      mcpIds: [],
+      modelId: 'm',
+      input: { text: 'x' },
+      config: {},
+      createdAt: 1,
+      updatedAt: 1,
+      startedAt: null,
+      completedAt: null,
+      parentTaskId: null,
+      tags: [],
+      planItems: [
+        { id: 'p1', text: 'engine decided', status: 'done', createdAt: 1, updatedAt: 1, source: 'engine-decide' },
+        { id: 'p2', text: 'engine failed', status: 'failed', createdAt: 1, updatedAt: 1, source: 'engine-fail' },
+        { id: 'p3', text: 'user mark done', status: 'done', createdAt: 1, updatedAt: 1, source: 'user-mark-done' },
+        { id: 'p4', text: 'legacy without source', status: 'pending', createdAt: 1, updatedAt: 1 },
+        { id: 'p5', text: 'invalid source dropped', status: 'pending', createdAt: 1, updatedAt: 1, source: 'bogus-value' },
+      ],
+    },
+  ]
+  const { tasks } = migrateTasks(input)
+  const items = tasks[0]!.planItems!
+  assert.equal(items[0]!.source, 'engine-decide')
+  assert.equal(items[1]!.source, 'engine-fail')
+  assert.equal(items[2]!.source, 'user-mark-done')
+  // 缺失合法（旧数据）→ undefined
+  assert.equal(items[3]!.source, undefined)
+  // 非法值丢弃 → undefined
+  assert.equal(items[4]!.source, undefined)
+})

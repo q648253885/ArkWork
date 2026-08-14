@@ -52,7 +52,8 @@ export function ThoughtStream({ steps }: ThoughtStreamProps) {
   // 按 iteration 分组
   const units = useMemo(() => groupByIteration(steps), [steps])
   const running = steps.find((s) => s.status === 'running')
-  const failed = steps.find((s) => s.status === 'failed')
+  // v0.18.x：软失败（内部机制/门禁拦截）不算真实失败，不触发红色失败摘要
+  const failed = steps.find((s) => s.status === 'failed' && !s.softFail)
 
   const totalMs = steps.reduce((sum, s) => sum + (s.durationMs || 0), 0)
 
@@ -286,25 +287,28 @@ function ThinkBlock({ step, isActive }: { step: ReActStep; isActive?: boolean })
  * ============================================================ */
 function ToolCard({ step, observation }: { step: ReActStep; observation?: ReActStep }) {
   const [argsOpen, setArgsOpen] = useState(false) // v0.13.0：默认折叠
-  const [resultOpen, setResultOpen] = useState(true) // v0.13.0：默认展开
+  const [resultOpen, setResultOpen] = useState(false) // v0.18.x：结果默认折叠，避免写文件等工具把全文铺开
   const parsedArgs = parseArgs(step.toolArgs)
   const display = getToolDisplay(step.toolName ?? '', parsedArgs)
   const ToolIcon = Icon[display.icon]
   const argText = display.argSummary(parsedArgs)
   const isRunning = step.status === 'running'
   const isFailed = step.status === 'failed'
+  const isSoftFail = isFailed && step.softFail === true
   const isSuccess = step.status === 'success'
   const isCancelled = step.status === 'cancelled'
   const duration = step.durationMs
   const state = isRunning
     ? 'running'
-    : isFailed
-      ? 'failed'
-      : isSuccess
-        ? 'success'
-        : isCancelled
-          ? 'cancelled'
-          : 'pending'
+    : isSoftFail
+      ? 'guarded'
+      : isFailed
+        ? 'failed'
+        : isSuccess
+          ? 'success'
+          : isCancelled
+            ? 'cancelled'
+            : 'pending'
 
   // 失败-重试折叠：同 iteration 同工具的失败+成功
   const obsSummary = observation?.summary
@@ -364,6 +368,8 @@ function ToolCard({ step, observation }: { step: ReActStep; observation?: ReActS
         <span className="flex-shrink-0">
           {isRunning ? (
             <span className="inline-block w-3 h-3 border-[1.5px] border-accent border-t-transparent rounded-full animate-spin" />
+          ) : isSoftFail ? (
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-text-tertiary" title="内部机制拦截" />
           ) : isFailed ? (
             <span className="text-danger">✕</span>
           ) : (
@@ -375,7 +381,11 @@ function ToolCard({ step, observation }: { step: ReActStep; observation?: ReActS
       {(resultOpen && (hasResult || step.errorMessage)) && (
         <div className="tool-card__body">
           {step.errorMessage && (
-            <div className="text-danger whitespace-pre-wrap">{step.errorMessage}</div>
+            isSoftFail ? (
+              <div className="text-text-tertiary whitespace-pre-wrap">{step.errorMessage}</div>
+            ) : (
+              <div className="text-danger whitespace-pre-wrap">{step.errorMessage}</div>
+            )
           )}
           {step.resultSummary && (
             <div className="tool-card__result">{step.resultSummary}</div>
@@ -407,13 +417,13 @@ function ToolCard({ step, observation }: { step: ReActStep; observation?: ReActS
           {argsOpen && hasArgs && (
             <div className="tool-card__args">
               {argEntries.map(([k, v]) => {
-                const valueText = stringifyArgValue(v)
+                const valueText = argValueText(k, v)
                 return (
                   <div className="tool-card__arg-row" key={k}>
                     <span className="tool-card__arg-key">{argKeyLabel(k)}</span>
                     <span
                       className="tool-card__arg-value"
-                      title={valueText}
+                      title={stringifyArgValue(v)}
                     >
                       {valueText}
                     </span>
@@ -462,6 +472,17 @@ function stringifyArgValue(v: unknown): string {
   } catch {
     return String(v)
   }
+}
+
+/** v0.18.x：文件内容类参数 key —— 详情面板只显示摘要，不铺开整段代码 */
+const CONTENT_ARG_KEYS = new Set(['content', 'oldStr', 'newStr', 'old_str', 'new_str'])
+
+/** v0.18.x：参数值渲染（key 感知）。content/oldStr/newStr 等文件内容字段按 60 字符截断并标长度。 */
+function argValueText(key: string, v: unknown): string {
+  if (CONTENT_ARG_KEYS.has(key) && typeof v === 'string' && v.length > 60) {
+    return `（${v.length} 字符）${truncate(v, 60)}`
+  }
+  return stringifyArgValue(v)
 }
 
 function formatTimeShort(ts: number): string {

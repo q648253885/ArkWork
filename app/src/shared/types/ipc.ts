@@ -2,7 +2,7 @@
  * ArkWork — Shared Types: IPC Channels
  * 设计文档 §8.4
  * ============================================================ */
-import type { Task, TaskInput, TaskConfig, TaskStatus, PlanItemStatus } from './task'
+import type { Task, TaskInput, TaskConfig, TaskStatus, PlanItem, PlanItemStatus, PlanItemSource } from './task'
 import type { ReActEvent, ReActStep } from './react'
 import type { TaskProgress } from './progress'
 import type {
@@ -742,14 +742,53 @@ export interface LogEntry {
 
 /* ---- v0.14.0 Task 11：bugfix 技能（目标驱动多轮续跑） ---- */
 
-/** v0.14.0 Task 8：PlanItem 六态变更推送（Main → Renderer，经 planItem:status 通道） */
+/** v0.18.0：PlanItem 六态变更推送（Main → Renderer，经 `task:plan-item-status-changed` 通道）。
+ *  字段在 v0.14.0 基础上固化并扩展：
+ *  - index / fromStatus / source / reason / ts_iteration / version 为新增；
+ *  - 老字段 taskId / planItemId / status / ts 保留；note 字段废弃，迁到 reason。
+ *  - 完整对照表见 docs/versions/v0.18.0/03-system-design.md §4.3.1。
+ */
 export interface PlanItemStatusChanged {
+  /** 任务 ID（T-YYYYMMDD-XXXXXX） */
   taskId: string
+  /** PlanItem 稳定 ID（旧数据由迁移层补齐） */
   planItemId: string
+  /** 冗余字段：planItem 在 planItems 数组中的位置，避免客户端再 O(n) 查找 */
+  index: number
+  /** 变更前状态（用于 reconcile 比对） */
+  fromStatus: PlanItemStatus
+  /** 变更后状态 */
   status: PlanItemStatus
-  note?: string
+  /** 该项状态变更的来源（Main 端唯一写入） */
+  source: PlanItemSource
+  /** 失败原因 / LLM comment 等可选说明 */
+  reason?: string
+  /** Main 端单调递增版本号（同一 task 内每次 plan-item-status-changed 自增） */
+  version: number
+  /** 引擎迭代编号（便于调试 act-failure-iterN 等触发链路） */
+  ts_iteration?: number
+  /** ms 时间戳（Main 端 Date.now()） */
   ts: number
 }
+
+/** v0.18.0：planItems 整对象快照（兜底专用，与 patch 通道分开，避免队列交叉）。
+ *  触发场景：
+ *  - Renderer 主动 invoke('task:plan-list-snapshot', taskId)；
+ *  - Main 端在 plan-regen 后主动广播；
+ *  - Renderer 检测到 patch.version 落后差距 ≥ 5 时自动 fallback（见 store.ts reconcile 规则）。
+ */
+export interface PlanItemListSnapshotPayload {
+  taskId: string
+  planItems: PlanItem[]
+  /** Main 端单调递增版本号，与 patch 共用同一计数 */
+  version: number
+  ts: number
+}
+
+/** v0.18.0：用户手动切状态的回执 */
+export type PlanItemActionResult =
+  | { ok: true; version: number; effectiveStatus: PlanItemStatus }
+  | { ok: false; error: { code: 'E_NOT_FOUND' | 'E_INVALID_STATE' | 'E_PERMISSION_DENIED'; message: string } }
 
 /** bugfix 续跑模式（⌘K 可切换） */
 export type BugfixMode = 'multi-attempt' | 'single-attempt'
@@ -802,8 +841,16 @@ export interface ArkApi {
     onProgressClear: (cb: (payload: ToolProgressClearEvent) => void) => () => void
     onEvent: (cb: (event: ReActEvent) => void) => () => void
     onStatusChange: (cb: (task: Task) => void) => () => void
-    /** v0.14.0 Task 8：PlanItem 六态变更推送（Main → Renderer） */
+    /** v0.18.0：PlanItem 六态变更推送（Main → Renderer） */
     onPlanItemStatusChanged: (cb: (payload: PlanItemStatusChanged) => void) => () => void
+    /** v0.18.0：planItems 整对象快照（Main → Renderer，落后兜底） */
+    onPlanItemListSnapshot: (cb: (payload: PlanItemListSnapshotPayload) => void) => () => void
+    /** v0.18.0：用户手动切状态入口（Renderer → Main） */
+    cancelPlanItem: (payload: { taskId: string; planItemId: string }) => Promise<PlanItemActionResult>
+    retryPlanItem: (payload: { taskId: string; planItemId: string }) => Promise<PlanItemActionResult>
+    markDonePlanItem: (payload: { taskId: string; planItemId: string }) => Promise<PlanItemActionResult>
+    /** v0.18.0：Renderer 主动拉取 planItems 整对象（patch 落后兜底） */
+    fetchPlanItemList: (taskId: string) => Promise<PlanItem[]>
     /** Task 9：任务侧边栏进度摘要持久化（独立 IPC 通道，避免污染 task:status 主链路） */
     progressSave: (payload: { taskId: string; progress: TaskProgress }) => Promise<void>
     progressLoad: () => Promise<Record<string, TaskProgress> | null>

@@ -118,10 +118,21 @@ test('seed.ts: @default 与 @coder defaultSkillIds 含 todo-update', () => {
   assert.ok(matches && matches.length >= 2, `应出现 ≥2 次，实际 ${matches?.length ?? 0}`)
 })
 
-test('seed.ts: @default / @coder systemPrompt 强制 todo-update 自检', () => {
-  assert.match(seedSrc, /每完成一个阶段性操作后.*todo-update/, '应要求每阶段操作后调 todo-update')
-  assert.match(seedSrc, /检查清单和后续要做的事.*todo-update/, '应要求检查清单后续')
-  assert.match(seedSrc, /禁止.*批量标/, '应禁止批量标')
+test('seed.ts: @default / @coder systemPrompt 由引擎推进 + todo-update 显式推进清单（v0.18.x）', () => {
+  // v0.18.x：写文件/跑命令等阶段内工具不再自动推进清单，改由 LLM 在子任务完成时调 todo-update 显式推进
+  assert.match(
+    seedSrc,
+    /每个子任务[\s\S]{0,40}todo-update/,
+    '每个子任务真正完成时应显式调用 todo-update 推进清单',
+  )
+  // 写文件/跑命令不再自动推进（避免清单抢跑、与真实执行进度错位）
+  assert.match(
+    seedSrc,
+    /阶段内工具[\s\S]{0,10}不会[\s\S]{0,10}自动推进/,
+    '写文件/跑命令等阶段内工具不应自动推进清单',
+  )
+  // 仍然禁止批量打标
+  assert.match(seedSrc, /不要批量打标|禁止.*批量标/, '仍应禁止批量打标')
 })
 
 /* ---------- 4. 工具失败自动标 failed（源码契约） ---------- */
@@ -188,10 +199,14 @@ test('v0.17.6: 引擎独立判断函数 decidePlanAdvance 存在', () => {
   assert.match(engineSrc, /function\s+emitPlanStatus\(/, '应定义 emitPlanStatus 函数')
 })
 
-test('v0.17.6: 产成性工具白名单含 file-writer/file-editor/shell', () => {
-  assert.match(engineSrc, /isProductiveTool[\s\S]{0,400}'file-writer'[\s\S]{0,400}'file-editor'[\s\S]{0,400}'shell'/, 'isProductiveTool 应含 file-writer/file-editor/shell')
-  assert.match(engineSrc, /'task_complete'/, 'isProductiveTool 应含 task_complete')
-  assert.match(engineSrc, /'spec'[\s\S]{0,80}'plan'[\s\S]{0,80}'bugfix'/, 'isProductiveTool 应含 spec/plan/bugfix')
+test('v0.18.x: 产成性工具白名单不再含 file-writer/file-editor/shell（避免清单抢跑）', () => {
+  const productiveBody = engineSrc.match(/function\s+isProductiveTool\([\s\S]*?\n\}/)?.[0] ?? ''
+  assert.ok(productiveBody, '应能提取 isProductiveTool 函数体')
+  assert.doesNotMatch(productiveBody, /'file-writer'/, 'isProductiveTool 不应含 file-writer（写文件不自动推进清单）')
+  assert.doesNotMatch(productiveBody, /'file-editor'/, 'isProductiveTool 不应含 file-editor')
+  assert.doesNotMatch(productiveBody, /'shell'/, 'isProductiveTool 不应含 shell')
+  assert.match(productiveBody, /'task_complete'/, 'isProductiveTool 应含 task_complete')
+  assert.match(productiveBody, /'spec'[\s\S]{0,80}'plan'[\s\S]{0,80}'bugfix'/, 'isProductiveTool 应含 spec/plan/bugfix')
 })
 
 test('v0.17.6: 引擎兜底取代 LLM 自调 todo_update（act 结果驱动）', () => {

@@ -99,12 +99,12 @@ const BUILTIN_AGENTS: Agent[] = [
 2. 如果工具返回错误/空/与预期不符，是换参数重试、换工具，还是基于已有信息继续？
 3. 本次调用是否重复了之前同一参数？如果是，立即改策略，禁止再次调用。
 
-## 6. 任务清单（TodoWrite / todo-update）
+## 6. 任务清单（todo-update）
 - 多步骤任务首轮必须创建 TodoWrite 清单；简单一问一答可省略。
-- 每完成一个具体步骤，立即调用 todo-update 工具标记该步 done 并说明下一步，禁止批量标记多个任务后再继续。
-- 每完成一个阶段性操作后，都要自己检查清单和后续要做的事，及时用 todo-update 更新、及时反馈。
-- 中断续聊时先核对当前 Todo 状态；若发现与实际进度冲突，立即用 todo-update 修正并告知用户。
-- 最终交付前检查清单是否全部完成。
+- 清单状态推进规则（v0.18.0）：act 失败时引擎自动把当前项标 failed；写文件 / 跑命令等阶段内工具**不会**自动推进清单，避免清单抢跑、与真实执行进度错位。
+- 每个子任务**真正完成**时，必须调用 todo-update 把当前项标 done 并说明下一步；跳过 / 重试 / 取消也调 todo-update（标 skipped / retry 等），但不要批量打标。
+- 中断续聊时，先读取当前 Todo 状态；若发现"全部完成却又继续"的冲突，可调 todo-update 修正并告知用户。
+- 最终交付前检查清单全部完成。
 
 ## 7. 终止与交付
 - 任务完成调用 task_complete，参数包含：改了什么 / 验证结果 / 遗留风险。
@@ -116,7 +116,7 @@ const BUILTIN_AGENTS: Agent[] = [
     defaultKbIds: [],
     defaultConfig: { temperature: 0.5, maxIterations: 60 },
     isBuiltin: true,
-    version: '0.17.5',
+    version: '0.18.0',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
   },
@@ -198,11 +198,11 @@ const BUILTIN_AGENTS: Agent[] = [
 - 改后必测：修改后跑测试或冒烟验证；UI 改动对照原型 1:1 还原。
 - 文档/注释/实现三者一致，禁止静默分叉。
 
-## 7. 任务清单（TodoWrite / todo-update）
+## 7. 任务清单（todo-update）
 - 收到软件工程任务后，首轮思考创建 TodoWrite 清单（场景 A 还要列出文档链阶段）。
-- 每完成一个具体步骤，立即调用 todo-update 工具标记该步 done 并说明下一步，禁止批量标记多个任务后再继续。
-- 每完成一个阶段性操作后，都要自己检查清单和后续要做的事，及时用 todo-update 更新、及时反馈。
-- 中断续聊时，先读取当前 Todo 状态；若发现"全部完成却又继续"的冲突，立即用 todo-update 修正并告知用户。
+- 清单状态推进规则（v0.18.0）：act 失败时引擎自动把当前项标 failed；写文件 / 跑命令等阶段内工具**不会**自动推进清单，避免清单抢跑、与真实执行进度错位。
+- 每个子任务**真正完成**时，必须调用 todo-update 把当前项标 done 并说明下一步；跳过 / 重试 / 把失败项标 cancelled 也调 todo-update，但不要批量打标。
+- 中断续聊时，先读取当前 Todo 状态；若发现"全部完成却又继续"的冲突，可调 todo-update 修正并告知用户。
 - 最终交付前检查清单全部完成，并在 task_complete 摘要中说明验证结果与文档同步情况。
 
 ## 8. 终止与交付
@@ -215,7 +215,7 @@ const BUILTIN_AGENTS: Agent[] = [
     defaultKbIds: [],
     defaultConfig: { temperature: 0.3, maxIterations: 80 },
     isBuiltin: true,
-    version: '0.17.5',
+    version: '0.18.0',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
     // v0.15.0 Task 6：@coder 默认 acceptEdits —— 工作区内轻写（sed -i/tee/mkdir/cp/...）不再每次弹确认；
@@ -675,6 +675,8 @@ const UPGRADE_091_FLAG = 'seeded.v0.9.1.json'
 const UPGRADE_0150_FLAG = 'seeded.v0.15.0.json'
 // v0.16.0 增量升级标志：系统提示词工具优先级 + 新增文件工具 Skill
 const UPGRADE_0160_FLAG = 'seeded.v0.16.0.json'
+// v0.18.0 增量升级标志：清单状态由引擎独立判断 + prompt 去除强制 todo_update
+const UPGRADE_0180_FLAG = 'seeded.v0.18.0.json'
 
 async function isUpgraded062(): Promise<boolean> {
   return existsSync(join(getArkworkDir(), UPGRADE_062_FLAG))
@@ -942,6 +944,58 @@ async function upgradeTo0160(): Promise<void> {
   await markUpgraded0160()
 }
 
+async function isUpgraded0180(): Promise<boolean> {
+  return existsSync(join(getArkworkDir(), UPGRADE_0180_FLAG))
+}
+
+async function markUpgraded0180(): Promise<void> {
+  const flag = join(getArkworkDir(), UPGRADE_0180_FLAG)
+  await writeFile(flag, JSON.stringify({ ts: Date.now(), version: '0.18.0' }, null, 2))
+}
+
+/**
+ * v0.18.0 增量升级：清单状态由引擎独立判断（v0.17.6 引擎独立决策已就绪）；
+ * 此处把 @default / @coder 的 systemPrompt 中旧的强制调用 todo-update 措辞
+ * 改为可选提示（详见 03-system-design.md §7.4）。
+ *
+ * 与 v0.15.0 / v0.16.0 升级一致：version 落后则幂等同步关键字段；用户自定义 agent 不动。
+ */
+async function upgradeTo0180(): Promise<void> {
+  const agentsPath = join(getArkworkDir(), 'agents.json')
+  if (existsSync(agentsPath)) {
+    try {
+      const raw = await readFile(agentsPath, 'utf-8')
+      const existing = JSON.parse(raw) as Agent[]
+      const builtinMap = new Map(BUILTIN_AGENTS.map((a) => [a.id, a]))
+      let changed = false
+      const updated = existing.map((a) => {
+        if (!a.isBuiltin) return a
+        const latest = builtinMap.get(a.id)
+        if (!latest) return a
+        if (a.version === latest.version) return a
+        changed = true
+        return {
+          ...a,
+          systemPrompt: latest.systemPrompt,
+          defaultSkillIds: latest.defaultSkillIds,
+          version: latest.version,
+          role: latest.role ?? a.role,
+          goal: latest.goal ?? a.goal,
+          description: latest.description,
+          defaultPermissionMode: latest.defaultPermissionMode ?? a.defaultPermissionMode,
+        }
+      })
+      if (changed) {
+        await writeFile(agentsPath, JSON.stringify(updated, null, 2), 'utf-8')
+        console.log('[seed] v0.18.0 upgrade: synced builtin agents (engine-driven plan + relaxed todo_update prompt)')
+      }
+    } catch (err) {
+      console.error('[seed] v0.18.0 upgrade agents failed:', (err as Error).message)
+    }
+  }
+  await markUpgraded0180()
+}
+
 export async function seedDefaults(): Promise<void> {
   // 1. 检查是否已 v0.6.0 seed 过
   if (!(await isSeeded())) {
@@ -989,6 +1043,9 @@ export async function seedDefaults(): Promise<void> {
 
   // 8. v0.16.0 增量升级：系统提示词工具优先级 + 新增文件工具 Skill
   await upgradeTo0160()
+
+  // 9. v0.18.0 增量升级：清单状态由引擎独立判断 + prompt 去除强制 todo_update
+  await upgradeTo0180()
 }
 
 /**

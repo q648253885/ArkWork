@@ -78,6 +78,21 @@ function normalizePlanItem(raw: unknown, taskId: string, index: number): PlanIte
   const updatedAt = typeof obj['updatedAt'] === 'number' ? (obj['updatedAt'] as number) : createdAt
   const completedAt =
     typeof obj['completedAt'] === 'number' ? (obj['completedAt'] as number) : undefined
+  // v0.18.0：source 是新增可选字段，旧数据缺失合法；有值且非 PlanItemSource 字符串则丢弃
+  const rawSource = obj['source']
+  const source =
+    typeof rawSource === 'string' &&
+    [
+      'engine-decide',
+      'engine-fail',
+      'todo-update',
+      'user-cancel',
+      'user-retry',
+      'user-mark-done',
+      'plan-regen',
+    ].includes(rawSource)
+      ? (rawSource as PlanItem['source'])
+      : undefined
   // legacyStatus 仅当 PlanItem.status 是合法旧值时保留（用于审计 + 上层兼容性）
   const legacyStatus = LEGACY_STATUSES.has(status)
     ? (status as 'done' | 'failed')
@@ -100,6 +115,7 @@ function normalizePlanItem(raw: unknown, taskId: string, index: number): PlanIte
     updatedAt,
     ...(completedAt !== undefined ? { completedAt } : {}),
     ...(legacyStatus ? { legacyStatus } : {}),
+    ...(source !== undefined ? { source } : {}),
   }
   return { item, changed: structuralChanged }
 }

@@ -37,6 +37,8 @@ import {
   broadcastTaskStatus,
   broadcastToolProgress,
   clearToolProgress,
+  broadcastPlanItemStatus,
+  broadcastPlanListSnapshot,
   type ToolProgress,
 } from './events.js'
 import { getWorkspaceDir } from '../store/db.js'
@@ -329,12 +331,17 @@ export async function runReActLoop(
         const planItems: PlanItem[] = filteredItems.map((text, i) => ({
           id: `plan_${i}_${now}`,
           text,
-          status: 'pending' as const,
+          // v0.18.x：首项直接进入 running，让清单在任务开始就有反应，
+          // 而不是等到第一个 act 完成才被动推进。
+          status: i === 0 ? 'running' as const : 'pending' as const,
           createdAt: now,
           updatedAt: now,
         }))
         task.planItems = planItems
         await updateTask(task.id, { planItems })
+        // v0.18.0 F1/F2：plan 全量生成走 snapshot 通道（与 patch 分开，避免队列交叉）；
+        // 一次性把整 planItems 推到 Renderer 端 hydrate 三视图 + reconcile。
+        broadcastPlanListSnapshot(task.id, planItems, 'plan-regen')
         if (filteredItems.length < plan.items.length) {
           logger.warn(
             'Agent',
@@ -755,10 +762,10 @@ export async function runReActLoop(
       }
 
       if (action?.tool === 'ask_user') {
-        // v0.16.x：硬约束 — suggestions 必须给 2~4 个有效选项，否则当作控制类工具
-        // 校验失败：写入 failed observation 让 LLM 下一轮 Reason 重试（不暂停任务）。
-        // 此前「suggestions 可选」导致 LLM 经常只传 question，前端拿不到建议卡，
-        // 用户只能手动输入，违背「门禁 + 选择」原则。
+        // v0.18.x fix：放宽校验 — 只强制 question 有效，suggestions 不再硬性要求 2~4 个。
+        // 此前「suggestions < 2 即拒绝重试」会让 LLM 在「参数解析持续失败」里空转，
+        // 进而跳过门禁、继续编码，甚至因后续参数截断导致整个任务中断。
+        // 现在：suggestions 不足时注入兜底选项，仍保留「门禁 + 选择」体验，但不再触发重试循环。
         const rawQuestion = action.args.question
         const rawSuggestions = action.args.suggestions
         const validatedSuggestions = Array.isArray(rawSuggestions)
@@ -774,20 +781,16 @@ export async function runReActLoop(
         const tcId = response.toolCallId ?? `call_${iteration}_0`
         const invalidAskUser =
           typeof rawQuestion !== 'string' ||
-          rawQuestion.trim().length === 0 ||
-          validatedSuggestions.length < 2
+          rawQuestion.trim().length === 0
         if (invalidAskUser) {
-          const reason =
-            typeof rawQuestion !== 'string' || rawQuestion.trim().length === 0
-              ? 'ask_user.question 缺失或为空字符串'
-              : `ask_user.suggestions 必须是 2~4 个有效项（当前 ${validatedSuggestions.length} 个）`
+          const reason = 'ask_user.question 缺失或为空字符串'
           logger.warn('Agent', `ask_user rejected: ${reason} — 重试`, task.id)
           // 1) 写入 L1 observation，触发下一轮 Reason 重试
           await appendL1({
             taskId: task.id,
             role: 'tool',
             kind: 'observation',
-            content: `[ask_user] failed: ${reason}。ask_user 必须给出 question + 2~4 个 suggestions，每项至少含 label。请立即重试调用 ask_user 并补全 suggestions。`,
+            content: `[ask_user] failed: ${reason}。ask_user 必须给出非空 question。请立即重试调用 ask_user 并补全 question。`,
             iteration,
             meta: JSON.stringify({ tool: 'ask_user', toolCallId: tcId, error: reason }),
           })
@@ -814,11 +817,21 @@ export async function runReActLoop(
             status: 'failed',
             resultSummary: `ask_user 参数不合规：${reason}`,
             errorMessage: reason,
+            softFail: true,
           }
           await broadcastStep(failedStep)
           // 不暂停任务，继续下一轮 Reason
           continue
         }
+        // v0.18.x：suggestions 不足 2 个时注入兜底选项，避免前端拿不到建议卡
+        const finalSuggestions =
+          validatedSuggestions.length >= 2
+            ? validatedSuggestions
+            : [
+                ...validatedSuggestions,
+                { label: '继续', description: '保持当前方向继续执行' },
+                { label: '暂停', description: '先暂停，我来说明补充信息' },
+              ].slice(0, 2)
         // v0.14.0 修复：与 task_complete 同理，补写配对 tool observation，
         // 避免 assistant tool_calls 悬空导致后续交互 400。
         await appendL1({
@@ -833,8 +846,8 @@ export async function runReActLoop(
           type: 'ask_user',
           iteration,
           question: rawQuestion as string,
-          // 透传 Agent 附带的建议选项（已校验，2~4 个有效项）
-          suggestions: validatedSuggestions,
+          // 透传 Agent 附带的建议选项（不足时已兜底为 2 项）
+          suggestions: finalSuggestions,
         })
         await updateTask(task.id, { status: 'paused' })
         broadcastTaskStatus({ ...task, status: 'paused' })
@@ -899,6 +912,7 @@ export async function runReActLoop(
             iteration,
             error: '所有工具均已达到调用上限，无法继续执行',
           })
+          await markRunningPlanItemFailed(task)
           await updateTask(task.id, { status: 'failed' })
           broadcastTaskStatus({ ...task, status: 'failed' })
           await runDoneMemoryHooks(task, agent, opts.modelId, '')
@@ -937,7 +951,7 @@ export async function runReActLoop(
       }
 
       // 并行执行所有 act 调用；已耗尽预算的工具跳过执行，返回合成结果
-      const actCtx: ActContext = { task, agent, signal, coreSkillsEnabled, allowedStage }
+      const actCtx: ActContext = { task, agent, signal, coreSkillsEnabled, allowedStage, iteration }
       const actResults = await Promise.all(
         actions.map((a, i) => {
           if (exhaustedIndices.has(i)) {
@@ -1181,6 +1195,7 @@ export async function runReActLoop(
 
     // 超过迭代上限：失败但仍要归档 L1（v0.9.1 §Task 7 — 失败路径也保留 L3b/L4a 钩子）
     await emitEvent({ type: 'max_iterations_reached', iteration })
+    await markRunningPlanItemFailed(task)
     await updateTask(task.id, { status: 'failed' })
     broadcastTaskStatus({ ...task, status: 'failed' })
     logger.warn('Agent', `max iterations reached for ${task.id}`, task.id)
@@ -1197,6 +1212,7 @@ export async function runReActLoop(
     const message = (err as Error).message
     logger.error('Agent', `ReAct loop failed: ${message}`, task.id)
     await emitEvent({ type: 'task_failed', iteration: 0, error: message })
+    await markRunningPlanItemFailed(task)
     await updateTask(task.id, { status: 'failed' })
     broadcastTaskStatus({ ...task, status: 'failed' })
     // v0.9.1 §Task 7：失败路径也尝试归档 L1，让失败的经验也能进入 L3b/L4a
@@ -1228,6 +1244,36 @@ async function handleAbort(
   await emitEvent({ type: 'task_paused', iteration })
   await updateTask(task.id, { status: 'paused' })
   broadcastTaskStatus({ ...task, status: 'paused' })
+}
+
+/**
+ * v0.18.x fix：任务级失败时，把当前 running（无则首个 pending）的清单项标 failed，
+ * 让清单与真实执行进度一致 —— 此前任务失败（超迭代 / ReAct 崩溃）时清单纹丝不动，
+ * 用户看不到任何失败反馈。
+ */
+async function markRunningPlanItemFailed(task: Task): Promise<void> {
+  const planItems = task.planItems ?? []
+  if (planItems.length === 0) return
+  const runningIdx = planItems.findIndex((p) => p.status === 'running')
+  const targetIdx = runningIdx >= 0 ? runningIdx : planItems.findIndex((p) => p.status === 'pending')
+  if (targetIdx < 0) return
+  const target = planItems[targetIdx]
+  const fromStatus = target.status
+  target.status = 'failed'
+  target.updatedAt = Date.now()
+  target.completedAt = Date.now()
+  target.source = 'engine-fail'
+  await updateTask(task.id, { planItems })
+  broadcastPlanItemStatus(task.id, [
+    {
+      planItemId: target.id,
+      index: targetIdx,
+      fromStatus,
+      status: 'failed',
+      source: 'engine-fail',
+      reason: '任务失败，引擎标记当前项 failed',
+    },
+  ])
 }
 
 async function emitEvent(event: ReActEvent): Promise<void> {
@@ -1690,14 +1736,18 @@ function findPlanItemForStage(planItems: PlanItem[], stage: string): number {
 
 /**
  * v0.17.6：判断一个工具名是否属于"产成性"工具——成功调用通常意味着清单项可标 done。
- * 非产成性工具（只读探索 / 信息检索）成功后由 LLM 自行决定是否推进清单。
+ * 非产成性工具（只读探索 / 信息检索 / 阶段内中间写入）成功后由 LLM 自行决定是否推进清单。
  *
- * 产成性：file-writer / file-editor / shell / todo-update / task_complete / ask_user 等
+ * v0.18.x fix：file-writer / file-editor / shell 三项**不再**自动推进清单。
+ * 原因：一个清单项往往需要多次写入 / 多次命令（尤其 frontend-design 等插件会连续写多个文件），
+ * 若每次成功都自动把当前项标 done 并推进下一项，清单会"抢跑"，与真实执行进度错位。
+ * 这些阶段内工具成功后保持 running，由 LLM 通过 todo_update 在真正完成一个子任务时显式推进。
+ *
+ * 产成性（可自动标 done）：task_complete / ask_user / spec / plan / bugfix / react-core-skills 等
  * 只读性：file-reader / glob-search / grep-search / web-search / fetch-url / kb-search / session-search 等
  */
 function isProductiveTool(tool: string): boolean {
   const PRODUCTIVE = new Set([
-    'file-writer', 'file-editor', 'shell',
     'todo-update', 'todo_update',
     'task_complete', 'ask_user', 'spec', 'plan', 'bugfix', 'react-core-skills',
   ])
@@ -1890,8 +1940,20 @@ function buildObservationSummary(
   const str = (v: unknown): string => (typeof v === 'string' ? v : '')
   if (tool === 'file-reader') {
     const r = result as { content: string; lines: number; size: number; truncated: boolean; path: string }
-    const preview = safeSlice(str(r.content), 600)
+    // v0.18.x fix: 600→200，避免 thought stream 被大文件内容塞爆；
+    // 行数/字节数已带在头部，详情按需在 Inspector 面板看全文。
+    const preview = safeSlice(str(r.content), 200)
     return `[file-reader] ${r.path} (${r.lines} lines, ${r.size} bytes)\n\n${preview}${r.truncated ? '\n\n… (truncated)' : ''}`
+  }
+  // v0.18.x fix：写文件 / 编辑文件只回传摘要（路径 + 字节/行数/替换数），
+  // 不回写文件内容，避免把整段代码透传进 thought stream / 工具卡，导致显示过长。
+  if (tool === 'file-writer') {
+    const r = result as { path: string; bytes: number; lines: number; created: boolean }
+    return `[file-writer] ${r.path} (${r.bytes} bytes, ${r.lines} lines${r.created ? ', 新建' : ', 覆盖'})`
+  }
+  if (tool === 'file-editor') {
+    const r = result as { path: string; replacements: number }
+    return `[file-editor] ${r.path} (${r.replacements} replacements)`
   }
   if (tool === 'web-search') {
     const r = result as { results: Array<{ title: string; url: string; snippet: string }>; total: number; query: string }
@@ -1911,7 +1973,9 @@ function buildObservationSummary(
     const r = result as { command: string; cwd: string; stdout: string; stderr: string; exitCode: number | null; durationMs: number; timedOut: boolean }
     const out = safeSlice(str(r.stdout), 800)
     const err = safeSlice(str(r.stderr), 400)
-    const header = `[shell] \`${r.command}\` exit=${r.exitCode} · ${r.durationMs}ms${r.timedOut ? ' · timed out' : ''}`
+    // v0.18.x fix：命令本身可能内嵌 heredoc 全文（写文件场景），截断避免泄露整段内容
+    const cmd = safeSlice(str(r.command), 120)
+    const header = `[shell] \`${cmd}\` exit=${r.exitCode} · ${r.durationMs}ms${r.timedOut ? ' · timed out' : ''}`
     return `${header}\n\nstdout:\n${out}${str(r.stdout).length > 800 ? '\n… (truncated)' : ''}${err ? `\n\nstderr:\n${err}${str(r.stderr).length > 400 ? '\n… (truncated)' : ''}` : ''}`
   }
   if (tool === 'delegate-agent') {
@@ -1957,6 +2021,8 @@ interface ActContext {
   coreSkillsEnabled?: boolean
   /** v0.17.x：当前允许推进到的阶段（0~5），仅 coreSkillsEnabled 时有效 */
   allowedStage?: number
+  /** v0.18.0：当前 ReAct 迭代编号（用于 patch payload 的 ts_iteration 字段） */
+  iteration?: number
 }
 
 async function executeAct(
@@ -2002,6 +2068,7 @@ async function executeAct(
           durationMs,
           status: 'failed',
           errorMessage: guard.reason,
+          softFail: true,
         }
         logger.warn('Tool', `${action.tool} blocked by stage guard: ${guard.reason}`, placeholder.taskId)
         return {
@@ -2032,7 +2099,7 @@ async function executeAct(
         const errMsg = `todo_update 参数非法：item_index=${itemIndex} 越界（清单共 ${planItems.length} 项，索引 0~${planItems.length - 1}）`
         logger.warn('Agent', errMsg, placeholder.taskId)
         return {
-          completedStep: { ...placeholder, result: { error: errMsg }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg },
+          completedStep: { ...placeholder, result: { error: errMsg }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg, softFail: true },
           result: { error: errMsg }, resultSummary: errMsg, durationMs, ok: false, errorMessage: errMsg,
         }
       }
@@ -2040,15 +2107,18 @@ async function executeAct(
         const errMsg = `todo_update 参数非法：status=${status}（合法值 done/running/pending/skipped/failed）`
         logger.warn('Agent', errMsg, placeholder.taskId)
         return {
-          completedStep: { ...placeholder, result: { error: errMsg }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg },
+          completedStep: { ...placeholder, result: { error: errMsg }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg, softFail: true },
           result: { error: errMsg }, resultSummary: errMsg, durationMs, ok: false, errorMessage: errMsg,
         }
       }
 
       // 更新目标项 + 自动推进（标 done 时把下一项标 running）
       const target = planItems[itemIndex]
+      const fromStatus = target.status
       target.status = status as PlanItem['status']
       target.updatedAt = Date.now()
+      // v0.18.0 F4：记录 source 字段（LLM 主动调用 todo_update，不带"引擎"徽标）
+      target.source = 'todo-update'
       if (status === 'done') target.completedAt = Date.now()
       if (status === 'done' && itemIndex + 1 < planItems.length && planItems[itemIndex + 1].status === 'pending') {
         planItems[itemIndex + 1].status = 'running'
@@ -2056,9 +2126,48 @@ async function executeAct(
       }
       await updateTask(placeholder.taskId, { planItems })
 
+      // v0.18.0 F1：todo_update 拦截后也通过 patch 通道广播；
+      // 多项变更（done → 自动推进下一项）走串行 N 次广播（version 自增）。
+      broadcastPlanItemStatus(placeholder.taskId, [
+        {
+          planItemId: target.id,
+          index: itemIndex,
+          fromStatus,
+          status: status as PlanItem['status'],
+          source: 'todo-update',
+          reason: comment || undefined,
+          ts_iteration: ctx.iteration,
+        },
+      ])
+      if (status === 'done' && itemIndex + 1 < planItems.length && planItems[itemIndex + 1].status === 'pending') {
+        const next = planItems[itemIndex + 1]
+        broadcastPlanItemStatus(placeholder.taskId, [
+          {
+            planItemId: next.id,
+            index: itemIndex + 1,
+            fromStatus: 'pending',
+            status: 'running',
+            source: 'todo-update',
+            reason: 'todo-update 后自动推进',
+            ts_iteration: ctx.iteration,
+          },
+        ])
+      }
+
       // 构造清单概览（反馈给 LLM，让它知道更新后的状态）
+      // v0.18.x fix: 复用 engine-decision 同款五档 mark（done/running/failed/skipped/pending），
+      // 之前 LLM 主动 todo_update 写 failed 时会落到默认 [ ] 分支，跟路径 B 的 [!] 符号不一致。
       const overview = planItems.map((p, i) => {
-        const mark = p.status === 'done' ? '[x]' : p.status === 'running' ? '[~]' : '[ ]'
+        const mark =
+          p.status === 'done'
+            ? '[x]'
+            : p.status === 'running'
+              ? '[~]'
+              : p.status === 'failed'
+                ? '[!]'
+                : p.status === 'skipped'
+                  ? '[-]'
+                  : '[ ]'
         return `${mark} ${i + 1}. ${p.text}`
       }).join('\n')
       const summary = `已更新清单第 ${itemIndex + 1} 项为「${status}」${comment ? `：${comment}` : ''}\n当前清单：\n${overview}`
@@ -2098,6 +2207,8 @@ async function executeAct(
   //   1. act 失败 → running 项自动 failed
   //   2. act 成功 + 产成性工具（file-writer / file-editor / shell / spec / ...）→ running 项自动 done 并推进下一项
   //   3. act 成功 + 只读工具（file-reader / web-search / ...）→ 保持 running，让 LLM 决定
+  // v0.18.0 F1：决策落定后通过 broadcastPlanItemStatus 推单条 patch（不调整对象广播）。
+  // 写入顺序：先落盘（updateTask）→ 再广播 patch，保证内存/磁盘/三视图一致。
   if (ctx.task.planItems && ctx.task.planItems.length > 0 && action.tool !== 'todo-update' && action.tool !== 'todo_update') {
     try {
       const { planItems: nextItems, decisions } = decidePlanAdvance(
@@ -2108,7 +2219,30 @@ async function executeAct(
       )
       if (decisions.length > 0) {
         ctx.task.planItems = nextItems
+        // 1) 把 source 字段写到 planItem（v0.18.0 新增），便于 Renderer 端显示"引擎"徽标
+        for (const d of decisions) {
+          const item = nextItems[d.index]
+          if (!item) continue
+          item.source = d.after === 'failed' ? 'engine-fail' : 'engine-decide'
+        }
+        // 2) 持久化（落盘后再广播）
         await updateTask(placeholder.taskId, { planItems: nextItems })
+        // 3) 单条 patch 广播（F1 通道激活）；多 decisions 串行 N 次 + version 单调自增
+        for (const d of decisions) {
+          const item = nextItems[d.index]
+          if (!item) continue
+          broadcastPlanItemStatus(placeholder.taskId, [
+            {
+              planItemId: item.id,
+              index: d.index,
+              fromStatus: d.before,
+              status: d.after,
+              source: d.after === 'failed' ? 'engine-fail' : 'engine-decide',
+              reason: d.reason,
+              ts_iteration: ctx.iteration,
+            },
+          ])
+        }
         const overview = nextItems.map((p, i) => {
           const mark =
             p.status === 'done'
@@ -2122,10 +2256,18 @@ async function executeAct(
                     : '[ ]'
           return `${mark} ${i + 1}. ${p.text}`
         }).join('\n')
+        // v0.18.x fix: reason 截 80 字防爆行；overview 已在路径 A 打印过，
+        // 路径 B 走 patch 通道（broadcastPlanItemStatus）让 Renderer 维护当前态，
+        // 这里不重复打印整张清单，避免 thought stream 被压成 10+ 行扁平文本。
         const decisionList = decisions
-          .map((d) => `  - 第 ${d.index + 1} 项：${d.before} → ${d.after}（${d.reason}）`)
+          .map((d) => {
+            const reason = (d.reason ?? '').length > 80
+              ? (d.reason ?? '').slice(0, 80) + '…'
+              : d.reason ?? ''
+            return `  - 第 ${d.index + 1} 项：${d.before} → ${d.after}（${reason}）`
+          })
           .join('\n')
-        resultSummary += `\n\n[engine-decision] 引擎独立判断清单状态：\n${decisionList}\n\n当前清单：\n${overview}`
+        resultSummary += `\n\n[engine-decision] 引擎独立判断清单状态：\n${decisionList}`
         // 记日志
         if (decisions.some((d) => d.after === 'done' || d.after === 'failed')) {
           logger.info(
@@ -2423,10 +2565,10 @@ export function reconcileToolCalls(messages: LlmMessage[]): LlmMessage[] {
           'Agent',
           `reconcileToolCalls: stripped dangling tool_calls (${m.toolCalls.length}), skipping ${k - i - 1} orphan tool message(s)`,
         )
-        // v0.15.x polish6：剥离时若 content 含疑似大 shell command（>4KB 且含 << heredoc），
+        // v0.18.x fix: 阈值 4096→2048，4KB 仍会把 thought 区撑成长条；
         // 替换为摘要，避免污染 UI thought 区。
         let safeContent = m.content
-        if (typeof safeContent === 'string' && safeContent.length > 4096 && /<</.test(safeContent)) {
+        if (typeof safeContent === 'string' && safeContent.length > 2048 && /<</.test(safeContent)) {
           safeContent = `[shell 命令过长已截断，原文 ${safeContent.length} 字节]`
         }
         out.push({ ...m, toolCalls: undefined, content: safeContent })

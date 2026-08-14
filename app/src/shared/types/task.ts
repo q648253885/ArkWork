@@ -31,6 +31,23 @@ export type LegacyPlanItemStatus = 'done' | 'failed'
  * v0.14.0 Task 1 — PlanItem（任务级计划项）。
  * 旧版 PlanItem 仅含 `text`；新版显式引入 `status` 六态字段，旧字段保持可选以兼容 v0.13.1 数据。
  */
+/**
+ * v0.18.0：planItem 状态变更的来源标记。
+ * Main 端唯一写入，Renderer 不可注入（IPC 入口拒绝 source 字段）。
+ *  - engine-decide  / engine-fail：引擎独立判断（act 成功/失败）
+ *  - todo-update：LLM 主动调 todo_update 工具
+ *  - user-cancel / user-retry / user-mark-done：用户在 TodoPanel 行手动切状态
+ *  - plan-regen：plan 全量重新生成（snapshot 兜底）
+ */
+export type PlanItemSource =
+  | 'engine-decide'
+  | 'engine-fail'
+  | 'todo-update'
+  | 'user-cancel'
+  | 'user-retry'
+  | 'user-mark-done'
+  | 'plan-regen'
+
 export interface PlanItem {
   /** 计划项 ID（v0.14.0 新增；旧数据缺失时由迁移层补齐） */
   id: string
@@ -46,6 +63,8 @@ export interface PlanItem {
   updatedAt: number
   /** 完成时间（仅当 status === 'done' / 'failed' / 'cancelled' / 'skipped' 时存在） */
   completedAt?: number
+  /** v0.18.0 新增：该项状态来源（用于三视图与"引擎"/"推断"徽标） */
+  source?: PlanItemSource
 }
 
 export interface TaskInput {
@@ -64,6 +83,11 @@ export interface TaskConfig {
   maxTokens?: number
   maxIterations?: number
   stop?: string[]
+  /**
+   * v0.18.0 新增：是否每轮 Reason 之前注入 kind='plan_status' 的 user 消息。
+   * 默认 true；单步任务（planItems 为空）由 seed 层自动设 false。
+   */
+  injectPlanStatus?: boolean
 }
 
 export interface Task {

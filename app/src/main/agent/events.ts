@@ -9,7 +9,8 @@ import { getTaskMemoryDir } from '../store/db.js'
 import { broadcast } from '../window.js'
 import { logger } from '../system/logger.js'
 import type { ReActStep, ReActEvent } from '@shared/types/react'
-import type { Task } from '@shared/types/task'
+import type { Task, PlanItem, PlanItemStatus, PlanItemSource } from '@shared/types/task'
+import type { PlanItemStatusChanged, PlanItemListSnapshotPayload } from '@shared/types/ipc'
 
 const stepCollections = new Map<string, JsonlCollection<ReActStep>>()
 
@@ -125,4 +126,132 @@ export function clearToolProgress(taskId: string, groupId?: string): void {
   } catch (err) {
     logger.warn('Agent', `clearToolProgress failed (silent): ${(err as Error).message}`)
   }
+}
+
+/* ============================================================
+ * v0.18.0：PlanItem 状态变更 — 单条 patch 广播 + 整对象快照兜底
+ *
+ * 背景（B2 死通道）：v0.14.0 起就在 `task:plan-item-status-changed` 通道上订阅，
+ * 但 Main 侧从未触发。整对象 `broadcastTaskStatus` 每次 planItems 变化都会
+ * 重推整 Task（包含整 planItems 数组），payload 与渲染浪费严重。
+ *
+ * 新设计（详见 docs/versions/v0.18.0/03-system-design.md §4）：
+ *  - 引擎改 planItem 状态 → 调用 broadcastPlanItemStatus 推单条 patch；
+ *  - 同 task 维护 planListVersion 单调自增；Renderer 端做 reconcile；
+ *  - 整对象 snapshot 走独立 `task:plan-list-snapshot` 通道，仅用于落后兜底，
+ *    避免与 patch 队列交叉。两种 channel 不互相替代。
+ * ============================================================ */
+
+const planListVersionByTask = new Map<string, number>()
+
+/** 取得某 task 的当前 planListVersion（从未推过则返回 0）。 */
+export function getPlanListVersion(taskId: string): number {
+  return planListVersionByTask.get(taskId) ?? 0
+}
+
+/**
+ * v0.18.0：推送单条 / 多条 planItem 状态变更（Main → Renderer）。
+ *
+ * 职责：
+ *  - 维护单 task 的 planListVersion +1；
+ *  - 通过 `broadcast` 推 `task:plan-item-status-changed` 给所有 webContents；
+ *  - **不**走整对象 `broadcastTaskStatus` 通道，避免重复 payload 与双通路不一致。
+ *
+ * @param taskId   任务 ID
+ * @param items    变更项列表（每项含 planItemId / index / fromStatus / status / source / reason / ts_iteration）
+ * @returns        推完的 planListVersion；items 为空数组则仅返回当前版本号，不广播
+ *
+ * 注意：调用方应在更新完 `task.planItems` + `updateTask` 持久化后再调用本函数；
+ * 否则 patch 推过去而落盘失败会形成"内存有、磁盘无"的不一致。
+ */
+export function broadcastPlanItemStatus(
+  taskId: string,
+  items: Array<{
+    planItemId: string
+    index: number
+    fromStatus: PlanItemStatus
+    status: PlanItemStatus
+    source: PlanItemSource
+    reason?: string
+    ts_iteration?: number
+  }>,
+): number {
+  const version = (planListVersionByTask.get(taskId) ?? 0) + 1
+  planListVersionByTask.set(taskId, version)
+  if (items.length === 0) return version
+  const payload: PlanItemStatusChanged = {
+    taskId,
+    planItemId: items[0]!.planItemId,
+    index: items[0]!.index,
+    fromStatus: items[0]!.fromStatus,
+    status: items[0]!.status,
+    source: items[0]!.source,
+    reason: items[0]!.reason,
+    version,
+    ts: Date.now(),
+    ts_iteration: items[0]!.ts_iteration,
+  }
+  try {
+    // 注：v0.18.0 现阶段 payload 携带 items[0] 单条；批量多 decisions 通过
+    // 循环 N 次 broadcastPlanItemStatus 串行推，避免 Renderer 端按 index 拆分的复杂度。
+    broadcast('task:plan-item-status-changed', payload)
+    // 引擎决策日志（开发/生产都可观测；F9 验证 grep 命中）
+    if (items[0]!.source.startsWith('engine-')) {
+      logger.info(
+        'Agent',
+        `[engine-decide-plan] task=${taskId} idx=${items[0]!.index} from=${items[0]!.fromStatus} to=${items[0]!.status} source=${items[0]!.source}`,
+        taskId,
+      )
+    }
+    if (items.length > 1) {
+      // 多条决策：串行递归（version 单调 +1）
+      const rest = items.slice(1)
+      const nextVersion = broadcastPlanItemStatus(taskId, rest)
+      // 递归后覆盖本次返回值（让最外层 caller 拿到的是最终 version）
+      return nextVersion
+    }
+  } catch (err) {
+    logger.warn('Agent', `broadcastPlanItemStatus failed (silent): ${(err as Error).message}`)
+  }
+  return version
+}
+
+/**
+ * v0.18.0：推送 planItems 整对象快照（Main → Renderer）。
+ *
+ * 与 patch 通道分开，避免 patch 队列与 snapshot 队列交叉。
+ * 触发场景：
+ *  - plan-regen（plan 全量重新生成）：来源 = plan-regen；
+ *  - Renderer 通过 fetchPlanItemList 主动拉取后由 IPC handler 内部调用此函数广播；
+ *  - 未来 P1：Renderer 检测到 patch.version 落后差距 ≥ 5 时自动 fallback。
+ *
+ * @param taskId     任务 ID
+ * @param planItems  完整 PlanItem 列表（已按 index 排序）
+ * @param source     触发源（默认 'plan-regen'）
+ * @returns          推完的 planListVersion
+ */
+export function broadcastPlanListSnapshot(
+  taskId: string,
+  planItems: PlanItem[],
+  source: PlanItemSource = 'plan-regen',
+): number {
+  const version = (planListVersionByTask.get(taskId) ?? 0) + 1
+  planListVersionByTask.set(taskId, version)
+  const payload: PlanItemListSnapshotPayload = {
+    taskId,
+    planItems,
+    version,
+    ts: Date.now(),
+  }
+  try {
+    broadcast('task:plan-list-snapshot', payload)
+    logger.info(
+      'Agent',
+      `[plan-snapshot] task=${taskId} items=${planItems.length} version=${version} source=${source}`,
+      taskId,
+    )
+  } catch (err) {
+    logger.warn('Agent', `broadcastPlanListSnapshot failed (silent): ${(err as Error).message}`)
+  }
+  return version
 }

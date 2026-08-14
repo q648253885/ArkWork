@@ -51,6 +51,18 @@ const ark: ArkApi = {
       ipcRenderer.on('task:plan-item-status-changed', handler)
       return () => ipcRenderer.removeListener('task:plan-item-status-changed', handler)
     },
+    /** v0.18.0：planItems 整对象快照（落后兜底专用） */
+    onPlanItemListSnapshot: (cb) => {
+      const handler = (_e: IpcRendererEvent, payload: Parameters<typeof cb>[0]) => cb(payload)
+      ipcRenderer.on('task:plan-list-snapshot', handler)
+      return () => ipcRenderer.removeListener('task:plan-list-snapshot', handler)
+    },
+    /** v0.18.0：用户在 TodoPanel 行手动切状态 */
+    cancelPlanItem: (payload) => ipcRenderer.invoke('task:plan-item-cancel', payload),
+    retryPlanItem: (payload) => ipcRenderer.invoke('task:plan-item-retry', payload),
+    markDonePlanItem: (payload) => ipcRenderer.invoke('task:plan-item-mark-done', payload),
+    /** v0.18.0：Renderer 主动拉取 planItems（patch 落后兜底） */
+    fetchPlanItemList: (taskId) => ipcRenderer.invoke('task:plan-list-snapshot', taskId),
     // Task 9：进度摘要持久化（覆盖式写入 / 启动时一次性加载）
     progressSave: (payload) => ipcRenderer.invoke('task:progress-save', payload),
     progressLoad: () => ipcRenderer.invoke('task:progress-load'),

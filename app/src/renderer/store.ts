@@ -43,6 +43,23 @@ import { shortTaskId, formatUpdatedAt } from './types'
 import { simplifyFirstLine } from './utils/title'
 
 /* ============================================================
+ * v0.18.0 (03 §5)：Optimistic UI 2s TTL
+ * markPlanItemOptimistic 启动定时器；超时未收到 patch 回执则
+ * reject（Toast + 回滚，不卡死）。commit / reject 时清除。
+ * ============================================================ */
+const OPTIMISTIC_TTL_MS = 2000
+const optimisticTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function clearOptimisticTimer(taskId: string, planItemId: string): void {
+  const key = `${taskId}:${planItemId}`
+  const timer = optimisticTimers.get(key)
+  if (timer) {
+    clearTimeout(timer)
+    optimisticTimers.delete(key)
+  }
+}
+
+/* ============================================================
  * friendlyError — 把后端/网络原始错误转译为用户可读文案（X4）
  * 规则：先匹配已知模式，未命中则返回原文（保留可调试性）
  *
@@ -788,6 +805,24 @@ interface AppState {
   tasks: Task[]
   selectedTaskId: string | null
   selectedTask: Task | null
+  // ---- v0.18.0：planItem Optimistic overlay ----
+  /**
+   * 用户手动切状态后尚未 ack 的状态覆盖。
+   *  - key 1：taskId；key 2：planItemId
+   *  - value：{ targetStatus, submittedTs, clientVersion? }
+   * 渲染优先级：optimisticOverlay > task.planItems[i].status > 'pending'
+   */
+  optimisticOverlay: Record<string, Record<string, { targetStatus: import('@shared/types/task').PlanItemStatus; submittedTs: number; clientVersion?: number }>>
+  /** v0.18.0：每 task 的 planListVersion（Main 端 patch/snapshot 同步推进） */
+  planListVersion: Record<string, number>
+  /** v0.18.0：用户在 TodoPanel 触发的动作（行级 inFlight 角标显示） */
+  planItemInFlight: Record<string, Record<string, 'submitted' | 'rejected'>>
+  /** v0.18.0：写入 Optimistic + 立即本地生效；返回 clientVersion 预测值（后续 reconcile 用） */
+  markPlanItemOptimistic: (taskId: string, planItemId: string, targetStatus: import('@shared/types/task').PlanItemStatus) => number
+  /** v0.18.0：Main 端 patch 回执 ack（删除 optimistic，角标消失） */
+  commitPlanItemOptimistic: (taskId: string, planItemId: string) => void
+  /** v0.18.0：Main 端拒绝回执（回滚 + 弹 Toast） */
+  rejectPlanItemOptimistic: (taskId: string, planItemId: string, reason: string) => void
   /** v0.15.x：ask_user 暂停态展示的 Agent 问题全文（非 ask_user 暂停时为 null） */
   askUserQuestion: string | null
   /**
@@ -1493,6 +1528,78 @@ export const useStore = create<AppState>((set, get) => ({
   tasks: [],
   selectedTaskId: null,
   selectedTask: null,
+  // v0.18.0：optimistic overlay（用户手动切状态后立即本地生效，patch 回执 reconcile）
+  optimisticOverlay: {},
+  planListVersion: {},
+  planItemInFlight: {},
+  markPlanItemOptimistic: (taskId, planItemId, targetStatus) => {
+    const current = get().planListVersion[taskId] ?? 0
+    // 客户端预测：patch 到达后 version 必然 = current + 1；用 clientVersion 标乐观版本
+    const clientVersion = current + 1
+    set((s) => ({
+      optimisticOverlay: {
+        ...s.optimisticOverlay,
+        [taskId]: {
+          ...(s.optimisticOverlay[taskId] ?? {}),
+          [planItemId]: { targetStatus, submittedTs: Date.now(), clientVersion },
+        },
+      },
+      planItemInFlight: {
+        ...s.planItemInFlight,
+        [taskId]: { ...(s.planItemInFlight[taskId] ?? {}), [planItemId]: 'submitted' },
+      },
+    }))
+    // v0.18.0 (03 §5)：2s TTL 兜底 —— 超时仍未收到 patch 回执则回滚 + Toast
+    const key = `${taskId}:${planItemId}`
+    const existing = optimisticTimers.get(key)
+    if (existing) clearTimeout(existing)
+    optimisticTimers.set(
+      key,
+      setTimeout(() => {
+        optimisticTimers.delete(key)
+        const s = get()
+        // 仍处于 submitted（未被 commit / reject）才回滚，避免与正常 patch 竞态
+        if (s.planItemInFlight[taskId]?.[planItemId] === 'submitted') {
+          s.rejectPlanItemOptimistic(taskId, planItemId, '请求超时（2s 未收到回执），已回滚')
+        }
+      }, OPTIMISTIC_TTL_MS),
+    )
+    return clientVersion
+  },
+  commitPlanItemOptimistic: (taskId, planItemId) => {
+    clearOptimisticTimer(taskId, planItemId)
+    set((s) => {
+      const next = { ...(s.optimisticOverlay[taskId] ?? {}) }
+      delete next[planItemId]
+      const nextFlight = { ...(s.planItemInFlight[taskId] ?? {}) }
+      delete nextFlight[planItemId]
+      return {
+        optimisticOverlay: { ...s.optimisticOverlay, [taskId]: next },
+        planItemInFlight: { ...s.planItemInFlight, [taskId]: nextFlight },
+      }
+    })
+  },
+  rejectPlanItemOptimistic: (taskId, planItemId, reason) => {
+    clearOptimisticTimer(taskId, planItemId)
+    set((s) => {
+      const next = { ...(s.optimisticOverlay[taskId] ?? {}) }
+      delete next[planItemId]
+      const nextFlight = { ...(s.planItemInFlight[taskId] ?? {}) }
+      delete nextFlight[planItemId]
+      return {
+        optimisticOverlay: { ...s.optimisticOverlay, [taskId]: next },
+        planItemInFlight: { ...s.planItemInFlight, [taskId]: nextFlight },
+      }
+    })
+    // 弹 Toast 提示拒绝原因（不阻塞 UI）
+    const toastId = get().pushToast({
+      type: 'warning',
+      level: 'critical',
+      message: `清单操作被拒绝：${reason}`,
+      duration: 4000,
+    })
+    void toastId
+  },
   askUserQuestion: null,
   // Task 4：建议优先的任务交互 — 建议卡片状态
   suggestions: [],
@@ -1513,6 +1620,23 @@ export const useStore = create<AppState>((set, get) => ({
     ])
     // 重新计算 conversation（v0.4.0-rev5：传入 memory 以显示 L1 中的 user_message）
     set((s) => ({ conversation: deriveConversation(task, s.steps, s.memory) }))
+    // v0.18.0 F2：切换任务时主动拉取一次 planItems 整对象（防止长时间挂起后 patch 队列堆积）
+    try {
+      const planItems = await ark.task.fetchPlanItemList(id)
+      const current = get().planListVersion[id] ?? 0
+      if (planItems && planItems.length >= 0) {
+        set((s) => ({
+          tasks: s.tasks.map((t) => (t.id === id ? { ...t, planItems } : t)),
+          // 注意：fetchPlanItemList 不返回 version，仅作为 hydrate；后续 patch 仍以 push 为准
+          optimisticOverlay: { ...s.optimisticOverlay, [id]: {} },
+          planItemInFlight: { ...s.planItemInFlight, [id]: {} },
+        }))
+      }
+      void current
+    } catch (err) {
+      // 静默忽略：hydrate 失败不影响主链路；后续 patch 仍能推进
+      void err
+    }
   },
   refreshTasks: async () => {
     try {
@@ -2939,25 +3063,77 @@ export const useStore = create<AppState>((set, get) => ({
       }),
     )
 
-    // v0.14.0 Task 8：PlanItem 六态变更（Main → Renderer 推送）。
-    // 命中任务时原地更新 planItems 对应项 status/updatedAt，
-    // Sidebar 任务行 / Inspector 清单 Tab / 对话流 PlanMessage 三视图同源刷新。
+    // v0.18.0 F1：PlanItem 六态变更（Main → Renderer 推送）。
+    // 单条 patch 落地：原地更新 planItems 对应项 status / source / updatedAt；
+    // 同时推进 planListVersion；命中当前 task 的 optimistic 项则 commit（删除乐观覆盖）。
+    // Sidebar 任务行 / TodoPanel / 对话流 PlanMessage 三视图同源刷新（G3 保证）。
     unsubs.push(
       ark.task.onPlanItemStatusChanged((payload: PlanItemStatusChanged) => {
-        set((s) => ({
-          tasks: s.tasks.map((t) =>
-            t.id === payload.taskId && t.planItems
-              ? {
-                  ...t,
-                  planItems: t.planItems.map((p) =>
-                    p.id === payload.planItemId
-                      ? { ...p, status: payload.status, updatedAt: payload.ts }
-                      : p,
-                  ),
-                }
-              : t,
-          ),
-        }))
+        set((s) => {
+          // 1. 推进 version
+          const nextVersions = { ...s.planListVersion }
+          const prevVersion = nextVersions[payload.taskId] ?? 0
+          if (payload.version > prevVersion) {
+            nextVersions[payload.taskId] = payload.version
+          }
+          // 2. 更新 planItems（按 planItemId 寻址，老字段 index 兜底）
+          const nextTasks = s.tasks.map((t) => {
+            if (t.id !== payload.taskId) return t
+            const items = t.planItems ? [...t.planItems] : []
+            const idx =
+              items.findIndex((p) => p.id === payload.planItemId) >= 0
+                ? items.findIndex((p) => p.id === payload.planItemId)
+                : payload.index
+            if (idx < 0 || idx >= items.length) return t
+            items[idx] = {
+              ...items[idx]!,
+              status: payload.status,
+              source: payload.source,
+              updatedAt: payload.ts,
+              ...(payload.status === 'done' || payload.status === 'failed' || payload.status === 'cancelled' || payload.status === 'skipped'
+                ? { completedAt: payload.ts }
+                : {}),
+            }
+            return { ...t, planItems: items }
+          })
+          // 3. Optimistic reconcile：若命中正在等待的 planItemId，commit
+          const overlay = { ...(s.optimisticOverlay[payload.taskId] ?? {}) }
+          const flight = { ...(s.planItemInFlight[payload.taskId] ?? {}) }
+          if (overlay[payload.planItemId]) {
+            delete overlay[payload.planItemId]
+            delete flight[payload.planItemId]
+          }
+          return {
+            tasks: nextTasks,
+            planListVersion: nextVersions,
+            optimisticOverlay: { ...s.optimisticOverlay, [payload.taskId]: overlay },
+            planItemInFlight: { ...s.planItemInFlight, [payload.taskId]: flight },
+          }
+        })
+      }),
+    )
+
+    // v0.18.0 F2/F11：planItems 整对象快照（Main → Renderer）。
+    // 触发场景：plan-regen 后；patch 落后差距 ≥ 5 时 Renderer 主动 invoke 后回推。
+    // 行为：整 planItems 覆盖 + 推进 version；clear 当前 task 的 optimistic（整对象有更高优先级）。
+    unsubs.push(
+      ark.task.onPlanItemListSnapshot((payload) => {
+        set((s) => {
+          const nextVersions = { ...s.planListVersion }
+          const prevVersion = nextVersions[payload.taskId] ?? 0
+          if (payload.version > prevVersion) {
+            nextVersions[payload.taskId] = payload.version
+          }
+          const nextTasks = s.tasks.map((t) =>
+            t.id === payload.taskId ? { ...t, planItems: payload.planItems } : t,
+          )
+          return {
+            tasks: nextTasks,
+            planListVersion: nextVersions,
+            optimisticOverlay: { ...s.optimisticOverlay, [payload.taskId]: {} },
+            planItemInFlight: { ...s.planItemInFlight, [payload.taskId]: {} },
+          }
+        })
       }),
     )
 

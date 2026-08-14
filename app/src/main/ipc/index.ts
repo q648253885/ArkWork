@@ -24,6 +24,7 @@ import { registerBugfixHandlers } from './bugfix.js'
 import { registerPermissionHandlers } from './permission.js'
 import { registerContextHandlers } from './context.js'
 import { registerProgressHandlers } from './progress.js'
+import { registerPlanItemHandlers } from './plan-items.js'
 import { logger } from '../system/logger.js'
 
 export function registerIpcHandlers(): void {
@@ -54,6 +55,9 @@ export function registerIpcHandlers(): void {
   registerContextHandlers()
   // Task 9：任务侧边栏进度摘要持久化
   registerProgressHandlers()
+
+  // v0.18.0：planItem 用户手动切状态 + planItems 快照兜底
+  registerPlanItemHandlers()
 
   logger.info('System', 'IPC handlers registered')
 }

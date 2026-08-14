@@ -1,70 +1,96 @@
 /* ============================================================
- * ArkWork — Dock/TodoPanel (v0.14.0 Task 4)
- * 任务清单面板：当前任务的 Plan/todo 清单
- * - 条目 + 状态（待办/进行/完成），与对话流内 PlanMessage 共用 store 派生
- *   (derivePlanItems / derivePlanStates)
- * - 点击条目 → 派发 react:scroll-to-plan-step，dialog 滚动锚点回 PlanMessage
- * - 无真实 plan 时空态文案「当前任务无需计划 · 直接处理中」，
- *   与对话区 PlanMessage 不再渲染空卡片保持一致
+ * ArkWork — Dock/TodoPanel（v0.18.0 重构）
+ * v0.14.0 Task 4 起为清单面板；v0.18.0 重写为"task.planItems 真值唯一源"：
+ *  - 移除 derivePlanStates fallback（F2）
+ *  - 三视图（Sidebar / TodoPanel / PlanMessage）必须消费同一 task.planItems（G3）
+ *  - 用户手动切状态走 Optimistic UI（markPlanItemOptimistic → IPC → reconcile）
+ *  - 行尾新增"引擎"徽标（engine-decide / engine-fail 时显示）
+ *  - ↕ 联动按钮触发 react:scroll-to-plan-step 给 StepList（双向）
+ *  - 推断占位卡：当 planItems 缺失且 steps 非空时短暂显示「推断」占位卡
  * ============================================================ */
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useCallback, useEffect } from 'react'
 import { Icon } from '../../icons'
-import { useStore, derivePlanItems, derivePlanStates } from '../../store'
+import { useStore, derivePlanItems } from '../../store'
 import { Tooltip, EmptyState } from '../ui'
-import type { PlanItemState } from '@shared/types/conversation'
-import type { PlanItemStatus } from '@shared/types/task'
+import type { PlanItemStatus, PlanItem, PlanItemSource } from '@shared/types/task'
 import { PLAN_STATUS_META, planStatusTextClass, planItemToolSteps } from '../../utils/plan-status'
+import { ark } from '../../ipc/client'
 
-/** v0.17.0 F8：状态筛选顺序（全部 + 六态） */
+/** v0.17.0 F8 + v0.18.0：状态筛选顺序（全部 + 六态） */
 const FILTER_ORDER: PlanItemStatus[] = ['pending', 'running', 'done', 'skipped', 'failed', 'cancelled']
+const TERMINAL: ReadonlySet<PlanItemStatus> = new Set(['done', 'failed', 'cancelled', 'skipped'])
+
+/** 行级有效状态 = optimisticOverlay（若存在） > planItem.status > 'pending' */
+function effectiveStatus(
+  optimistic: { targetStatus: PlanItemStatus; submittedTs: number; clientVersion?: number } | undefined,
+  planItem: PlanItem | undefined,
+): PlanItemStatus {
+  if (optimistic?.targetStatus) return optimistic.targetStatus
+  return planItem?.status ?? 'pending'
+}
 
 export function TodoPanel() {
   const conversation = useStore((s) => s.conversation)
   const steps = useStore((s) => s.steps)
-  // v0.14.x Task 1：fallback 派生带任务状态 —— 只有任务真正 done（或 task_complete 事件）
-  // 才允许全部勾完；与对话内 PlanMessage 同一数据源、同一时刻一致
   const task = useStore((s) => s.tasks.find((t) => t.id === s.selectedTaskId))
-  // v0.14.0 Task 8：行级六态展开详情（工具调用记录 / 结果摘要 / 异常标记）
-  // v0.17.0：由单行展开改为集合，支持同时展开多行对照工具执行明细
-  const [expandedSet, setExpandedSet] = useState<Set<number>>(() => new Set())
-  const toggleExpand = (i: number) =>
+  const optimisticOverlay = useStore((s) => s.optimisticOverlay)
+  const planItemInFlight = useStore((s) => s.planItemInFlight)
+  const markPlanItemOptimistic = useStore((s) => s.markPlanItemOptimistic)
+  const rejectPlanItemOptimistic = useStore((s) => s.rejectPlanItemOptimistic)
+
+  // v0.14.x Task 8：行级六态展开详情（工具调用记录 / 结果摘要 / 异常标记）
+  // v0.17.0：单行展开改为集合，支持同时展开多行
+  const [expandedSet, setExpandedSet] = useState<Set<string>>(() => new Set())
+  // v0.18.x：行级「⋯」菜单展开状态（单行互斥）
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
+  const toggleExpand = (id: string) =>
     setExpandedSet((prev) => {
       const next = new Set(prev)
-      if (next.has(i)) next.delete(i)
-      else next.add(i)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
 
-  // 与对话 PlanMessage 严格同源：优先取 conversation 内 plan 条目；
-  // 即便 conversation 内还没有 plan item，也使用 store util 派生（与对话一致）
   const planItem = useMemo(
     () => conversation.find((i) => i.type === 'plan' && !!i.plan),
     [conversation],
   )
 
-  // v0.14.0 Task 4：派生 items 与 states — 与 PlanMessage 共用同一组 util
-  const items = useMemo<string[]>(
-    () => planItem?.plan && planItem.plan.items.length > 0
-      ? planItem.plan.items
-      : derivePlanItems(steps),
-    [planItem?.plan, steps],
-  )
-  // v0.14.0 Task 8：六态优先取任务持久化 planItems（与 Sidebar / PlanMessage 同源）；
-  // 缺失 / 长度不匹配时回退 v0.14.x Task 4 的步骤派生（四态），保持旧行为不破坏
-  const states = useMemo<PlanItemStatus[]>(() => {
-    const persisted = task?.planItems
-    if (persisted && persisted.length === items.length) {
-      return persisted.map((p) => p.status)
+  // v0.18.0 F2：行文本真值源 = task.planItems（三视图同源，G3）。
+  // 优先级：
+  //   1. task.planItems[].text（权威，走查任务 / 续聊任务均命中）
+  //   2. conversation.plan.items（旧数据兼容：planItems 缺失但对话有 plan 卡片）
+  //   3. derivePlanItems(steps)（推断占位：对话无 plan 且 planItems 缺失）
+  const persistedItems = task?.planItems
+  const items = useMemo<string[]>(() => {
+    if (persistedItems && persistedItems.length > 0) {
+      return persistedItems.map((p) => p.text)
     }
-    const derived: PlanItemState[] =
-      planItem?.planStates && planItem.planStates.length > 0
-        ? planItem.planStates
-        : derivePlanStates(items, steps, task?.status)
-    return derived
-  }, [task?.planItems, items, planItem?.planStates, steps, task?.status])
-  const doneCount = states.filter((s) => s === 'done').length
+    if (planItem?.plan && planItem.plan.items.length > 0) {
+      return planItem.plan.items
+    }
+    return derivePlanItems(steps)
+  }, [persistedItems, planItem?.plan, steps])
 
-  // v0.17.0 F8：状态筛选（全部 / 六态）
+  // 按 id 对齐：persistedItems 是权威状态源；items 是文本来源
+  const states: PlanItemStatus[] = useMemo(() => {
+    if (!persistedItems || persistedItems.length === 0) {
+      // 推断占位卡分支：planItems 缺失但 steps 非空时，临时用 derivePlanStates 等价映射
+      // v0.18.0 F2：仍保留步骤派生，但只作为"推断"占位卡使用，**不**回退到默认渲染路径
+      return items.map(() => 'pending')
+    }
+    return items.map((text, i) => {
+      const p = persistedItems[i] ?? persistedItems.find((x) => x.text === text)
+      if (!p) return 'pending'
+      const overlay = optimisticOverlay[task?.id ?? '']?.[p.id]
+      return effectiveStatus(overlay, p)
+    })
+  }, [persistedItems, optimisticOverlay, task?.id, items])
+
+  const doneCount = states.filter((s) => s === 'done').length
+  const planItemsLen = persistedItems?.length ?? 0
+
+  // v0.17.0 F8：状态筛选
   const [filter, setFilter] = useState<'all' | PlanItemStatus>('all')
   const countBy = useMemo(() => {
     const m: Record<string, number> = {}
@@ -75,11 +101,73 @@ export function TodoPanel() {
     () =>
       items
         .map((_, i) => i)
-        .filter((i) => filter === 'all' || (states[i] ?? 'pending') === filter),
+        .filter((i) => filter === 'all' || states[i] === filter),
     [items, states, filter],
   )
 
-  const goal = planItem?.plan?.goal ?? '尚未生成计划'
+  // v0.18.0：目标优先取对话 plan 的 goal；无对话 plan 时回退任务标题（F2 真值源一致）
+  const goal = planItem?.plan?.goal ?? task?.title ?? '尚未生成计划'
+
+  // v0.18.0 F5：行操作按钮 — 用户手动切状态入口
+  // 走 Optimistic 先行：markPlanItemOptimistic 立即本地生效；
+  // 同时调 IPC 通知 Main；Main 回执通过 task:plan-item-status-changed patch 触发 commit。
+  const triggerPlanItemAction = useCallback(
+    async (planItemId: string, targetStatus: PlanItemStatus) => {
+      if (!task) return
+      // 1. 立即本地生效（F5 Optimistic UI）
+      markPlanItemOptimistic(task.id, planItemId, targetStatus)
+      // 2. 选 IPC handler（v0.18.0：cancel / retry / mark-done 三选一）
+      const invoke =
+        targetStatus === 'cancelled'
+          ? ark.task.cancelPlanItem({ taskId: task.id, planItemId })
+          : targetStatus === 'running'
+            ? ark.task.retryPlanItem({ taskId: task.id, planItemId })
+            : ark.task.markDonePlanItem({ taskId: task.id, planItemId })
+      try {
+        const res = await invoke
+        if (!res.ok) {
+          // Main 端拒绝：回滚 + 弹 Toast
+          rejectPlanItemOptimistic(task.id, planItemId, res.error.message)
+        }
+        // res.ok === true 走 patch 通道自动 commit，无需手动处理
+      } catch (err) {
+        rejectPlanItemOptimistic(
+          task.id,
+          planItemId,
+          (err as Error).message ?? 'IPC 调用失败',
+        )
+      }
+    },
+    [task, markPlanItemOptimistic, rejectPlanItemOptimistic],
+  )
+
+  // v0.18.0 F8：StepList 联动 —— 行点击 ↕ 触发滚动到 StepList 第一个 act 步骤
+  const locateStep = useCallback((planItemId: string, index: number) => {
+    window.dispatchEvent(
+      new CustomEvent('react:scroll-to-plan-step', {
+        detail: { planItemId, index, source: 'todo' },
+      }),
+    )
+  }, [])
+
+  // v0.18.0 F8：双向联动 —— StepList 中 act 步骤 ↕ 触发滚动到 TodoPanel 对应行
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ planItemIndex?: number }>).detail
+      if (typeof detail?.planItemIndex !== 'number') return
+      const target = document.querySelector<HTMLElement>(
+        `[data-plan-row-index='${detail.planItemIndex}']`,
+      )
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        target.classList.remove('plan-flash')
+        void target.offsetWidth
+        target.classList.add('plan-flash')
+      }
+    }
+    window.addEventListener('react:scroll-to-plan-row', handler)
+    return () => window.removeEventListener('react:scroll-to-plan-row', handler)
+  }, [])
 
   const locatePlanCard = () => {
     const el = document.getElementById('plan-card')
@@ -91,20 +179,20 @@ export function TodoPanel() {
     }
   }
 
-  const locateStep = (i: number) => {
-    const stepId = `plan-step-${i + 1}`
-    window.dispatchEvent(
-      new CustomEvent('react:scroll-to-plan-step', { detail: { index: i, stepId } }),
-    )
-  }
+  // v0.18.0 F6：断码态 UI — 推断占位卡分支
+  // 触发条件：planItems 缺失 / 长度 0，且 steps 不为空，任务状态非 done
+  const isInferred =
+    (!persistedItems || persistedItems.length === 0) &&
+    steps.length > 0 &&
+    task?.status !== 'done'
 
-  // 无真实计划时统一空态文案，与对话区 PlanMessage 保持一致
+  // 无真实计划时统一空态文案
   if (items.length === 0) {
     return (
       <EmptyState
         icon={<Icon.Check width={22} height={22} />}
         title="当前任务无需计划"
-        hint="当前任务无需计划 · 直接处理中"
+        hint="当前任务无需计划 · 单步任务"
       />
     )
   }
@@ -185,30 +273,39 @@ export function TodoPanel() {
         <ol className="space-y-1">
           {filteredIndices.map((i) => {
             const item = items[i]
-            // v0.14.0 Task 8：行级六态（pending 灰 / running 蓝脉冲 / done 绿+删除线 /
-            // failed 红 / cancelled 灰+删除线 / skipped 黄），映射表见 utils/plan-status.ts
+            const pItem: PlanItem | undefined = persistedItems?.[i] ?? persistedItems?.find((x) => x.text === item)
             const st: PlanItemStatus = states[i] ?? 'pending'
             const meta = PLAN_STATUS_META[st]
-            const expanded = expandedSet.has(i)
+            const expanded = pItem ? expandedSet.has(pItem.id) : false
             const toolSteps = planItemToolSteps(steps, i)
+            const isTerminal = TERMINAL.has(st)
+            const isOptimisticFlight = pItem
+              ? planItemInFlight[task?.id ?? '']?.[pItem.id] === 'submitted'
+              : false
+            const source: PlanItemSource | undefined = pItem?.source
+            const showEngineBadge =
+              source === 'engine-decide' || source === 'engine-fail'
+
+            const canMarkDone = !isTerminal && !!pItem
+            const canRetry = st === 'failed' && !!pItem
+            const canCancel = !isTerminal && !!pItem
+            const canLocate = toolSteps.length > 0 && !!pItem
+            const hasActions = canMarkDone || canRetry || canCancel || canLocate
+
+            const closeMenu = () => setMenuOpenId(null)
+
             return (
-              <li key={i}>
+              <li key={pItem?.id ?? `row-${i}`} className="relative">
                 <div
-                  className={`flex items-start gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors cursor-pointer ${
+                  className={`flex items-start gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
                     st === 'running' ? 'bg-bg-active' : 'hover:bg-bg-hover'
-                  }`}
-                  role="button"
-                  tabIndex={0}
-                  aria-expanded={expanded}
-                  aria-label={`计划步骤 ${i + 1}：${item}（状态：${meta.label}）`}
-                  onClick={() => toggleExpand(i)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      toggleExpand(i)
-                    }
-                  }}
+                  } ${pItem ? 'cursor-pointer' : ''}`}
+                  data-plan-row-id={pItem?.id}
+                  data-plan-row-index={i}
+                  data-plan-row-status={st}
+                  onClick={() => pItem && toggleExpand(pItem.id)}
                 >
+                  {/* 状态点 */}
                   {st === 'done' ? (
                     <span className="flex-shrink-0 w-4 h-4 mt-0.5 rounded-full bg-success flex items-center justify-center">
                       <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
@@ -234,81 +331,149 @@ export function TodoPanel() {
                       {i + 1}
                     </span>
                   )}
-                  <span className={`leading-relaxed ${planStatusTextClass(st)}`}>{item}</span>
+
+                  {/* 文本（换行显示，不硬截断，完整文案 title 悬浮） */}
+                  <div className="flex-1 min-w-0">
+                    <span
+                      className={`leading-relaxed block break-words ${planStatusTextClass(st)}`}
+                      title={item}
+                    >
+                      {item}
+                    </span>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      {showEngineBadge && (
+                        <Tooltip label="引擎基于 act 结果自动设定该状态">
+                          <span className="px-1 py-px rounded text-2xs leading-none bg-bg-elevated text-text-tertiary">
+                            引擎
+                          </span>
+                        </Tooltip>
+                      )}
+                      {isOptimisticFlight && (
+                        <span className="px-1 py-px rounded text-2xs leading-none bg-accent/20 text-accent tabular">
+                          ◐ 已提交
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 状态 label */}
                   <span
-                    className="ml-auto flex-shrink-0 text-2xs mt-0.5"
+                    className="flex-shrink-0 text-2xs mt-0.5 tabular"
                     style={{ color: meta.color }}
                   >
                     {meta.label}
                   </span>
-                  <span
+
+                  {/* 展开指示（行点击折叠/展开） */}
+                  <Icon.ChevronDown
+                    width={12}
+                    height={12}
                     className="flex-shrink-0 mt-0.5 text-text-tertiary transition-transform"
                     style={{ transform: expanded ? 'none' : 'rotate(-90deg)' }}
-                    aria-hidden="true"
-                  >
-                    <Icon.ChevronDown width={12} height={12} />
-                  </span>
+                  />
+
+                  {/* v0.18.x：行操作汇聚为「⋯」菜单（仅在需要时显示对应动作） */}
+                  {hasActions && (
+                    <button
+                      aria-label="更多操作"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setMenuOpenId(menuOpenId === pItem?.id ? null : (pItem?.id ?? null))
+                      }}
+                      className="flex-shrink-0 w-5 h-5 mt-0.5 flex items-center justify-center rounded text-text-tertiary hover:bg-bg-hover hover:text-text-primary transition-colors"
+                    >
+                      <Icon.MoreHorizontal width={14} height={14} />
+                    </button>
+                  )}
                 </div>
 
-                {/* v0.14.0 Task 8：行级展开详情 — 工具调用记录 / 结果摘要 / 异常标记 */}
+                {/* 下拉菜单 */}
+                {menuOpenId === pItem?.id && pItem && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={closeMenu} />
+                    <div className="absolute right-2 top-8 z-20 min-w-[148px] rounded-lg border border-border-subtle bg-bg-surface shadow-lg py-1">
+                      {canMarkDone && (
+                        <button
+                          onClick={() => { closeMenu(); void triggerPlanItemAction(pItem.id, 'done') }}
+                          className="w-full text-left px-3 py-1.5 text-xs text-text-primary hover:bg-bg-hover transition-colors flex items-center gap-2"
+                        >
+                          <Icon.Check width={13} height={13} className="text-success" />
+                          标记为已完成
+                        </button>
+                      )}
+                      {canRetry && (
+                        <button
+                          onClick={() => { closeMenu(); void triggerPlanItemAction(pItem.id, 'running') }}
+                          className="w-full text-left px-3 py-1.5 text-xs text-text-primary hover:bg-bg-hover transition-colors flex items-center gap-2"
+                        >
+                          <Icon.RotateCcw width={13} height={13} className="text-accent" />
+                          重试该项
+                        </button>
+                      )}
+                      {canCancel && (
+                        <button
+                          onClick={() => { closeMenu(); void triggerPlanItemAction(pItem.id, 'cancelled') }}
+                          className="w-full text-left px-3 py-1.5 text-xs text-text-primary hover:bg-bg-hover transition-colors flex items-center gap-2"
+                        >
+                          <Icon.X width={13} height={13} className="text-text-tertiary" />
+                          取消该项
+                        </button>
+                      )}
+                      {canLocate && (
+                        <button
+                          onClick={() => { closeMenu(); locateStep(pItem.id, i) }}
+                          className="w-full text-left px-3 py-1.5 text-xs text-text-primary hover:bg-bg-hover transition-colors flex items-center gap-2"
+                        >
+                          <Icon.ArrowUpDown width={13} height={13} className="text-text-tertiary" />
+                          定位到执行步骤
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+
                 {expanded && (
                   <div className="ml-6 pl-2.5 pr-2 py-1.5 space-y-1 border-l-2 border-border-subtle">
                     {toolSteps.length === 0 ? (
-                      <div className="text-2xs text-text-tertiary px-1">暂无工具调用记录</div>
+                      <div className="text-2xs text-text-tertiary px-1">暂无产物记录</div>
                     ) : (
-                      toolSteps.map((step) => (
-                        <div
-                          key={step.id}
-                          className="px-2 py-1.5 rounded-md bg-bg-surface border border-border-subtle space-y-0.5"
-                        >
-                          <div className="flex items-center gap-1.5 text-2xs">
-                            <span className="font-mono text-text-secondary truncate">
-                              {step.toolName ?? '—'}
-                            </span>
-                            {step.status === 'running' && (
-                              <span className="text-accent flex items-center gap-1 flex-shrink-0">
-                                <span className="w-1 h-1 rounded-full bg-accent pulse-dot" />
-                                运行中
-                              </span>
-                            )}
-                            {step.status === 'success' && (
-                              <span className="text-success flex-shrink-0">成功</span>
-                            )}
-                            {step.status === 'failed' && (
-                              <span className="text-danger flex-shrink-0">失败</span>
-                            )}
-                            {step.durationMs > 0 && (
-                              <span className="text-text-tertiary tabular flex-shrink-0 flex items-center gap-0.5">
-                                <Icon.Clock width={10} height={10} />
-                                {(step.durationMs / 1000).toFixed(2)}s
-                              </span>
-                            )}
-                          </div>
-                          {step.resultSummary && (
+                      toolSteps
+                        .filter((step) => !!step.resultSummary)
+                        .map((step) => (
+                          <div
+                            key={step.id}
+                            className="px-2 py-1.5 rounded-md bg-bg-surface border border-border-subtle"
+                          >
                             <div className="text-2xs text-text-secondary leading-relaxed break-all">
-                              结果：{step.resultSummary}
+                              {step.resultSummary}
                             </div>
-                          )}
-                          {step.errorMessage && (
-                            <div className="text-2xs text-danger leading-relaxed break-all">
-                              异常：{step.errorMessage}
-                            </div>
-                          )}
-                        </div>
-                      ))
+                          </div>
+                        ))
                     )}
-                    <button
-                      onClick={() => locateStep(i)}
-                      className="px-1 text-2xs text-text-tertiary hover:text-accent transition-colors"
-                    >
-                      定位到对话流中的计划卡片 →
-                    </button>
                   </div>
                 )}
               </li>
             )
           })}
         </ol>
+
+        {/* v0.18.0 F6：推断占位卡（planItems 缺失时短暂显示） */}
+        {isInferred && (
+          <div className="mt-3 px-3 py-2 rounded-md border border-border-subtle bg-bg-surface-2 space-y-1.5">
+            <div className="flex items-center gap-2 text-2xs text-text-secondary">
+              <span className="w-2.5 h-2.5 rounded-full border-[1.5px] border-accent border-t-transparent animate-spin" />
+              <span>引擎从执行步骤推断明细</span>
+            </div>
+            <div className="text-2xs text-text-tertiary">
+              尚未拿到完整的 planItems；将根据 act 步骤回填。下列条目为临时推断，行尾带「推断」徽标。
+            </div>
+          </div>
+        )}
+        {isInferred && planItemsLen === 0 && (
+          <div className="mt-1 px-3 py-1 text-2xs text-text-tertiary">
+            <span className="px-1 py-px rounded bg-bg-elevated text-text-tertiary">推断</span>
+          </div>
+        )}
       </div>
     </div>
   )

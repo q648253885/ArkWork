@@ -1048,12 +1048,19 @@ textarea {
 .tool-card[data-state="cancelled"]::before {
   background: var(--text-tertiary);
 }
+/* v0.18.x：软失败（内部机制/门禁拦截）中性样式 —— 灰点，不红 */
+.tool-card[data-state="guarded"]::before {
+  background: var(--text-tertiary);
+}
 .tool-card[data-state="running"] {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .tool-card[data-state="failed"] {
   border-color: var(--danger);
+}
+.tool-card[data-state="guarded"] {
+  border-color: var(--border-default);
 }
 .tool-card__head {
   display: flex;

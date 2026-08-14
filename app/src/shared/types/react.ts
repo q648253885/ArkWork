@@ -52,6 +52,10 @@ export interface ReActStep {
   status: ReActStepStatus
   errorMessage?: string
 
+  /** v0.18.x：软失败标记 —— 内部机制/门禁拦截（阶段守卫、参数校验、预算上限等），
+   * 属于大模型与 Agent 的正常交互，交互区应中性显示而非红色报错。 */
+  softFail?: boolean
+
   /** UI 折叠状态 */
   expanded?: boolean
 }

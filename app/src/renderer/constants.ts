@@ -92,6 +92,26 @@ export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
     verb: '读取文件',
     argSummary: (a) => basename(String(a.path ?? '')),
   },
+  'file-writer': {
+    icon: 'File',
+    verb: '写入文件',
+    argSummary: (a) => basename(String(a.path ?? '')),
+  },
+  'file-editor': {
+    icon: 'File',
+    verb: '编辑文件',
+    argSummary: (a) => basename(String(a.path ?? '')),
+  },
+  'glob-search': {
+    icon: 'Search',
+    verb: '查找文件',
+    argSummary: (a) => truncate(String(a.pattern ?? ''), 28),
+  },
+  'grep-search': {
+    icon: 'Search',
+    verb: '搜索内容',
+    argSummary: (a) => truncate(String(a.pattern ?? ''), 28),
+  },
   'web-search': {
     icon: 'Search',
     verb: '搜索网页',
@@ -184,6 +204,8 @@ const EXEC_PHRASE_BY_TOOL: Record<string, string> = {
   // 引擎内置工具（工具名与 agent/registry.ts handlers 保持一致）
   shell: '正在运行命令…',
   'file-reader': '正在读取文件…',
+  'file-writer': '正在写入文件…',
+  'file-editor': '正在编辑文件…',
   'read_file': '正在读取文件…',
   'web-search': '正在检索网页…',
   'fetch-url': '正在获取网页内容…',

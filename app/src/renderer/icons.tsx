@@ -358,6 +358,19 @@ export const Icon = {
       <path d="M12 6h9M12 13h9M12 20h9" />
     </svg>
   ),
+  // v0.18.0：planItem 行操作按钮 — 重试 / 取消 / StepList 联动
+  RotateCcw: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base(p)}>
+      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+      <path d="M3 3v5h5" />
+    </svg>
+  ),
+  ArrowUpDown: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base(p)}>
+      <path d="m7 4 0 16M3 8l4-4 4 4" />
+      <path d="m17 20 0 -16M21 16l-4 4 -4 -4" />
+    </svg>
+  ),
 }
 
 export type IconName = keyof typeof Icon
