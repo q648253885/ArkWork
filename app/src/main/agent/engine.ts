@@ -2429,6 +2429,37 @@ async function executeAct(
     resultSummary = `failed: ${errorMessage}`
     logger.error('Tool', `${action.tool} failed: ${errorMessage}`, placeholder.taskId)
   }
+  // v0.23.0：判定软失败（橙色警告）vs 真实失败（红色错误）。
+  // 软失败：工具未找到 / 参数非法 / 权限拒绝 / 用户拒绝 / 命令确认超时 / shell 退出码非 0
+  // （用户禁用 shell 等场景均为非致命，提示用户修改命令即可，不该让 step 变红）。
+  // 真实失败：网络 5xx / MCP 子进程退出 / 文件系统权限等致命错。
+  let isSoftFail = false
+  if (!ok && errorMessage) {
+    const msg = errorMessage
+    if (
+      msg.includes('Tool not found') ||
+      msg.includes('tool-not-found') ||
+      msg.includes('参数非法') ||
+      msg.includes('参数错误') ||
+      msg.includes('schema') ||
+      msg.includes('validation failed') ||
+      msg.includes('invalid argument') ||
+      msg.includes('参数校验') ||
+      msg.includes('Permission denied') ||
+      msg.includes('permission denied') ||
+      msg.includes('用户拒绝') ||
+      msg.includes('用户已取消') ||
+      msg.includes('命令确认') ||
+      msg.includes('确认超时') ||
+      msg.includes('确认已取消') ||
+      msg.includes('exited with code') ||
+      msg.includes('exit code') ||
+      msg.includes('退出码') ||
+      msg.includes('exitCode')
+    ) {
+      isSoftFail = true
+    }
+  }
   // v0.17.6：引擎独立决策——基于 act 结果推进清单状态，**不依赖 LLM 自调 todo_update**。
   // 决策规则（详见 decidePlanAdvance）：
   //   1. act 失败 → running 项自动 failed
@@ -2518,6 +2549,8 @@ async function executeAct(
       durationMs,
       status: ok ? 'success' : 'failed',
       errorMessage,
+      // v0.23.0：软失败标记供 Renderer 区分橙色警告与红色错误
+      softFail: !ok && isSoftFail,
     },
     result,
     resultSummary,

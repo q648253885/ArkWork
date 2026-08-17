@@ -23,6 +23,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../icons'
 import { contextColor, CONTEXT_NOISE_KINDS } from '../constants'
 import { useStore, friendlyError, computeModelHealth } from '../store'
+import { simplifyFirstLine } from '../utils/title'
 import type { PermissionMode } from '@shared/types/permission'
 import { Tooltip } from './ui'
 import { RunConsole } from './RunConsole'
@@ -92,6 +93,7 @@ export function Composer() {
   const pauseTask = useStore((s) => s.pauseTask)
   const resumeTask = useStore((s) => s.resumeTask)
   const runTask = useStore((s) => s.runTask)
+  const renameTask = useStore((s) => s.renameTask)
   const selectedTaskId = useStore((s) => s.selectedTaskId)
   const tasks = useStore((s) => s.tasks)
   const task = tasks.find((t) => t.id === selectedTaskId)
@@ -258,6 +260,20 @@ export function Composer() {
     setActiveIndex(0)
   }, [menu, trigger])
 
+  // ============ v0.23.0：任务标题实时跟随用户输入（debounce 800ms）============
+  // 用户在输入框里敲字时，把首行作为 task title 实时同步到 sidebar / task header。
+  // 仅当 title 仍是占位「未命名任务」或上次同步值时覆盖；用户手动重命名后不再覆盖。
+  const titleSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const titleLastSyncedRef = useRef<string>('') // 上次同步到后端的 title，避免重复 IPC
+  useEffect(() => {
+    return () => {
+      if (titleSyncTimerRef.current) {
+        clearTimeout(titleSyncTimerRef.current)
+        titleSyncTimerRef.current = null
+      }
+    }
+  }, [])
+
   // ============ 输入变化：检测 @ / / 触发 ============
   const onChangeInput = (val: string) => {
     setInput(val)
@@ -271,6 +287,25 @@ export function Composer() {
     } else if (menu) {
       setMenu(null)
     }
+
+    // v0.23.0：实时同步首行作为任务标题。条件：
+    //   - 任务已选中
+    //   - 输入非空（至少敲了一行）
+    //   - 当前 task title 仍是占位「未命名任务 / 未命名任务 N」或上次同步值（避免覆盖用户手动改的）
+    //   - 800ms debounce：用户暂停敲字后触发，避免每个键击都 IPC
+    if (!task) return
+    const simplified = simplifyFirstLine(val)
+    if (!simplified) return
+    const placeholder = /^未命名任务(\s\d+)?$/
+    const isPlaceholder = placeholder.test(task.title)
+    const isSameAsLastSynced = titleLastSyncedRef.current === simplified
+    if (!isPlaceholder && !isSameAsLastSynced) return
+    if (titleSyncTimerRef.current) clearTimeout(titleSyncTimerRef.current)
+    titleSyncTimerRef.current = setTimeout(() => {
+      void renameTask(task.id, simplified).then(() => {
+        titleLastSyncedRef.current = simplified
+      })
+    }, 800)
   }
 
   // ============ 选择 @ 菜单项 ============
@@ -598,13 +633,13 @@ export function Composer() {
               : 'border-border-default bg-bg-input shadow-md focus-within:border-business-primary focus-within:shadow-lg'
           }`}
         >
-          <span className="text-business-primary mt-1 select-none font-mono text-base">›</span>
+          <span className="text-text-tertiary mt-1 select-none font-mono text-base">›</span>
           <textarea
             ref={textareaRef}
             value={input}
             onChange={(e) => onChangeInput(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Ask anything…  @ 引用 · / 命令  (⌘↵ 发送 / Shift+Enter 换行 / Esc 停止)"
+            placeholder="描述你的任务，例如：帮我重构 src/components 下所有 useState 为 useReducer…  @ 引用 · / 命令  (⌘↵ 发送 / Shift+Enter 换行 / Esc 停止)"
             rows={1}
             className="flex-1 resize-none text-sm text-text-primary placeholder-text-tertiary bg-transparent leading-relaxed px-1 py-2"
             style={{ minHeight: '44px', maxHeight: '320px' }}

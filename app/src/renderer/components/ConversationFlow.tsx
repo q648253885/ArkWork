@@ -198,9 +198,14 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
     // Task 2：思考/执行中描述（自然语言、不抖动）
     const lastAct = [...steps].reverse().find((s) => s.type === 'act')
     const lastReason = [...steps].reverse().find((s) => s.type === 'reason')
-    const thinkingDescription = lastAct
-      ? (lastAct.intent || executionDescription(lastAct.toolName))
-      : reasoningDescription(lastReason ? 'finalizing' : 'thinking')
+    // v0.23.0：执行中文本要"较为详细的大模型感知的正在做的事情"（TraeWork 风格）
+    // 优先用 reason 的 thought 摘要（最多 80 字），其次用 act 的 intent，最后兜底文案
+    const truncate80 = (s: string) => (s.length > 80 ? s.slice(0, 80) + '…' : s)
+    const thinkingDescription = lastReason?.thought
+      ? truncate80(lastReason.thought.replace(/\n+/g, ' ').trim())
+      : lastAct
+        ? (lastAct.intent || executionDescription(lastAct.toolName))
+        : reasoningDescription(lastReason ? 'finalizing' : 'thinking')
 
     return (
       /* v0.22.0 — DSH 风格 ChatView：column 居中 760px、column gap 16px；
@@ -247,15 +252,42 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
             )
           })}
 
-          {/* running 但还没有 assistant 消息：DSH 风格 — 业务蓝 shimmer 文本 */}
+          {/* running 但还没有 assistant 消息：v0.23.0 TraeWork 风格活动指示器
+               - 展示最近 1-2 步（reason/act）的意图与摘要
+               - 业务蓝 shimmer 渐变文本（DSH） */}
           {isRunning && (items.length === 0 || items[items.length - 1].type !== 'assistant') && (
-            <div
-              className="fade-in-up flex items-center gap-2 text-sm font-medium turn-status"
-              aria-live="polite"
-              style={{ lineHeight: '26px' }}
-            >
-              <span className="turn-status__text">{thinkingDescription}</span>
-              <span className="turn-status__clock" />
+            <div className="fade-in-up space-y-1" aria-live="polite">
+              {/* 主活动行：最近 reason / act 的详细描述（80 字内） */}
+              <div
+                className="flex items-center gap-2 text-sm font-medium turn-status"
+                style={{ lineHeight: '26px' }}
+              >
+                <span className="turn-status__text">{thinkingDescription}</span>
+                <span className="turn-status__clock" />
+              </div>
+              {/* 副活动行：最近 2 步的简短动作流（紧凑显示） */}
+              <div className="flex items-center gap-1.5 text-2xs text-text-tertiary">
+                {[...steps].slice(-2).map((s, i) => {
+                  if (s.type === 'reason') return null
+                  if (s.type === 'act') {
+                    const verb = s.intent || (s.toolName ? `${s.toolName}` : '执行中…')
+                    return (
+                      <span
+                        key={s.id || `${i}-act`}
+                        className="inline-flex items-center gap-1"
+                      >
+                        <span
+                          className="inline-block w-1 h-1 rounded-full"
+                          style={{ background: s.status === 'running' ? 'var(--business-primary)' : s.status === 'failed' ? 'var(--danger)' : 'var(--success)' }}
+                        />
+                        <span>{verb.slice(0, 24)}</span>
+                        {i === 0 && <span className="text-text-tertiary/60">·</span>}
+                      </span>
+                    )
+                  }
+                  return null
+                })}
+              </div>
             </div>
           )}
 
@@ -265,8 +297,8 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
             <SuggestionCards suggestions={suggestions} />
           )}
 
-          {/* 底部留白 */}
-          <div className="h-6" />
+          {/* 底部留白（v0.23.0：增大 h-12 防止与 Composer / RunConsole 输入区重叠） */}
+          <div className="h-12" />
         </div>
 
         {/* v0.22.0：DSH ChatView 顶部 16px 渐隐提示（保持） */}

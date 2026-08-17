@@ -341,12 +341,26 @@ function ToolCard({ step, observation }: { step: ReActStep; observation?: ReActS
     window.dispatchEvent(new CustomEvent('react:retry-tool', { detail: { stepId: step.id, toolName: step.toolName } }))
   }
 
+  // v0.23.0：TraeWork 风格 hover 浮窗 — 让用户悬停就能看到"做了什么 / 参数 / 结果"
+  // 构建 hover 提示（按优先级截取，控制在 280 字内）
+  const hoverTip = (() => {
+    if (!hasResult && !step.errorMessage) return formatTimeShort(step.startedAt)
+    const lines: string[] = []
+    lines.push(`${display.verb}${argText ? ` · ${argText}` : ''}`)
+    if (step.intent) lines.push(`意图：${step.intent.replace(/\n+/g, ' ').trim().slice(0, 120)}`)
+    if (step.errorMessage) lines.push(`结果：${step.errorMessage.replace(/\n+/g, ' ').trim().slice(0, 120)}`)
+    else if (step.resultSummary) lines.push(`结果：${step.resultSummary.replace(/\n+/g, ' ').trim().slice(0, 120)}`)
+    else if (obsSummary) lines.push(`结果：${obsSummary.replace(/\n+/g, ' ').trim().slice(0, 120)}`)
+    if (duration > 0) lines.push(`耗时：${(duration / 1000).toFixed(1)}s · ${formatTimeShort(step.startedAt)}`)
+    return lines.join('\n')
+  })()
+
   return (
     <div
       id={`tool-${step.id}`}
       className="tool-card"
       data-state={state}
-      title={formatTimeShort(step.startedAt)}
+      title={hoverTip}
     >
       <button
         onClick={() => setResultOpen((v) => !v)}
