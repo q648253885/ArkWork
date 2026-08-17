@@ -565,94 +565,141 @@ textarea {
 }
 
 /* ============================================================
- * Markdown 渲染样式（.md-body 容器内）
+ * v0.22.0 — Markdown 渲染样式（.md-body 容器内）
+ * 参考 deepseek-harness-desktop：AssistantMarkdown 16/28 主行节奏、
+ * DSH 风格代码块（无外框 + 浅蓝底）、inline code 浅灰底、
+ * copy-btn hover 提亮、heading 24/22/17 阶梯。
  * 纯 CSS 实现，不引入 react-markdown；由简易 parser 输出 HTML
  * v0.4.0 — 全部走 CSS 变量，浅深皮肤通用
  * ============================================================ */
 .md-body {
+  /* DSH AssistantMarkdown：16/28 主体节奏、block 间距 16px */
   font-size: 16px;
-  line-height: 1.7;
+  line-height: 28px;
   color: var(--text-primary);
   word-wrap: break-word;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   /* v0.6.1：交互区内容必须可选区复制（覆盖 body 的 user-select:none） */
   user-select: text;
   -webkit-user-select: text;
 }
 .md-body > *:first-child { margin-top: 0; }
 .md-body > *:last-child  { margin-bottom: 0; }
-.md-body h1 { font-size: 24px; font-weight: 600; margin: 1.2em 0 0.6em; line-height: 1.4; }
-.md-body h2 { font-size: 20px; font-weight: 600; margin: 1.1em 0 0.5em; line-height: 1.4; }
-.md-body h3 { font-size: 17px; font-weight: 600; margin: 1em 0 0.4em; }
-.md-body p  { margin: 0.6em 0; }
-.md-body ul, .md-body ol { margin: 0.6em 0; padding-left: 1.5em; }
-.md-body li { margin: 0.3em 0; }
+/* DSH markdown 字体阶梯（DSH --dsw-font-markdown-*）：
+   H1 700 24/34、H2 700 22/32、H3 700 20/30、H4 600 16/28 */
+.md-body h1 {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 34px;
+  margin: 0;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+.md-body h2 {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 32px;
+  margin: 0;
+  color: var(--text-primary);
+  letter-spacing: -0.005em;
+}
+.md-body h3 {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 30px;
+  margin: 0;
+  color: var(--text-primary);
+}
+.md-body h4 {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 28px;
+  margin: 0;
+  color: var(--text-primary);
+}
+.md-body p  { margin: 0; }
+/* DSH markdown 列表：li 28 行、缩进 1.5em */
+.md-body ul, .md-body ol { margin: 0; padding-left: 1.5em; display: flex; flex-direction: column; gap: 6px; }
+.md-body li { margin: 0; }
 .md-body ul > li { list-style: disc; }
 .md-body ol > li { list-style: decimal; }
-.md-body a  { color: var(--accent); text-decoration: none; }
+.md-body a  { color: var(--business-primary); text-decoration: none; }
 .md-body a:hover { text-decoration: underline; }
 .md-body strong { font-weight: 600; color: var(--text-primary); }
 .md-body em { font-style: italic; }
+/* DSH inline code：14/22、neutral-bluish-100 底、6px 圆角 */
 .md-body code {
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 14px;
-  background: var(--bg-hover);
-  padding: 2px 6px;
-  border-radius: 4px;
+  line-height: 22px;
+  background: var(--bg-surface);
+  padding: 1px 6px;
+  border-radius: 6px;
   color: var(--text-primary);
+  word-break: break-word;
 }
+/* DSH markdown 代码块：12px 圆角、neutral-bluish-50 底、16px 18px 内边距、13/22 mono */
 .md-body pre {
   position: relative;
-  background: var(--bg-base);
+  background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 16px 18px;
-  margin: 0.8em 0;
+  margin: 0;
   overflow-x: auto;
 }
 .md-body pre code {
   background: transparent;
   padding: 0;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 22px;
   color: var(--text-primary);
+  font-family: var(--font-mono);
 }
+/* DSH 风格：左上 lang tag（小写、灰字）*/
 .md-body pre .lang-tag {
   position: absolute;
-  top: 8px;
-  left: 12px;
+  top: 10px;
+  left: 16px;
   font-size: 11px;
-  letter-spacing: 0.05em;
+  letter-spacing: 0;
   color: var(--text-tertiary);
-  text-transform: uppercase;
-  font-family: 'JetBrains Mono', monospace;
+  text-transform: lowercase;
+  font-family: var(--font-mono);
   pointer-events: none;
+  user-select: none;
 }
+/* DSH 风格：右上 copy 按钮（hover 显示，DSH 在 hover 时浮现）*/
 .md-body pre .copy-btn {
   position: absolute;
   top: 8px;
   right: 8px;
   font-size: 11px;
   color: var(--text-tertiary);
-  background: transparent;
+  background: var(--bg-overlay);
   border: 1px solid var(--border-subtle);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 3px 10px;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 150ms;
+  transition: opacity var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .md-body pre:hover .copy-btn { opacity: 1; }
-.md-body pre .copy-btn:hover { color: var(--text-primary); border-color: var(--border-default); }
+.md-body pre .copy-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
 .md-body blockquote {
   border-left: 3px solid var(--border-default);
-  padding: 0.2em 0 0.2em 1em;
-  margin: 0.8em 0;
+  padding: 0;
+  margin: 0;
   color: var(--text-secondary);
+  padding-left: 1em;
 }
 .md-body table {
   border-collapse: collapse;
-  margin: 0.8em 0;
+  margin: 0;
   font-size: 14px;
+  line-height: 22px;
   width: 100%;
 }
 .md-body th, .md-body td {
@@ -670,27 +717,28 @@ textarea {
 .md-body hr {
   border: none;
   border-top: 1px solid var(--border-subtle);
-  margin: 1.2em 0;
+  margin: 0;
 }
 /* ECharts 图表块（```echarts {json}```） */
 .md-body .echart-wrap {
   position: relative;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  margin: 0.8em 0;
+  border-radius: 12px;
+  margin: 0;
   background: var(--bg-surface);
   overflow: hidden;
 }
 .md-body .echart-title {
   position: absolute;
-  top: 8px;
-  left: 12px;
+  top: 10px;
+  left: 16px;
   font-size: 11px;
-  letter-spacing: 0.05em;
+  letter-spacing: 0;
   color: var(--text-tertiary);
-  text-transform: uppercase;
-  font-family: 'JetBrains Mono', monospace;
+  text-transform: lowercase;
+  font-family: var(--font-mono);
   pointer-events: none;
+  user-select: none;
   z-index: 1;
 }
 .md-body .echart-canvas {
@@ -699,49 +747,83 @@ textarea {
 }
 
 /* ============================================================
+ * v0.22.0 — Shiki 语法高亮 token 调色板（参考 DSH --shiki-*）
+ * 静态值：浅色与深色各一组常量颜色，由 ui-theme 注入到 Markdown 渲染层
+ * ============================================================ */
+:root {
+  --shiki-foreground: var(--text-primary);
+  --shiki-background: var(--bg-surface);
+  --shiki-token-constant: #1C7ED6;
+  --shiki-token-string: #2F9E44;
+  --shiki-token-comment: #868E96;
+  --shiki-token-keyword: #D6336C;
+  --shiki-token-parameter: #E8590C;
+  --shiki-token-function: #6741D9;
+  --shiki-token-string-expression: #2B8A3E;
+  --shiki-token-punctuation: #495057;
+  --shiki-token-link: #1971C2;
+}
+.dark {
+  --shiki-token-constant: #4DABF7;
+  --shiki-token-string: #69DB7C;
+  --shiki-token-comment: #ADB5BD;
+  --shiki-token-keyword: #FAA2C1;
+  --shiki-token-parameter: #FFA94D;
+  --shiki-token-function: #B197FC;
+  --shiki-token-string-expression: #8CE99A;
+  --shiki-token-punctuation: #CED4DA;
+  --shiki-token-link: #74C0FC;
+}
+
+/* ============================================================
  * v0.5.0 — 状态语义与反馈 token 已合并至顶部 :root / .dark（见文件头）
  * ============================================================ */
 
-/* ---------- RunConsole 运行控制台 ---------- */
+/* ---------- v0.22.0 RunConsole 运行控制台（DSH 风格） ---------- */
+/* DSH 风格：胶囊卡片，与 Composer 输入卡同 form 形态（22px 圆角，
+   l2-darkmode-thin 边框、shadow-md 漂浮），不使用紫罗兰外环 */
 .run-console {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-3xl);
+  box-shadow: var(--shadow-md);
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 .run-console[data-state="running"] {
-  border-color: var(--status-running);
-  box-shadow: 0 0 0 3px var(--status-running-soft);
+  border-color: var(--business-primary);
+  box-shadow: 0 0 0 3px var(--business-primary-soft);
 }
 .run-console[data-state="paused"] {
-  border-color: var(--status-paused);
-  box-shadow: 0 0 0 3px var(--status-paused-soft);
+  border-color: var(--warning);
+  box-shadow: 0 0 0 3px var(--warning-soft);
 }
 .run-console[data-state="error"] {
-  border-color: var(--status-error);
-  box-shadow: 0 0 0 3px var(--status-error-soft);
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
 }
 .run-console[data-state="cancelled"] {
-  border-color: var(--status-idle);
+  border-color: var(--border-default);
 }
+/* DSH：状态点 8px 实心 + running 呼吸 */
 .run-console__dot {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--status-running);
+  background: var(--business-primary);
   flex-shrink: 0;
 }
 .run-console[data-state="running"] .run-console__dot { animation: pulse-dot 1.8s ease-in-out infinite; }
-.run-console[data-state="paused"]  .run-console__dot { background: var(--status-paused); animation: none; }
-.run-console[data-state="error"]    .run-console__dot { background: var(--status-error); animation: none; }
-.run-console[data-state="cancelled"] .run-console__dot { background: var(--status-idle); animation: none; }
+.run-console[data-state="paused"]  .run-console__dot { background: var(--warning); animation: none; }
+.run-console[data-state="error"]    .run-console__dot { background: var(--danger); animation: none; }
+.run-console[data-state="cancelled"] .run-console__dot { background: var(--text-tertiary); animation: none; }
 .run-console__meta {
   font-size: 13px;
-  color: var(--text-secondary);
+  line-height: 20px;
+  color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -845,39 +927,53 @@ textarea {
 .dialog__input:focus, .dialog__textarea:focus, .dialog__select:focus { border-color: var(--accent); }
 .dialog__input:disabled, .dialog__textarea:disabled { opacity: 0.6; cursor: not-allowed; }
 
-/* ---------- 上下文变更 chip（对话流内） ---------- */
+/* ---------- v0.22.0 上下文变更 chip（对话流内，DSH 风格） ---------- */
+/* DSH 风格：圆角 6px、12px 字号、tag 模式（业务蓝淡底），hover 提亮 */
 .ctx-chip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
   align-self: center;
-  padding: var(--space-1) var(--space-3);
+  padding: 4px var(--space-3);
   font-size: 12px;
+  line-height: 20px;
   color: var(--chip-text);
   background: var(--chip-bg);
-  border-radius: var(--radius-sm);
-  animation: fade-in-up var(--duration-base) var(--ease-out-expo);
+  border-radius: 6px;
+  animation: fade-in-up var(--dur-base) var(--ease-out);
 }
 
-/* ---------- 消息操作条（MessageActions） ---------- */
-/* v0.5.0：图标常驻可见（标识一直在），hover 整条消息时高亮 */
+/* ---------- v0.22.0 消息操作条（DSH MessageIconActions 风格） ---------- */
+/* DSH 风格：图标按钮常驻可见（标识一直在），hover 整条消息时高亮；
+   每个按钮 28×28、6px 内边距、hover 圆形 bg-hover 圆角 */
 .message-actions {
   display: flex;
-  gap: var(--space-1);
-  margin-top: 6px;
+  align-items: center;
+  gap: 10px;
+  height: 28px;
+  margin-top: 16px;
+  margin-left: -6px;
   opacity: 0.55;
-  transition: opacity var(--duration-fast);
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 .group:hover .message-actions { opacity: 1; }
 .message-actions__btn {
-  padding: 3px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
   font-size: 12px;
   color: var(--text-tertiary);
-  border-radius: var(--radius-sm);
-  transition: all var(--duration-fast);
+  background: transparent;
+  border: none;
+  border-radius: 28px;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
 }
 .message-actions__btn:hover {
-  color: var(--text-primary);
+  color: var(--text-secondary);
   background: var(--bg-hover);
 }
 
@@ -942,23 +1038,30 @@ textarea {
  * ============================================================ */
 
 /* ============================================================
- * v0.13.0 — Plan Checklist 状态视觉
- * pending / running（accent 边线 + 圆圈呼吸）/ done（✓ + 删除线）
+ * v0.22.0 — Plan Checklist 状态视觉（DSH TodoPanel 风格）
+ * pending / running（业务蓝边线 + 圆圈呼吸）/ done（绿 ✓ + 删除线）/
+ * failed（红）/ cancelled（灰）/ skipped（黄）
+ * 行高统一 36px（DSH --dsh-todo-row-height），间距 8px。
  * ============================================================ */
 .plan-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   font-size: 13px;
-  line-height: 28px;
+  line-height: 20px;
   color: var(--text-secondary);
   position: relative;
-  padding: 0 8px;
-  border-radius: var(--r-sm);
+  padding: 8px 12px;
+  border-radius: 6px;
   transition: background-color var(--dur-fast) var(--ease-out);
+  min-height: 36px;
+}
+.plan-row:hover {
+  background: var(--bg-hover);
 }
 .plan-row[data-state="running"] {
-  color: var(--accent);
+  color: var(--business-primary);
+  background: var(--business-primary-soft);
 }
 .plan-row[data-state="done"] {
   color: var(--text-tertiary);
@@ -989,19 +1092,18 @@ textarea {
   border-color: var(--warning);
 }
 .plan-row__circle {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   border: 1.5px solid var(--border-default);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  margin-top: 6px;
   transition: all var(--dur-fast) var(--ease-out);
 }
 .plan-row[data-state="running"] .plan-row__circle {
-  border-color: var(--accent);
+  border-color: var(--business-primary);
   border-top-color: transparent;
   animation: plan-spin 1.4s linear infinite;
 }
@@ -1014,54 +1116,61 @@ textarea {
   height: 10px;
   color: white;
 }
-.plan-row[data-state="running"]::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 4px;
-  bottom: 4px;
-  width: 2px;
-  border-radius: 1px;
-  background: var(--accent);
-}
 @keyframes plan-spin {
   to { transform: rotate(360deg); }
 }
 
-/* v0.14.0 Task 4：清单步骤点击 / 步骤锚点滚动到位的短暂高亮 */
+/* v0.22.0：清单步骤点击 / 步骤锚点滚动到位的短暂高亮（业务蓝淡底） */
 .plan-flash {
   animation: plan-flash-anim 1.4s var(--ease-out) 1;
-  background-color: var(--accent-soft);
-  border-radius: var(--r-sm);
+  background-color: var(--business-primary-soft);
+  border-radius: var(--radius-sm);
 }
 @keyframes plan-flash-anim {
   0%   { background-color: transparent; }
-  20%  { background-color: var(--accent-soft); }
+  20%  { background-color: var(--business-primary-soft); }
   100% { background-color: transparent; }
 }
 
 /* ============================================================
- * v0.13.0 — ToolCard 独立组件
- * 五态：pending / running / success / failed / cancelled
- * v0.15.x：去 JSON 化、人类可读化、整体视觉降级更轻量
+ * v0.22.0 — ToolCard 工具调用卡（DSH GenericCommandCard 风格）
+ * 五态：pending / running / success / failed / cancelled / guarded（软失败）
+ * v0.15.x：去 JSON 化、人类可读化、整体视觉降级更轻量；
+ * v0.22.0：DSH 风格 — 圆角 6px、左侧 2px 状态条、hover 提亮、思考中带 shimmer
  * ============================================================ */
 .tool-card {
   position: relative;
   background: var(--bg-surface);
-  /* 50% 透明度：与父容器融合 */
-  background: rgba(255, 255, 255, 0.5);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--r-md);
+  border-radius: 6px;
   overflow: hidden;
   transition: border-color var(--dur-fast) var(--ease-out);
 }
-/* 深色皮肤：50% 透明需要叠加深色基底 */
-:where(.dark) .tool-card,
-[data-theme="dark"] .tool-card {
-  background: rgba(0, 0, 0, 0.5);
+/* DSH 风格：运行态 shimmer 横扫（与 ThinkingRow 共享动效） */
+.tool-card[data-state="running"]::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 300px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--bg-base) 60%, transparent) 55%,
+    transparent 100%
+  );
+  animation: dsh-row-sweep 2.6s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes dsh-row-sweep {
+  0% { left: -300px; }
+  90%, 100% { left: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tool-card[data-state="running"]::after { animation: none; }
 }
 
-/* 左侧 2px 状态色条 */
+/* DSH 左侧 2px 状态色条 */
 .tool-card::before {
   content: '';
   position: absolute;
@@ -1072,34 +1181,12 @@ textarea {
   background: var(--text-tertiary);
   pointer-events: none;
 }
-.tool-card[data-state="running"]::before {
-  background: var(--accent);
-}
-.tool-card[data-state="success"]::before {
-  background: var(--success);
-}
-.tool-card[data-state="failed"]::before {
-  background: var(--danger);
-}
-.tool-card[data-state="cancelled"]::before {
-  background: var(--text-tertiary);
-}
-/* v0.19.x：软失败（门禁/预算拦截）淡橙色警告 —— 区别于红色真实报错 */
-.tool-card[data-state="guarded"]::before {
-  background: var(--warning);
-}
-.tool-card[data-state="running"] {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-.tool-card[data-state="failed"] {
-  border-color: var(--danger);
-}
-.tool-card[data-state="guarded"] {
-  /* 淡橙色边框（warning-soft 半透明），提示 Agent 拦截但不必刺眼 */
-  border-color: var(--warning);
-  box-shadow: 0 0 0 3px var(--warning-soft);
-}
+.tool-card[data-state="running"]::before { background: var(--business-primary); }
+.tool-card[data-state="success"]::before  { background: var(--success); }
+.tool-card[data-state="failed"]::before   { background: var(--danger); }
+.tool-card[data-state="cancelled"]::before { background: var(--text-tertiary); }
+.tool-card[data-state="guarded"]::before   { background: var(--warning); }
+/* DSH：running/failed 不再使用发光圈，改为左侧 2px 状态条 + shimmer 即可 */
 .tool-card__head {
   display: flex;
   align-items: center;
@@ -1108,9 +1195,10 @@ textarea {
   cursor: pointer;
   user-select: none;
 }
-/* v0.15.x：头部一行文案（图标 + 动词 + · + 参数） */
+/* DSH：头部一行文案（图标 + 动词 · 参数），13px */
 .tool-card__head-text {
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 20px;
   font-weight: 500;
   color: var(--text-primary);
   display: inline-flex;
@@ -1142,28 +1230,31 @@ textarea {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
 }
 .tool-card__body {
   padding: 0 12px 12px 14px;
   font-size: 12px;
   border-top: 1px solid var(--border-subtle);
+  margin-top: 0;
 }
-/* v0.15.x：result 改为段落式，去掉等宽字体和强制 pre-wrap */
 .tool-card__result {
   color: var(--text-secondary);
   margin-top: 8px;
   font-size: 12px;
   line-height: 1.6;
-  /* 正常换行，不再强制 pre-wrap */
 }
-/* v0.15.x：详情面板（key-value 列表） */
+/* DSH 风格：详情面板 — l1 边框、6px 圆角、12/18 mono */
 .tool-card__args {
   margin-top: 8px;
-  padding: 6px 8px;
+  padding: 8px 10px;
   background: transparent;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--r-sm);
-  font-size: 11.5px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 18px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1173,7 +1264,7 @@ textarea {
 .tool-card__arg-row {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 .tool-card__arg-key {
@@ -1188,7 +1279,8 @@ textarea {
   min-width: 0;
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
+  line-height: 18px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1200,19 +1292,20 @@ textarea {
   margin-top: 8px;
   flex-wrap: wrap;
 }
+/* DSH 风格按钮：hover 浅灰圆点 + 文字颜色加深 */
 .tool-card__btn {
   font-size: 11px;
-  padding: 4px 8px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-xs);
-  background: var(--bg-overlay);
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
   transition: all var(--dur-fast) var(--ease-out);
 }
 .tool-card__btn:hover {
   color: var(--text-primary);
-  border-color: var(--border-default);
+  background: var(--bg-hover);
 }
 .tool-card__btn--retry {
   color: var(--danger);
@@ -1221,82 +1314,105 @@ textarea {
 .tool-card__btn--retry:hover {
   background: var(--danger);
   color: white;
+  border-color: var(--danger);
 }
 
 /* ============================================================
- * v0.13.0 — ReAct Reason / Observation 视觉分离
- * - Reason 折叠块（默认折叠）
- * - Observation 淡色卡（独立容器）
- * v0.15.x：Observation 视觉降级为 ToolCard 内的尾部文本块
+ * v0.22.0 — ReAct Reason / Observation 视觉分离（DSH ReasoningRow 风格）
+ * - Reason 折叠块：左 3px 状态条 + 摘要 + chevron；展开显示 body
+ * - Observation 降级为 ToolCard 内尾部的纯文本
+ * running 态带 shimmer 横扫（DSH GenericCommandCard 同款）
  * ============================================================ */
 .react-reason {
-  background: var(--bg-surface-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-md);
-  padding: 8px 12px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-.react-reason__head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  user-select: none;
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
-.react-reason__icon { font-size: 12px; }
-.react-reason__duration {
-  margin-left: auto;
-  font-family: var(--font-mono);
-}
-.react-reason__body {
-  margin-top: 6px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-}
-/* v0.17.0 F6：思考块三态左条（running 紫罗兰 / failed 危险 / done 中性） */
-.react-reason {
   position: relative;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 6px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow: hidden;
 }
+/* DSH 风格：左侧 2px 状态条（与 ToolCard 一致） */
 .react-reason::before {
   content: '';
   position: absolute;
   left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
   background: var(--border-default);
-  border-radius: 3px 0 0 3px;
+  border-radius: 1px;
   pointer-events: none;
 }
-.react-reason[data-state="running"]::before {
-  background: var(--accent);
+.react-reason[data-state="running"]::before { background: var(--business-primary); }
+.react-reason[data-state="failed"]::before  { background: var(--danger); }
+/* DSH 风格：running 态 shimmer 横扫 */
+.react-reason[data-state="running"]::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 300px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--bg-base) 60%, transparent) 55%,
+    transparent 100%
+  );
+  animation: dsh-row-sweep 2.6s ease-out infinite;
+  pointer-events: none;
 }
-.react-reason[data-state="failed"]::before {
-  background: var(--danger);
+/* v0.22.0：fold 头部一行摘要（DSH ReasoningRow .row 风格） */
+.react-reason__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 0 14px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-tertiary);
+}
+.react-reason[data-state="running"] .react-reason__head {
+  color: var(--business-primary);
+  font-weight: 500;
+}
+.react-reason__icon { font-size: 12px; flex-shrink: 0; }
+.react-reason__duration {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.react-reason__body {
+  margin-top: 6px;
+  padding: 0 12px 0 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 .react-reason__chevron {
-  margin-left: 2px;
   color: var(--text-tertiary);
   flex-shrink: 0;
   transition: transform var(--dur-fast) var(--ease-out);
+  margin-left: 2px;
 }
 .react-reason__footer {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
   margin-top: 6px;
+  padding: 0 12px 0 14px;
 }
-/* v0.15.x：去独立卡片边框/背景，仅保留左侧 2px 状态条 + 适度内边距 */
 .react-observation {
-  /* 去掉独立卡片边框/背景 */
   background: transparent;
   border: none;
   border-left: 2px solid var(--border-default);
   border-radius: 0;
-  padding: 4px 0 4px 10px;
+  padding: 4px 0 4px 12px;
   margin-top: 4px;
   font-size: 12px;
   color: var(--text-tertiary);
@@ -1305,7 +1421,6 @@ textarea {
 .react-observation__label {
   font-size: 11px;
   font-weight: 500;
-  /* 去掉大写 + letter-spacing，回归中文常规 */
   text-transform: none;
   letter-spacing: 0;
   color: var(--text-tertiary);
@@ -1631,6 +1746,44 @@ textarea {
 }
 
 /* ============================================================
+ * v0.22.0 — DSH ChatView .turnStatus（运行中 shimmer 文本）
+ * 业务蓝渐变 + 横向背景滑动，1.8s 循环
+ * ============================================================ */
+.turn-status {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+  background: linear-gradient(
+    90deg,
+    var(--business-primary) 0%,
+    var(--business-primary) 40%,
+    var(--business-primary-soft) 50%,
+    var(--business-primary) 60%,
+    var(--business-primary) 100%
+  );
+  background-position: 100% 0;
+  background-size: 250% 100%;
+  background-clip: text;
+  color: transparent;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: dsh-turn-status-shimmer 1.8s linear infinite;
+}
+@keyframes dsh-turn-status-shimmer {
+  to { background-position: 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .turn-status {
+    animation: none;
+    background-position: 0 0;
+    background-size: 100% 100%;
+  }
+}
+
+/* ============================================================
  * v0.13.0 — 空态/滚动提示徽章
  * ============================================================ */
 .empty-state-hero {
@@ -1728,25 +1881,29 @@ textarea {
   color: var(--text-secondary);
 }
 
+/* DSH ChatView .toBottom 风格：圆形浮按钮 + 边框 + shadow-lv2 */
 .scroll-to-bottom {
   position: absolute;
   bottom: 16px;
   right: 16px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  border-radius: 999px;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 100px;
   background: var(--bg-overlay);
   border: 1px solid var(--border-default);
   box-shadow: var(--shadow-md);
-  font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   cursor: pointer;
   z-index: 10;
   transition: all var(--dur-fast) var(--ease-out);
 }
-.scroll-to-bottom:hover { color: var(--text-primary); }
+.scroll-to-bottom:hover {
+  background: var(--bg-hover);
+}
 
 /* ============================================================
  * v0.13.0 — 任务头 56px 高度与元数据行

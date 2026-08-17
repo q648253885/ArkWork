@@ -203,8 +203,10 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
       : reasoningDescription(lastReason ? 'finalizing' : 'thinking')
 
     return (
+      /* v0.22.0 — DSH 风格 ChatView：column 居中 760px、column gap 16px；
+         顶部 16px 渐隐提示保持；back-to-bottom 按钮改为 34×34 圆形浮按钮（CSS .scroll-to-bottom） */
       <div className="flex-1 overflow-y-auto min-h-0 relative" ref={scrollRef} onScroll={onScroll}>
-        <div className="max-w-[760px] mx-auto px-6 py-6 space-y-8">
+        <div className="max-w-[760px] mx-auto px-6 py-6 space-y-4">
           {items.length === 0 && ctxChips.length === 0 && (
             <div className="py-10" />
           )}
@@ -245,11 +247,15 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
             )
           })}
 
-          {/* running 但还没有 assistant 消息：显示「正在分析…」 */}
+          {/* running 但还没有 assistant 消息：DSH 风格 — 业务蓝 shimmer 文本 */}
           {isRunning && (items.length === 0 || items[items.length - 1].type !== 'assistant') && (
-            <div className="fade-in-up flex items-center gap-2 text-xs text-text-tertiary" aria-live="polite">
-              <span className="w-1.5 h-1.5 rounded-full bg-accent pulse-dot" />
-              <span>{thinkingDescription}</span>
+            <div
+              className="fade-in-up flex items-center gap-2 text-sm font-medium turn-status"
+              aria-live="polite"
+              style={{ lineHeight: '26px' }}
+            >
+              <span className="turn-status__text">{thinkingDescription}</span>
+              <span className="turn-status__clock" />
             </div>
           )}
 
@@ -263,43 +269,27 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
           <div className="h-6" />
         </div>
 
-        {/* v0.13.0：顶部 16px 渐隐提示（暗示可向下滚动看新内容） */}
+        {/* v0.22.0：DSH ChatView 顶部 16px 渐隐提示（保持） */}
         {!atBottom && (
           <div className="pointer-events-none absolute top-0 left-0 right-0 h-4 bg-gradient-to-b from-bg-base to-transparent" />
         )}
 
-        {/* v0.13.0：「↓ N 条新消息」浮层（非贴底 + 有未读时显示） */}
-        {unreadCount > 0 && (
-          <div className="flex flex-col gap-1 fixed bottom-32 right-6 z-30">
-            <button
-              onClick={() => {
-                const el = scrollRef.current
-                if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-                lastSeenCountRef.current = items.length
-                setUnreadCount(0)
-              }}
-              aria-label={`${unreadCount} 条新消息，点击跳到底部`}
-              className="px-2.5 h-7 rounded-full bg-accent text-text-inverse border border-accent/50 shadow-panel scale-in flex items-center gap-1 hover:bg-accent-hover transition-colors"
-            >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-text-inverse">
-                <path d="M6 2v8M2 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              <span className="tabular">↓ {unreadCount} 条新消息</span>
-            </button>
-            <button
-              onClick={() => {
-                const el = scrollRef.current
-                if (el) el.scrollTo({ top: 0, behavior: 'smooth' })
-              }}
-              aria-label="回到顶部"
-              className="px-2.5 h-7 rounded-full bg-bg-overlay border border-border-default text-xs text-text-secondary hover:text-text-primary shadow-panel scale-in flex items-center gap-1"
-            >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-text-tertiary">
-                <path d="M6 10V2M2 6l4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              回到顶部
-            </button>
-          </div>
+        {/* v0.22.0：DSH ChatView 圆形 back-to-bottom 按钮（34×34 浮按钮） */}
+        {!atBottom && (
+          <button
+            onClick={() => {
+              const el = scrollRef.current
+              if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+              lastSeenCountRef.current = items.length
+              setUnreadCount(0)
+            }}
+            aria-label={`${unreadCount} 条新消息，点击跳到底部`}
+            className="scroll-to-bottom"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 3v10M3 8l5 5 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
         )}
       </div>
     )
@@ -470,16 +460,19 @@ function PlanMessage({
     )
   }
   return (
-    <div className="fade-in-up flex flex-col items-start">
+    <div className="fade-in-up flex flex-col items-start group" data-time-hover-root>
       <div className="flex items-center gap-2 mb-1.5">
         <Avatar color={agent.avatarColor} initial={agent.name[0]} />
         <span className="text-sm text-text-secondary">@{agent.name}</span>
-        <span className="text-2xs text-text-tertiary">· 任务计划</span>
-        <span className="text-2xs text-text-tertiary tabular">{tsLabel}</span>
+        <span className="text-sm text-text-tertiary">· 任务计划</span>
+        <span className="text-sm text-text-tertiary tabular opacity-0 transition-opacity duration-100 group-hover:opacity-100">
+          {tsLabel}
+        </span>
       </div>
+      {/* v0.22.0：DSH TodoPanel 风格卡片 — 12px 圆角、l1 边框、neutral tip 底 */}
       <div
         id="plan-card"
-        className="w-full max-w-[92%] rounded-xl rounded-tl-sm bg-bg-surface border border-border-subtle px-5 py-4 space-y-3"
+        className="w-full rounded-xl border border-border-subtle bg-bg-surface px-4 py-3 space-y-2"
       >
         {/* v0.14.0 Task 8：头部可点击展开/折叠（默认展开） */}
         <button
@@ -489,13 +482,17 @@ function PlanMessage({
           className="w-full text-left focus-ring flex items-center gap-2"
         >
           <span className="flex-1 min-w-0">
-            <span className="block text-2xs text-text-tertiary uppercase tracking-wider font-medium">目标</span>
-            <span className="block text-sm text-text-primary leading-relaxed">{goal}</span>
+            <span className="block text-2xs text-text-tertiary font-medium">目标</span>
+            <span className="block text-sm text-text-primary" style={{ lineHeight: '24px' }}>{goal}</span>
           </span>
           {aggregateMeta && (
             <span
-              className="flex-shrink-0 text-2xs font-medium px-1.5 py-0.5 rounded-full border"
-              style={{ color: aggregateMeta.color, borderColor: aggregateMeta.color }}
+              className="flex-shrink-0 text-2xs font-medium px-2 py-0.5 rounded-full"
+              style={{
+                color: aggregateMeta.color,
+                background: 'var(--bg-overlay)',
+                border: '1px solid ' + aggregateMeta.color,
+              }}
             >
               {aggregateMeta.label}
             </span>
@@ -509,18 +506,23 @@ function PlanMessage({
 
         {!collapsed && (
           <>
+            {/* v0.22.0：DSH TodoPanel 进度信息（13/20，弹性布局） */}
             <div className="flex items-center gap-2 text-2xs text-text-tertiary tabular">
               <span>{doneCount}/{items.length} 完成</span>
+              <span className="ml-auto text-text-tertiary">
+                {items.length > 0 ? Math.round((doneCount / items.length) * 100) : 0}%
+              </span>
             </div>
-            <div className="w-full h-1.5 bg-bg-elevated rounded-full overflow-hidden">
+            {/* v0.22.0：DSH 风格 4px 高进度条 */}
+            <div className="w-full h-1 bg-bg-hover rounded-full overflow-hidden">
               <div
-                className="h-full rounded-full bg-success transition-all duration-500"
+                className="h-full rounded-full bg-business-primary transition-all duration-500"
                 style={{ width: `${items.length === 0 ? 0 : Math.round((doneCount / items.length) * 100)}%` }}
               />
             </div>
-            <div className="space-y-0.5">
+            {/* v0.22.0：步骤列表 36px 行高，gap 4px */}
+            <div className="space-y-1 mt-1">
               {items.map((it, i) => {
-                // v0.14.0 Task 8：行级六态（颜色/删除线由 .plan-row[data-state] CSS 承担）
                 const state: PlanItemStatus = states[i] ?? 'pending'
                 const meta = PLAN_STATUS_META[state]
                 return (
@@ -582,24 +584,40 @@ function PlanMessage({
  * ============================================================ */
 
 /* ============================================================
- * User Bubble — 右对齐气泡
+ * v0.22.0 — User Bubble（右对齐气泡，DSH MessageItem.userStack）
+ * - figma 659:38813：r22 fill、max 525px / 82%、10/16 padding
+ * - 16/24 主行节奏
  * ============================================================ */
 function UserBubble({ text, tsLabel }: { text: string; tsLabel: string }) {
   return (
-    <div className="fade-in-up flex flex-col items-end">
-      <div className="flex items-center gap-2 mb-1.5">
-        <span className="text-2xs text-text-tertiary tabular">{tsLabel}</span>
-        <span className="text-2xs text-text-tertiary uppercase tracking-wider">You</span>
+    <div className="fade-in-up flex flex-col items-end group" data-time-hover-root>
+      {/* DSH IconActions 时时间端：hover/focus 才显示（timeStart） */}
+      <div className="flex items-center gap-2 mb-1.5 opacity-0 transition-opacity duration-100 group-hover:opacity-100">
+        <span className="text-sm text-text-tertiary tabular">{tsLabel}</span>
       </div>
-      <div className="max-w-[85%] rounded-xl rounded-tr-sm bg-accent-soft border border-accent/20 px-4 py-2.5 select-text">
-        <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">{text}</p>
+      <div
+        className="select-text"
+        style={{
+          maxWidth: 'min(525px, 82%)',
+          background: 'var(--bg-surface-2)',
+          borderRadius: '22px',
+          padding: '10px 16px',
+          fontSize: '16px',
+          lineHeight: '24px',
+          color: 'var(--text-primary)',
+        }}
+      >
+        <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{text}</p>
       </div>
     </div>
   )
 }
 
 /* ============================================================
- * Assistant Message — 左侧主角，Markdown 全渲染
+ * v0.22.0 — Assistant Message（DSH AssistantMarkdown 风格）
+ * - 16/28 主行节奏、block 间距 16px（CSS .md-body）
+ * - 无背景卡片，纯流式叙事（DSH 左侧直接铺开）
+ * - 头像 + @name + time + IconActions（DSH MessageIconActions）
  * ============================================================ */
 function AssistantMessage({
   text,
@@ -617,16 +635,20 @@ function AssistantMessage({
   messageId: string
 }) {
   return (
-    <div className="fade-in-up flex flex-col items-start group">
+    <div className="fade-in-up flex flex-col items-start group" data-time-hover-root>
       <div className="flex items-center gap-2 mb-2">
         <Avatar color={agent.avatarColor} initial={agent.name[0]} />
         <span className="text-sm text-text-secondary">@{agent.name}</span>
-        <span className="text-2xs text-text-tertiary tabular">{tsLabel}</span>
+        {/* DSH：timeEnd 在 hover/focus 时浮现（与 IconActions 同节奏） */}
+        <span className="text-sm text-text-tertiary tabular opacity-0 transition-opacity duration-100 group-hover:opacity-100">
+          {tsLabel}
+        </span>
       </div>
-      <div className="max-w-[88%] w-full rounded-xl rounded-tl-sm bg-bg-surface border border-border-subtle px-5 py-3.5">
+      {/* DSH 风格：流式叙事体，无独立气泡背景（headline + body） */}
+      <div className="w-full">
         <Markdown content={text} streaming={streaming} />
       </div>
-      {/* v0.5.0（B3）：hover 操作条 — MessageActions 替代旧 ActionMini，按钮全接线 */}
+      {/* v0.22.0：hover 操作条 — DSH MessageIconActions，28×28 圆形按钮 */}
       {!streaming && text.trim() && taskId && (
         <MessageActions taskId={taskId} messageId={messageId} text={text} />
       )}
@@ -635,7 +657,9 @@ function AssistantMessage({
 }
 
 /* ============================================================
- * React Message — 步骤流：默认折叠摘要 + 产物卡片
+ * v0.22.0 — React Message（DSH ReasoningRow 风格）
+ * - 头部 avatar + @name · 步骤流 + time
+ * - ThoughtStream 内含折叠摘要 + 步骤卡
  * ============================================================ */
 function ReactMessage({
   steps,
@@ -648,14 +672,16 @@ function ReactMessage({
 }) {
   const artifacts = useMemo(() => extractArtifacts(steps ?? []), [steps])
   return (
-    <div className="fade-in-up flex flex-col items-start">
+    <div className="fade-in-up flex flex-col items-start group" data-time-hover-root>
       <div className="flex items-center gap-2 mb-1.5">
         <Avatar color={agent.avatarColor} initial={agent.name[0]} />
         <span className="text-sm text-text-secondary">@{agent.name}</span>
-        <span className="text-2xs text-text-tertiary">· 步骤流</span>
-        <span className="text-2xs text-text-tertiary tabular">{tsLabel}</span>
+        <span className="text-sm text-text-tertiary">· 步骤流</span>
+        <span className="text-sm text-text-tertiary tabular opacity-0 transition-opacity duration-100 group-hover:opacity-100">
+          {tsLabel}
+        </span>
       </div>
-      <div className="w-full max-w-[92%]">
+      <div className="w-full">
         <ThoughtStream steps={steps ?? []} />
         {artifacts.length > 0 && (
           <div className="mt-2">
@@ -679,9 +705,9 @@ function Avatar({ color, initial }: { color: string; initial: string }) {
 }
 
 /* ============================================================
- * ReactStreamGroup — 连续步骤流分组（v0.8.1）
+ * v0.22.0 — ReactStreamGroup（连续步骤流分组，DSH 风格）
  * 同一 agent 的多次工具调用共享一个 header，步骤流连续展示，
- * 产物卡片随对应 iteration 内联。
+ * 产物卡片随对应 iteration 内联。time hover 显示。
  * ============================================================ */
 function ReactStreamGroup({
   items,
@@ -693,14 +719,16 @@ function ReactStreamGroup({
   tsLabel: string
 }) {
   return (
-    <div className="fade-in-up flex flex-col items-start">
+    <div className="fade-in-up flex flex-col items-start group" data-time-hover-root>
       <div className="flex items-center gap-2 mb-1.5">
         <Avatar color={agent.avatarColor} initial={agent.name[0]} />
         <span className="text-sm text-text-secondary">@{agent.name}</span>
-        <span className="text-2xs text-text-tertiary">· 步骤流</span>
-        <span className="text-2xs text-text-tertiary tabular">{tsLabel}</span>
+        <span className="text-sm text-text-tertiary">· 步骤流</span>
+        <span className="text-sm text-text-tertiary tabular opacity-0 transition-opacity duration-100 group-hover:opacity-100">
+          {tsLabel}
+        </span>
       </div>
-      <div className="w-full max-w-[92%] space-y-1.5">
+      <div className="w-full space-y-2">
         {items.map((item) => {
           const steps = item.steps ?? []
           const artifacts = extractArtifacts(steps)

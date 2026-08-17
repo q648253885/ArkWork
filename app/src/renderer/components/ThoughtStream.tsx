@@ -126,8 +126,9 @@ function groupByIteration(steps: ReActStep[]): IterationUnit[] {
 }
 
 /* ============================================================
- * CollapsedSummary — 折叠摘要行
- * "▸ 已思考 3.2s · 调用 3 个工具（读取文件 ×2 · 搜索网页 ×1）· 共 12.4s"
+ * v0.22.0 — CollapsedSummary 折叠摘要行（DSH 风格）
+ * "▾ 已思考 3.2s · 调用 3 个工具（读取文件 ×2 · 搜索网页 ×1）"
+ * 13/20 主行节奏、left chevron + summary + duration
  * ============================================================ */
 function CollapsedSummary({
   units,
@@ -163,20 +164,24 @@ function CollapsedSummary({
 
   const summary = failed
     ? `✕ ${failedStep?.errorMessage?.slice(0, 60) || failedStep?.thought?.slice(0, 60) || '执行失败'}`
-    : `已思考 ${(totalMs / 1000).toFixed(1)}s${toolCount > 0 ? ` · 调用 ${toolCount} 个工具（${toolSummary}）` : ''}${reasonCount > 0 ? ` · ${reasonCount} 轮思考` : ''} · 共 ${(totalMs / 1000).toFixed(1)}s`
+    : `${reasonCount > 0 ? `已思考 ${(totalMs / 1000).toFixed(1)}s` : ''}${toolCount > 0 ? ` · 调用 ${toolCount} 个工具（${toolSummary}）` : ''}`
 
   return (
     <button
       onClick={onToggle}
-      className="w-full flex items-center gap-1.5 py-1 px-0.5 rounded-md hover:bg-bg-hover transition-colors group"
+      className="w-full flex items-center gap-2 py-1 px-1 rounded-md hover:bg-bg-hover transition-colors group"
+      style={{ lineHeight: '20px' }}
     >
       {expanded ? (
-        <Icon.ChevronDown width={16} height={16} className="text-text-tertiary flex-shrink-0" />
+        <Icon.ChevronDown width={14} height={14} className="text-text-tertiary flex-shrink-0" />
       ) : (
-        <Icon.ChevronRight width={16} height={16} className="text-text-tertiary flex-shrink-0" />
+        <Icon.ChevronRight width={14} height={14} className="text-text-tertiary flex-shrink-0" />
       )}
       <span className={`flex-1 text-left truncate text-xs ${failed ? 'text-danger' : 'text-text-tertiary'}`}>
         {summary}
+      </span>
+      <span className="text-2xs text-text-tertiary tabular flex-shrink-0">
+        {(totalMs / 1000).toFixed(1)}s
       </span>
     </button>
   )
@@ -215,9 +220,11 @@ function IterationBlock({ unit, isActive }: { unit: IterationUnit; isActive?: bo
 }
 
 /* ============================================================
- * ThinkBlock — v0.13.0 Reason 块（独立视觉容器）
- * 灰色从属卡片，无背景块、仅 1px 边线。流式时尾缀光标；完成后"Reasoning · 3.2s ▾"
- * v0.13.0：💭 emoji 替换为 SVG Brain 图标（对齐 00-design-system §1.2）
+ * v0.22.0 — ThinkBlock 思考块（DSH ReasoningRow 风格）
+ * - 行内摘要：Brain 图标 + 状态文本 + 时间 + chevron
+ * - running 态带 shimmer 横扫（CSS .react-reason[data-state="running"]::after）
+ * - 展开后 body 段落式 + 复制按钮
+ * - 左 2px 状态条：running 业务蓝、failed 危险
  * ============================================================ */
 function ThinkBlock({ step, isActive }: { step: ReActStep; isActive?: boolean }) {
   const [showFull, setShowFull] = useState(false)
@@ -227,7 +234,6 @@ function ThinkBlock({ step, isActive }: { step: ReActStep; isActive?: boolean })
 
   if (!thought) return null
 
-  // v0.17.0 F6：思考块三态 running / done / failed（数据契约 data-state）
   const state = step.status === 'running' ? 'running' : step.status === 'failed' ? 'failed' : 'done'
   const statusText = state === 'running' ? '思考中…' : state === 'failed' ? '思考失败' : '已完成思考'
 
@@ -245,10 +251,10 @@ function ThinkBlock({ step, isActive }: { step: ReActStep; isActive?: boolean })
         aria-expanded={showFull}
       >
         <span className="react-reason__icon" aria-hidden="true">
-          <Icon.Brain width={12} height={12} />
+          <Icon.Brain width={14} height={14} />
         </span>
         <span className={state === 'failed' ? 'text-danger' : ''}>{statusText}</span>
-        {isRunning && <span className="w-1 h-1 rounded-full bg-accent pulse-dot" />}
+        {isRunning && <span className="w-1.5 h-1.5 rounded-full bg-business-primary pulse-dot" />}
         <span className="react-reason__duration tabular">
           {isRunning ? '…' : duration > 0 ? `${(duration / 1000).toFixed(1)}s` : ''}
         </span>
@@ -264,7 +270,7 @@ function ThinkBlock({ step, isActive }: { step: ReActStep; isActive?: boolean })
         <div className="react-reason__body">
           {thought}
           {isRunning && (
-            <span className="inline-block w-0.5 h-3.5 bg-accent ml-0.5 animate-pulse" />
+            <span className="inline-block w-0.5 h-3.5 bg-business-primary ml-0.5 animate-pulse" />
           )}
         </div>
       )}
@@ -495,49 +501,53 @@ function formatTimeShort(ts: number): string {
 }
 
 /* ============================================================
- * v0.14.0 Task 4：并行进度条（按工具维度）
+ * v0.22.0 — 并行进度条（按工具维度，DSH QueueDock 风格）
  * 同一轮发起多个 Act 调用时，按 requestId 分别展示，
  * 防止单一"正在执行…"互相覆盖；finished 状态在动画后由
  * `clear` 事件移除以保持列表干净。
+ *
+ * DSH 风格：tip 底（neutral）、l1 边框、12px 圆角；行内 28px 高，
+ * 左侧 chip 24px 圆角、右侧时钟。
  * ============================================================ */
 function ParallelProgressBar({ progress }: { progress: ToolProgressEvent[] }) {
   return (
     <div
-      className="rounded-lg border border-border-subtle bg-bg-surface/50 px-2 py-1.5 space-y-1"
+      className="rounded-xl border border-border-subtle bg-bg-surface px-3 py-2 space-y-1.5"
       data-testid="parallel-progress"
     >
-      <div className="flex items-center gap-1.5 text-2xs text-text-tertiary">
-        <Icon.Branch width={16} height={16} />
-        <span>并行执行 {progress.length} 个工具</span>
+      <div className="flex items-center gap-2 text-xs text-text-tertiary" style={{ lineHeight: '20px' }}>
+        <Icon.Branch width={14} height={14} />
+        <span className="font-medium">并行执行 {progress.length} 个工具</span>
       </div>
       {progress.map((p) => {
         const isRunning = p.status === 'running'
         const isFailed = p.status === 'failed'
         const cls = isRunning
-          ? 'bg-accent-soft text-accent'
+          ? 'bg-business-primary-soft text-business-primary'
           : isFailed
             ? 'bg-danger-soft text-danger'
             : 'bg-success-soft text-success'
         return (
           <div
             key={p.requestId}
-            className="flex items-center gap-1.5 text-2xs"
+            className="flex items-center gap-2 text-xs"
             data-tool={p.tool}
             data-status={p.status}
+            style={{ lineHeight: '20px' }}
           >
             <span
-              className={`px-1.5 py-0.5 rounded font-medium ${cls}`}
+              className={`px-2 py-0.5 rounded-md font-medium ${cls}`}
             >
               {p.tool}
             </span>
-            <span className="text-text-tertiary truncate">
+            <span className="text-text-secondary truncate flex-1 min-w-0">
               {p.resultSummary ?? (isRunning ? '执行中…' : p.status)}
             </span>
             {isRunning && (
-              <span className="ml-auto inline-block w-3 h-3 border-[1.5px] border-accent border-t-transparent rounded-full animate-spin flex-shrink-0" />
+              <span className="inline-block w-3 h-3 border-[1.5px] border-business-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
             )}
             {typeof p.durationMs === 'number' && p.durationMs > 0 && (
-              <span className="ml-auto text-2xs text-text-tertiary tabular flex-shrink-0">
+              <span className="text-2xs text-text-tertiary tabular flex-shrink-0">
                 <Icon.Clock width={11} height={11} className="inline-block mr-0.5 -mt-px" aria-hidden="true" />
                 {(p.durationMs / 1000).toFixed(1)}s
               </span>

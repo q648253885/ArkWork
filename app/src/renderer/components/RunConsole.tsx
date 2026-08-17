@@ -219,16 +219,20 @@ export function RunConsole({
             </div>
           )}
 
-          {/* 控制按钮组 — v0.11.0 F1104：44px 命中区（h-11） + L2 Tooltip */}
+          {/* v0.22.0 — DSH 风格运行控制按钮组：
+              - 36px 高、6px 圆角胶囊（DSH Button atom outline / primary）
+              - 继续 / 重执行：业务蓝主色
+              - 暂停 / 停止：ghost 风格 + hover 浅红
+              - 重试：危险色描边按钮 */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {status === 'running' && (
               <Tooltip label="暂停" kbd="⌥⏸" desc="暂停当前任务，可编辑输入追加指令" delay={150}>
                 <button
                   onClick={onPause}
                   aria-label="暂停运行"
-                  className="flex items-center gap-1.5 h-11 px-3.5 rounded-lg text-text-secondary hover:bg-bg-hover text-xs font-medium transition-colors focus-ring"
+                  className="flex items-center gap-1.5 h-9 px-3 rounded-md text-text-secondary hover:bg-bg-hover text-xs font-medium transition-colors focus-ring"
                 >
-                  <Icon.Pause width={16} height={16} />
+                  <Icon.Pause width={14} height={14} />
                   暂停
                 </button>
               </Tooltip>
@@ -238,9 +242,10 @@ export function RunConsole({
                 <button
                   onClick={handleAppendAndResume}
                   aria-label="继续运行"
-                  className="flex items-center gap-1.5 h-11 px-3.5 rounded-lg bg-accent hover:bg-accent-hover text-text-inverse text-xs font-medium transition-colors focus-ring"
+                  className="flex items-center gap-1.5 h-9 px-3 rounded-md text-text-inverse text-xs font-medium transition-colors focus-ring"
+                  style={{ background: 'var(--business-primary)' }}
                 >
-                  <Icon.Play width={16} height={16} />
+                  <Icon.Play width={14} height={14} />
                   继续
                 </button>
               </Tooltip>
@@ -250,9 +255,9 @@ export function RunConsole({
                 <button
                   onClick={onRetry}
                   aria-label="重试"
-                  className="flex items-center gap-1.5 h-11 px-3.5 rounded-lg text-danger hover:bg-danger-soft text-xs font-medium transition-colors focus-ring"
+                  className="flex items-center gap-1.5 h-9 px-3 rounded-md text-danger hover:bg-danger-soft text-xs font-medium transition-colors focus-ring"
                 >
-                  <Icon.Refresh width={16} height={16} />
+                  <Icon.Refresh width={14} height={14} />
                   重试
                 </button>
               </Tooltip>
@@ -262,9 +267,10 @@ export function RunConsole({
                 <button
                   onClick={onRerun}
                   aria-label="重新执行该任务"
-                  className="flex items-center gap-1.5 h-11 px-3.5 rounded-lg bg-accent hover:bg-accent-hover text-text-inverse text-xs font-medium transition-colors focus-ring"
+                  className="flex items-center gap-1.5 h-9 px-3 rounded-md text-text-inverse text-xs font-medium transition-colors focus-ring"
+                  style={{ background: 'var(--business-primary)' }}
                 >
-                  <Icon.Refresh width={16} height={16} />
+                  <Icon.Refresh width={14} height={14} />
                   重新执行
                 </button>
               </Tooltip>
@@ -274,9 +280,9 @@ export function RunConsole({
                 <button
                   onClick={onCancel}
                   aria-label="停止运行"
-                  className="flex items-center gap-1.5 h-11 px-3.5 rounded-lg text-text-tertiary hover:text-danger hover:bg-danger-soft text-xs font-medium transition-colors focus-ring"
+                  className="flex items-center gap-1.5 h-9 px-3 rounded-md text-text-tertiary hover:text-danger hover:bg-danger-soft text-xs font-medium transition-colors focus-ring"
                 >
-                  <Icon.Stop width={16} height={16} />
+                  <Icon.Stop width={14} height={14} />
                   停止
                 </button>
               </Tooltip>

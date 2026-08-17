@@ -45,12 +45,14 @@ export function MessageActions({ taskId, messageId, text, iteration }: MessageAc
   }
 
   return (
+    /* v0.22.0 — DSH MessageIconActions 风格：
+       - 三个图标按钮（复制/重新生成/导出）以 10px 间距水平排列
+       - 每个按钮 28×28、6px 内边距、hover 圆形 bg-hover 浅灰底
+       - 时间标签由父级 data-time-hover-root 在 hover/focus 时浮现 */
     <div className="message-actions">
-      {/* v0.5.0：按钮只显示图标（标识常驻），Tooltip hover 时显示文字提示；v0.6.2：tip 用 top 放置避免遮挡
-          v0.11.0 F1104：命中区 32px（w-8 h-8） */}
       <Tooltip label="复制" kbd="⌘C" desc="复制消息文本" placement="top" delay={150}>
         <button
-          className="message-actions__btn !w-8 !h-8"
+          className="message-actions__btn"
           onClick={handleCopy}
           aria-label="复制消息"
         >
@@ -59,7 +61,7 @@ export function MessageActions({ taskId, messageId, text, iteration }: MessageAc
       </Tooltip>
       <Tooltip label="重新生成" desc="以相同输入重跑本轮" placement="top" delay={150}>
         <button
-          className="message-actions__btn !w-8 !h-8"
+          className="message-actions__btn"
           onClick={handleRegenerate}
           aria-label="重新生成"
         >
@@ -68,7 +70,7 @@ export function MessageActions({ taskId, messageId, text, iteration }: MessageAc
       </Tooltip>
       <Tooltip label="导出对话" desc="导出为 Markdown 文件" placement="top" delay={150}>
         <button
-          className="message-actions__btn !w-8 !h-8"
+          className="message-actions__btn"
           onClick={handleExport}
           aria-label="导出对话"
         >
