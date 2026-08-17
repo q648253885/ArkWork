@@ -101,15 +101,24 @@ export function OnboardingLayer() {
   }
 
   return (
+    /* v0.21.0 — DSH 风格 Onboarding（参考 HeroShell）：
+       - 顶部 headline 26/32 wt500：鱼标 + "欢迎 ArkWork"
+       - 步骤卡片：扁平 subtle hover
+       - 圆角 16px、shadow-md、业务蓝链接 */
     <div
-      className="fixed bottom-12 right-4 w-72 z-[45] bg-bg-overlay border border-border-default rounded-lg shadow-panel scale-in"
+      className="fixed bottom-12 right-4 w-80 z-[45] bg-bg-overlay border border-border-subtle rounded-2xl shadow-lg scale-in"
       role="region"
       aria-label="新手引导"
     >
-      {/* 头部 */}
-      <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-border-subtle">
-        <Brand size={16} />
-        <span className="text-sm text-text-primary font-medium">欢迎使用 ArkWork</span>
+      {/* 头部 — DSH HeroShell headline 风格 */}
+      <div className="flex items-center gap-2 px-4 pt-4 pb-3">
+        <Brand size={24} />
+        <span
+          className="text-text-primary font-medium tracking-tight leading-[32px]"
+          style={{ fontSize: '20px' }}
+        >
+          欢迎使用 ArkWork
+        </span>
         <button
           onClick={handleSkip}
           className="ml-auto w-6 h-6 flex items-center justify-center rounded text-text-tertiary hover:text-text-primary hover:bg-bg-hover transition-colors"
@@ -120,7 +129,7 @@ export function OnboardingLayer() {
       </div>
 
       {/* 步骤清单 */}
-      <div className="p-2 space-y-0.5">
+      <div className="px-2 pb-2 space-y-0.5">
         {steps.map((step, i) => (
           <div
             key={step.id}
@@ -147,9 +156,10 @@ export function OnboardingLayer() {
               </div>
               <div className="text-2xs text-text-tertiary leading-relaxed mt-0.5">{step.desc}</div>
               {!step.done && (
+                /* v0.21.0：链接改用业务蓝（DSH --dsw-alias-state-business-primary） */
                 <button
                   onClick={step.onAction}
-                  className="mt-1.5 text-2xs text-accent hover:text-accent-hover font-medium transition-colors"
+                  className="mt-1.5 text-2xs text-business-primary hover:text-business-primary-hover font-medium transition-colors"
                 >
                   {step.actionLabel} →
                 </button>
@@ -160,7 +170,7 @@ export function OnboardingLayer() {
       </div>
 
       {/* 底部跳过 */}
-      <div className="px-3.5 py-2 border-t border-border-subtle flex items-center justify-between">
+      <div className="px-4 py-2.5 border-t border-border-subtle flex items-center justify-between">
         <span className="text-2xs text-text-tertiary">
           {steps.filter((s) => s.done).length}/{steps.length} 完成
         </span>

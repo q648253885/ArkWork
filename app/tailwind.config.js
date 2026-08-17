@@ -62,9 +62,10 @@ export default {
         'shell-stderr': 'var(--shell-stderr)',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'PingFang SC', 'Segoe UI', 'sans-serif'],
-        display: ['Inter', 'system-ui', '-apple-system', 'PingFang SC', 'Segoe UI', 'sans-serif'],
-        mono: ['JetBrains Mono', 'ui-monospace', 'SF Mono', 'Menlo', 'monospace'],
+        // v0.21.0：移除 Inter / JetBrains Mono 外链依赖，改用系统字体栈（与 globals.css --font-sans 一致）
+        sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', 'Helvetica', 'Arial', 'sans-serif'],
+        display: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', 'Helvetica', 'Arial', 'sans-serif'],
+        mono: ['SF Mono', 'JetBrains Mono', 'Fira Code', 'Consolas', 'Liberation Mono', 'Menlo', 'Courier', 'PingFang SC', 'Microsoft YaHei'],
       },
       borderRadius: {
         DEFAULT: '8px',
@@ -73,6 +74,7 @@ export default {
         lg: '12px',
         xl: '16px',
         '2xl': '20px',
+        '3xl': '22px',   // v0.21.0：DSH 风格 Composer floating card radius
       },
       fontSize: {
         // v0.13.0 — Modular 1.2 scale，主体 15px（WorkBuddy 量级）

@@ -546,6 +546,8 @@ export function Composer() {
   }
 
   return (
+    /* v0.21.0 — DSH 风格 floating capsule 输入框：
+       22px 圆角、l2-darkmode-thin 边框、shadow-md 漂浮感、业务蓝发送按钮 */
     <div className="relative border-t border-border-subtle bg-bg-base flex-shrink-0" data-state={isRunning ? 'running' : isFailed ? 'error' : 'idle'}>
       {/* chips 行 */}
       <div className="flex items-center gap-1 px-3 pt-2 pb-1 flex-wrap">
@@ -587,14 +589,16 @@ export function Composer() {
         </div>
       )}
 
-      {/* 输入框 — v0.9.1：Trae 式大圆角卡片 + 聚焦光晕（border-accent + accent-soft 外环） */}
+      {/* v0.21.0 — DSH 风格 floating capsule 输入卡：22px radius、l2-darkmode-thin border、shadow-md */}
       <div className="px-3 pt-2">
         <div
-          className={`flex items-start gap-2.5 bg-bg-input/70 backdrop-blur-md border rounded-2xl px-3.5 py-3 focus-within:border-accent focus-within:shadow-accent transition-all duration-150 ${
-            isFailed ? 'border-danger' : 'border-border-default'
+          className={`flex items-start gap-2.5 rounded-3xl border px-4 py-2 transition-all duration-200 ${
+            isFailed
+              ? 'border-danger bg-bg-input shadow-md'
+              : 'border-border-default bg-bg-input shadow-md focus-within:border-business-primary focus-within:shadow-lg'
           }`}
         >
-          <span className="text-accent mt-0.5 select-none font-mono text-base">›</span>
+          <span className="text-business-primary mt-1 select-none font-mono text-base">›</span>
           <textarea
             ref={textareaRef}
             value={input}
@@ -602,8 +606,8 @@ export function Composer() {
             onKeyDown={onKeyDown}
             placeholder="Ask anything…  @ 引用 · / 命令  (⌘↵ 发送 / Shift+Enter 换行 / Esc 停止)"
             rows={1}
-            className="flex-1 resize-none text-sm text-text-primary placeholder-text-tertiary bg-transparent leading-relaxed px-1.5 py-2"
-            style={{ minHeight: '60px', maxHeight: '320px' }}
+            className="flex-1 resize-none text-sm text-text-primary placeholder-text-tertiary bg-transparent leading-relaxed px-1 py-2"
+            style={{ minHeight: '44px', maxHeight: '320px' }}
           />
         </div>
       </div>
@@ -674,15 +678,17 @@ export function Composer() {
 
         <Divider />
 
-        {/* 发送 / 停止 — 主 CTA；v0.11.0 F1104：44px 命中区（h-11） */}
+        {/* v0.21.0 — DSH 风格发送/停止：
+            - 发送：业务蓝 (#3964FE) 圆角胶囊（DSH --dsw-alias-button-info-fill，34px 圆 icon 风格 + 文字）
+            - 停止：保持 danger 红色，去除冗余高度 */}
         {isRunning ? (
           <Tooltip label="停止" kbd="Esc" desc="终止当前任务，已执行步骤保留" delay={150}>
             <button
               onClick={handleStopOrEsc}
               aria-label="停止运行 Esc"
-              className="flex items-center gap-1.5 h-11 px-5 rounded-lg bg-danger hover:opacity-90 text-text-inverse text-sm font-medium transition-opacity focus-ring"
+              className="flex items-center gap-1.5 h-9 px-4 rounded-full bg-danger hover:opacity-90 text-text-inverse text-sm font-medium transition-opacity focus-ring"
             >
-              <Icon.Stop width={16} height={16} />
+              <Icon.Stop width={14} height={14} />
               停止
             </button>
           </Tooltip>
@@ -697,9 +703,12 @@ export function Composer() {
               onClick={() => void handleSend()}
               disabled={!input.trim() || !model || healthUnavailable}
               aria-label="发送消息 ⏎"
-              className="flex items-center gap-1.5 h-11 px-5 rounded-lg bg-accent hover:bg-accent-hover text-text-inverse text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-ring"
+              className="flex items-center gap-1.5 h-9 px-4 rounded-full text-text-inverse text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-ring hover:opacity-90"
+              style={{
+                background: 'var(--business-primary)',
+              }}
             >
-              <Icon.Send width={16} height={16} />
+              <Icon.Send width={14} height={14} />
               发送
             </button>
           </Tooltip>

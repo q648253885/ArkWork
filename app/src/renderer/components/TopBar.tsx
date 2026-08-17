@@ -30,8 +30,11 @@ export function TopBar() {
   const openModulePage = useStore((s) => s.openModulePage)
 
   return (
+    /* v0.21.0 — DSH 风格 TopBar：
+       - 高度 48px（h-12，与 DSH mac caption row 32px+ 内边距对齐）
+       - 搜索按钮更轻量：l2 border、subtle 底色、hover 提亮 */
     <div
-      className="relative flex items-center h-11 border-b border-border-subtle bg-bg-base flex-shrink-0 select-none"
+      className="relative flex items-center h-12 border-b border-border-subtle bg-bg-base flex-shrink-0 select-none"
       style={{
         WebkitAppRegion: 'drag' as React.CSSProperties['WebkitAppRegion'],
         paddingLeft: isMac ? MAC_TRAFFIC_WIDTH : 14,
@@ -50,7 +53,7 @@ export function TopBar() {
           <button
             onClick={() => setCmdPaletteOpen(true)}
             aria-label="打开 Quick Action 搜索 ⌘K"
-            className="topbar-search__button flex items-center gap-2 h-8 px-3.5 rounded-md bg-bg-surface border border-border-subtle hover:border-border-default text-text-secondary hover:text-text-primary transition-colors focus-ring min-w-[280px] max-w-[440px] justify-center"
+            className="topbar-search__button flex items-center gap-2 h-9 px-3.5 rounded-full bg-bg-surface border border-border-subtle hover:border-border-default text-text-secondary hover:text-text-primary transition-colors focus-ring min-w-[280px] max-w-[440px] justify-center"
           >
             <Icon.Search width={15} height={15} aria-hidden="true" />
             <span className="topbar-search__label text-xs">搜索任务、文件、Agent、命令</span>
@@ -73,9 +76,9 @@ export function TopBar() {
           <button
             onClick={() => openModulePage('settings')}
             aria-label="设置 ⌘,"
-            className="h-11 w-11 flex items-center justify-center rounded-lg text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors focus-ring"
+            className="h-12 w-12 flex items-center justify-center rounded-lg text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors focus-ring"
           >
-            <Icon.Settings width={20} height={20} aria-hidden="true" />
+            <Icon.Settings width={18} height={18} aria-hidden="true" />
           </button>
         </Tooltip>
       </div>
@@ -183,7 +186,7 @@ function WorkspaceIdentifier() {
           aria-label="切换工作区 ⌘⇧W"
           aria-expanded={open}
           aria-haspopup="menu"
-          className="workspace-identifier__button group flex items-center gap-2 h-11 pl-2.5 pr-3 rounded-lg bg-bg-surface border border-border-subtle hover:bg-bg-hover hover:border-border-default transition-colors focus-ring"
+          className="workspace-identifier__button group flex items-center gap-2 h-9 pl-2.5 pr-3 rounded-lg bg-bg-surface border border-border-subtle hover:bg-bg-hover hover:border-border-default transition-colors focus-ring"
         >
           {/* (1) 原创工作区图形（不缩放，16px 稳定占据） */}
           <Icon.Workspace

@@ -80,11 +80,13 @@ export function Sidebar({ width, onResizeStart }: SidebarProps) {
 function SidebarTop() {
   const createTask = useStore((s) => s.createTask)
   return (
+    /* v0.21.0 — DSH 风格 newSession（figma 133:7634）：
+       38px 高度、12px 圆角、elevated fill（白底）+ l2 border */
     <div className="sidebar-top p-2 pb-2 flex-shrink-0">
       <Tooltip label="新建任务" kbd="⌘N" desc="创建新任务并进入对话" block>
         <button
           onClick={() => void createTask({ title: '', text: '' })}
-          className="sidebar-new-task w-full flex items-center justify-center gap-1.5 h-8 px-3 rounded-md bg-accent hover:bg-accent-hover active:scale-[0.98] text-text-inverse text-sm font-medium transition-[background-color,color,transform] focus-ring"
+          className="sidebar-new-task w-full flex items-center justify-center gap-1.5 h-[38px] px-4 rounded-xl bg-bg-overlay border border-border-default hover:bg-bg-surface active:scale-[0.98] text-text-primary text-sm font-medium transition-[background-color,color,transform] focus-ring"
         >
           <Icon.Plus width={16} height={16} aria-hidden="true" />
           <span className="sidebar-new-task__label">新建任务</span>
@@ -310,11 +312,12 @@ function ThreadRow({
   // v0.14.0 Task 8：任务行与清单六态联动 —
   // 全部 done → 任务行视为 done；任一 failed → warning 角标（见下方渲染）；
   // 状态点颜色取六态映射（planItems 缺失/为空时回退任务级状态，保持旧行为）
+  // v0.21.0：running 态颜色由 accent（紫罗兰）改用 business-primary（业务蓝），与 DSH 风格对齐
   const planStatus = aggregatePlanStatus(task.planItems?.map((p) => p.status))
   const statusColor = planStatus
     ? PLAN_STATUS_META[planStatus].color
     : task.status === 'running'
-      ? 'var(--accent)'
+      ? 'var(--business-primary)'
       : task.status === 'failed'
         ? 'var(--danger)'
         : 'var(--text-tertiary)'
@@ -369,25 +372,25 @@ function ThreadRow({
           onClick={() => onPick(task.id)}
           data-thread-row={task.id}
           data-selected={selected ? 'true' : 'false'}
+          /* v0.21.0 — DSH 风格 ThreadRow 选中态：业务蓝淡底 + 业务蓝左条 + 业务蓝外环 */
           className={`relative w-full flex items-center gap-2 h-8 pl-3 pr-2.5 rounded-md text-xs text-left transition-colors ${
             selected
-              ? 'bg-accent-soft text-text-primary font-medium'
+              ? 'bg-business-primary-soft text-business-primary font-medium'
               : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
           } ${pulse ? 'pulse-new-task' : ''}`}
         >
-          {/* polish3 §Task 1.1：左侧 2px accent bar（选中时显示） */}
+          {/* v0.21.0：左侧 2px 业务蓝条（DSH 风格左 indicator） */}
           {selected && (
             <span
               aria-hidden="true"
-              className="absolute left-0 top-1 bottom-1 w-0.5 rounded-r bg-accent"
+              className="absolute left-0 top-1 bottom-1 w-0.5 rounded-r bg-business-primary"
             />
           )}
-          {/* polish3 §Task 1.2：状态点尺寸 6px + 选中时外环。
-              v0.14.0 Task 8：与清单六态联动 — planItems 存在时颜色取六态映射，
+          {/* v0.14.0 Task 8：与清单六态联动 — planItems 存在时颜色取六态映射，
               否则回退任务级状态（保持旧行为） */}
           <span
             aria-hidden="true"
-            className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${selected ? 'ring-2 ring-accent/30' : ''}`}
+            className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${selected ? 'ring-2 ring-business-primary/30' : ''}`}
             style={{ background: statusColor }}
           />
           {task.automationId ? (
@@ -552,6 +555,9 @@ function CapabilityEntries() {
   const modulePage = useStore((s) => s.modulePage)
 
   return (
+    /* v0.21.0 — DSH 风格 Sidebar 能力入口：
+       - active：业务蓝文字 + 蓝色淡背景（DSH --dsw-alias-interactive-bg-hover-accent）
+       - 整体保留 Sidebar 留白与 8px gap 节奏 */
     <div className="sidebar-capability border-t border-border-subtle py-1.5 px-1.5 flex-shrink-0">
       {CAPABILITY_ENTRIES.map((m) => {
         const active = modulePage === m.page
@@ -566,7 +572,7 @@ function CapabilityEntries() {
               aria-label={`${m.label} ${m.shortcut}`}
               className={`sidebar-capability__item w-full flex items-center gap-2 h-8 px-2.5 rounded-md text-sm transition-colors focus-ring mb-0.5 ${
                 active
-                  ? 'bg-bg-surface text-text-primary font-medium'
+                  ? 'bg-business-primary-soft text-business-primary font-medium'
                   : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
               }`}
             >
@@ -574,7 +580,7 @@ function CapabilityEntries() {
                 <EntryIcon
                   width={16}
                   height={16}
-                  className={`flex-shrink-0 ${active ? 'text-accent' : ''}`}
+                  className={`flex-shrink-0 ${active ? 'text-business-primary' : ''}`}
                   aria-hidden="true"
                 />
               </span>
