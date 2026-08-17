@@ -47,6 +47,8 @@ export type PlanItemSource =
   | 'user-retry'
   | 'user-mark-done'
   | 'plan-regen'
+  /** v0.21.0：续聊时旧清单全完成后，引擎自动追加的「新需求承接项」 */
+  | 'continuation'
 
 export interface PlanItem {
   /** 计划项 ID（v0.14.0 新增；旧数据缺失时由迁移层补齐） */

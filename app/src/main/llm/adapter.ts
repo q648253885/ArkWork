@@ -31,6 +31,21 @@ export interface LlmTool {
   }
 }
 
+/**
+ * v0.20.0 缓存命中统计（跨厂商统一口径）：
+ * DeepSeek → prompt_cache_hit_tokens / prompt_cache_miss_tokens；
+ * MiniMax → prompt_tokens_details.cached_tokens；
+ * Anthropic → cache_read_input_tokens / cache_creation_input_tokens。
+ */
+export interface LlmCacheUsage {
+  /** 本次输入命中缓存的 token 数 */
+  hitTokens: number
+  /** 本次输入未命中缓存的 token 数 */
+  missTokens: number
+  /** 本次新写入缓存的 token 数（部分厂商提供，可缺省） */
+  writeTokens?: number
+}
+
 export interface LlmCompleteRequest {
   system: string
   messages: LlmMessage[]
@@ -56,6 +71,8 @@ export interface LlmCompleteResponse {
   toolCallId?: string             // 用于回写 tool result
   tokensIn: number
   tokensOut: number
+  /** v0.20.0：缓存命中统计（厂商未返回时为 undefined） */
+  cache?: LlmCacheUsage
   finishReason: 'stop' | 'tool_calls' | 'length' | 'content_filter'
   /** DeepSeek/o1 等思考模型的 reasoning_content，需原样传回 API */
   reasoningContent?: string

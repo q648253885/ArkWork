@@ -3218,12 +3218,16 @@ export const useStore = create<AppState>((set, get) => ({
             ts: Date.now(),
             level: 'INFO',
             source: 'LLM',
-            message: `iter ${event.iteration} reason_end tokens=${event.tokensIn ?? 0}+${event.tokensOut ?? 0} ⏱${event.durationMs}ms`,
+            message:
+              `iter ${event.iteration} reason_end tokens=${event.tokensIn ?? 0}+${event.tokensOut ?? 0}` +
+              (event.cacheHitTokens !== undefined ? ` cacheHit=${event.cacheHitTokens}` : '') +
+              ` ⏱${event.durationMs}ms`,
           })
         } else if (event.type === 'act_end') {
           get().appendLog({
             ts: Date.now(),
-            level: event.ok ? 'INFO' : 'ERROR',
+            // v0.19.x：门禁/预算拦截（softFail）按 WARN 橙色，只有真实工具报错才是 ERROR 红色
+            level: event.ok ? 'INFO' : event.softFail ? 'WARN' : 'ERROR',
             source: 'Tool',
             message: `act_end ${event.resultSummary} ⏱${event.durationMs}ms`,
           })

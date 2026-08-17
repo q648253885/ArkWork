@@ -369,7 +369,7 @@ function ToolCard({ step, observation }: { step: ReActStep; observation?: ReActS
           {isRunning ? (
             <span className="inline-block w-3 h-3 border-[1.5px] border-accent border-t-transparent rounded-full animate-spin" />
           ) : isSoftFail ? (
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-text-tertiary" title="内部机制拦截" />
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-warning" title="Agent 拦截（门禁/预算，非错误）" />
           ) : isFailed ? (
             <span className="text-danger">✕</span>
           ) : (
@@ -382,7 +382,7 @@ function ToolCard({ step, observation }: { step: ReActStep; observation?: ReActS
         <div className="tool-card__body">
           {step.errorMessage && (
             isSoftFail ? (
-              <div className="text-text-tertiary whitespace-pre-wrap">{step.errorMessage}</div>
+              <div className="text-warning whitespace-pre-wrap">{step.errorMessage}</div>
             ) : (
               <div className="text-danger whitespace-pre-wrap">{step.errorMessage}</div>
             )

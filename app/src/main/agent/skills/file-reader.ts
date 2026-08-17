@@ -48,7 +48,7 @@ export async function fileReader(
     : resolve(baseDir, args.path)
 
   if (!existsSync(abs)) {
-    throw new Error(`file not found: ${args.path}`)
+    throw new Error(`file not found: ${args.path}（已解析为 ${abs}）`)
   }
 
   // v0.16.6+：重复读同一文件/同一段 → 给 Agent 友好提示（不阻断）

@@ -75,6 +75,8 @@ export async function addSkill(input: SkillAddInput): Promise<Skill> {
     id,
     source: input.source ?? 'custom',
     enabled: input.enabled ?? true,
+    // v0.19.0 M5：新建技能归属 user 层
+    layer: 'user',
   }
   await writeSkillToFolder(skill, input.instructionMdContent)
   invalidateSkillCache()
@@ -211,6 +213,8 @@ export async function importSkillFromDir(dirPath: string): Promise<Skill> {
     enabled: skill.enabled ?? true,
     toolName: skill.toolName ?? asciiToolName(skill.id),
     installedFrom: skill.installedFrom ?? dirPath,
+    // v0.19.0 M5：导入技能归属 user 层
+    layer: 'user',
   }
   await writeSkillToFolder(skill, instructionMdContent)
   invalidateSkillCache()
@@ -260,6 +264,8 @@ export async function importSkillFromMarkdown(filePath: string): Promise<Skill> 
     namespace: 'imported',
     source: 'custom',
     enabled: true,
+    // v0.19.0 M5：导入技能归属 user 层
+    layer: 'user',
     // v0.8.0：ASCII 工具名（中文名技能生成 slug 会退化为 "skill"，此处用 id 派生保证唯一）
     toolName: asciiToolName(id),
     tags: ['imported', 'markdown'],

@@ -71,7 +71,7 @@ function handleTodoUpdate(
   status: string,
   comment: string,
 ): TodoUpdateResult {
-  const VALID = new Set(['done', 'running', 'pending', 'skipped', 'failed'])
+  const VALID = new Set(['done', 'running', 'pending', 'skipped', 'failed', 'cancelled'])
   const next = planItems.map((p) => ({ ...p }))
   if (!Number.isInteger(itemIndex) || itemIndex < 0 || itemIndex >= next.length) {
     return {
@@ -84,7 +84,7 @@ function handleTodoUpdate(
   if (!VALID.has(status)) {
     return {
       ok: false,
-      errorMessage: `todo_update 参数非法：status=${status}（合法值 done/running/pending/skipped/failed）`,
+      errorMessage: `todo_update 参数非法：status=${status}（合法值 done/running/pending/skipped/failed/cancelled）`,
       overview: '',
       planItems: next,
     }
@@ -92,7 +92,9 @@ function handleTodoUpdate(
   const target = next[itemIndex]
   target.status = status as PlanStatus
   target.updatedAt = Date.now()
-  if (status === 'done') target.completedAt = Date.now()
+  if (status === 'done' || status === 'failed' || status === 'skipped' || status === 'cancelled') {
+    target.completedAt = Date.now()
+  }
   if (
     status === 'done' &&
     itemIndex + 1 < next.length &&
@@ -110,7 +112,11 @@ function handleTodoUpdate(
             ? '[~]'
             : p.status === 'failed'
               ? '[!]'
-              : '[ ]'
+              : p.status === 'skipped'
+                ? '[-]'
+                : p.status === 'cancelled'
+                  ? '[·]'
+                  : '[ ]'
       return `${mark} ${i + 1}. ${p.text}`
     })
     .join('\n')
@@ -365,7 +371,7 @@ test('E2E 场景B-边界: todo_update 非法 status → 返回 ok:false', () => 
   const r = handleTodoUpdate(items, 0, 'finished', '')
   assert.equal(r.ok, false)
   assert.match(r.errorMessage!, /status=finished/)
-  assert.match(r.errorMessage!, /done.*running.*pending.*skipped.*failed/)
+  assert.match(r.errorMessage!, /done.*running.*pending.*skipped.*failed.*cancelled/)
 })
 
 test('E2E 场景B-skipped: 跳过某项不影响下一项推进', () => {

@@ -14,7 +14,7 @@
  * ============================================================ */
 import type { LlmMessage, LlmTool } from '../llm/adapter.js'
 import type { MemoryItem, MemoryKind } from '@shared/types/memory'
-import type { SkillSource } from '@shared/types/agent'
+import type { PromptSection, SkillSource } from '@shared/types/agent'
 import type {
   ContextCategory,
   ContextDetail,
@@ -53,8 +53,11 @@ export interface ContextSkillInstruction {
 /** computeContextBreakdown 入参 */
 export interface ContextBreakdownInput {
   maxTokens: number
-  /** Agent 系统提示词 + 人格段 + 工作区指令（不含记忆注入） */
+  /** Agent 系统提示词 + 人格段 + 工作区指令（不含记忆注入）；systemSections 缺省时的回退口径 */
   systemPrompt: string
+  /** v0.19.0 M1：有序系统提示词段（core-rules / personality / workspace …）。
+   *  提供时 system 分类按下钻为逐段明细；缺省回退为单条 system-prompt 明细。 */
+  systemSections?: PromptSection[]
   /** 记忆注入文本（策展记忆 / 用户画像 / 知识库状态行） */
   memoryInjection?: string
   /** L1 file_ref 条目（附加文件） */
@@ -116,6 +119,24 @@ function snippet(text: string, n = 60): string {
   return t.length > n ? t.slice(0, n) + '…' : t
 }
 
+/** v0.19.0 M1：系统提示词段的友好展示名（core-rules 等固定段 → 中文；未知段回退 id / 标题） */
+const SYSTEM_SECTION_LABELS: Record<string, string> = {
+  'core-rules': '核心规则',
+  'personality': '人格设定',
+  'workspace': '工作区指令',
+  'memory': '记忆注入',
+  'skill-hint': '当前技能指令',
+  'plan-constraint': '计划执行约束',
+}
+
+function systemSectionLabel(sec: PromptSection): string {
+  const known = SYSTEM_SECTION_LABELS[sec.id]
+  if (known) return known
+  // 未知段：尝试从 `## 标题` 中抽取；否则回退为 id
+  const title = sec.text.match(/^##\s+(.+)$/m)?.[1]?.trim()
+  return title || sec.id
+}
+
 /**
  * 计算上下文占比明细。纯函数，不做任何 I/O。
  *
@@ -136,24 +157,41 @@ export function computeContextBreakdown(input: ContextBreakdownInput): ContextBr
   const items: ContextBreakdownItem[] = []
 
   // ---- system ----
-  const systemTokens = estimateTextTokens(input.systemPrompt)
+  // v0.19.0 M1：若提供了有序 section，则按段下钻（core-rules / personality / workspace …）；
+  // 否则回退为单条 system-prompt 明细（兼容旧调用方）。
+  const sections = input.systemSections ?? []
+  const systemTokens = sections.length
+    ? sections.reduce((s, sec) => s + estimateTextTokens(sec.text), 0)
+    : estimateTextTokens(input.systemPrompt)
+  const systemDetails: ContextDetail[] = sections.length
+    ? sections.map((sec) => ({
+        id: `system:${sec.id}`,
+        label: systemSectionLabel(sec),
+        type: 'system-section',
+        tokenCount: estimateTextTokens(sec.text),
+        removable: false,
+      }))
+    : [
+        {
+          id: 'system:prompt',
+          label: 'Agent 系统提示词 + 工作区指令',
+          type: 'system-prompt',
+          tokenCount: systemTokens,
+          removable: false,
+        },
+      ]
   items.push({
     category: 'system',
     label: CATEGORY_LABELS.system,
     tokenCount: systemTokens,
     percentage: pctOf(systemTokens, max),
-    details: [
-      {
-        id: 'system:prompt',
-        label: 'Agent 系统提示词 + 工作区指令',
-        type: 'system-prompt',
-        tokenCount: systemTokens,
-        removable: false,
-      },
-    ],
+    details: systemDetails,
   })
 
   // ---- files ----
+  // v0.19.x fix：此前 files 分类只统计 L1 file_ref（附加文件），任务对话中从未产生
+  // file_ref → 面板"文件"恒为 0/空。现在把 file-reader 工具读到的文件内容观察
+  // （tool 消息）也归入"文件"分类（从 messages 中拆出，避免双重计数）。
   const fileDetails: ContextDetail[] = input.fileItems.map((m) => ({
     id: m.id,
     label: snippet(m.content, 80) || `文件引用 #${m.id.slice(-4)}`,
@@ -162,14 +200,6 @@ export function computeContextBreakdown(input: ContextBreakdownInput): ContextBr
     removable: true,
     data: m.meta,
   }))
-  const fileTokens = fileDetails.reduce((s, d) => s + d.tokenCount, 0)
-  items.push({
-    category: 'files',
-    label: CATEGORY_LABELS.files,
-    tokenCount: fileTokens,
-    percentage: pctOf(fileTokens, max),
-    details: fileDetails,
-  })
 
   // ---- tools + mcp ----
   const toolDetails: ContextDetail[] = []
@@ -207,6 +237,8 @@ export function computeContextBreakdown(input: ContextBreakdownInput): ContextBr
 
   // ---- messages ----
   // 不展示工具调用的原始 JSON 参数：assistant 调用工具只显示工具名。
+  // v0.19.x：file-reader 的 tool 消息（读到的文件内容）归入 files 分类，不进 messages。
+  const FILE_READ_TOOLS = new Set(['file-reader'])
   const msgDetails: ContextDetail[] = []
   let msgTokens = 0
   for (let i = 0; i < input.messages.length; i++) {
@@ -215,6 +247,17 @@ export function computeContextBreakdown(input: ContextBreakdownInput): ContextBr
     if (m.reasoningContent) tokens += estimateTextTokens(m.reasoningContent)
     if (m.toolCalls) {
       for (const tc of m.toolCalls) tokens += estimateTextTokens(tc.function.arguments)
+    }
+    if (m.role === 'tool' && m.name && FILE_READ_TOOLS.has(m.name)) {
+      // 文件读取观察 → 文件分类（不可单条移除，避免破坏 tool_call 配对）
+      fileDetails.push({
+        id: `file-obs:${i}`,
+        label: `文件读取：` + snippet(m.content, 70),
+        type: 'file',
+        tokenCount: tokens,
+        removable: false,
+      })
+      continue
     }
     msgTokens += tokens
     let label: string
@@ -231,6 +274,14 @@ export function computeContextBreakdown(input: ContextBreakdownInput): ContextBr
     // 单条对话消息不提供移除（避免破坏 tool_call 配对）；整类可通过「清空」归档
     msgDetails.push({ id: `msg:${i}`, label, type: 'message', tokenCount: tokens, removable: false })
   }
+  const fileTokens = fileDetails.reduce((s, d) => s + d.tokenCount, 0)
+  items.push({
+    category: 'files',
+    label: CATEGORY_LABELS.files,
+    tokenCount: fileTokens,
+    percentage: pctOf(fileTokens, max),
+    details: fileDetails,
+  })
   items.push({
     category: 'messages',
     label: CATEGORY_LABELS.messages,

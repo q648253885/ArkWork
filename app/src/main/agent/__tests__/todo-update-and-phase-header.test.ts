@@ -135,21 +135,30 @@ test('seed.ts: @default / @coder systemPrompt 由引擎推进 + todo-update 显�
   assert.match(seedSrc, /不要批量打标|禁止.*批量标/, '仍应禁止批量打标')
 })
 
-/* ---------- 4. 工具失败自动标 failed（源码契约） ---------- */
+/* ---------- 4. 工具失败与清单推进（源码契约） ---------- */
 
-test('engine.ts: 工具失败时自动把 running 项标 failed（v0.17.6 改用 decidePlanAdvance）', () => {
+test('engine.ts: 工具瞬时失败保持 running 可重试，成功产出自动推进（v0.17.6 decidePlanAdvance / v0.19.x 修订）', () => {
   // v0.17.6：旧版"if !ok 兜底"已被 decidePlanAdvance 取代
-  // 失败场景由 decidePlanAdvance 内部判断分支处理：act 失败 → running 项自动 failed
   assert.match(
     engineSrc,
     /decidePlanAdvance\(\s*ctx\.task\.planItems,\s*action\.tool,\s*ok/,
     '应使用 decidePlanAdvance 综合判断（失败/成功均进入）',
   )
-  // decidePlanAdvance 内部：!ok 分支应标 failed
+  // v0.19.x：act 失败 → 保持 running（瞬时失败可自纠重试），不再直接永久标 failed
   assert.match(
     engineSrc,
-    /!\s*ok[\s\S]{0,200}status\s*=\s*['"]failed['"]/,
-    'decidePlanAdvance 内部：act 失败应把 running 项标 failed',
+    /瞬时失败保持 running[\s\S]{0,180}after:\s*['"]running['"]/,
+    'decidePlanAdvance 内部：act 失败应保持 running（可重试），不标 failed',
+  )
+  assert.ok(
+    !/after:\s*['"]failed['"]/.test(engineSrc.match(/if \(!ok\) \{[\s\S]{0,600}?after:\s*['"]\w+['"]/)?.[0] ?? ''),
+    'decidePlanAdvance 的 !ok 分支不应再把项标 failed',
+  )
+  // v0.19.x：无 running 项时自动恢复推进首个 pending（修复清单卡死）
+  assert.match(
+    engineSrc,
+    /pendingIdx[\s\S]{0,200}after:\s*['"]running['"]/,
+    '无 running 项时应自动恢复推进首个 pending',
   )
   assert.match(
     engineSrc,
@@ -174,12 +183,12 @@ test('engine.ts: PLAN_SYSTEM_PROMPT Spec 级明确禁止阶段标题作为清单
 test('engine.ts: todo_update 处理逻辑完整（校验 + 自动推进 + 概览）', () => {
   // 校验 item_index 越界
   assert.match(engineSrc, /item_index=.*越界|item_index.*range|item_index.*越界/, '应校验 item_index 越界')
-  // 校验 status 合法值
+  // 校验 status 合法值（v0.19.1 新增 cancelled，共 6 态）
   assert.match(engineSrc, /VALID_STATUSES\s*=\s*new\s+Set/, '应定义合法状态集合')
   assert.match(
     engineSrc,
-    /done.*running.*pending.*skipped.*failed|'done'.*'running'.*'pending'.*'skipped'.*'failed'/,
-    '合法状态集合应含 5 种',
+    /done.*running.*pending.*skipped.*failed.*cancelled|'done'.*'running'.*'pending'.*'skipped'.*'failed'.*'cancelled'/,
+    '合法状态集合应含 6 种（含 cancelled）',
   )
   // done 时自动推进下一项为 running
   assert.match(
@@ -231,7 +240,7 @@ test('v0.17.6: 引擎兜底取代 LLM 自调 todo_update（act 结果驱动）',
 
 test('v0.17.6: 每轮 Reason 前注入 plan_status（独立 user 消息）', () => {
   // emitPlanStatus 应在 reason_start 之后调用
-  const reasonIdx = engineSrc.search(/await\s+emitEvent\(\s*\{\s*type:\s*['"]reason_start['"]/)
+  const reasonIdx = engineSrc.search(/await\s+emitEvent\(\s*task\.id,\s*\{\s*type:\s*['"]reason_start['"]/)
   const emitIdx = engineSrc.indexOf('emitPlanStatus(task, iteration', reasonIdx)
   assert.ok(reasonIdx > 0, '应先有 reason_start 事件')
   assert.ok(emitIdx > reasonIdx, 'emitPlanStatus 应在 reason_start 之后调用')
@@ -270,3 +279,169 @@ test('v0.17.6: MemoryKind 新增 plan_status', () => {
     'MemoryKind 应新增 plan_status 枚举值',
   )
 })
+
+/* ---------- 8. v0.19.1 清单缺陷修复（噪声过滤 / 中断丢弃 / 计划上下文隔离） ---------- */
+
+test('v0.19.1: parsePlanItems 调用 isNoisePlanItem 过滤噪声项', () => {
+  assert.match(
+    engineSrc,
+    /filter\(\(\s*x\s*\)\s*=>\s*!isNoisePlanItem\(\s*x\s*\)\)/,
+    'parsePlanItems 应链式过滤 isNoisePlanItem 噪声项',
+  )
+  assert.match(
+    engineSrc,
+    /import\s*\{\s*isNoisePlanItem\s*\}\s*from\s*['"]@shared\/utils\/plan-noise['"]/,
+    'engine.ts 应从 @shared/utils/plan-noise 引入 isNoisePlanItem',
+  )
+})
+
+test('v0.19.1: 中断/取消时 discardIncompletePlanItems 把未完成项标 cancelled', () => {
+  assert.match(
+    engineSrc,
+    /async\s+function\s+discardIncompletePlanItems\(/,
+    '应定义 discardIncompletePlanItems 函数',
+  )
+  // handleAbort 的 cancelled / paused 两条分支都应调用 discardIncompletePlanItems
+  const calls = engineSrc.match(/discardIncompletePlanItems\(current\s*\?\?\s*task,\s*['"][^'"]+['"]\)/g)
+  assert.ok(calls && calls.length >= 2, 'handleAbort 的 cancelled 与 paused 分支都应调用 discardIncompletePlanItems')
+  // 未完成项（running/pending）→ cancelled，并写入 source=user-cancel
+  assert.match(
+    engineSrc,
+    /p\.status\s*===\s*['"]running['"]\s*\|\|\s*p\.status\s*===\s*['"]pending['"]/,
+    '应将 running/pending 视为未完成项',
+  )
+  assert.match(
+    engineSrc,
+    /p\.source\s*=\s*['"]user-cancel['"]/,
+    '丢弃的清单项 source 应为 user-cancel',
+  )
+})
+
+test('v0.19.1: 计划生成排除历史 plan/plan_status 上下文（excludePlanContext）', () => {
+  assert.match(
+    engineSrc,
+    /opts\?\.excludePlanContext\s*&&\s*\(m\.kind\s*===\s*['"]plan['"]\s*\|\|\s*m\.kind\s*===\s*['"]plan_status['"]\)/,
+    'assembleMessages 应在 excludePlanContext 时跳过 plan/plan_status',
+  )
+  assert.match(
+    engineSrc,
+    /assembleMessages\(\s*task,\s*agent,\s*\{\s*excludePlanContext:\s*true\s*\}\)/,
+    'tryGeneratePlan 应传入 excludePlanContext: true',
+  )
+})
+
+test('v0.19.1: emitPlanStatus 注入同步义务硬约束（实时维护清单）', () => {
+  assert.match(
+    engineSrc,
+    /同步义务[\s\S]{0,120}todo_update[\s\S]{0,120}cancelled/,
+    'emitPlanStatus 末尾应注入同步义务（含 todo_update 与 cancelled）',
+  )
+  assert.match(
+    engineSrc,
+    /禁止累积多步后一次性批量修正/,
+    '同步义务应明确禁止批量滞后修正',
+  )
+})
+
+/* ---------- 9. v0.19.x 清单恢复 / 预算 200 / 达限询问 / 单行化 / files 分类 ---------- */
+
+test('v0.19.x: 工具类别预算上限提高到 200', () => {
+  assert.match(engineSrc, /MAX_PER_TOOL_DEFAULT\s*=\s*200/, '写入类工具上限应为 200')
+  assert.match(engineSrc, /MAX_PER_TOOL_READONLY\s*=\s*200/, '只读类工具上限应为 200')
+})
+
+test('v0.19.x: 类别预算触顶时中断 ask_user 询问是否继续（而非跳过）', () => {
+  // 达限中断：emit ask_user + paused
+  assert.match(
+    engineSrc,
+    /categoryExhausted\s*&&\s*!budgetInterrupted/,
+    '应存在类别达限中断守卫（仅询问一次）',
+  )
+  assert.match(
+    engineSrc,
+    /任务执行时间可能过长[\s\S]{0,400}type:\s*['"]ask_user['"]/,
+    '达限时应 ask_user 并提示任务执行时间可能过长',
+  )
+  assert.match(
+    engineSrc,
+    /budgetInterrupted\s*=\s*true/,
+    '达限中断后应置位 budgetInterrupted 防止重复询问',
+  )
+  // 同参数重复调用被拦截计入重点监控统计
+  assert.match(
+    engineSrc,
+    /signatureBlockedTotal\s*\+=/,
+    '同参数重复调用被拦截时应累计 signatureBlockedTotal',
+  )
+  // 预算拦截步骤标 softFail（橙色警告而非红色）
+  assert.match(
+    engineSrc,
+    /budget\s*interrupt|预算拦截是引擎主动行为[\s\S]{0,80}softFail/,
+    '预算拦截合成步骤应标 softFail',
+  )
+})
+
+test('v0.19.x: 清单项规范化 —— 强制单行 + 40 字截断', () => {
+  assert.match(
+    engineSrc,
+    /function\s+sanitizePlanItemText\(/,
+    '应定义 sanitizePlanItemText 函数',
+  )
+  assert.match(
+    engineSrc,
+    /oneLine\.length\s*>\s*40/,
+    '超过 40 字应截断加省略号',
+  )
+  // parsePlanItems 应对每项调用 sanitizePlanItemText
+  assert.match(
+    engineSrc,
+    /\.map\(\s*\(x\)\s*=>\s*sanitizePlanItemText\(\s*x\s*\)\s*\)/,
+    'parsePlanItems 应对每项做单行化',
+  )
+  // Plan 级 prompt 要求 20 字内一行短句
+  assert.match(
+    engineSrc,
+    /PLAN_SYSTEM_PROMPT[\s\S]{0,800}20 字以内/,
+    '计划 prompt 应要求 20 字以内短句',
+  )
+})
+
+test('v0.19.x: file-reader 读取内容归入上下文「文件」分类', () => {
+  const bdSrc = readFileSync(
+    fileURLToPath(new URL('../context-breakdown.ts', import.meta.url)),
+    'utf-8',
+  )
+  assert.match(
+    bdSrc,
+    /FILE_READ_TOOLS\s*=\s*new\s+Set\(\s*\[['"]file-reader['"]\]\s*\)/,
+    '应定义 file-reader 工具集合',
+  )
+  assert.match(
+    bdSrc,
+    /m\.role\s*===\s*['"]tool['"]\s*&&\s*m\.name\s*&&\s*FILE_READ_TOOLS\.has\(m\.name\)/,
+    'tool 消息且工具名为 file-reader 时应归入文件分类',
+  )
+  assert.match(
+    bdSrc,
+    /文件读取：/,
+    '文件分类明细应标记为文件读取',
+  )
+})
+
+test('v0.19.x: act_end 事件透传 softFail，前端按 WARN 显示', () => {
+  const reactSrc = readFileSync(
+    fileURLToPath(new URL('../../../shared/types/react.ts', import.meta.url)),
+    'utf-8',
+  )
+  assert.match(
+    reactSrc,
+    /type:\s*['"]act_end['"][\s\S]{0,300}softFail\?:/,
+    'act_end 事件应携带 softFail 字段',
+  )
+  assert.match(
+    engineSrc,
+    /softFail:\s*\(r\.completedStep\s+as\s+ReActStep\)\.softFail\s*===\s*true/,
+    'engine 透传 act_end.softFail',
+  )
+})
+

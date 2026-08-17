@@ -53,6 +53,23 @@ function formatPercent(value: number): string {
   return value % 1 === 0 ? value.toFixed(0) : value.toFixed(1)
 }
 
+/** 明细类型的友好展示名（替代原始英文大写，与中文 UI 一致） */
+const DETAIL_TYPE_LABELS: Record<string, string> = {
+  'system-prompt': '系统提示词',
+  'system-section': '系统段',
+  file: '文件',
+  tool: '工具',
+  'sub-agent': '子智能体',
+  'skill-instruction': '技能指令',
+  message: '消息',
+  'memory-injection': '记忆注入',
+  mcp: 'MCP',
+}
+
+function typeLabel(type: string): string {
+  return DETAIL_TYPE_LABELS[type] ?? type
+}
+
 function PanelMessage({ icon, title, hint }: { icon?: React.ReactNode; title: string; hint?: string }) {
   return (
     <div className="flex h-full flex-col">
@@ -308,7 +325,7 @@ export function ContextPanel() {
                                 <div className="mt-0.5 flex items-center gap-1.5 text-2xs text-text-tertiary">
                                   <span className="font-mono tabular">{detail.tokenCount.toLocaleString()} tokens</span>
                                   <span>·</span>
-                                  <span className="uppercase tracking-wider">{detail.type}</span>
+                                  <span className="tracking-wide">{typeLabel(detail.type)}</span>
                                 </div>
                               </div>
                               {detail.removable && (

@@ -3,12 +3,33 @@
  * 设计文档 §10.2 / §10.5
  * ============================================================ */
 
+/**
+ * v0.19.0 M1：系统提示词 section（提示词组装化）。
+ * 借鉴 dsh prompt-system 的 section/scope 设计：把写死的长字符串拆为有序段，
+ * 由组装器按 order 升序渲染；scope 预留（本版不启用，供后续作用域遮蔽）。
+ */
+export interface PromptSection {
+  /** 段标识，用于去重 / 遮蔽 / 测试断言 */
+  id: string
+  /** 排序权重，升序渲染，负数前移 */
+  order: number
+  /** 段正文（含 `## 标题` 与内容） */
+  text: string
+  /** 预留：作用域遮蔽（本版不启用） */
+  scope?: string
+}
+
 export interface Agent {
   id: string                    // @researcher
   name: string
   description: string
   avatarColor: string           // 首字母方块的颜色
   systemPrompt: string
+  /**
+   * v0.19.0 M1：有序 section（替代 systemPrompt 作为核心规则的组装单元）。
+   * 缺省时组装器回退用 systemPrompt 作单段；systemPrompt 保留为向后兼容的扁平化产物。
+   */
+  systemSections?: PromptSection[]
   // v0.6.0：CrewAI 式角色三字段（运行时注入，见 engine 装配管道）
   role?: string                 // 代码审查员
   goal?: string                 // 审查代码质量与安全
@@ -121,6 +142,16 @@ export interface Skill {
    * 缺省时由 registry.skillToolName() 按 name 生成。
    */
   toolName?: string
+  /**
+   * v0.19.0 M5：分层来源。同名 id 最近层遮蔽（project > user > bundled）。
+   * 旧数据迁移默认 'user'。
+   */
+  layer?: 'project' | 'user' | 'bundled' | 'runtime'
+  /**
+   * v0.19.0 M5：作用域（空/缺省 = 全局可用）。
+   * 用于按 agent / workspace 过滤注入到 LLM 的工具集。
+   */
+  scopes?: string[]
 }
 
 export interface McpServer {

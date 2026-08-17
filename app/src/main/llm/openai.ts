@@ -5,6 +5,7 @@
 import OpenAI from 'openai'
 import type {
   LlmAdapter,
+  LlmCacheUsage,
   LlmCompleteRequest,
   LlmCompleteResponse,
   LlmMessage,
@@ -68,6 +69,9 @@ export class OpenAIAdapter implements LlmAdapter {
     // DeepSeek/o1 等思考模型返回的 reasoning_content，需原样传回
     const reasoningContent = (message as unknown as Record<string, unknown>).reasoning_content as string | undefined
 
+    // v0.20.0：提取缓存命中统计（DeepSeek / MiniMax 等 OpenAI 兼容端点）
+    const cache = extractCacheUsage(completion.usage)
+
     let action: ReActAction | null = null
     let toolCallId: string | undefined
     const actions: ReActAction[] = []
@@ -98,10 +102,42 @@ export class OpenAIAdapter implements LlmAdapter {
       toolCallId,
       tokensIn: completion.usage?.prompt_tokens ?? 0,
       tokensOut: completion.usage?.completion_tokens ?? 0,
+      cache,
       finishReason: mapFinishReason(choice.finish_reason),
       reasoningContent,
     }
   }
+}
+
+/**
+ * v0.20.0：从 OpenAI 兼容端点的 usage 提取缓存命中统计。
+ * - DeepSeek：usage.prompt_cache_hit_tokens / prompt_cache_miss_tokens
+ * - MiniMax：usage.prompt_tokens_details.cached_tokens（未命中 = prompt_tokens - cached）
+ * 两者都没有时返回 undefined（表示该端点未报告缓存信息）。
+ */
+function extractCacheUsage(
+  usage: OpenAI.Completions.CompletionUsage | null | undefined,
+): LlmCacheUsage | undefined {
+  if (!usage) return undefined
+  const raw = usage as unknown as Record<string, unknown>
+  const promptTokens = usage.prompt_tokens ?? 0
+
+  const hit = raw.prompt_cache_hit_tokens
+  const miss = raw.prompt_cache_miss_tokens
+  if (typeof hit === 'number' || typeof miss === 'number') {
+    const hitTokens = typeof hit === 'number' ? hit : 0
+    const missTokens =
+      typeof miss === 'number' ? miss : Math.max(0, promptTokens - hitTokens)
+    return { hitTokens, missTokens }
+  }
+
+  const details = raw.prompt_tokens_details as Record<string, unknown> | undefined
+  const cached = details?.cached_tokens
+  if (typeof cached === 'number') {
+    return { hitTokens: cached, missTokens: Math.max(0, promptTokens - cached) }
+  }
+
+  return undefined
 }
 
 function toOpenAIMessage(m: LlmMessage): OpenAI.Chat.Completions.ChatCompletionMessageParam {

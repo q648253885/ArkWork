@@ -116,7 +116,7 @@ const BUILTIN_AGENTS: Agent[] = [
     defaultKbIds: [],
     defaultConfig: { temperature: 0.5, maxIterations: 60 },
     isBuiltin: true,
-    version: '0.18.0',
+    version: '0.19.0',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
   },
@@ -215,7 +215,7 @@ const BUILTIN_AGENTS: Agent[] = [
     defaultKbIds: [],
     defaultConfig: { temperature: 0.3, maxIterations: 80 },
     isBuiltin: true,
-    version: '0.18.0',
+    version: '0.19.0',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
     // v0.15.0 Task 6：@coder 默认 acceptEdits —— 工作区内轻写（sed -i/tee/mkdir/cp/...）不再每次弹确认；
@@ -223,6 +223,12 @@ const BUILTIN_AGENTS: Agent[] = [
     defaultPermissionMode: 'acceptEdits',
   },
 ]
+
+// v0.19.0 M1：为内置 Agent 派生有序 systemSections（core-rules 单段，文本与 systemPrompt 一致）。
+// 单一真源仍是 systemPrompt；systemSections 仅作为组装器的结构化入口，避免双份文案漂移。
+for (const agent of BUILTIN_AGENTS) {
+  agent.systemSections = [{ id: 'core-rules', order: 0, text: agent.systemPrompt }]
+}
 
 /** v0.8.0：已废弃的内置 Agent id 列表（精简为仅保留通用助手；@coder 于 v0.15.0 恢复） */
 const DEPRECATED_BUILTIN_AGENT_IDS = ['@researcher', '@writer', '@code-reviewer']
@@ -665,335 +671,54 @@ const BUILTIN_MODELS: LlmModel[] = [
   // 无内置模型 — 用户在设置页按需添加，每个模型自带 id+url+协议+key
 ]
 
-// v0.6.2 增量升级标志：修复 file-reader 路径、给内置 Agent 加 shell skill
-const UPGRADE_062_FLAG = 'seeded.v0.6.2.json'
-// v0.9.0 增量升级标志：工具容错恢复 systemPrompt 更新
-const UPGRADE_090_FLAG = 'seeded.v0.9.0.json'
-// v0.9.1 增量升级标志：工作区探索规则 systemPrompt 更新
-const UPGRADE_091_FLAG = 'seeded.v0.9.1.json'
-// v0.15.0 增量升级标志：恢复 @coder 内置智能体并绑定 react-core-skills
-const UPGRADE_0150_FLAG = 'seeded.v0.15.0.json'
-// v0.16.0 增量升级标志：系统提示词工具优先级 + 新增文件工具 Skill
-const UPGRADE_0160_FLAG = 'seeded.v0.16.0.json'
-// v0.18.0 增量升级标志：清单状态由引擎独立判断 + prompt 去除强制 todo_update
-const UPGRADE_0180_FLAG = 'seeded.v0.18.0.json'
-
-async function isUpgraded062(): Promise<boolean> {
-  return existsSync(join(getArkworkDir(), UPGRADE_062_FLAG))
-}
-
-async function markUpgraded062(): Promise<void> {
-  const flag = join(getArkworkDir(), UPGRADE_062_FLAG)
-  await writeFile(flag, JSON.stringify({ ts: Date.now(), version: '0.6.2' }, null, 2))
-}
-
-async function isUpgraded090(): Promise<boolean> {
-  return existsSync(join(getArkworkDir(), UPGRADE_090_FLAG))
-}
-
-async function markUpgraded090(): Promise<void> {
-  const flag = join(getArkworkDir(), UPGRADE_090_FLAG)
-  await writeFile(flag, JSON.stringify({ ts: Date.now(), version: '0.9.0' }, null, 2))
-}
-
-async function isUpgraded091(): Promise<boolean> {
-  return existsSync(join(getArkworkDir(), UPGRADE_091_FLAG))
-}
-
-async function markUpgraded091(): Promise<void> {
-  const flag = join(getArkworkDir(), UPGRADE_091_FLAG)
-  await writeFile(flag, JSON.stringify({ ts: Date.now(), version: '0.9.1' }, null, 2))
-}
-
 /**
- * v0.6.2 增量升级：同步已有内置 Agent 的关键字段。
- * 保留用户自定义 Agent 和用户对内置 Agent 的 model/temperature 等个性化修改，
- * 只更新 systemPrompt、defaultSkillIds、version 等由版本变更引入的字段。
+ * v0.19.0 M1：统一同步内置 Agent 到最新定义（幂等）。
+ * 取代 v0.6.2 / v0.9.0 / v0.9.1 / v0.15.0 / v0.16.0 / v0.18.0 六段增量升级：
+ * 用 agent.version 字段判断是否落后（不再依赖守卫 flag），落后则幂等同步关键字段。
+ * 职责：
+ *  1) 补齐缺失的内置 agent（按 id 去重，仅新增不覆盖）；
+ *  2) 已存在内置 agent 若 version 落后，同步 systemPrompt / systemSections /
+ *     defaultSkillIds / version / role / goal / backstory / description / defaultPermissionMode；
+ *  3) 用户自定义 agent（isBuiltin=false）永不覆盖。
+ * 副作用：仅当存在待补齐或落后项时写 agents.json。
  */
-async function upgradeTo062(): Promise<void> {
-  if (await isUpgraded062()) return
+async function syncBuiltinAgentsToLatest(): Promise<void> {
   const agentsPath = join(getArkworkDir(), 'agents.json')
-  if (existsSync(agentsPath)) {
-    try {
-      const raw = await readFile(agentsPath, 'utf-8')
-      const existing = JSON.parse(raw) as Agent[]
-      const builtinMap = new Map(BUILTIN_AGENTS.map((a) => [a.id, a]))
-      let changed = false
-      const updated = existing.map((a) => {
-        if (!a.isBuiltin) return a
-        const latest = builtinMap.get(a.id)
-        if (!latest) return a
-        const next = {
-          ...a,
-          systemPrompt: latest.systemPrompt,
-          defaultSkillIds: latest.defaultSkillIds,
-          version: latest.version,
-          role: latest.role ?? a.role,
-          goal: latest.goal ?? a.goal,
-          backstory: latest.backstory ?? a.backstory,
-        }
-        if (JSON.stringify(next.defaultSkillIds) !== JSON.stringify(a.defaultSkillIds) ||
-            next.systemPrompt !== a.systemPrompt || next.version !== a.version) {
-          changed = true
-        }
-        return next
-      })
-      if (changed) {
-        await writeFile(agentsPath, JSON.stringify(updated, null, 2), 'utf-8')
-        console.log('[seed] v0.6.2 upgrade: synced builtin agents')
+  if (!existsSync(agentsPath)) return
+  try {
+    const raw = await readFile(agentsPath, 'utf-8')
+    const existing = JSON.parse(raw) as Agent[]
+    const existingIds = new Set(existing.map((a) => a.id))
+    const builtinMap = new Map(BUILTIN_AGENTS.map((a) => [a.id, a]))
+    const toAdd = BUILTIN_AGENTS.filter((a) => !existingIds.has(a.id))
+    let changed = toAdd.length > 0
+    const updated = existing.map((a) => {
+      if (!a.isBuiltin) return a
+      const latest = builtinMap.get(a.id)
+      if (!latest) return a
+      if (a.version === latest.version) return a
+      changed = true
+      return {
+        ...a,
+        systemPrompt: latest.systemPrompt,
+        systemSections: latest.systemSections ?? a.systemSections,
+        defaultSkillIds: latest.defaultSkillIds,
+        version: latest.version,
+        role: latest.role ?? a.role,
+        goal: latest.goal ?? a.goal,
+        backstory: latest.backstory ?? a.backstory,
+        description: latest.description,
+        defaultPermissionMode: latest.defaultPermissionMode ?? a.defaultPermissionMode,
       }
-    } catch (err) {
-      console.error('[seed] v0.6.2 upgrade agents failed:', (err as Error).message)
+    })
+    if (changed) {
+      const merged = [...updated, ...toAdd]
+      await writeFile(agentsPath, JSON.stringify(merged, null, 2), 'utf-8')
+      console.log(`[seed] syncBuiltinAgentsToLatest: added ${toAdd.length}, synced stale builtin agents`)
     }
+  } catch (err) {
+    console.error('[seed] syncBuiltinAgentsToLatest failed:', (err as Error).message)
   }
-  await markUpgraded062()
-}
-
-/**
- * v0.9.0 增量升级：更新内置 Agent 的 systemPrompt（新增容错恢复段）。
- * 与 upgradeTo062 逻辑相同，但使用独立守卫标志，确保已升级用户也能拿到新 prompt。
- */
-async function upgradeTo090(): Promise<void> {
-  if (await isUpgraded090()) return
-  const agentsPath = join(getArkworkDir(), 'agents.json')
-  if (existsSync(agentsPath)) {
-    try {
-      const raw = await readFile(agentsPath, 'utf-8')
-      const existing = JSON.parse(raw) as Agent[]
-      const builtinMap = new Map(BUILTIN_AGENTS.map((a) => [a.id, a]))
-      let changed = false
-      const updated = existing.map((a) => {
-        if (!a.isBuiltin) return a
-        const latest = builtinMap.get(a.id)
-        if (!latest) return a
-        const next = {
-          ...a,
-          systemPrompt: latest.systemPrompt,
-          version: latest.version,
-        }
-        if (next.systemPrompt !== a.systemPrompt || next.version !== a.version) {
-          changed = true
-        }
-        return next
-      })
-      if (changed) {
-        await writeFile(agentsPath, JSON.stringify(updated, null, 2), 'utf-8')
-        console.log('[seed] v0.9.0 upgrade: synced builtin agent systemPrompt')
-      }
-    } catch (err) {
-      console.error('[seed] v0.9.0 upgrade agents failed:', (err as Error).message)
-    }
-  }
-  await markUpgraded090()
-}
-
-/**
- * v0.9.1 增量升级：更新内置 Agent 的 systemPrompt（新增工作区探索规则段）。
- * 与 upgradeTo090 逻辑相同，但使用独立守卫标志，确保已升级用户也能拿到新 prompt。
- */
-async function upgradeTo091(): Promise<void> {
-  if (await isUpgraded091()) return
-  const agentsPath = join(getArkworkDir(), 'agents.json')
-  if (existsSync(agentsPath)) {
-    try {
-      const raw = await readFile(agentsPath, 'utf-8')
-      const existing = JSON.parse(raw) as Agent[]
-      const builtinMap = new Map(BUILTIN_AGENTS.map((a) => [a.id, a]))
-      let changed = false
-      const updated = existing.map((a) => {
-        if (!a.isBuiltin) return a
-        const latest = builtinMap.get(a.id)
-        if (!latest) return a
-        const next = {
-          ...a,
-          systemPrompt: latest.systemPrompt,
-          version: latest.version,
-        }
-        if (next.systemPrompt !== a.systemPrompt || next.version !== a.version) {
-          changed = true
-        }
-        return next
-      })
-      if (changed) {
-        await writeFile(agentsPath, JSON.stringify(updated, null, 2), 'utf-8')
-        console.log('[seed] v0.9.1 upgrade: synced builtin agent systemPrompt')
-      }
-    } catch (err) {
-      console.error('[seed] v0.9.1 upgrade agents failed:', (err as Error).message)
-    }
-  }
-  await markUpgraded091()
-}
-
-async function isUpgraded0150(): Promise<boolean> {
-  return existsSync(join(getArkworkDir(), UPGRADE_0150_FLAG))
-}
-
-async function markUpgraded0150(): Promise<void> {
-  const flag = join(getArkworkDir(), UPGRADE_0150_FLAG)
-  await writeFile(flag, JSON.stringify({ ts: Date.now(), version: '0.15.0' }, null, 2))
-}
-
-/**
- * v0.15.0 增量升级：恢复 @coder 内置智能体（v0.8.0 曾废弃，现恢复并绑定 react-core-skills 准则）。
- * 仅添加缺失的内置 agent（按 id 去重），不覆盖用户自定义 agent；
- * 已存在的 @coder 同步其 systemPrompt / defaultSkillIds / version 等关键字段。
- *
- * v0.15.1 幂等化修复：此前 flag 存在即短路（isUpgraded0150），导致已固化的旧版
- * @coder 数据（version 0.8.0 / 旧 systemPrompt / defaultPermissionMode 缺失）永远无法升级。
- * 现在每次启动都会检查内置 agent 版本是否落后于最新定义，落后则强制同步关键字段；
- * flag 仅用于一次性补齐缺失 agent 与避免重复新增。
- */
-async function upgradeTo0150(): Promise<void> {
-  const agentsPath = join(getArkworkDir(), 'agents.json')
-  const wasUpgraded = await isUpgraded0150()
-  if (existsSync(agentsPath)) {
-    try {
-      const raw = await readFile(agentsPath, 'utf-8')
-      const existing = JSON.parse(raw) as Agent[]
-      const existingIds = new Set(existing.map((a) => a.id))
-      // 1. 补齐缺失的内置 agent（@coder 在 v0.8.0 被删除，此处恢复；仅首次执行）
-      const toAdd = !wasUpgraded ? BUILTIN_AGENTS.filter((a) => !existingIds.has(a.id)) : []
-      // 2. 幂等同步：已存在的内置 agent 若 version 落后于最新定义，强制同步关键字段。
-      //    version 相同则跳过（不覆盖用户对 description/role 等的微调，也不重复写盘）。
-      const builtinMap = new Map(BUILTIN_AGENTS.map((a) => [a.id, a]))
-      let changed = toAdd.length > 0
-      const updated = existing.map((a) => {
-        if (!a.isBuiltin) return a
-        const latest = builtinMap.get(a.id)
-        if (!latest) return a
-        if (a.version === latest.version) return a
-        changed = true
-        const next = {
-          ...a,
-          systemPrompt: latest.systemPrompt,
-          defaultSkillIds: latest.defaultSkillIds,
-          version: latest.version,
-          role: latest.role ?? a.role,
-          goal: latest.goal ?? a.goal,
-          description: latest.description,
-          // v0.15.0 Task 6：@coder 智能体默认 acceptEdits —— 已存在 agent 也同步升级
-          defaultPermissionMode: latest.defaultPermissionMode ?? a.defaultPermissionMode,
-        }
-        return next
-      })
-      if (changed) {
-        const merged = [...updated, ...toAdd]
-        await writeFile(agentsPath, JSON.stringify(merged, null, 2), 'utf-8')
-        console.log(`[seed] v0.15.0 upgrade: restored @coder (added ${toAdd.length}, synced fields)`)
-      }
-    } catch (err) {
-      console.error('[seed] v0.15.0 upgrade agents failed:', (err as Error).message)
-    }
-  }
-  await markUpgraded0150()
-}
-
-async function isUpgraded0160(): Promise<boolean> {
-  return existsSync(join(getArkworkDir(), UPGRADE_0160_FLAG))
-}
-
-async function markUpgraded0160(): Promise<void> {
-  const flag = join(getArkworkDir(), UPGRADE_0160_FLAG)
-  await writeFile(flag, JSON.stringify({ ts: Date.now(), version: '0.16.4' }, null, 2))
-}
-
-/**
- * v0.16.x 增量升级：同步系统提示词（工具/技能优先级 / TodoWrite / 文件工具优先）
- * 与 defaultSkillIds（新增 file-writer / file-editor / glob-search / grep-search）。
- * 已存在的内置 agent 若 version 落后于最新定义，强制同步关键字段；不覆盖用户自定义 agent。
- */
-async function upgradeTo0160(): Promise<void> {
-  const wasUpgraded = await isUpgraded0160()
-  const agentsPath = join(getArkworkDir(), 'agents.json')
-  if (existsSync(agentsPath)) {
-    try {
-      const raw = await readFile(agentsPath, 'utf-8')
-      const existing = JSON.parse(raw) as Agent[]
-      const existingIds = new Set(existing.map((a) => a.id))
-      // 首次：补齐缺失的内置 agent
-      const toAdd = !wasUpgraded ? BUILTIN_AGENTS.filter((a) => !existingIds.has(a.id)) : []
-      const builtinMap = new Map(BUILTIN_AGENTS.map((a) => [a.id, a]))
-      let changed = toAdd.length > 0
-      const updated = existing.map((a) => {
-        if (!a.isBuiltin) return a
-        const latest = builtinMap.get(a.id)
-        if (!latest) return a
-        if (a.version === latest.version) return a
-        changed = true
-        return {
-          ...a,
-          systemPrompt: latest.systemPrompt,
-          defaultSkillIds: latest.defaultSkillIds,
-          version: latest.version,
-          role: latest.role ?? a.role,
-          goal: latest.goal ?? a.goal,
-          description: latest.description,
-          defaultPermissionMode: latest.defaultPermissionMode ?? a.defaultPermissionMode,
-        }
-      })
-      if (changed) {
-        const merged = [...updated, ...toAdd]
-        await writeFile(agentsPath, JSON.stringify(merged, null, 2), 'utf-8')
-        console.log(`[seed] v0.16.x upgrade: synced builtin agents (added ${toAdd.length})`)
-      }
-    } catch (err) {
-      console.error('[seed] v0.16.0 upgrade agents failed:', (err as Error).message)
-    }
-  }
-  await markUpgraded0160()
-}
-
-async function isUpgraded0180(): Promise<boolean> {
-  return existsSync(join(getArkworkDir(), UPGRADE_0180_FLAG))
-}
-
-async function markUpgraded0180(): Promise<void> {
-  const flag = join(getArkworkDir(), UPGRADE_0180_FLAG)
-  await writeFile(flag, JSON.stringify({ ts: Date.now(), version: '0.18.0' }, null, 2))
-}
-
-/**
- * v0.18.0 增量升级：清单状态由引擎独立判断（v0.17.6 引擎独立决策已就绪）；
- * 此处把 @default / @coder 的 systemPrompt 中旧的强制调用 todo-update 措辞
- * 改为可选提示（详见 03-system-design.md §7.4）。
- *
- * 与 v0.15.0 / v0.16.0 升级一致：version 落后则幂等同步关键字段；用户自定义 agent 不动。
- */
-async function upgradeTo0180(): Promise<void> {
-  const agentsPath = join(getArkworkDir(), 'agents.json')
-  if (existsSync(agentsPath)) {
-    try {
-      const raw = await readFile(agentsPath, 'utf-8')
-      const existing = JSON.parse(raw) as Agent[]
-      const builtinMap = new Map(BUILTIN_AGENTS.map((a) => [a.id, a]))
-      let changed = false
-      const updated = existing.map((a) => {
-        if (!a.isBuiltin) return a
-        const latest = builtinMap.get(a.id)
-        if (!latest) return a
-        if (a.version === latest.version) return a
-        changed = true
-        return {
-          ...a,
-          systemPrompt: latest.systemPrompt,
-          defaultSkillIds: latest.defaultSkillIds,
-          version: latest.version,
-          role: latest.role ?? a.role,
-          goal: latest.goal ?? a.goal,
-          description: latest.description,
-          defaultPermissionMode: latest.defaultPermissionMode ?? a.defaultPermissionMode,
-        }
-      })
-      if (changed) {
-        await writeFile(agentsPath, JSON.stringify(updated, null, 2), 'utf-8')
-        console.log('[seed] v0.18.0 upgrade: synced builtin agents (engine-driven plan + relaxed todo_update prompt)')
-      }
-    } catch (err) {
-      console.error('[seed] v0.18.0 upgrade agents failed:', (err as Error).message)
-    }
-  }
-  await markUpgraded0180()
 }
 
 export async function seedDefaults(): Promise<void> {
@@ -1026,32 +751,18 @@ export async function seedDefaults(): Promise<void> {
     await markSeeded()
   }
 
-  // 3. v0.6.2 增量升级（即使已经 v0.6.0 seed 过也会执行一次）
-  await upgradeTo062()
-
-  // 4. v0.8.0 增量升级：删除废弃的内置 Agent（精简为仅保留通用助手）
+  // 3. v0.8.0：删除废弃的内置 Agent（精简为仅保留通用助手）
   await removeDeprecatedBuiltinAgents()
 
-  // 5. v0.9.0 增量升级：更新内置 Agent systemPrompt（新增容错恢复段）
-  await upgradeTo090()
-
-  // 6. v0.9.1 增量升级：更新内置 Agent systemPrompt（新增工作区探索规则段）
-  await upgradeTo091()
-
-  // 7. v0.15.0 增量升级：恢复 @coder 内置智能体并绑定 react-core-skills 准则
-  await upgradeTo0150()
-
-  // 8. v0.16.0 增量升级：系统提示词工具优先级 + 新增文件工具 Skill
-  await upgradeTo0160()
-
-  // 9. v0.18.0 增量升级：清单状态由引擎独立判断 + prompt 去除强制 todo_update
-  await upgradeTo0180()
+  // 4. v0.19.0 M1：统一同步内置 Agent 到最新定义
+  //    （取代 v0.6.2 / v0.9.0 / v0.9.1 / v0.15.0 / v0.16.0 / v0.18.0 六段增量升级）
+  await syncBuiltinAgentsToLatest()
 }
 
 /**
  * v0.8.0：删除已废弃的内置 Agent（@researcher / @writer / @code-reviewer）。
  * 仅删除 isBuiltin=true 且 id 在 DEPRECATED 列表中的条目；用户自定义副本不受影响。
- * 注：@coder 于 v0.15.0 恢复（见 upgradeTo0150），不再纳入废弃列表。
+ * 注：@coder 于 v0.15.0 恢复（现由 syncBuiltinAgentsToLatest 维护），不再纳入废弃列表。
  */
 async function removeDeprecatedBuiltinAgents(): Promise<void> {
   const agentsPath = join(getArkworkDir(), 'agents.json')

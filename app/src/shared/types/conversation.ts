@@ -2,9 +2,24 @@
  * ArkWork — Shared Types: Conversation / Folder / Automation / KB
  * 渲染层用于组装对话流和模块视图的辅助类型
  * ============================================================ */
-import type { PlanContent, ReActStep } from './react'
+import type { PlanContent, ReActStep, ReActEvent } from './react'
 
 export type ConversationItemType = 'user' | 'assistant' | 'react' | 'plan'
+
+/**
+ * v0.19.0 M2：会话事件（唯一真源日志条目）。
+ * = ReActEvent 的完整负载 + 落盘元数据（id / seq / ts）。
+ * 落盘于 task 内存目录的 session.jsonl，仅追加不可改写；
+ * 模型历史 / UI 时间线最终可从此日志投影派生（当前先双轨，L1 仍为索引缓存）。
+ */
+export type SessionEvent = ReActEvent & {
+  /** 落盘 id（genId 生成） */
+  id: string
+  /** 单调递增序号（append 时自动填充） */
+  seq: number
+  /** 时间戳（毫秒） */
+  ts: number
+}
 
 /** v0.8.0：计划清单条目状态；v0.14.x Task 1 扩展 'failed'（中途失败的项） */
 export type PlanItemState = 'pending' | 'running' | 'done' | 'failed'

@@ -1048,9 +1048,9 @@ textarea {
 .tool-card[data-state="cancelled"]::before {
   background: var(--text-tertiary);
 }
-/* v0.18.x：软失败（内部机制/门禁拦截）中性样式 —— 灰点，不红 */
+/* v0.19.x：软失败（门禁/预算拦截）淡橙色警告 —— 区别于红色真实报错 */
 .tool-card[data-state="guarded"]::before {
-  background: var(--text-tertiary);
+  background: var(--warning);
 }
 .tool-card[data-state="running"] {
   border-color: var(--accent);
@@ -1060,7 +1060,9 @@ textarea {
   border-color: var(--danger);
 }
 .tool-card[data-state="guarded"] {
-  border-color: var(--border-default);
+  /* 淡橙色边框（warning-soft 半透明），提示 Agent 拦截但不必刺眼 */
+  border-color: var(--warning);
+  box-shadow: 0 0 0 3px var(--warning-soft);
 }
 .tool-card__head {
   display: flex;

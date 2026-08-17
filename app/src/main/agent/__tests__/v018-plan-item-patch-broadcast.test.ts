@@ -285,14 +285,14 @@ test('v0.18.0 seed.ts: 不再含强制 todo-update 文案', () => {
   assert.match(seedSrc, /也调\s*todo-update/, '应保留 todo-update 作为显式推进入口')
 })
 
-test('v0.18.0 seed.ts: 内置 Agent 升级到 0.18.0', () => {
-  // BUILTIN_AGENTS 的 version 字段应含 0.18.0
-  const matches = seedSrc.match(/version:\s*['"]0\.18\.0['"]/g)
-  assert.ok(matches && matches.length >= 2, `@default + @coder 都应升到 0.18.0（实际 ${matches?.length ?? 0}）`)
+test('v0.19.0 seed.ts: 内置 Agent 升级到 0.19.0', () => {
+  // BUILTIN_AGENTS 的 version 字段应含 0.19.0
+  const matches = seedSrc.match(/version:\s*['"]0\.19\.0['"]/g)
+  assert.ok(matches && matches.length >= 2, `@default + @coder 都应升到 0.19.0（实际 ${matches?.length ?? 0}）`)
 })
 
-test('v0.18.0 seed.ts: 增加 upgradeTo0180 函数 + 注册', () => {
-  assert.match(seedSrc, /async function upgradeTo0180\(/, '应定义 upgradeTo0180 升级函数')
-  assert.match(seedSrc, /await upgradeTo0180\(\)/, 'seedDefaults 应调用 upgradeTo0180')
-  assert.match(seedSrc, /UPGRADE_0180_FLAG\s*=\s*['"]seeded\.v0\.18\.0\.json['"]/, '应定义 v0.18.0 升级 flag')
+test('v0.19.0 seed.ts: 使用 syncBuiltinAgentsToLatest 统一同步', () => {
+  assert.match(seedSrc, /async function syncBuiltinAgentsToLatest\(/, '应定义 syncBuiltinAgentsToLatest 同步函数')
+  assert.match(seedSrc, /await syncBuiltinAgentsToLatest\(\)/, 'seedDefaults 应调用 syncBuiltinAgentsToLatest')
+  assert.match(seedSrc, /systemSections/, '内置 Agent 应派生 systemSections')
 })

@@ -282,13 +282,14 @@ test('v0.9.1: READONLY_TOOLS 存在且含 file-reader', () => {
   )
 })
 
-test('v0.16.4: seed.ts 存在 upgradeTo0160 升级逻辑与强化 Skill/工具优先级提示', () => {
+test('v0.19.0: seed.ts 使用 syncBuiltinAgentsToLatest 统一同步内置 Agent 到 0.19.0', () => {
   const src = readFileSync(
     fileURLToPath(new URL('../../store/seed.ts', import.meta.url)),
     'utf8',
   )
-  assert.match(src, /async\s+function\s+upgradeTo0160/, 'seed.ts 应定义 upgradeTo0160')
-  assert.match(src, /version:\s*'0\.16\.4'/, '@default.version 应提升至 0.16.4')
+  assert.match(src, /async\s+function\s+syncBuiltinAgentsToLatest/, 'seed.ts 应定义 syncBuiltinAgentsToLatest')
+  assert.match(src, /version:\s*'0\.19\.0'/, '@default.version 应提升至 0.19.0')
+  assert.match(src, /systemSections/, '内置 Agent 应派生 systemSections')
   assert.match(src, /## 1\. 技能优先/, '@default.systemPrompt 应含技能优先段')
   assert.match(src, /## 2\. 工具选择层级/, '@default.systemPrompt 应含工具选择层级段')
   assert.match(src, /## 3\. 禁止模式/, '@default.systemPrompt 应含禁止模式段')

@@ -60,7 +60,7 @@ export function StepList() {
     if (lastAct) {
       return lastAct.status === 'failed'
         ? '工具调用失败，正在处理…'
-        : executionDescription(lastAct.toolName)
+        : lastAct.intent || executionDescription(lastAct.toolName)
     }
     const lastReason = [...steps].reverse().find((s) => s.type === 'reason')
     return reasoningDescription(lastReason ? 'finalizing' : 'thinking')
@@ -162,6 +162,11 @@ export function StepList() {
                     {step.tokensOut && (
                       <span className="text-2xs text-text-tertiary tabular">out {step.tokensOut}</span>
                     )}
+                    {step.cacheHitTokens !== undefined && step.cacheHitTokens > 0 && (
+                      <span className="text-2xs text-text-tertiary tabular" title="缓存命中 token（低价计费）">
+                        cache {step.cacheHitTokens}
+                      </span>
+                    )}
                     {isRunning && (
                       <span className="text-2xs text-accent flex items-center gap-1 ml-auto">
                         <span className="w-1 h-1 rounded-full bg-accent pulse-dot" />
@@ -189,6 +194,11 @@ export function StepList() {
                   </div>
                   <div className="text-xs text-text-secondary">
                     {step.thought && <div className="leading-relaxed">{step.thought}</div>}
+                    {step.type === 'act' && step.intent && (
+                      <div className="mt-0.5 text-xs text-text-primary font-medium leading-relaxed">
+                        {step.intent}
+                      </div>
+                    )}
                     {step.toolName && (
                       <div className="mt-0.5 font-mono">
                         <span className="text-text-tertiary">tool: </span>

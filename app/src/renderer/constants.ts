@@ -147,6 +147,25 @@ export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
     verb: '询问用户',
     argSummary: (a) => truncate(String(a.question ?? ''), 32),
   },
+  // v0.21.0：清单更新工具人性化（此前走 fallback 显示机械名 todo_update）
+  'todo-update': {
+    icon: 'Check',
+    verb: '更新清单',
+    argSummary: (a) => {
+      const idx = Number(a.item_index)
+      const statusZh = { done: '完成', running: '进行中', pending: '待办', skipped: '跳过', failed: '失败', cancelled: '取消' }[String(a.status ?? '')] ?? String(a.status ?? '')
+      return Number.isInteger(idx) && idx >= 0 ? `第 ${idx + 1} 项 → ${statusZh}` : statusZh
+    },
+  },
+  todo_update: {
+    icon: 'Check',
+    verb: '更新清单',
+    argSummary: (a) => {
+      const idx = Number(a.item_index)
+      const statusZh = { done: '完成', running: '进行中', pending: '待办', skipped: '跳过', failed: '失败', cancelled: '取消' }[String(a.status ?? '')] ?? String(a.status ?? '')
+      return Number.isInteger(idx) && idx >= 0 ? `第 ${idx + 1} 项 → ${statusZh}` : statusZh
+    },
+  },
 }
 
 /**

@@ -199,7 +199,7 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
     const lastAct = [...steps].reverse().find((s) => s.type === 'act')
     const lastReason = [...steps].reverse().find((s) => s.type === 'reason')
     const thinkingDescription = lastAct
-      ? executionDescription(lastAct.toolName)
+      ? (lastAct.intent || executionDescription(lastAct.toolName))
       : reasoningDescription(lastReason ? 'finalizing' : 'thinking')
 
     return (

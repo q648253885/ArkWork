@@ -34,6 +34,8 @@ export interface ReActStep {
   // for act
   toolName?: string
   toolArgs?: string                // 序列化后的 args 字符串
+  /** v0.21.0：人类可读的动作意图描述（如「执行命令：npm test」），交互区简介展示 */
+  intent?: string
   result?: unknown
   resultSummary?: string
 
@@ -49,6 +51,10 @@ export interface ReActStep {
   durationMs: number
   tokensIn?: number
   tokensOut?: number
+  /** v0.20.0：本轮输入命中缓存的 token 数（厂商未返回时为 undefined） */
+  cacheHitTokens?: number
+  /** v0.20.0：本轮输入未命中缓存的 token 数 */
+  cacheMissTokens?: number
   status: ReActStepStatus
   errorMessage?: string
 
@@ -71,6 +77,10 @@ export type ReActEvent =
       action: ReActAction | null
       tokensIn?: number
       tokensOut?: number
+      /** v0.20.0：本轮输入命中缓存的 token 数 */
+      cacheHitTokens?: number
+      /** v0.20.0：本轮输入未命中缓存的 token 数 */
+      cacheMissTokens?: number
       durationMs: number
     }
   | { type: 'act_start'; iteration: number; tool: string; args: Record<string, unknown> }
@@ -82,6 +92,8 @@ export type ReActEvent =
       durationMs: number
       ok: boolean
       errorMessage?: string
+      /** v0.19.x：软失败（门禁/预算拦截）—— 日志按 WARN 橙色而非 ERROR 红色 */
+      softFail?: boolean
     }
   | { type: 'observation'; iteration: number; summary: string; rawL2Path?: string }
   | {

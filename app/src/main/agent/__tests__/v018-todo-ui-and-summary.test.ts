@@ -223,14 +223,14 @@ test('v0.18.x fix: 内部机制/门禁拦截（softFail）用中性 guarded 样�
     /status\s*===\s*['"]failed['"]\s*&&\s*!s\.softFail/,
     '任务级 failed 判断应排除 softFail 步骤',
   )
-  // 软失败步骤走 guarded 状态（中性样式）
+  // 软失败步骤走 guarded 状态（v0.19.x 淡橙色警告，区别于红色真实报错）
   assert.match(rendererThoughtStreamSrc, /isSoftFail/, '应计算 isSoftFail 标记')
   assert.match(rendererThoughtStreamSrc, /['"]guarded['"]/, '软失败应映射到 guarded 状态')
-  // 软失败图标显示灰点而非红色 ✕
-  assert.match(rendererThoughtStreamSrc, /bg-text-tertiary/, '软失败应使用灰色状态点')
-  assert.match(rendererThoughtStreamSrc, /内部机制拦截/, '软失败图标应有「内部机制拦截」title')
-  // 软失败 errorMessage 用 text-text-tertiary 而非 text-danger
-  assert.match(rendererThoughtStreamSrc, /text-text-tertiary\s+whitespace-pre-wrap/, '软失败异常信息应中性显示')
+  // 软失败图标显示橙色点而非红色 ✕
+  assert.match(rendererThoughtStreamSrc, /bg-warning/, '软失败应使用橙色状态点')
+  assert.match(rendererThoughtStreamSrc, /Agent 拦截（门禁\/预算，非错误）/, '软失败图标应有拦截说明 title')
+  // 软失败 errorMessage 用 text-warning 而非 text-danger
+  assert.match(rendererThoughtStreamSrc, /text-warning\s+whitespace-pre-wrap/, '软失败异常信息应橙色警告显示')
 })
 
 /* ---------- 12. engine ask_user 校验放宽契约 ---------- */

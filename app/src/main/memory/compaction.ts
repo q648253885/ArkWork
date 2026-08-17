@@ -389,6 +389,12 @@ export function sliceRecentContext(items: MemoryItem[], keepTokens = KEEP_TOKENS
     acc += tokens
     if (i === 0) splitIdx = 0
   }
+  // v0.19.x fix：切片边界必须落在「轮次」边界（assistant reasoning + 其后连续 tool 响应）。
+  // 否则会把 assistant tool_calls 归档而保留其 tool 响应，产生孤立 tool 消息，
+  // 每次 assembleMessages 都触发 reconcileToolCalls "dropped orphan tool message"。
+  while (splitIdx > 0 && splitIdx < sorted.length && sorted[splitIdx].role === 'tool') {
+    splitIdx -= 1
+  }
   return {
     recentContext: sorted.slice(splitIdx),
     dropped: sorted.slice(0, splitIdx),

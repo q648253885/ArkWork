@@ -11,12 +11,20 @@
  *  - 修复 task_complete / ask_user handler 键名（与 seed 对齐）
  * ============================================================ */
 import { join, dirname, relative, sep } from 'node:path'
-import { readFile, readdir, writeFile, mkdir, rm, copyFile, stat } from 'node:fs/promises'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFile, readdir, writeFile, mkdir, rm, copyFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { dialog } from 'electron'
 import { getArkworkDir, getWorkspaceDir } from '../store/db.js'
 import { builtinSkills } from '../store/seed.js'
+// v0.19.0 M5：分层技能发现（project > user > bundled 遮蔽 + scopes 过滤）
+import { discoverSkills } from './skill-discovery.js'
+// v0.19.0 M4：工具三段流水线（pre/execute/post）
+import {
+  runToolPipeline,
+  type ToolPipelineContext,
+  type PreExecuteOutcome,
+} from './tool-pipeline.js'
 import type { Agent, Skill } from '@shared/types/agent'
 import type { Task } from '@shared/types/task'
 import type { LlmTool } from '../llm/adapter.js'
@@ -176,39 +184,28 @@ const handlers: Record<string, BuiltinHandler> = {
   'react-core-skills': async (args, ctx) => reactCoreSkills(args as ReactCoreSkillsArgs, ctx) as Promise<ReactCoreSkillsResult | { status: 'failed'; error: string }>,
 }
 
-let cachedSkills: Skill[] | null = null
+// v0.19.0 M5：技能缓存按工作区隔离（project 层技能随 workspace 变化）
+const skillCacheByWorkspace = new Map<string, Skill[]>()
 
 /**
- * 列出全部 skill。
+ * 列出全部 skill（分层发现：project > user > bundled，同名 id 最近层遮蔽）。
  * v0.6.0：从文件夹存储读取（{arkworkDir}/skills/{id}/skill.json），
  * 首次启动若不存在则迁移旧 skills.json，再不济返回 builtin。
- * 渐进式披露：仅读 skill.json（~200 bytes），不读 SKILL.md。
+ * v0.19.0 M5：改为 discoverSkills 分层扫描；渐进式披露保持不变（仅读 skill.json，不读 SKILL.md）。
  */
 export async function listSkills(): Promise<Skill[]> {
-  if (cachedSkills) return cachedSkills
+  const workspaceDir = getWorkspaceDir()
+  const cached = skillCacheByWorkspace.get(workspaceDir)
+  if (cached) return cached
   const skillsDir = join(getArkworkDir(), 'skills')
-  // 1. 文件夹存储不存在 → 尝试迁移旧 skills.json
+  // 1. 文件夹存储不存在 → 尝试迁移旧 skills.json（并把内置技能播种到文件夹）
   if (!existsSync(skillsDir)) {
     await migrateLegacySkillsJson()
   }
-  // 2. 扫描所有子文件夹，读 skill.json
-  if (existsSync(skillsDir)) {
-    const skills = await loadSkillsFromFolders(skillsDir)
-    if (skills.length > 0) {
-      cachedSkills = skills
-      return cachedSkills
-    }
-  }
-  // 3. fallback：内置 skill
-  cachedSkills = builtinSkills.map((s) => {
-    if (s.instructionMd && !isAbsolute(s.instructionMd)) {
-      // 仓库内置 SKILL.md：相对 app/src/main/skills/builtin/{id}/ 解析
-      const builtinPath = join(getArkworkDir(), '..', '..', '..', s.instructionMd)
-      return { ...s, instructionMd: builtinPath }
-    }
-    return s
-  })
-  return cachedSkills
+  // 2. 分层发现（project / user / bundled 合并 + 遮蔽）
+  const skills = await discoverSkills(workspaceDir)
+  skillCacheByWorkspace.set(workspaceDir, skills)
+  return skills
 }
 
 export async function getSkill(id: string): Promise<Skill | null> {
@@ -288,144 +285,27 @@ export async function invokeSkill(
     if (!handler) {
       throw new Error(`No handler for builtin skill: ${skill.builtinHandler}`)
     }
-    // needsConfirmation：v0.8.1 起经 renderer 美观浮层确认（默认注入），
-    // shell 场景先按命令安全分级决定是否真的需要询问。
-    // v0.14.0 Task 6：使用新的 4 级 risk level 评估；
-    //  - workspace-readonly / external-readonly：直接放行（不进 confirm 链路，不报"被拒绝"）
-    //  - workspace-light-write：首次确认后本会话记住
-    //  - high-risk：每次都问
-    //  - reject：直接拒绝
-    if (skill.needsConfirmation && !ctx.confirm) {
-      ctx.confirm = makeRendererConfirm()
+    // v0.19.0 M4：改走三段流水线（pre 确认 / execute 执行 / post 摘要），
+    // 去除 if/else 交织；对外签名 { result, summary } 不变。
+    const wsDir = ctx.workspaceDir ?? getWorkspaceDir()
+    const permissionMode = await resolveEffectivePermissionMode(wsDir)
+    const pipelineCtx: ToolPipelineContext = {
+      task: ctx.task as Task,
+      skill,
+      args,
+      permissionMode,
     }
-    if (skill.needsConfirmation && ctx.confirm) {
-      let outcome: ConfirmOutcome = { allowed: true }
-      if (skill.builtinHandler === 'shell') {
-        const argsRec = args as Record<string, unknown>
-        // v0.15.x 防御：LLM 偶发把 command 字段传成嵌套对象（如 { command: { command: '...' } }），
-        // 直接 String() 会得到 '[object Object]'，既污染弹窗也会触发高风险误判。
-        // 尝试按字符串 → 嵌套 command → JSON.stringify 顺序回退。
-        let cmd = ''
-        const rawCmd = argsRec.command
-        if (typeof rawCmd === 'string') {
-          cmd = rawCmd
-        } else if (rawCmd && typeof rawCmd === 'object') {
-          const inner = (rawCmd as Record<string, unknown>).command
-          cmd = typeof inner === 'string' ? inner : ''
-          if (!cmd) cmd = JSON.stringify(rawCmd)
-        }
-        cmd = cmd.trim()
-        // v0.15.x polish6：shell command 长度上限。
-        // 超长命令（典型：>4KB heredoc 写文件）会被 Anthropic streaming 截断，
-        // reconcileToolCalls 剥离 dangling toolCalls 后内容直接落到 thought UI，
-        // 污染显示且无法真正执行。一律拒绝，引导 Agent 用专用写文件技能。
-        const MAX_SHELL_COMMAND_LENGTH = 4096
-        if (cmd.length > MAX_SHELL_COMMAND_LENGTH) {
-          logger.warn(
-            'Tool',
-            `shell command too large (${cmd.length} bytes > ${MAX_SHELL_COMMAND_LENGTH}) — reject, suggest file-writer`,
-            ctx.taskId,
-          )
-          return {
-            result: {
-              error: `shell: command 过长（${cmd.length} 字节 > ${MAX_SHELL_COMMAND_LENGTH} 字节）。请改用 file-writer 或 file-editor 技能。`,
-              tooLarge: true,
-              sizeBytes: cmd.length,
-              suggestion: 'file-writer / file-editor',
-            },
-            summary: `命令过长（${cmd.length} 字节），已拒绝。请改用 file-writer 或 file-editor 技能。`,
-          }
-        }
-        const wsDir = ctx.workspaceDir ?? getWorkspaceDir()
-        const risk = assessCommandRisk(cmd, wsDir)
-        // 1) 拒绝类（黑名单 / 不可执行）
-        if (risk.level === 'reject') {
-          logger.warn('Tool', `shell rejected: ${cmd.slice(0, 120)}`, ctx.taskId)
-          return {
-            result: { error: '命令被安全策略拦截（高危操作），已拒绝执行' },
-            summary: '命令被拒绝：命中高危规则，请改用安全命令',
-          }
-        }
-        // 2) 工作区内只读 / 工作区外只读：直接放行，不进确认链路（不弹框、不报「用户拒绝」）
-        if (risk.level === 'workspace-readonly' || risk.level === 'external-readonly') {
-          outcome = { allowed: true }
-        }
-        // 3) 工作区轻写：按 mode 决定是否走确认。
-        //    - plan 模式：deny（拒绝写入，与 MODE_POLICIES 一致）
-        //    - default / acceptEdits：放行（不再弹窗打扰；与 MODE_POLICIES + shell.ts 一致）
-        //    - 其他（兜底）：保留旧行为（首次确认后记住）
-        else if (risk.level === 'workspace-light-write') {
-          const mode = await resolveEffectivePermissionMode(wsDir)
-          const policy = MODE_POLICIES[mode].workspaceLightWrite
-          if (policy === 'allow') {
-            outcome = { allowed: true }
-          } else if (policy === 'deny') {
-            return {
-              result: { error: `当前模式（${mode}）禁止工作区内写入` },
-              summary: `当前模式（${mode}）禁止写入`,
-            }
-          } else {
-            outcome = await ctx.confirm({
-              requestId: '',
-              skillName: '运行命令',
-              command: cmd,
-              cwd: ctx.workspaceDir,
-              impacts: risk.impacts,
-              risk: 'low',
-              taskId: ctx.taskId,
-            })
-            if (outcome.allowed) {
-              approveCommandForSession(cmd)
-            }
-          }
-        }
-        // 4) 高风险：每次都问（勾选「本次会话不再询问」才记住）
-        else {
-          outcome = await ctx.confirm({
-            requestId: '',
-            skillName: '运行命令',
-            command: cmd,
-            cwd: ctx.workspaceDir,
-            impacts: risk.impacts,
-            risk: risk.impacts.some((i) => /删除|不可恢复|重置|管理员|覆盖|管理员|解压/.test(i)) ? 'high' : 'medium',
-            taskId: ctx.taskId,
-          })
-        }
-      } else {
-        // polish4 §C1.2：非 shell builtin 走统一评估；workspace-readonly / external-readonly 直通
-        const risk = assessToolRisk(skill, args)
-        if (risk.level === 'workspace-readonly' || risk.level === 'external-readonly') {
-          outcome = { allowed: true }
-        } else {
-          // 其他需要确认的工具：展示技能名 + 参数摘要
-          const argsPreview = JSON.stringify(args, null, 2).slice(0, 500)
-          outcome = await ctx.confirm({
-            requestId: '',
-            skillName: skill.name,
-            impacts: risk.impacts,
-            risk: risk.level === 'workspace-light-write' ? 'low' : 'medium',
-            argsSummary: argsPreview,
-            taskId: ctx.taskId,
-          })
-        }
-      }
-      if (!outcome.allowed) {
-        // 误报修复：只有用户显式点击「拒绝」才记为「用户拒绝执行」；
-        // 对话框被关闭（Esc/点背景）或 60s 超时都不算用户拒绝。
-        const msg =
-          outcome.reason === 'denied'
-            ? '用户拒绝执行'
-            : outcome.reason === 'timeout'
-              ? '命令确认超时，未执行'
-              : '命令确认已取消，未执行'
-        return { result: { error: msg }, summary: msg }
-      }
-    }
-    const startedAt = Date.now()
-    const result = await handler(args, ctx)
-    const summary = summarizeResult(skill.builtinHandler, result)
-    logger.info('Tool', `skill ${skill.name} (${Date.now() - startedAt}ms)`, ctx.taskId)
-    return { result, summary }
+    return runToolPipeline(pipelineCtx, {
+      pre: () => confirmBuiltinSkill(skill, args, ctx, wsDir, permissionMode),
+      execute: async () => {
+        const startedAt = Date.now()
+        const result = await handler(args, ctx)
+        logger.info('Tool', `skill ${skill.name} (${Date.now() - startedAt}ms)`, ctx.taskId)
+        return result
+      },
+      post: (_c, raw) =>
+        Promise.resolve({ result: raw, summary: summarizeResult(skill.builtinHandler!, raw) }),
+    })
   }
 
   if (skill.source === 'mcp' && skill.mcpRef) {
@@ -477,15 +357,15 @@ export async function invokeSkill(
 export async function writeSkillToFolder(skill: Skill, instructionMdContent?: string): Promise<void> {
   const dir = join(getArkworkDir(), 'skills', skill.id)
   await mkdir(dir, { recursive: true })
-  // 若提供指令体内容，写入 SKILL.md 并在元数据中标记
-  let persistSkill: Skill = { ...skill }
+  // v0.19.0 M5：旧数据迁移——持久化到 {arkworkDir}/skills（user 层）的技能默认补 layer:'user'
+  let persistSkill: Skill = { ...skill, layer: skill.layer ?? 'user' }
   if (instructionMdContent !== undefined) {
     await writeFile(join(dir, 'SKILL.md'), instructionMdContent, 'utf-8')
     persistSkill = { ...skill, instructionMd: 'SKILL.md' }
   }
   await writeFile(join(dir, 'skill.json'), JSON.stringify(persistSkill, null, 2), 'utf-8')
   // 失效缓存
-  cachedSkills = null
+  invalidateSkillCache()
 }
 
 /** 删除 skill 文件夹 */
@@ -494,7 +374,7 @@ export async function deleteSkillFolder(skillId: string): Promise<void> {
   if (existsSync(dir)) {
     await rm(dir, { recursive: true, force: true })
   }
-  cachedSkills = null
+  invalidateSkillCache()
 }
 
 /** 读取 skill 文件夹内的 SKILL.md 内容（用于编辑器回填） */
@@ -511,94 +391,7 @@ export async function readSkillInstruction(skillId: string): Promise<string | nu
 
 /** 失效 skill 内存缓存（CRUD 后调用） */
 export function invalidateSkillCache(): void {
-  cachedSkills = null
-}
-
-/** 从文件夹存储加载全部 skill 元数据 */
-async function loadSkillsFromFolders(skillsDir: string): Promise<Skill[]> {
-  const result: Skill[] = []
-  let entries: string[]
-  try {
-    entries = await readdir(skillsDir)
-  } catch {
-    return result
-  }
-  for (const name of entries) {
-    const dir = join(skillsDir, name)
-    // 只处理目录
-    try {
-      if (!(await stat(dir)).isDirectory()) continue
-    } catch {
-      continue
-    }
-    const skillJsonPath = join(dir, 'skill.json')
-    if (existsSync(skillJsonPath)) {
-      // 格式 A：skill.json（ArkWork 原生 / 用户自定义）
-      try {
-        const raw = await readFile(skillJsonPath, 'utf-8')
-        const skill = JSON.parse(raw) as Skill
-        // 兼容旧数据：未设 enabled 字段默认 true
-        if (skill.enabled === undefined) skill.enabled = true
-        // instructionMd 转为绝对路径（listSkills 不读内容，invokeSkill 才读）
-        if (skill.instructionMd && !isAbsolute(skill.instructionMd)) {
-          skill.instructionMd = join(dir, skill.instructionMd)
-        }
-        result.push(skill)
-      } catch (err) {
-        logger.warn('Tool', `failed to parse skill.json for ${name}: ${(err as Error).message}`)
-      }
-      continue
-    }
-    // 格式 B：SKILL.md-only（v0.6.1，SkillHub 等第三方标准格式）
-    // 无 skill.json 但有 SKILL.md → 解析 frontmatter 生成 Skill 元数据
-    if (existsSync(join(dir, 'SKILL.md'))) {
-      const skill = parseSkillMdOnly(dir, name)
-      if (skill) result.push(skill)
-    }
-  }
-  return result
-}
-
-/**
- * v0.6.1：解析 SKILL.md-only 目录（Anthropic/SkillHub 标准格式）。
- * frontmatter 示例：
- *   ---
- *   name: weekly-report-pro
- *   description: 生成周报
- *   ---
- * 元数据规则：id=目录名（保证删除/指令读取路径一致）；toolName=目录名（ASCII 安全）；
- * name/description 从 frontmatter 读取（缺省用目录名）。
- */
-function parseSkillMdOnly(dir: string, folderName: string): Skill | null {
-  const mdPath = join(dir, 'SKILL.md')
-  let raw: string
-  try {
-    raw = readFileSync(mdPath, 'utf-8')
-  } catch {
-    return null
-  }
-  let name = folderName
-  let description = ''
-  const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)
-  if (fm) {
-    const nameMatch = fm[1].match(/^name:\s*(.+)$/m)
-    const descMatch = fm[1].match(/^description:\s*(.+)$/m)
-    if (nameMatch) name = nameMatch[1].trim()
-    if (descMatch) description = descMatch[1].trim()
-  }
-  return {
-    id: folderName,
-    name,
-    description: description || `${folderName}（SkillHub 技能）`,
-    namespace: 'market',
-    source: 'market',
-    enabled: true,
-    toolName: folderName,
-    instructionMd: 'SKILL.md',
-    inputSchema: { type: 'object', properties: {} },
-    tags: ['skillhub'],
-    installedFrom: `skillhub.${folderName}`,
-  }
+  skillCacheByWorkspace.clear()
 }
 
 /**
@@ -659,10 +452,6 @@ export async function seedBuiltinSkillsToFolders(): Promise<void> {
     }
     await writeSkillToFolder(next)
   }
-}
-
-function isAbsolute(p: string): boolean {
-  return p.startsWith('/') || /^[a-zA-Z]:/.test(p)
 }
 
 /**
@@ -843,6 +632,145 @@ export function approveCommandForSession(cmd: string): void {
   if (!key) return
   sessionApprovedCommands.add(key)
   logger.info('Tool', `shell light-write approved for session: ${key.slice(0, 120)}`)
+}
+
+/**
+ * v0.19.0 M4：builtin 工具的 pre-execute 审批策略。
+ * 把原 invokeSkill 里交织的 if/else 确认逻辑收敛为单一入口，返回 approve/deny：
+ *  - needsConfirmation=false → approve（不弹确认）
+ *  - shell：命令过长 / 黑名单 / plan 模式禁止写 → deny（带结构化 result）
+ *  - shell：只读直通；轻写按 mode 策略（allow/deny/confirm）；高风险每次确认
+ *  - 非 shell：统一 assessToolRisk，只读直通，其余确认
+ *  - 用户确认结果区分 denied / timeout / dismissed（只有显式拒绝才报「用户拒绝执行」）
+ */
+export async function confirmBuiltinSkill(
+  skill: Skill,
+  args: Record<string, unknown>,
+  ctx: SkillContext,
+  wsDir: string,
+  permissionMode: PermissionMode,
+): Promise<PreExecuteOutcome> {
+  if (!skill.needsConfirmation) return { verdict: 'approve' }
+  if (!ctx.confirm) ctx.confirm = makeRendererConfirm()
+
+  let outcome: ConfirmOutcome = { allowed: true }
+
+  if (skill.builtinHandler === 'shell') {
+    const argsRec = args as Record<string, unknown>
+    // v0.15.x 防御：LLM 偶发把 command 字段传成嵌套对象，直接 String() 会得 '[object Object]'。
+    let cmd = ''
+    const rawCmd = argsRec.command
+    if (typeof rawCmd === 'string') {
+      cmd = rawCmd
+    } else if (rawCmd && typeof rawCmd === 'object') {
+      const inner = (rawCmd as Record<string, unknown>).command
+      cmd = typeof inner === 'string' ? inner : ''
+      if (!cmd) cmd = JSON.stringify(rawCmd)
+    }
+    cmd = cmd.trim()
+
+    // v0.15.x polish6：shell command 长度上限。超长命令（典型：>4KB heredoc）
+    // 会被 streaming 截断，污染显示且无法执行。一律拒绝，引导用专用写文件技能。
+    const MAX_SHELL_COMMAND_LENGTH = 4096
+    if (cmd.length > MAX_SHELL_COMMAND_LENGTH) {
+      logger.warn(
+        'Tool',
+        `shell command too large (${cmd.length} bytes > ${MAX_SHELL_COMMAND_LENGTH}) — reject, suggest file-writer`,
+        ctx.taskId,
+      )
+      return {
+        verdict: 'deny',
+        reason: `命令过长（${cmd.length} 字节），已拒绝。请改用 file-writer 或 file-editor 技能。`,
+        result: {
+          error: `shell: command 过长（${cmd.length} 字节 > ${MAX_SHELL_COMMAND_LENGTH} 字节）。请改用 file-writer 或 file-editor 技能。`,
+          tooLarge: true,
+          sizeBytes: cmd.length,
+          suggestion: 'file-writer / file-editor',
+        },
+      }
+    }
+
+    const risk = assessCommandRisk(cmd, wsDir)
+    // 1) 拒绝类（黑名单 / 不可执行）
+    if (risk.level === 'reject') {
+      logger.warn('Tool', `shell rejected: ${cmd.slice(0, 120)}`, ctx.taskId)
+      return {
+        verdict: 'deny',
+        reason: '命令被拒绝：命中高危规则，请改用安全命令',
+        result: { error: '命令被安全策略拦截（高危操作），已拒绝执行' },
+      }
+    }
+    // 2) 工作区内/外只读：直通，不进确认链路（不弹框、不报「用户拒绝」）
+    if (risk.level === 'workspace-readonly' || risk.level === 'external-readonly') {
+      outcome = { allowed: true }
+    }
+    // 3) 工作区轻写：按 mode 决定（allow 放行 / deny 拒绝 / light-confirm 首次确认）
+    else if (risk.level === 'workspace-light-write') {
+      const policy = MODE_POLICIES[permissionMode].workspaceLightWrite
+      if (policy === 'allow') {
+        outcome = { allowed: true }
+      } else if (policy === 'deny') {
+        return {
+          verdict: 'deny',
+          reason: `当前模式（${permissionMode}）禁止写入`,
+          result: { error: `当前模式（${permissionMode}）禁止工作区内写入` },
+        }
+      } else {
+        outcome = await ctx.confirm({
+          requestId: '',
+          skillName: '运行命令',
+          command: cmd,
+          cwd: ctx.workspaceDir,
+          impacts: risk.impacts,
+          risk: 'low',
+          taskId: ctx.taskId,
+        })
+        if (outcome.allowed) approveCommandForSession(cmd)
+      }
+    }
+    // 4) 高风险：每次都问（勾选「本次会话不再询问」才记住）
+    else {
+      outcome = await ctx.confirm({
+        requestId: '',
+        skillName: '运行命令',
+        command: cmd,
+        cwd: ctx.workspaceDir,
+        impacts: risk.impacts,
+        risk: risk.impacts.some((i) => /删除|不可恢复|重置|管理员|覆盖|解压/.test(i)) ? 'high' : 'medium',
+        taskId: ctx.taskId,
+      })
+    }
+  } else {
+    // polish4 §C1.2：非 shell builtin 统一评估；只读直通
+    const risk = assessToolRisk(skill, args)
+    if (risk.level === 'workspace-readonly' || risk.level === 'external-readonly') {
+      outcome = { allowed: true }
+    } else {
+      const argsPreview = JSON.stringify(args, null, 2).slice(0, 500)
+      outcome = await ctx.confirm({
+        requestId: '',
+        skillName: skill.name,
+        impacts: risk.impacts,
+        risk: risk.level === 'workspace-light-write' ? 'low' : 'medium',
+        argsSummary: argsPreview,
+        taskId: ctx.taskId,
+      })
+    }
+  }
+
+  if (!outcome.allowed) {
+    // 误报修复：只有用户显式点击「拒绝」才记为「用户拒绝执行」；
+    // 对话框被关闭（Esc/点背景）或 60s 超时都不算用户拒绝。
+    const msg =
+      outcome.reason === 'denied'
+        ? '用户拒绝执行'
+        : outcome.reason === 'timeout'
+          ? '命令确认超时，未执行'
+          : '命令确认已取消，未执行'
+    return { verdict: 'deny', reason: msg, result: { error: msg } }
+  }
+
+  return { verdict: 'approve' }
 }
 
 /** renderer 回传确认结果时由 ipc/tool.ts 调用 */

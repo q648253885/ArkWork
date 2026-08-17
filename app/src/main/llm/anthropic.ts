@@ -6,6 +6,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type {
   LlmAdapter,
+  LlmCacheUsage,
   LlmCompleteRequest,
   LlmCompleteResponse,
   LlmMessage,
@@ -98,8 +99,28 @@ export class AnthropicAdapter implements LlmAdapter {
       toolCallId,
       tokensIn: response.usage.input_tokens,
       tokensOut: response.usage.output_tokens,
+      cache: extractCacheUsage(response.usage),
       finishReason: mapFinishReason(response.stop_reason),
     }
+  }
+}
+
+/**
+ * v0.20.0：从 Anthropic usage 提取缓存命中统计。
+ * - cache_read_input_tokens：命中缓存读取的 token 数
+ * - cache_creation_input_tokens：本次新写入缓存的 token 数
+ * 两者都无时返回 undefined。
+ */
+function extractCacheUsage(usage: Anthropic.Usage): LlmCacheUsage | undefined {
+  const raw = usage as unknown as Record<string, unknown>
+  const read = raw.cache_read_input_tokens
+  const write = raw.cache_creation_input_tokens
+  if (typeof read !== 'number' && typeof write !== 'number') return undefined
+  const hitTokens = typeof read === 'number' ? read : 0
+  return {
+    hitTokens,
+    missTokens: Math.max(0, usage.input_tokens - hitTokens),
+    writeTokens: typeof write === 'number' ? write : undefined,
   }
 }
 

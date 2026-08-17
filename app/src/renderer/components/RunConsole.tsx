@@ -68,14 +68,14 @@ export function RunConsole({
       const lastAct = [...steps].reverse().find((s) => s.type === 'act')
       if (lastAct) {
         const failed = lastAct.status === 'failed'
-        return failed ? '工具调用失败，正在处理…' : executionDescription(lastAct.toolName)
+        return failed ? '工具调用失败，正在处理…' : (lastAct.intent || executionDescription(lastAct.toolName))
       }
       const lastReason = [...steps].reverse().find((s) => s.type === 'reason')
       return reasoningDescription(lastReason ? 'finalizing' : 'thinking')
     }
     if (status === 'paused') {
       const lastAct = [...steps].reverse().find((s) => s.type === 'act')
-      return lastAct ? `${executionDescription(lastAct.toolName).replace(/…$/, '')}（已暂停）` : '已暂停 · 等待你的指令…'
+      return lastAct ? `${(lastAct.intent || executionDescription(lastAct.toolName)).replace(/…$/, '')}（已暂停）` : '已暂停 · 等待你的指令…'
     }
     if (status === 'error') {
       return '运行出错 · 请查看上方错误信息'

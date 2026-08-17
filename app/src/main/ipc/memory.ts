@@ -265,15 +265,46 @@ export async function compressMemory(
   const beforeTokens = totalTokens(all)
 
   // 1. 分类
-  const recentReasoning = all
-    .filter((m) => m.kind === 'reasoning' || m.kind === 'observation')
-    .slice(-policy.keepRecentTurns * 2)
-  const recentIds = new Set(recentReasoning.map((m) => m.id))
+  // v0.19.x fix：按完整「轮次」（reasoning + 其后连续 observation）保留最近 N 轮，
+  // 不再按 2*N 条消息硬切，避免从 observation 中间切开产生孤立 tool 消息
+  // （前置 assistant tool_calls 被归档），导致每轮 assembleMessages 报 orphan。
+  let keepFromIdx = 0
+  let seenTurns = 0
+  for (let i = all.length - 1; i >= 0; i--) {
+    if (all[i].kind === 'reasoning') {
+      seenTurns += 1
+      if (seenTurns >= policy.keepRecentTurns) {
+        keepFromIdx = i
+        break
+      }
+    }
+  }
+  const recentIds = new Set(all.slice(keepFromIdx).map((m) => m.id))
+
+  // v0.19.x fix：dropFailed 必须与轮次对齐。此前「无条件丢弃失败 observation」会在
+  // 保留其前置 reasoning（含 assistant tool_calls）的同时删除配对 tool 响应，导致
+  // assembleMessages 重建出「有 tool_calls 无 tool 响应」的消息，每轮触发
+  // reconcileToolCalls "stripped dangling tool_calls"（并向 OpenAI 兼容端点发送 400 风险）。
+  // 现在仅当失败 observation 所属 reasoning 整轮被归档时才丢弃；reasoning 被保留时，
+  // 失败 observation 一并保留。
+  const failedObsKeep = new Map<string, boolean>()
+  if (policy.dropFailed) {
+    let lastReasoningId: string | null = null
+    for (const m of all) {
+      if (m.kind === 'reasoning') {
+        lastReasoningId = m.id
+      } else if (m.kind === 'observation') {
+        if (lastReasoningId) failedObsKeep.set(m.id, recentIds.has(lastReasoningId))
+      }
+    }
+  }
 
   const keep = all.filter((m) => {
     if (m.archivedAt) return false
-    // dropFailed：失败工具结果不保留（归档）
-    if (policy.dropFailed && isFailedObservation(m)) return false
+    // dropFailed：仅丢弃「整轮被归档」的失败工具结果（避免 dangling tool_calls）
+    if (policy.dropFailed && isFailedObservation(m)) {
+      return failedObsKeep.get(m.id) ?? false
+    }
     if (policy.keepSystem && m.kind === 'system_prompt') return true
     if (policy.keepUserTurns && m.kind === 'user_message') return true
     if (policy.keepFileRefs && m.kind === 'file_ref') return true
