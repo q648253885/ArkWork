@@ -395,9 +395,12 @@ export function sliceRecentContext(items: MemoryItem[], keepTokens = KEEP_TOKENS
   while (splitIdx > 0 && splitIdx < sorted.length && sorted[splitIdx].role === 'tool') {
     splitIdx -= 1
   }
+  // v0.23.2 fix「用户输入被吞」：user_message 永不归档——交互区的用户气泡由
+  // memory 派生，归档即从 UI 消失；且用户消息通常很小，全部保留对预算影响可忽略。
+  const isPinned = (m: MemoryItem, i: number) => i >= splitIdx || m.kind === 'user_message'
   return {
-    recentContext: sorted.slice(splitIdx),
-    dropped: sorted.slice(0, splitIdx),
+    recentContext: sorted.filter((m, i) => isPinned(m, i)),
+    dropped: sorted.filter((m, i) => !isPinned(m, i)),
   }
 }
 

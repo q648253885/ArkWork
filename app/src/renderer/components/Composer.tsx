@@ -23,7 +23,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../icons'
 import { contextColor, CONTEXT_NOISE_KINDS } from '../constants'
 import { useStore, friendlyError, computeModelHealth } from '../store'
-import { simplifyFirstLine } from '../utils/title'
+// v0.24.x：标题生成（基于首条用户消息首行）改由 store.sendMessage 调用 simplifyFirstLine
+// import { simplifyFirstLine } from '../utils/title'
 import type { PermissionMode } from '@shared/types/permission'
 import { Tooltip } from './ui'
 import { RunConsole } from './RunConsole'
@@ -31,7 +32,7 @@ import { ModelSwitcher } from './ModelSwitcher'
 import { AgentChip } from './AgentChip'
 import type { FsNode } from '../types'
 
-type MenuKind = 'at' | 'slash' | null
+type MenuKind = 'at' | 'slash' | 'agent' | null
 
 // v0.15.0：权限模式循环与三态元信息（Composer chip / Settings 共用文案）
 const PERMISSION_ORDER: PermissionMode[] = ['default', 'acceptEdits', 'plan']
@@ -72,6 +73,8 @@ export function Composer() {
   const [activeIndex, setActiveIndex] = useState(0)
   // v0.9.0 F904：模型切换器（工具栏首控）
   const [modelSwitcherOpen, setModelSwitcherOpen] = useState(false)
+  // v0.24.x：权限模式下拉选择（替代 Shift+Tab 循环）
+  const [permissionMenuOpen, setPermissionMenuOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lastInputRef = useRef<string>('')
 
@@ -93,7 +96,8 @@ export function Composer() {
   const pauseTask = useStore((s) => s.pauseTask)
   const resumeTask = useStore((s) => s.resumeTask)
   const runTask = useStore((s) => s.runTask)
-  const renameTask = useStore((s) => s.renameTask)
+  // v0.24.x：Composer 不再触发自动重命名，store.renameTask 仅供任务侧栏手动重命名
+  // const renameTask = useStore((s) => s.renameTask)
   const selectedTaskId = useStore((s) => s.selectedTaskId)
   const tasks = useStore((s) => s.tasks)
   const task = tasks.find((t) => t.id === selectedTaskId)
@@ -146,6 +150,8 @@ export function Composer() {
 
   // ============ 上下文 token：优先用引擎报告的实时 payload，回落到 L1 估算 ============
   const contextSize = useStore((s) => s.contextSize)
+  // v0.23.1：当前任务的前缀缓存命中统计（端点上报过才显示命中率）
+  const cacheUsage = useStore((s) => s.cacheUsage)
   const ctxUsed = useMemo(
     () => contextSize?.payloadTokens ?? memory.filter((m) => m.enabled && !m.archivedAt).reduce((s, m) => s + m.tokens, 0),
     [contextSize, memory],
@@ -169,22 +175,12 @@ export function Composer() {
     return ''
   }, [input, menu])
 
-  // ============ @ 菜单数据：分四段 Agents / Skills / Files / Memory ============
+  // ============ @ 菜单数据：分四段 智能体 / 技能 / 文件 / 记忆 ============
+  // v0.24.x：@ 引用菜单已不包含「智能体」段（按用户要求）。智能体入口改为
+  // 点击 Composer 顶部 chips 行的智能体 chip 弹出独立下拉（与 @ 解耦）。
   const atSections = useMemo(() => {
     const q = trigger.toLowerCase()
     const filter = (label: string) => !q || label.toLowerCase().includes(q)
-
-    const agentItems = agents
-      .filter((a) => filter(a.name))
-      .map((a) => ({
-        kind: 'agent' as const,
-        id: a.id,
-        label: a.name,
-        hint: a.description,
-        color: a.avatarColor,
-        section: '智能体',
-        active: a.id === selectedAgentId,
-      }))
 
     const skillItems = skills
       .filter((s) => filter(s.name))
@@ -221,23 +217,43 @@ export function Composer() {
 
     // v0.7.0：Memory 段 — 已启用且未归档的 L1/L3 记忆条目
     // v0.8.1：过滤对话噪音（用户/模型对话），只保留资源条目（文件/技能/知识库等）
+    // v0.24.x：记忆条目显示「可读摘要 + 触发内容 + token」三行：
+    //   - 摘要：去掉 "(触发点：...) / 总项数=..." 这类内部状态格式噪音，仅取首行可读描述
+    //   - 触发内容：若 memory.kind === 'plan_status'，提取"当前运行第 N 项"作为触发描述
+    //   - token：保留量纲提示
     const memoryItems = memory
       .filter((m) => m.enabled && !m.archivedAt && (m.layer === 'L1' || m.layer === 'L3'))
       .filter((m) => !CONTEXT_NOISE_KINDS.has(m.kind))
       .filter((m) => !q || (m.content || '').toLowerCase().includes(q))
       .slice(0, 15)
-      .map((m) => ({
-        kind: 'memory' as const,
-        id: m.id,
-        label: (m.content || '(空记忆)').slice(0, 48),
-        hint: `${m.layer} · ${m.tokens} tokens`,
-        color: '#9B6BFF',
-        section: '记忆',
-        active: false,
-      }))
+      .map((m) => {
+        const cleaned = cleanMemoryContent(m.content || '(空记忆)')
+        const trigger = extractMemoryTrigger(m)
+        return {
+          kind: 'memory' as const,
+          id: m.id,
+          label: cleaned.summary || '(空记忆)',
+          hint: trigger ? `${trigger} · ${m.layer} · ${m.tokens} tokens` : `${m.layer} · ${m.tokens} tokens`,
+          color: '#9B6BFF',
+          section: '记忆',
+          active: false,
+        }
+      })
 
-    return [...agentItems, ...skillItems, ...fileItems, ...memoryItems]
-  }, [trigger, agents, skills, files, memory, selectedAgentId, selectedSkillIds, fileChips])
+    return [...skillItems, ...fileItems, ...memoryItems]
+  }, [trigger, skills, files, memory, selectedSkillIds, fileChips])
+
+  // ============ v0.24.x：智能体下拉菜单（独立于 @ 引用）============
+  const agentItems = useMemo(
+    () =>
+      agents.map((a) => ({
+        id: a.id,
+        name: a.name,
+        description: a.description,
+        color: a.avatarColor,
+      })),
+    [agents],
+  )
 
   // ============ / 菜单数据 ============
   const slashCommands = useMemo(() => {
@@ -260,17 +276,40 @@ export function Composer() {
     setActiveIndex(0)
   }, [menu, trigger])
 
-  // ============ v0.23.0：任务标题实时跟随用户输入（debounce 800ms）============
-  // 用户在输入框里敲字时，把首行作为 task title 实时同步到 sidebar / task header。
-  // 仅当 title 仍是占位「未命名任务」或上次同步值时覆盖；用户手动重命名后不再覆盖。
-  const titleSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const titleLastSyncedRef = useRef<string>('') // 上次同步到后端的 title，避免重复 IPC
+  // ============ v0.24.x：记忆内容清洗 + 触发描述提取 ============
+  // 历史 L1 plan_status / iteration_step 等条目带有"（触发点：...）\n总项数=..."这种
+  // 内部状态格式，对 LLM 有用但对用户不可读。这里抽取"当前运行第 N 项"作为触发描述，
+  // 把首行可读部分作为摘要，避免把内部 status 字符串直接展示在 @ 引用面板中。
+  function cleanMemoryContent(raw: string): { summary: string } {
+    // 去掉 "（触发点：...）" 段
+    const noTrigger = raw.replace(/（触发点：[^）]*）/g, '').replace(/\(触发点：[^)]*\)/g, '').trim()
+    // 取首行非空内容
+    const firstLine = noTrigger.split(/\r?\n/).find((l) => l.trim().length > 0) ?? ''
+    return { summary: firstLine.slice(0, 48).trim() }
+  }
+
+  function extractMemoryTrigger(m: { kind: string; content: string }): string {
+    if (m.kind !== 'plan_status') return ''
+    const triggerMatch = m.content.match(/（触发点：([^）]*)）/m) ?? m.content.match(/\(触发点：([^)]*)\)/m)
+    const trigger = triggerMatch?.[1]?.trim() ?? ''
+    const runningMatch = m.content.match(/当前运行：第\s*(\d+)\s*项/m)
+    const running = runningMatch ? `当前运行第 ${runningMatch[1]} 项` : ''
+    if (trigger && running) return `${trigger} · ${running}`
+    if (running) return running
+    if (trigger) return trigger
+    return ''
+  }
+
+  // ============ v0.24.x：标题改为「发送后」生成 ============
+  // 取消 v0.23.0 的输入时 800ms debounce 实时同步——用户在敲字时若敲到一半
+  // （甚至第一个字符）就触发了「未命名任务 → 一字标题」误显示，且中途会与其他
+  // 用户/系统改标题的写入产生竞态。
+  // 新策略：标题完全由 store.sendMessage / store.createTask 在发送成功后基
+  // 于「首条已提交用户消息」首行生成；Composer 在此不持有 titleSyncTimer。
+  // 历史占位「未命名任务 / 未命名任务 N」仍由 store 在续聊时刷新（polish2）。
   useEffect(() => {
     return () => {
-      if (titleSyncTimerRef.current) {
-        clearTimeout(titleSyncTimerRef.current)
-        titleSyncTimerRef.current = null
-      }
+      /* no-op：预留清理点，旧的 titleSyncTimer 已在 handleSend 中清掉 */
     }
   }, [])
 
@@ -287,35 +326,14 @@ export function Composer() {
     } else if (menu) {
       setMenu(null)
     }
-
-    // v0.23.0：实时同步首行作为任务标题。条件：
-    //   - 任务已选中
-    //   - 输入非空（至少敲了一行）
-    //   - 当前 task title 仍是占位「未命名任务 / 未命名任务 N」或上次同步值（避免覆盖用户手动改的）
-    //   - 800ms debounce：用户暂停敲字后触发，避免每个键击都 IPC
-    if (!task) return
-    const simplified = simplifyFirstLine(val)
-    if (!simplified) return
-    const placeholder = /^未命名任务(\s\d+)?$/
-    const isPlaceholder = placeholder.test(task.title)
-    const isSameAsLastSynced = titleLastSyncedRef.current === simplified
-    if (!isPlaceholder && !isSameAsLastSynced) return
-    if (titleSyncTimerRef.current) clearTimeout(titleSyncTimerRef.current)
-    titleSyncTimerRef.current = setTimeout(() => {
-      void renameTask(task.id, simplified).then(() => {
-        titleLastSyncedRef.current = simplified
-      })
-    }, 800)
   }
 
   // ============ 选择 @ 菜单项 ============
   const pickAtItem = (item: (typeof atSections)[number]) => {
     // 从输入中移除 @xxx 部分
     const cleaned = input.replace(/@(\w*)$/, '').replace(/\s+$/, '')
-    if (item.kind === 'agent') {
-      setSelectedAgent(item.id)
-      setInput(cleaned + ' ')
-    } else if (item.kind === 'skill') {
+    // v0.24.x：智能体已不在 @ 引用中（顶部智能体 chip 点击→独立下拉切换）
+    if (item.kind === 'skill') {
       // v0.16.7+：把「Use Skill: {name}」字面量插入到输入框，让 LLM 看到明文指令
       // 显式触发（@coder systemPrompt 已规定识别 "Use Skill: X" → 立即调用 X）。
       // 同时调 toggleSkill 走任务级 skillIds 通道作为冗余兜底。
@@ -421,6 +439,8 @@ export function Composer() {
     // 把 file chips 以 [file: path] 附加到消息末尾（占位，真实路径作为上下文）
     const fileRefs = fileChips.map((c) => `@file:${c.path}`).join(' ')
     const fullText = fileRefs ? `${text}\n\n附件: ${fileRefs}` : text
+    // v0.24.x：标题生成已迁移到 store.sendMessage（发送成功后基于首行生成）。
+    // Composer 不再持有 timer / sentinel 状态；旧的清理分支直接移除。
     await sendMessage(fullText)
     setInput('')
     setFileChips([])
@@ -581,40 +601,139 @@ export function Composer() {
   }
 
   return (
-    /* v0.21.0 — DSH 风格 floating capsule 输入框：
-       22px 圆角、l2-darkmode-thin 边框、shadow-md 漂浮感、业务蓝发送按钮 */
+    /* v0.24.x — 重新排版（Trae harness 风格）：
+       - 顶部 chips 行：智能体入口（点击下拉切换）+ 引用 + 命令 + KB + 文件 chips
+       - 输入框（floating capsule）
+       - 底部工具行：模型 + 默认权限 + ctx 圆环 + 发送 */
     <div className="relative border-t border-border-subtle bg-bg-base flex-shrink-0" data-state={isRunning ? 'running' : isFailed ? 'error' : 'idle'}>
-      {/* chips 行 */}
-      <div className="flex items-center gap-1 px-3 pt-2 pb-1 flex-wrap">
-        {agent && <AgentChip agent={{ name: agent.name, color: agent.avatarColor }} />}
-        {selectedSkills.map((s) => (
-            <Chip key={s.id} color="#5B8DEF" onRemove={() => removeSkill(s.id)}>
-              ✦ {s.name}
-            </Chip>
-          ))}
-          {fileChips.map((c) => (
-            <Chip key={c.path} color="#A6ABB5" onRemove={() => removeFile(c.path)}>
-              {c.name}
-            </Chip>
-          ))}
-          {/* v0.8.0 F813：知识库 chip — 点击展开启用清单 */}
-          {knowledgeBases.length > 0 && (
-<Tooltip label="知识库：点击选择当前任务启用的知识库">
-            <button
-              onClick={() => setKbMenuOpen((v) => !v)}
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-2xs font-mono transition-colors ${
-                enabledKbCount > 0
-                  ? 'bg-accent-soft border-accent text-accent'
-                  : 'bg-bg-surface border-border-subtle text-text-tertiary hover:text-text-secondary'
-              }`}
+      {/* ============ 顶部 chips 行：智能体入口 + 引用 + 命令 + KB + 文件 ============ */}
+      <div className="flex items-center gap-1 px-3 pt-2 pb-1 flex-wrap relative">
+        {/* v0.24.x：智能体入口（点击弹出下拉选择）—— 替代原先静态 AgentChip */}
+        <Tooltip label="切换智能体" desc="点击选择当前任务的智能体" placement="top" delay={150}>
+          <button
+            type="button"
+            onClick={() => setMenu(menu === 'agent' ? null : 'agent')}
+            aria-haspopup="listbox"
+            aria-expanded={menu === 'agent'}
+            className={`inline-flex items-center gap-1.5 h-[26px] px-2 rounded-md border text-2xs font-mono transition-colors ${
+              menu === 'agent'
+                ? 'bg-accent-soft border-accent text-accent'
+                : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            <span
+              className="relative inline-flex items-center justify-center w-3 h-3 rounded-full"
+              style={{ backgroundColor: agent?.avatarColor ?? 'var(--text-secondary)' }}
+            />
+            <span className="font-medium">@{agent?.name ?? '未选择'}</span>
+            <Icon.ChevronDown width={10} height={10} />
+          </button>
+        </Tooltip>
 
-            >
-              <Icon.Book width={10} height={10} />
-              知识库 {enabledKbCount}
-            </button>
+        {/* v0.24.x：「引用」按钮（@ 菜单入口）—— 移到顶部 */}
+        <ToolIcon
+          icon={<Icon.AtSign width={13} height={13} />}
+          label="引用"
+          tooltip="@ 引用 技能 / 文件 / 记忆"
+          onClick={() => {
+            if (menu === 'at') {
+              setMenu(null)
+              setInput((prev) => prev.replace(/@(\w*)$/, '').replace(/\s+$/, ''))
+            } else {
+              setInput((prev) => (prev.endsWith('@') ? prev : prev + (prev && !prev.endsWith(' ') ? ' ' : '') + '@'))
+              setMenu('at')
+            }
+            textareaRef.current?.focus()
+          }}
+          active={menu === 'at'}
+        />
+
+        {/* v0.24.x：「命令」按钮（/ 菜单入口）—— 移到顶部 */}
+        <ToolIcon
+          icon={<Icon.Slash width={13} height={13} />}
+          label="命令"
+          tooltip="/ 命令"
+          onClick={() => {
+            if (menu === 'slash') {
+              setMenu(null)
+              setInput((prev) => prev.replace(/(?:^|\s)\/(\w*)$/, '').replace(/\s+$/, ''))
+            } else {
+              setInput((prev) => (prev.endsWith('/') ? prev : prev + (prev && !prev.endsWith(' ') ? ' ' : '') + '/'))
+              setMenu('slash')
+            }
+            textareaRef.current?.focus()
+          }}
+          active={menu === 'slash'}
+        />
+
+        {/* 文件 chips 保留 */}
+        {selectedSkills.map((s) => (
+          <Chip key={s.id} color="#5B8DEF" onRemove={() => removeSkill(s.id)}>
+            ✦ {s.name}
+          </Chip>
+        ))}
+        {fileChips.map((c) => (
+          <Chip key={c.path} color="#A6ABB5" onRemove={() => removeFile(c.path)}>
+            {c.name}
+          </Chip>
+        ))}
+        {/* v0.8.0 F813：知识库 chip — 点击展开启用清单 */}
+        {knowledgeBases.length > 0 && (
+<Tooltip label="知识库：点击选择当前任务启用的知识库">
+          <button
+            onClick={() => setKbMenuOpen((v) => !v)}
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-2xs font-mono transition-colors ${
+              enabledKbCount > 0
+                ? 'bg-accent-soft border-accent text-accent'
+                : 'bg-bg-surface border-border-subtle text-text-tertiary hover:text-text-secondary'
+            }`}
+
+          >
+            <Icon.Book width={10} height={10} />
+            知识库 {enabledKbCount}
+          </button>
 </Tooltip>
-          )}
-        </div>
+        )}
+
+        {/* v0.24.x：智能体下拉面板（宽度自适应内容，显示完整名称与标签） */}
+        {menu === 'agent' && (
+          <PickerPopover
+            title="切换智能体"
+            onClose={() => setMenu(null)}
+            panelClass="w-max min-w-[220px] max-w-[360px]"
+          >
+            {agentItems.length === 0 ? (
+              <div className="px-3 py-6 text-center text-xs text-text-tertiary">尚未配置智能体</div>
+            ) : (
+              <div className="flex flex-col">
+                {agentItems.map((a) => (
+                  <button
+                    key={a.id}
+                    onClick={() => {
+                      setSelectedAgent(a.id)
+                      setMenu(null)
+                    }}
+                    className={`flex items-center gap-2 h-8 px-2.5 text-left transition-colors whitespace-nowrap ${
+                      a.id === selectedAgentId ? 'bg-bg-active' : 'hover:bg-bg-hover'
+                    }`}
+                  >
+                    <span
+                      className="flex-shrink-0 h-5 w-5 flex items-center justify-center rounded-md text-xs font-medium"
+                      style={{ background: `${a.color}22`, color: a.color }}
+                    >
+                      <Icon.Bot width={13} height={13} />
+                    </span>
+                    <span className="flex-1 min-w-0 text-xs text-text-primary overflow-hidden text-ellipsis">{a.name}</span>
+                    {a.id === selectedAgentId && (
+                      <span className="text-2xs text-success flex-shrink-0">✓ 当前</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </PickerPopover>
+        )}
+      </div>
 
       {/* v0.13.0：error 状态 — 红色边线 + 错误消息显示在输入框下方 */}
       {isFailed && errorMessage && (
@@ -639,7 +758,7 @@ export function Composer() {
             value={input}
             onChange={(e) => onChangeInput(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="描述你的任务，例如：帮我重构 src/components 下所有 useState 为 useReducer…  @ 引用 · / 命令  (⌘↵ 发送 / Shift+Enter 换行 / Esc 停止)"
+            placeholder=""
             rows={1}
             className="flex-1 resize-none text-sm text-text-primary placeholder-text-tertiary bg-transparent leading-relaxed px-1 py-2"
             style={{ minHeight: '44px', maxHeight: '320px' }}
@@ -647,69 +766,78 @@ export function Composer() {
         </div>
       </div>
 
-      {/* 工具行 */}
+      {/* ============ 底部工具行：模型 + 默认权限 + ctx + 发送 ============ */}
       <div className="flex items-center gap-2 px-3 py-2">
-        {/* v0.9.0 F904：模型切换器 — 工具栏第一控件（唯一带主色底衬） */}
+        {/* 模型切换器 */}
         <ModelSwitcher open={modelSwitcherOpen} onOpenChange={setModelSwitcherOpen} />
 
-        {/* @ / 按钮 — 显示文字标签；再次点击 toggle 关闭 */}
-        <ToolIcon
-          icon={<Icon.AtSign width={13} height={13} />}
-          label="引用"
-          tooltip="@ 引用 Agent / Skill / 文件 / 记忆"
-          onClick={() => {
-            if (menu === 'at') {
-              setMenu(null)
-              setInput((prev) => prev.replace(/@(\w*)$/, '').replace(/\s+$/, ''))
-            } else {
-              setInput((prev) => (prev.endsWith('@') ? prev : prev + (prev && !prev.endsWith(' ') ? ' ' : '') + '@'))
-              setMenu('at')
-            }
-            textareaRef.current?.focus()
-          }}
-          active={menu === 'at'}
-        />
-        <ToolIcon
-            icon={<Icon.Slash width={13} height={13} />}
-            label="命令"
-            tooltip="/ 命令"
-          onClick={() => {
-            if (menu === 'slash') {
-              setMenu(null)
-              setInput((prev) => prev.replace(/(?:^|\s)\/(\w*)$/, '').replace(/\s+$/, ''))
-            } else {
-              setInput((prev) => (prev.endsWith('/') ? prev : prev + (prev && !prev.endsWith(' ') ? ' ' : '') + '/'))
-              setMenu('slash')
-            }
-            textareaRef.current?.focus()
-          }}
-          active={menu === 'slash'}
-        />
+        {/* v0.24.x：默认权限 chip —— 点击弹出下拉列表选择 */}
+        <div className="relative">
+          <Tooltip
+            label={PERMISSION_META[permissionMode].label}
+            desc={PERMISSION_META[permissionMode].desc}
+            placement="top"
+            delay={150}
+          >
+            <button
+              onClick={() => setPermissionMenuOpen((v) => !v)}
+              aria-haspopup="listbox"
+              aria-expanded={permissionMenuOpen}
+              aria-label="切换权限模式"
+              className={`inline-flex items-center gap-1 h-8 px-2.5 rounded-md border text-2xs transition-colors focus-ring ${PERMISSION_META[permissionMode].cls}`}
+            >
+              {PERMISSION_META[permissionMode].icon}
+              <span className="font-mono">{PERMISSION_META[permissionMode].label}</span>
+              <Icon.ChevronDown width={10} height={10} />
+            </button>
+          </Tooltip>
+
+          {permissionMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setPermissionMenuOpen(false)} />
+              <div className="absolute z-30 bottom-full left-0 mb-1 w-60 bg-bg-overlay border border-border-default rounded-lg shadow-panel py-1 scale-in">
+                <div className="px-3 py-1.5 border-b border-border-subtle text-2xs text-text-tertiary uppercase tracking-wider font-medium">
+                  权限模式
+                </div>
+                {PERMISSION_ORDER.map((mode) => {
+                  const meta = PERMISSION_META[mode]
+                  const active = mode === permissionMode
+                  return (
+                    <button
+                      key={mode}
+                      onClick={() => {
+                        void setPermissionMode(mode)
+                        setPermissionMenuOpen(false)
+                      }}
+                      className={`w-full flex items-center gap-2 h-9 px-3 text-left transition-colors ${
+                        active ? 'bg-bg-active' : 'hover:bg-bg-hover'
+                      }`}
+                    >
+                      <span className="flex-shrink-0 text-text-secondary">{meta.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-text-primary">{meta.label}</div>
+                        <div className="text-2xs text-text-tertiary truncate">{meta.desc}</div>
+                      </div>
+                      {active && <span className="text-2xs text-success flex-shrink-0">✓</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          )}
+        </div>
 
         <div className="flex-1" />
 
-        {/* ctx 上下文用量 — 放右侧，带文字标识；点击切换到 SidePanel memory 面板 */}
-        <CtxRing used={ctxUsed} total={ctxBudget} window={ctxWindow} pct={ctxPct} onClick={() => setActiveActivity('memory')} />
-
-        {/* v0.15.0：权限模式 chip — 点击循环 默认权限 → 接受编辑 → 只读权限（Shift+Tab 亦同） */}
-        <Tooltip
-          label={PERMISSION_META[permissionMode].label}
-          desc={`${PERMISSION_META[permissionMode].desc} · Shift+Tab 切换`}
-          placement="top"
-          delay={150}
-        >
-          <button
-            onClick={() => {
-              const next = PERMISSION_ORDER[(PERMISSION_ORDER.indexOf(permissionMode) + 1) % PERMISSION_ORDER.length]
-              void setPermissionMode(next)
-            }}
-            aria-label="切换权限模式"
-            className={`inline-flex items-center gap-1 h-8 px-2.5 rounded-md border text-2xs transition-colors focus-ring ${PERMISSION_META[permissionMode].cls}`}
-          >
-            {PERMISSION_META[permissionMode].icon}
-            <span className="font-mono">{PERMISSION_META[permissionMode].label}</span>
-          </button>
-        </Tooltip>
+        {/* ctx 上下文用量 */}
+        <CtxRing
+          used={ctxUsed}
+          total={ctxBudget}
+          window={ctxWindow}
+          pct={ctxPct}
+          cache={cacheUsage?.reported ? cacheUsage : null}
+          onClick={() => setActiveActivity('memory')}
+        />
 
         <Divider />
 
@@ -759,7 +887,7 @@ export function Composer() {
             </div>
           ) : (
             <>
-              {(['智能体', '技能', '文件', '记忆'] as const).map((section) => {
+              {(['技能', '文件', '记忆'] as const).map((section) => {
                 const items = atSections.filter((i) => i.section === section)
                 if (items.length === 0) return null
                 return (
@@ -920,17 +1048,8 @@ function Chip({
 /* ============================================================
  * AtItemIcon — @ 菜单项图标（大号，带分类色）
  * ============================================================ */
-function AtItemIcon({ kind, color }: { kind: 'agent' | 'skill' | 'file' | 'memory'; color: string }) {
-  if (kind === 'agent') {
-    return (
-      <span
-        className="flex-shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-xs font-medium"
-        style={{ background: `${color}22`, color }}
-      >
-        <Icon.Bot width={15} height={15} />
-      </span>
-    )
-  }
+function AtItemIcon({ kind, color }: { kind: 'skill' | 'file' | 'memory'; color: string }) {
+  // v0.24.x：「agent」已不在 @ 引用中（顶部智能体 chip 独立入口）
   if (kind === 'skill') {
     return (
       <span
@@ -1004,12 +1123,14 @@ function CtxRing({
   total,
   window,
   pct,
+  cache,
   onClick,
 }: {
   used: number
   total: number
   window: number
   pct: number
+  cache?: { hitTokens: number; missTokens: number } | null
   onClick?: () => void
 }) {
   const color = contextColor(pct)
@@ -1017,9 +1138,13 @@ function CtxRing({
   const circ = 2 * Math.PI * radius
   const offset = circ - (pct / 100) * circ
   const overLimit = pct > 95
+  // v0.23.1：缓存命中率 = 命中 /（命中 + 未命中）；端点未报告（cache=null）不显示
+  const cacheTotal = cache ? cache.hitTokens + cache.missTokens : 0
+  const cachePct = cache && cacheTotal > 0 ? Math.round((cache.hitTokens / cacheTotal) * 100) : null
+  const cacheText = cache && cachePct !== null ? ` · 缓存命中 ${cachePct}%（命中 ${cache.hitTokens.toLocaleString()} / 输入 ${cacheTotal.toLocaleString()} tokens）` : ''
   const tooltipText = overLimit
-    ? `上下文已超预算 ${pct}%，建议使用 /压缩记忆 降低占用`
-    : `上下文用量：${used.toLocaleString()} / 预算 ${total.toLocaleString()} tokens（${pct}%）· 模型窗口 ${window.toLocaleString()}`
+    ? `上下文已超预算 ${pct}%，建议使用 /压缩记忆 降低占用${cacheText}`
+    : `上下文用量：${used.toLocaleString()} / 预算 ${total.toLocaleString()} tokens（${pct}%）· 模型窗口 ${window.toLocaleString()}${cacheText}`
 
   return (
     <Tooltip label={tooltipText} placement="top">
@@ -1053,6 +1178,15 @@ function CtxRing({
         <span className="text-xs font-mono tabular" style={{ color }}>
           {pct}%
         </span>
+        {/* v0.23.1：缓存命中率常驻小字（仅端点上报过缓存数据时显示） */}
+        {cachePct !== null && (
+          <span
+            className="text-2xs font-mono tabular text-text-tertiary"
+            title={`前缀缓存命中率 ${cachePct}% · 命中 ${(cache?.hitTokens ?? 0).toLocaleString()} / 输入 ${cacheTotal.toLocaleString()} tokens`}
+          >
+            ⚡{cachePct}%
+          </span>
+        )}
         {overLimit && (
 <Tooltip label="输入 /压缩记忆 以降低占用">
           <span className="text-2xs text-danger">
@@ -1072,10 +1206,13 @@ function PickerPopover({
   title,
   children,
   onClose,
+  panelClass,
 }: {
   title: string
   children: React.ReactNode
   onClose?: () => void
+  /** v0.24.x：面板宽度类（默认 left-3 right-3 撑满；agent 列表传 w-max 自适应） */
+  panelClass?: string
 }) {
   return (
     <>
@@ -1084,7 +1221,9 @@ function PickerPopover({
         className="fixed inset-0 z-20"
         onClick={onClose}
       />
-      <div className="absolute z-30 left-3 right-3 bottom-full mb-1 bg-bg-overlay border border-border-default rounded-lg shadow-panel max-h-[420px] overflow-y-auto scale-in">
+      <div className={`absolute z-30 left-3 bottom-full mb-1 bg-bg-overlay border border-border-default rounded-lg shadow-panel max-h-[420px] overflow-y-auto scale-in ${
+        panelClass ?? 'right-3'
+      }`}>
         <div className="px-3 py-2 border-b border-border-subtle text-2xs text-text-tertiary uppercase tracking-wider font-medium flex items-center gap-1.5 sticky top-0 bg-bg-overlay">
           <Icon.Search width={11} height={11} />
           {title}

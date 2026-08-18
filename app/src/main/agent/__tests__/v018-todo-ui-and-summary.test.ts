@@ -274,7 +274,8 @@ test('v0.18.x fix: 任务失败时 markRunningPlanItemFailed 把 running 项标 
   )
   assert.match(engineSrc, /target\.status\s*=\s*['"]failed['"]/, '目标项应标 failed')
   assert.match(engineSrc, /source:\s*['"]engine-fail['"]/, '失败来源应为 engine-fail')
-  // 三个失败路径均接入该函数
+  // 失败路径接入该函数（v0.23.2：max-iterations 改为优雅暂停不再标 failed，
+  // 真实失败路径剩 catch task_failed 与上下文溢出 fast-fail 等 ≥2 处）
   const callCount = (engineSrc.match(/await\s+markRunningPlanItemFailed\(task\)/g) ?? []).length
-  assert.ok(callCount >= 3, `markRunningPlanItemFailed 应至少在 3 个失败路径接入，当前 ${callCount} 处`)
+  assert.ok(callCount >= 2, `markRunningPlanItemFailed 应至少在 2 个失败路径接入，当前 ${callCount} 处`)
 })

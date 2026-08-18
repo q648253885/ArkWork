@@ -1,68 +1,120 @@
 /**
- * v0.16.6+ 重复读检测器
+ * v0.24.0 重复读检测器（升级自 v0.16.6 的 warn-only 版本）
  *
- * 用户原话：「读文件工具的限制应该仅限于一直读重复的文件才进行干预」。
+ * v0.23.x 实测（T-20260817-106u4s：105 轮 / 132 工具 / 1.56M tokens 修一行 bug）
+ * 证明 warn-only 不够：同文件读 5-6 次、同关键词 grep 3+ 次，且旧版 hint 字段
+ * 从未被 buildObservationSummary 消费，警告根本没到模型眼里。
  *
- * 设计：
- *  - 维护一张 key → { count, firstReadAt } 的 Map（按 taskId 隔离）
- *  - key = "<tool>:<signature>"，signature = 把路径/pattern/maxLines 等参数规范化后的字符串
- *  - 第一次调用返回 null（放行 + 计数）
- *  - 第 N+1 次相同 signature 调用返回"已读 N 次"提示，但不阻断，让 Agent 自己判断
- *  - 阈值：file-reader / grep-search / glob-search 连续 3 次相同参数触发提示
- *  - 故意不阻断：用户允许 Agent 在需要时"再看一眼"；只是提醒它已经看过了
- *
- * 这个模块同时给 file-reader / grep-search / glob-search / file-editor 共用。
+ * 新设计（三级判决）：
+ *  - 第 1-2 次：pass 放行（正常探索）
+ *  - 第 3 次：  warn  放行执行，但观察文本前置警告（真正送达模型）
+ *  - 第 4 次起：block 不再执行，直接返回「缓存内容头 + 行动指令」，
+ *              强制 Agent 停止重读、开始写代码/验证
+ *  - file-editor / file-writer 写入成功后调用 invalidateReadsOf(path)
+ *    清除该路径记录，保证「编辑后合法重读」不受影响
  */
 import type { SkillContext } from '../registry.js'
 
+export type RepeatVerdict =
+  | { action: 'pass' }
+  | { action: 'warn'; hint: string }
+  | { action: 'block'; observation: string }
+
 export interface RepeatReadOptions {
-  /** 触发提示的重复次数阈值（默认 3） */
-  threshold?: number
+  /** warn 阈值（第 N 次触发警告，默认 3） */
+  warnThreshold?: number
+  /** block 阈值（第 N 次起拦截，默认 4） */
+  blockThreshold?: number
 }
 
 interface RepeatEntry {
   count: number
   firstReadAt: number
-  lastWarnedAt: number
-  lastSignature: string
+  lastContentHead: string
 }
 
 /** 内部 Map：taskId → (signature → entry) */
 const taskMaps = new WeakMap<object, Map<string, RepeatEntry>>()
 
+function mapOf(ctx: SkillContext): Map<string, RepeatEntry> {
+  let map = taskMaps.get(ctx as object)
+  if (!map) {
+    map = new Map()
+    taskMaps.set(ctx as object, map)
+  }
+  return map
+}
+
 /**
- * 检查本次调用是否构成「重复读」。返回：
- *  - null = 第一次或差异调用，放行
- *  - string = 命中重复，给出提示语（不阻断，工具仍执行）
+ * 三级判决。signature 建议只含「决定内容等价性」的字段
+ * （路径 / pattern / 分页参数），不含会漂移的临时字段。
  */
 export function checkRepeatRead(
   ctx: SkillContext,
   tool: 'file-reader' | 'grep-search' | 'glob-search',
   signature: Record<string, unknown>,
   options: RepeatReadOptions = {},
-): string | null {
-  const threshold = options.threshold ?? 3
+): RepeatVerdict {
+  const warnAt = options.warnThreshold ?? 3
+  const blockAt = options.blockThreshold ?? 4
   const sig = stableSignature(signature)
-  if (!sig) return null
+  if (!sig) return { action: 'pass' }
 
-  let map = taskMaps.get(ctx as object)
-  if (!map) {
-    map = new Map()
-    taskMaps.set(ctx as object, map)
-  }
-
-  const now = Date.now()
+  const map = mapOf(ctx)
   const entry = map.get(sig)
   if (!entry) {
-    map.set(sig, { count: 1, firstReadAt: now, lastWarnedAt: 0, lastSignature: sig })
-    return null
+    map.set(sig, { count: 1, firstReadAt: Date.now(), lastContentHead: '' })
+    return { action: 'pass' }
   }
   entry.count += 1
-  if (entry.count <= threshold) return null
-  // 阈值后：每 60 秒最多提示一次，避免刷屏
-  if (now - entry.lastWarnedAt < 60_000) return null
-  entry.lastWarnedAt = now
-  return formatHint(tool, entry.count, sig)
+  if (entry.count < warnAt) return { action: 'pass' }
+  if (entry.count < blockAt) {
+    return {
+      action: 'warn',
+      hint: `[重复读警告] 这是第 ${entry.count} 次对相同目标调用 ${tool}（${sig}）。重复读不会带来新信息。请基于上文已有内容直接行动：编辑文件 / 写代码 / 运行验证。`,
+    }
+  }
+  return {
+    action: 'block',
+    observation: [
+      `[已拦截] ${tool} 对相同目标（${sig}）已调用 ${entry.count} 次，本次不再执行。`,
+      entry.lastContentHead
+        ? `上次结果开头（内容已在你的上下文里）：\n${entry.lastContentHead}`
+        : '上次结果已在你的上下文里。',
+      '',
+      '你现在必须行动，禁止继续读取/搜索相同目标：',
+      '  1) 基于已有信息直接编辑目标文件（file-editor / file-writer）；',
+      '  2) 或运行验证命令（shell）确认现状；',
+      '  3) 若信息确实不足，换一个【不同的】文件或【不同的】关键词，不要重复本次调用。',
+    ].join('\n'),
+  }
+}
+
+/** skill 执行成功后记录内容头（前 600 字符），block 时回带给模型 */
+export function recordRepeatResult(
+  ctx: SkillContext,
+  tool: 'file-reader' | 'grep-search' | 'glob-search',
+  signature: Record<string, unknown>,
+  content: string,
+): void {
+  const sig = stableSignature(signature)
+  if (!sig) return
+  const entry = mapOf(ctx).get(sig)
+  if (entry) entry.lastContentHead = content.slice(0, 600)
+}
+
+/**
+ * 文件被写入/编辑后清除相关读记录，保证「改完重读验证」合法。
+ * path 匹配规则：签名里含该 path 子串的条目全部清除。
+ */
+export function invalidateReadsOf(ctx: SkillContext, path: string): void {
+  if (!path) return
+  const map = taskMaps.get(ctx as object)
+  if (!map) return
+  const p = path.replaceAll('\\', '/')
+  for (const sig of map.keys()) {
+    if (sig.includes(p)) map.delete(sig)
+  }
 }
 
 /** 清空某 task 的所有读文件记录（如任务结束 / pause） */
@@ -73,24 +125,12 @@ export function clearRepeatReadMap(ctx: SkillContext): void {
 function stableSignature(signature: Record<string, unknown>): string | null {
   const keys = Object.keys(signature).sort()
   if (!keys.length) return null
-  // 过滤 undefined / null
   const parts: string[] = []
   for (const k of keys) {
     const v = signature[k]
-    if (v === undefined || v === null) continue
+    if (v === undefined || v === null || v === '') continue
     parts.push(`${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
   }
   if (!parts.length) return null
   return parts.join('|')
-}
-
-function formatHint(tool: string, count: number, sig: string): string {
-  return (
-    `[重复读警告] ${tool} 已对相同 signature 调用 ${count} 次：` +
-    sig +
-    `。重复读同一内容不会带来新信息。请思考：\n` +
-    `  1) 你已经从这次阅读里得到所需信息了吗？\n` +
-    `  2) 如果是新需求（如起新分支 / 写新模块），先写代码 / 写测试 / 跑实测，不要再读同一文件。\n` +
-    `  3) 若需要"对照最近一次修改"做 diff，应改用 file-editor 或 git diff，不要整体重读。`
-  )
 }

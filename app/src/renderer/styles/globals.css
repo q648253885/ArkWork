@@ -1246,14 +1246,14 @@ textarea {
   font-size: 12px;
   line-height: 1.6;
 }
-/* DSH 风格：详情面板 — l1 边框、6px 圆角、12/18 mono */
+/* DSH 风格：详情面板 — l1 边框、6px 圆角、11/18 mono（v0.24.x 减一档）*/
 .tool-card__args {
   margin-top: 8px;
   padding: 8px 10px;
   background: transparent;
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 18px;
   display: flex;
   flex-direction: column;
@@ -1363,7 +1363,7 @@ textarea {
   animation: dsh-row-sweep 2.6s ease-out infinite;
   pointer-events: none;
 }
-/* v0.22.0：fold 头部一行摘要（DSH ReasoningRow .row 风格） */
+/* v0.22.0：fold 头部一行摘要（DSH ReasoningRow .row 风格，v0.24.x 13→12px） */
 .react-reason__head {
   display: flex;
   align-items: center;
@@ -1371,7 +1371,7 @@ textarea {
   padding: 0 12px 0 14px;
   cursor: pointer;
   user-select: none;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 20px;
   color: var(--text-tertiary);
 }
@@ -1379,7 +1379,7 @@ textarea {
   color: var(--business-primary);
   font-weight: 500;
 }
-.react-reason__icon { font-size: 12px; flex-shrink: 0; }
+.react-reason__icon { font-size: 11px; flex-shrink: 0; }
 .react-reason__duration {
   margin-left: auto;
   font-family: var(--font-mono);
@@ -1389,10 +1389,10 @@ textarea {
 .react-reason__body {
   margin-top: 6px;
   padding: 0 12px 0 14px;
-  line-height: 1.7;
+  line-height: 1.6;
   white-space: pre-wrap;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 12px;
 }
 .react-reason__chevron {
   color: var(--text-tertiary);
@@ -1407,25 +1407,41 @@ textarea {
   margin-top: 6px;
   padding: 0 12px 0 14px;
 }
-.react-observation {
-  background: transparent;
-  border: none;
-  border-left: 2px solid var(--border-default);
-  border-radius: 0;
-  padding: 4px 0 4px 12px;
-  margin-top: 4px;
+/* ============================================================
+ * v0.24.x — 「要做什么」action 短语蓝色 hint 行（Trae / DeepSeek harness 风格）
+ * 置于 iteration 顶部、ThinkBlock 之上，独立条目不嵌套折叠。
+ * 复用 turn-status 业务蓝渐变与 11px 字阶，比 body 小、视觉降权不抢戏。
+ * ============================================================ */
+.intent-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 4px 0;
   font-size: 12px;
-  color: var(--text-tertiary);
-  line-height: 1.6;
+  line-height: 18px;
+  color: var(--text-secondary);
+  border-left: 2px solid var(--business-primary);
+  padding-left: 10px;
+  margin: 2px 0 4px 0;
 }
-.react-observation__label {
+.intent-hint__label {
   font-size: 11px;
   font-weight: 500;
-  text-transform: none;
+  color: var(--business-primary);
+  background: var(--business-primary-soft, rgba(57, 100, 254, 0.12));
+  border-radius: 4px;
+  padding: 1px 6px;
   letter-spacing: 0;
-  color: var(--text-tertiary);
-  margin-bottom: 2px;
+  flex-shrink: 0;
 }
+.intent-hint__text {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  word-break: break-word;
+}
+/* .react-observation 在 v0.24.x 已废弃：保留选择器以防旧类名残留造成空白。 */
+.react-observation { display: none; }
 
 /* ============================================================
  * redesign-workspace-navigation Task 6 — 响应式布局与可访问命中区
@@ -1752,7 +1768,11 @@ textarea {
 .turn-status {
   display: inline-flex;
   align-items: center;
-  height: 26px;
+  /* v0.23.2 fix：固定 height 26px + background-clip:text 时，换行的第二行
+     超出盒子的字形没有渐变背景可剪裁 → 只露出两行交叠的中间条。
+     改 min-height 让盒子随换行撑高，渐变覆盖全部行。 */
+  min-height: 26px;
+  height: auto;
   font-size: 14px;
   line-height: 22px;
   font-weight: 500;

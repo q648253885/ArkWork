@@ -105,6 +105,10 @@ export function createMainWindow(): BrowserWindow {
       nodeIntegration: false,
       sandbox: false,
       spellcheck: false,
+      // v0.24.1：允许右栏 BrowserPanel 使用 <webview>（agent 自主浏览器）。
+      // webview 不注入 preload、无 node 权限，仅承载网页内容；new-window 已被
+      // 全局 web-contents-created 拦截为系统浏览器打开。
+      webviewTag: true,
     },
   })
 

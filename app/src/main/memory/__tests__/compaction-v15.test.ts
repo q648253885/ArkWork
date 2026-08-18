@@ -154,6 +154,22 @@ test('sliceRecentContext: keepTokens 边界裁剪', () => {
   assert.equal(recentContext.length + dropped.length, 10)
 })
 
+test('v0.23.2 sliceRecentContext: user_message 永不归档（交互区用户输入不消失）', () => {
+  const items: MemoryItem[] = [
+    makeItem({ id: 'u1', role: 'user', kind: 'user_message', content: '第一轮指令', iteration: 0, createdAt: 0, tokens: 10 }),
+    ...Array.from({ length: 10 }).map((_, i) =>
+      makeItem({ id: `m-${i}`, role: 'assistant', kind: 'reasoning', content: 'x'.repeat(100), iteration: i + 1, createdAt: i + 1, tokens: 50 }),
+    ),
+  ]
+  const { recentContext, dropped } = sliceRecentContext(items, 120)
+  // 预算只够保留 ~2 条，但 user_message 必须钉在 recentContext
+  assert.ok(dropped.length > 0)
+  assert.ok(recentContext.some((m) => m.id === 'u1'), 'user_message 不应被归档')
+  assert.ok(!dropped.some((m) => m.id === 'u1'))
+  // 顺序保持
+  assert.ok(recentContext.findIndex((m) => m.id === 'u1') === 0)
+})
+
 test('buildSummarizePrompt: 拼接 items 并附带模板', () => {
   const items: MemoryItem[] = [
     makeItem({ id: 'a', role: 'user', kind: 'user_message', content: 'hello', iteration: 0, createdAt: 0 }),

@@ -39,20 +39,17 @@ export class AnthropicAdapter implements LlmAdapter {
   async complete(req: LlmCompleteRequest): Promise<LlmCompleteResponse> {
     const model = (req as LlmCompleteRequest & { modelId?: string }).modelId ?? this.defaultModel
 
-    // Claude 的 system 单独传入
-    // messages 必须以 user 开头，且 system 不算
-    const messages: Anthropic.MessageParam[] = req.messages
-      .filter((m) => m.role !== 'system')
-      .map(toAnthropicMessage)
-
-    const tools: Anthropic.Tool[] | undefined = req.tools?.map(toAnthropicTool)
+    // v0.23.1 缓存修复：Anthropic prompt caching 必须显式标记 cache_control 断点，
+    // 否则 cache_read_input_tokens 恒为 0（命中率 0 的根因）。
+    // 借鉴 Claude Code 的断点布局：system 尾 + tools 尾 + 消息末尾（≤4 个断点限制内）。
+    const { system, tools, messages } = withCacheBreakpoints(req)
 
     const response = await this.client.messages.create(
       {
         model,
-        system: req.system,
+        system,
         messages,
-        tools: tools as Anthropic.Tool[] | undefined,
+        tools,
         max_tokens: req.maxTokens ?? 4096,
         temperature: req.temperature ?? 0.5,
       },
@@ -111,7 +108,7 @@ export class AnthropicAdapter implements LlmAdapter {
  * - cache_creation_input_tokens：本次新写入缓存的 token 数
  * 两者都无时返回 undefined。
  */
-function extractCacheUsage(usage: Anthropic.Usage): LlmCacheUsage | undefined {
+export function extractCacheUsage(usage: Anthropic.Usage): LlmCacheUsage | undefined {
   const raw = usage as unknown as Record<string, unknown>
   const read = raw.cache_read_input_tokens
   const write = raw.cache_creation_input_tokens
@@ -121,6 +118,63 @@ function extractCacheUsage(usage: Anthropic.Usage): LlmCacheUsage | undefined {
     hitTokens,
     missTokens: Math.max(0, usage.input_tokens - hitTokens),
     writeTokens: typeof write === 'number' ? write : undefined,
+  }
+}
+
+/**
+ * v0.23.1 缓存修复：为请求打 cache_control 断点（借鉴 Claude Code 布局）。
+ * - system：转 text block 数组，块尾标 ephemeral
+ * - tools：最后一个 tool 标 ephemeral
+ * - messages：最后一条消息的最后一个 content block 标 ephemeral
+ * 共 3 个断点（API 上限 4 个）。ReAct 循环中 system/tools/历史消息逐字节稳定，
+ * 断点随对话尾部滚动 → 前缀稳定命中，cache_read_input_tokens 不再恒为 0。
+ */
+export function withCacheBreakpoints(req: LlmCompleteRequest): {
+  system: Anthropic.MessageCreateParams['system']
+  tools: Anthropic.Tool[] | undefined
+  messages: Anthropic.MessageParam[]
+} {
+  const system = req.system
+    ? [{ type: 'text' as const, text: req.system, cache_control: { type: 'ephemeral' as const } }]
+    : undefined
+
+  const tools = req.tools?.map((t, i) =>
+    i === req.tools!.length - 1
+      ? { ...toAnthropicTool(t), cache_control: { type: 'ephemeral' as const } }
+      : toAnthropicTool(t),
+  )
+
+  const messages: Anthropic.MessageParam[] = req.messages
+    .filter((m) => m.role !== 'system')
+    .map(toAnthropicMessage)
+  if (messages.length > 0) {
+    const last = messages[messages.length - 1]
+    messages[messages.length - 1] = markLastBlockCacheable(last)
+  }
+
+  return { system, tools, messages }
+}
+
+/** 把消息的最后一个 content block 标记为缓存断点（string content 自动转 block 数组）。
+ * 注：SDK 0.30.x 的类型声明未含 cache_control（运行时透传有效），走双重断言。 */
+function markLastBlockCacheable(m: Anthropic.MessageParam): Anthropic.MessageParam {
+  if (typeof m.content === 'string') {
+    return {
+      role: m.role,
+      content: [
+        { type: 'text', text: m.content, cache_control: { type: 'ephemeral' } },
+      ] as unknown as NonNullable<Anthropic.MessageParam['content']>,
+    }
+  }
+  if (!Array.isArray(m.content) || m.content.length === 0) return m
+  const blocks = [...(m.content as unknown as Record<string, unknown>[])]
+  blocks[blocks.length - 1] = {
+    ...blocks[blocks.length - 1],
+    cache_control: { type: 'ephemeral' },
+  }
+  return {
+    role: m.role,
+    content: blocks as unknown as NonNullable<Anthropic.MessageParam['content']>,
   }
 }
 

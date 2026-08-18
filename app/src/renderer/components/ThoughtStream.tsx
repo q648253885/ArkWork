@@ -126,7 +126,43 @@ function groupByIteration(steps: ReActStep[]): IterationUnit[] {
 }
 
 /* ============================================================
- * v0.22.0 — CollapsedSummary 折叠摘要行（DSH 风格）
+ * v0.24.x — 「要做什么」action 短语
+ * 优先 act 步骤的 intent（agent 显式声明的「下一步要做的事」），回落 executionDescription。
+ * 取最近一个 act 的意图作为该 iteration 的「要做什么」展示，限 80 字。
+ * 设计参考 Trae harness / DeepSeek Harness：蓝色 hint 风格，
+ * 与「思考块」「工具卡」「结果摘要」并列作为时间线内一项常规条目，不嵌套。
+ * ============================================================ */
+function unitIntention(unit: IterationUnit): string {
+  const pick = (s: string | undefined | null) =>
+    s && s.trim() ? s.replace(/\n+/g, ' ').trim().slice(0, 80) : ''
+  // v0.24.x 修复：优先 reason.thought 的叙述性「要做什么」，而非 act.intent。
+  // 用户反馈：要的「要做什么」是 traework 风格的意图叙述（如「运行前先确认脚本类型正确，
+  // 并查看 typecheck 命令。」），而不是 describeAction 生成的「执行命令：npm test」这类工具动作描述。
+  const thought = pick(firstSentence(unit.reason?.thought))
+  if (thought) return thought
+  for (const a of unit.acts) {
+    const s = pick(a.intent)
+    if (s) return s
+  }
+  // 没有 intent 时回落 act.toolName / observation，但限 80 字
+  const fallbackAct = unit.acts[0]
+  if (fallbackAct?.toolName) {
+    const execDesc = getToolDisplay(fallbackAct.toolName, parseArgs(fallbackAct.toolArgs)).verb
+    return pick(execDesc)
+  }
+  return pick(unit.observation?.summary)
+}
+
+/** 取叙述文本的首句（到第一个中英文句末标点 / 换行），作为简洁的「要做什么」。 */
+function firstSentence(s: string | undefined | null): string {
+  if (!s) return ''
+  const t = s.replace(/\n+/g, ' ').trim()
+  const m = t.match(/^([^。！？!?；;]+)[。！？!?；;]/)
+  return m ? m[1].trim() : t
+}
+
+/* ============================================================
+ * CollapsedSummary 折叠摘要行（DSH 风格）
  * "▾ 已思考 3.2s · 调用 3 个工具（读取文件 ×2 · 搜索网页 ×1）"
  * 13/20 主行节奏、left chevron + summary + duration
  * ============================================================ */
@@ -162,6 +198,8 @@ function CollapsedSummary({
       .join(' · ')
   }, [toolSteps])
 
+  // v0.24.x：折叠行只展示「cumulative 工具摘要」+ 耗时，不再附加"做了什么"叙述。
+  // 描述类摘要已落 IterationBlock 顶部的「要做什么」intent-hint 蓝色行。
   const summary = failed
     ? `✕ ${failedStep?.errorMessage?.slice(0, 60) || failedStep?.thought?.slice(0, 60) || '执行失败'}`
     : `${reasonCount > 0 ? `已思考 ${(totalMs / 1000).toFixed(1)}s` : ''}${toolCount > 0 ? ` · 调用 ${toolCount} 个工具（${toolSummary}）` : ''}`
@@ -194,12 +232,25 @@ function CollapsedSummary({
  * 此处不再渲染 PlanCard，避免重复。
  * ============================================================ */
 function IterationBlock({ unit, isActive }: { unit: IterationUnit; isActive?: boolean }) {
+  // v0.24.x：「要做什么」action 短语——作为 iteration 开始的蓝色 hint 行（think 块之前），
+  // 优先 act.intent（agent 显式声明的"下一步要做的事"），回落工具动词 + observation。
+  // 视觉与 turn-status 一致，独立存在于时间线内，不嵌入 ThinkBlock 折叠态。
+  const intention = unitIntention(unit)
   return (
     <div
       className="space-y-1"
       data-react-iteration={String(unit.iteration)}
       id={`react-iter-${unit.iteration}`}
     >
+      {/* 「要做什么」蓝色 hint 行 — 放在 iteration 开头（think 块之前），
+          与 ThinkBlock / ToolCard 并列作为时间线内的常规条目。 */}
+      {intention && (
+        <div className="intent-hint">
+          <span className="intent-hint__label">要做什么</span>
+          <span className="intent-hint__text">{intention}</span>
+        </div>
+      )}
+
       {/* 思考块 — v0.13.0 Reason 视觉分离 */}
       {unit.reason && <ThinkBlock step={unit.reason} isActive={isActive} />}
 
@@ -208,13 +259,9 @@ function IterationBlock({ unit, isActive }: { unit: IterationUnit; isActive?: bo
         <ToolCard key={act.id} step={act} observation={unit.observation} />
       ))}
 
-      {/* Observation 视觉分离（淡色 observation 卡） */}
-      {unit.observation && unit.observation.summary && (
-        <div className="react-observation">
-          <div className="react-observation__label">结果</div>
-          <div>{unit.observation.summary}</div>
-        </div>
-      )}
+      {/* v0.24.x：移除「做了什么」结果行。
+          实际工作叙述已落 IterationBlock 顶部「要做什么」intent-hint 蓝色行，
+          此处不再独立展示避免与「要做什么」视觉混淆。 */}
     </div>
   )
 }

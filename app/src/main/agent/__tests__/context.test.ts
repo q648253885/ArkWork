@@ -185,6 +185,7 @@ test('applyMicroCompact: 默认 keepRecentTurns = RECENT_TOOL_TURNS(3)', () => {
 })
 
 test('常量契约: MAX_REASONING_CONTENT / MAX_OBSERVATION_CONTENT', () => {
-  assert.equal(MAX_REASONING_CONTENT, 4000)
+  // v0.24.0：4000 → 1500（压历史膨胀，见 context.ts 注释）
+  assert.equal(MAX_REASONING_CONTENT, 1500)
   assert.equal(MAX_OBSERVATION_CONTENT, 8000)
 })

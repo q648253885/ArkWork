@@ -23,6 +23,16 @@ import { fileURLToPath } from 'node:url'
  *  这是对原实现的并行副本，不修改 engine.ts。 */
 function parsePlanItems(raw: string): string[] | null {
   if (!raw) return null
+  const json = parsePlanItemsJson(raw)
+  if (json && json.length > 0) return json
+  const lines = parsePlanItemsLines(raw)
+  if (lines && lines.length > 0) return lines
+  const arrows = parsePlanItemsArrows(raw)
+  if (arrows && arrows.length > 0) return arrows
+  return null
+}
+
+function parsePlanItemsJson(raw: string): string[] | null {
   let text = raw.replace(/```(?:json)?\s*/g, '').replace(/```/g, '').trim()
   const start = text.indexOf('[')
   const end = text.lastIndexOf(']')
@@ -37,6 +47,26 @@ function parsePlanItems(raw: string): string[] | null {
   } catch {
     return null
   }
+}
+
+function parsePlanItemsLines(raw: string): string[] | null {
+  const lines = raw.split(/\n+/).map((l) => l.trim()).filter(Boolean)
+  const items: string[] = []
+  for (const line of lines) {
+    const m = line.match(/^(?:\d+[.、)）:]|[一二三四五六七八九十]+[、.．]|[-*•·])\s*(.+?)[。；;]?\s*$/)
+    if (!m) continue
+    items.push(m[1].trim())
+  }
+  return items.length > 0 ? items : null
+}
+
+function parsePlanItemsArrows(raw: string): string[] | null {
+  const parts = raw.split(/\s*(?:→|->|=>|⇒|→)\s*/)
+  if (parts.length < 2) return null
+  const items = parts
+    .map((p) => p.replace(/^[\s\-*•·\d.、)）:：]+/, '').replace(/[。；;,.，]$/, '').trim())
+    .filter(Boolean)
+  return items.length >= 2 ? items.slice(0, 12) : null
 }
 
 /* ---------- 1. parsePlanItems 纯函数行为 ---------- */
@@ -112,6 +142,48 @@ test('parsePlanItems: 损坏 JSON → null（不抛错）', () => {
 
 test('parsePlanItems: 含前后缀文本 + 数组 → 容忍', () => {
   const raw = '好的，我整理了 3 步：\n["步骤 A", "步骤 B", "步骤 C"]\n请按顺序执行。'
+  const out = parsePlanItems(raw)
+  assert.ok(out)
+  assert.equal(out!.length, 3)
+})
+
+/* v0.24.1：思考型模型不输出 JSON 数组，输出散文/编号/箭头链的容错解析 */
+
+test('parsePlanItems: 编号列表（1. 2. 3.）→ 提取为清单', () => {
+  const raw = '好的，我按文档驱动流程来：\n1. 定位问题并梳理现状\n2. 修改代码实现技能调用\n3. 验证修复效果'
+  const out = parsePlanItems(raw)
+  assert.ok(out, '编号列表应能被容错解析')
+  assert.equal(out!.length, 3)
+  assert.equal(out![0], '定位问题并梳理现状')
+  assert.equal(out![1], '修改代码实现技能调用')
+  assert.equal(out![2], '验证修复效果')
+})
+
+test('parsePlanItems: 中文编号（一、二、三 或 1、2、3）→ 提取为清单', () => {
+  const raw = '一、定位问题\n二、修改代码\n三、验证'
+  const out = parsePlanItems(raw)
+  assert.ok(out, '中文编号列表应能被容错解析')
+  assert.equal(out!.length, 3)
+})
+
+test('parsePlanItems: 无序列表（- / * / •）→ 提取为清单', () => {
+  const raw = '- 定位问题\n* 修改代码\n• 验证效果'
+  const out = parsePlanItems(raw)
+  assert.ok(out, '无序列表应能被容错解析')
+  assert.equal(out!.length, 3)
+})
+
+test('parsePlanItems: 箭头链（A → B → C）→ 拆分为清单', () => {
+  const raw = '定位问题 → 修改代码实现技能调用 → 验证修复效果'
+  const out = parsePlanItems(raw)
+  assert.ok(out, '箭头链应能被容错解析')
+  assert.equal(out!.length, 3)
+  assert.equal(out![0], '定位问题')
+  assert.equal(out![2], '验证修复效果')
+})
+
+test('parsePlanItems: 编号列表混入说明性段落 → 只提取列表项', () => {
+  const raw = '先说明背景：用户反馈 agent 调用 skill 但未实现使用。\n接下来：\n1. 定位根因\n2. 修复引擎\n3. 回归验证。'
   const out = parsePlanItems(raw)
   assert.ok(out)
   assert.equal(out!.length, 3)
@@ -282,13 +354,13 @@ test('v0.9.1: READONLY_TOOLS 存在且含 file-reader', () => {
   )
 })
 
-test('v0.19.0: seed.ts 使用 syncBuiltinAgentsToLatest 统一同步内置 Agent 到 0.19.0', () => {
+test('v0.19.0: seed.ts 使用 syncBuiltinAgentsToLatest 统一同步内置 Agent 到 0.24.1', () => {
   const src = readFileSync(
     fileURLToPath(new URL('../../store/seed.ts', import.meta.url)),
     'utf8',
   )
   assert.match(src, /async\s+function\s+syncBuiltinAgentsToLatest/, 'seed.ts 应定义 syncBuiltinAgentsToLatest')
-  assert.match(src, /version:\s*'0\.19\.0'/, '@default.version 应提升至 0.19.0')
+  assert.match(src, /version:\s*'0\.24\.1'/, '@default.version 应保持 0.24.1')
   assert.match(src, /systemSections/, '内置 Agent 应派生 systemSections')
   assert.match(src, /## 1\. 技能优先/, '@default.systemPrompt 应含技能优先段')
   assert.match(src, /## 2\. 工具选择层级/, '@default.systemPrompt 应含工具选择层级段')
@@ -297,6 +369,7 @@ test('v0.19.0: seed.ts 使用 syncBuiltinAgentsToLatest 统一同步内置 Agent
   assert.match(src, /file-editor/, '@default.defaultSkillIds 应包含 file-editor')
   assert.match(src, /glob-search/, '@default.defaultSkillIds 应包含 glob-search')
   assert.match(src, /grep-search/, '@default.defaultSkillIds 应包含 grep-search')
+  assert.match(src, /S-core\.browser/, '@default.defaultSkillIds 应包含 browser（v0.24.1 agent 自主浏览器）')
 })
 
 /* ---------- 6. v0.17.4 文档驱动计划 prompt 与阶段对齐验证 ---------- */

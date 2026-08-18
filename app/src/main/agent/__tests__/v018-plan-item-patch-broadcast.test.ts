@@ -285,10 +285,10 @@ test('v0.18.0 seed.ts: 不再含强制 todo-update 文案', () => {
   assert.match(seedSrc, /也调\s*todo-update/, '应保留 todo-update 作为显式推进入口')
 })
 
-test('v0.19.0 seed.ts: 内置 Agent 升级到 0.19.0', () => {
-  // BUILTIN_AGENTS 的 version 字段应含 0.19.0
-  const matches = seedSrc.match(/version:\s*['"]0\.19\.0['"]/g)
-  assert.ok(matches && matches.length >= 2, `@default + @coder 都应升到 0.19.0（实际 ${matches?.length ?? 0}）`)
+test('v0.24.1 seed.ts: 内置 Agent 升级到 0.24.1', () => {
+  // BUILTIN_AGENTS 的 version 字段应含 0.24.1
+  const matches = seedSrc.match(/version:\s*['"]0\.24\.1['"]/g)
+  assert.ok(matches && matches.length >= 2, `@default + @coder 都应保持 0.24.1（实际 ${matches?.length ?? 0}）`)
 })
 
 test('v0.19.0 seed.ts: 使用 syncBuiltinAgentsToLatest 统一同步', () => {

@@ -821,6 +821,13 @@ export interface BugfixProgressEvent {
   ts: number
 }
 
+/* ---- v0.24.1：agent 自主浏览器加载请求 ---- */
+export interface BrowserLoadRequest {
+  requestId: string
+  /** 要加载的完整 URL（本地文件已转为 file://） */
+  url: string
+}
+
 /* ---- 暴露给 Renderer 的 ark API 完整签名 ---- */
 export interface ArkApi {
   task: {
@@ -1001,6 +1008,18 @@ export interface ArkApi {
   log: {
     list: (taskId?: string) => Promise<LogEntry[]>
     onAppend: (cb: (entry: LogEntry) => void) => () => void
+  }
+  /**
+   * v0.24.1：agent 自主驱动的内置浏览器（右栏 BrowserPanel 的 <webview>）。
+   * Main → Renderer 通知加载；Renderer 在 did-finish-load / did-fail-load 后回传结果。
+   */
+  browser: {
+    /** 订阅 agent 的 browser.open 请求（含 requestId，用于回传加载结果） */
+    onLoadRequest: (cb: (req: BrowserLoadRequest) => void) => () => void
+    /** webview 加载完成（或失败）后回传 */
+    loadDone: (requestId: string, error?: string) => Promise<void>
+    /** 地址栏输入 → 完整 URL（本地路径转 file://，基于工作区） */
+    resolve: (input: string) => Promise<string>
   }
   settings: {
     get: () => Promise<AppSettings>

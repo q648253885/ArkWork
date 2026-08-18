@@ -48,7 +48,7 @@ test('buildPersonalitySegment: 全空返回空串', () => {
 
 /* ---------- buildSystemSections 排序 ---------- */
 
-test('buildSystemSections: 按 order 升序输出（core-rules → personality → workspace → memory → plan-constraint）', () => {
+test('buildSystemSections: 按 order 升序输出（workspace-context 最先 → core-rules → personality → workspace → memory → plan-constraint）', () => {
   const ctx = {
     agent: makeAgent({ role: '审查员', goal: '找 bug' }),
     workspaceDir: '/tmp/ws',
@@ -58,15 +58,18 @@ test('buildSystemSections: 按 order 升序输出（core-rules → personality �
   const sections = buildSystemSections(ctx)
   assert.deepEqual(
     sections.map((s) => s.id),
-    ['core-rules', 'personality', 'workspace', 'memory', 'plan-constraint'],
+    ['workspace-context', 'core-rules', 'personality', 'workspace', 'memory', 'plan-constraint'],
   )
+  // v0.24.x 用户明确要求：ArkWork 系统提示词最先（位于 coreRules 之前）
+  assert.equal(sections[0].id, 'workspace-context')
+  assert.equal(sections[1].id, 'core-rules')
 })
 
 /* ---------- buildSystemSections 空段跳过 ---------- */
 
 test('buildSystemSections: 空人格 / 无记忆 / 无技能 / 无计划时对应段被跳过', () => {
   const sections = buildSystemSections({ agent: makeAgent(), workspaceDir: '/tmp/ws' })
-  assert.deepEqual(sections.map((s) => s.id), ['core-rules', 'workspace'])
+  assert.deepEqual(sections.map((s) => s.id), ['workspace-context', 'core-rules', 'workspace'])
 })
 
 /* ---------- v0.20.0 缓存优化：system 静态化 ---------- */
@@ -123,9 +126,10 @@ test('buildSystemSections: systemSections 存在时逐段展开（不读 systemP
     ],
   })
   const sections = buildSystemSections({ agent, workspaceDir: '/tmp/ws' })
-  assert.equal(sections[0].id, 'core-rules')
-  assert.equal(sections[1].id, 'core-rules-2')
-  assert.equal(sections[2].id, 'workspace')
+  assert.equal(sections[0].id, 'workspace-context') // v0.24.x：ArkWork 系统提示词最先
+  assert.equal(sections[1].id, 'core-rules')
+  assert.equal(sections[2].id, 'core-rules-2')
+  assert.equal(sections[3].id, 'workspace')
 })
 
 /* ---------- renderSystemPrompt ---------- */

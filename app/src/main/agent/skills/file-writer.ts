@@ -16,6 +16,8 @@ import {
   logError,
   type FileToolContext,
 } from './file-tool-safety.js'
+import { invalidateReadsOf } from './read-repeat-guard.js'
+import type { SkillContext } from '../registry.js'
 
 export interface FileWriterArgs {
   path: string
@@ -72,6 +74,8 @@ export async function fileWriter(
     await writeFile(abs, content, 'utf-8')
     const lines = content.split('\n').length
     await logInfo('Tool', `file-writer: ${rawPath} (${content.length} bytes, ${existed ? '覆盖' : '新建'})`, ctx.taskId)
+    // v0.24.0：文件已变更，清除该路径的重复读记录
+    invalidateReadsOf(ctx as SkillContext, rawPath)
     return {
       path: rawPath,
       bytes: Buffer.byteLength(content, 'utf-8'),

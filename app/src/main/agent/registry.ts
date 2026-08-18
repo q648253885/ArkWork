@@ -41,6 +41,7 @@ import { MODE_POLICIES, type PermissionMode } from './permission-mode.js'
 import { getSessionMode } from './session-mode.js'
 import { loadPermissionSettings } from './settings-loader.js'
 import { fetchUrl, type FetchUrlArgs, type FetchUrlResult } from './skills/fetch-url.js'
+import { browser, type BrowserArgs, type BrowserResult } from './skills/browser.js'
 import { delegateAgent, type DelegateArgs, type DelegateResult } from './skills/delegate.js'
 import { sessionSearch, type SessionSearchArgs, type SessionSearchResult } from './skills/session-search.js'
 import { kbSearch, type KbSearchArgs, type KbSearchSkillResult } from './skills/kb-search.js'
@@ -171,6 +172,7 @@ const handlers: Record<string, BuiltinHandler> = {
   'grep-search': async (args, ctx) => grepSearch(args as GrepSearchArgs, ctx) as Promise<GrepSearchResult>,
   'web-search': async (args, ctx) => webSearch(args as WebSearchArgs, ctx) as Promise<WebSearchResult>,
   'fetch-url': async (args, ctx) => fetchUrl(args as FetchUrlArgs, ctx) as Promise<FetchUrlResult>,
+  'browser': async (args, ctx) => browser(args as BrowserArgs, ctx) as Promise<BrowserResult>,
   'shell': async (args, ctx) => shell(args as ShellArgs, ctx) as Promise<ShellResult>,
   'task_complete': async (args) => ({ acknowledged: true, summary: (args as { summary: string }).summary }),
   'ask_user': async (args) => ({ acknowledged: true, question: (args as { question: string }).question }),
@@ -544,6 +546,10 @@ function summarizeResult(handler: string, result: unknown): string {
   if (handler === 'fetch-url') {
     const r = result as FetchUrlResult
     return `${r.chars} chars from ${r.url}`
+  }
+  if (handler === 'browser') {
+    const r = result as BrowserResult
+    return `browser:${r.action} · ${r.ok ? r.summary : r.error}`
   }
   if (handler === 'shell') {
     const r = result as ShellResult

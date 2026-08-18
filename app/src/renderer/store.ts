@@ -38,7 +38,7 @@ import type {
   PlanItemState,
   Suggestion,
 } from '@shared/types/conversation'
-import type { ToolConfirmRequest, ToolProgressEvent, ToolProgressClearEvent, ConfirmRespondReason, PlanItemStatusChanged } from '@shared/types/ipc'
+import type { ToolConfirmRequest, ToolProgressEvent, ToolProgressClearEvent, ConfirmRespondReason, PlanItemStatusChanged, BrowserLoadRequest } from '@shared/types/ipc'
 import { shortTaskId, formatUpdatedAt } from './types'
 import { simplifyFirstLine } from './utils/title'
 
@@ -480,8 +480,11 @@ function deriveConversation(
     const group = byIter.get(iter)!.sort((a, b) => a.startedAt - b.startedAt)
     const reasonStep = group.find((s) => s.type === 'reason')
     const isComplete = reasonStep?.action?.tool === 'task_complete'
-    // 最终回复：task_complete 或无 action（模型直接回复未调用工具）
-    const isFinalAnswer = isComplete || !reasonStep?.action
+    // v0.23.1：ask_user 的问题也是面向用户的最终输出 — 生成 assistant 消息
+    // 永久保留在交互区（此前问题只存在于暂停态卡片，作答后即消失）。
+    const isAskUser = reasonStep?.action?.tool === 'ask_user'
+    // 最终回复：task_complete / ask_user / 无 action（模型直接回复未调用工具）
+    const isFinalAnswer = isComplete || isAskUser || !reasonStep?.action
     const ts = reasonStep?.startedAt ?? group[0]?.startedAt ?? 0
 
     const items: ConversationItem[] = [{
@@ -498,7 +501,9 @@ function deriveConversation(
         type: 'assistant',
         text: isComplete
           ? (reasonStep.action?.args?.summary as string) ?? reasonStep.thought ?? ''
-          : reasonStep.thought ?? '',
+          : isAskUser
+            ? (reasonStep.action?.args?.question as string) ?? reasonStep.thought ?? ''
+            : reasonStep.thought ?? '',
         ts: reasonStep.startedAt,
         tsLabel: formatTimeLabel(reasonStep.startedAt),
       })
@@ -747,6 +752,11 @@ interface AppState {
   setInspectorTabOrder: (order: InspectorTabId[]) => void
   hideInspectorTab: (tab: InspectorTabId) => void
   restoreInspectorTab: (tab: InspectorTabId) => void
+
+  // ============================================================
+  // v0.24.1：agent 自主浏览器 —— 主进程 browser.open 的加载请求（含 requestId）
+  browserLoad: BrowserLoadRequest | null
+  setBrowserLoad: (req: BrowserLoadRequest | null) => void
 
   // ============================================================
   // v0.9.0 F900 — 全局模块页（CenterStage 整页切换）
@@ -1014,6 +1024,16 @@ interface AppState {
   /** v0.15.x：按需拉取任务真实 payload 估算（空闲/完成态也如实展示） */
   refreshContextSize: (taskId: string) => Promise<void>
 
+  // ---- v0.23.1：当前任务的 LLM 前缀缓存命中统计（reason_end 事件累计） ----
+  cacheUsage: {
+    /** 命中缓存的输入 token 累计 */
+    hitTokens: number
+    /** 未命中缓存的输入 token 累计 */
+    missTokens: number
+    /** 是否收到过端点上报的缓存数据（false = 端点未报告，UI 不显示命中率） */
+    reported: boolean
+  } | null
+
   // ---- ReAct Trace ----
   steps: ReActStep[]
   refreshSteps: (taskId: string) => Promise<void>
@@ -1174,6 +1194,8 @@ export const useStore = create<AppState>((set, get) => ({
   // fix-workspace-task-automation-memory Task 5：Inspector 默认 Todos
   inspectorTab: DEFAULT_INSPECTOR_TAB,
   setInspectorTab: (t) => set({ inspectorTab: t }),
+  browserLoad: null,
+  setBrowserLoad: (req) => set({ browserLoad: req }),
   inspectorTabOrder: sanitizeInspectorOrder(loadUiState('inspector-tab-order', INSPECTOR_TAB_ORDER)),
   hiddenInspectorTabs: sanitizeHiddenTabs(loadUiState('inspector-tab-hidden', [])),
   setInspectorTabOrder: (order) => {
@@ -1607,7 +1629,7 @@ export const useStore = create<AppState>((set, get) => ({
   clearSuggestions: () => set({ suggestions: [] }),
   selectTask: async (id) => {
     // Task 4：任务切换时清空建议卡片 + ask_user 暂停态
-    set({ selectedTaskId: id, askUserQuestion: null, contextSize: null, suggestions: [] })
+    set({ selectedTaskId: id, askUserQuestion: null, contextSize: null, suggestions: [], cacheUsage: null })
     const task = get().tasks.find((t) => t.id === id) ?? null
     set({ selectedTask: task })
     // 加载相关数据（文件列表恒为工作区根目录，v0.6.3）
@@ -1852,7 +1874,7 @@ export const useStore = create<AppState>((set, get) => ({
       await ark.task.delete(id)
       // 如果删除的是当前选中任务，清空选中
       if (get().selectedTaskId === id) {
-        set({ selectedTaskId: null, selectedTask: null, conversation: [], steps: [], memory: [], contextSize: null })
+        set({ selectedTaskId: null, selectedTask: null, conversation: [], steps: [], memory: [], contextSize: null, cacheUsage: null })
       }
       // Task 9：删除任务时同步清理内存中的进度摘要（持久化缓存由 IPC 层清理，
       // 这里只清理前端状态，避免下次同名任务误读旧进度）
@@ -2087,6 +2109,7 @@ export const useStore = create<AppState>((set, get) => ({
         selectedFile: null,
         selectedFileContent: null,
         contextSize: null,
+        cacheUsage: null,
         modulePage: null,
         // Phase A Task 2：切换工作区 → 清空所有任务的确认缓存（路径变了旧确认失效）
         workspaceConfirmedForTask: {},
@@ -2692,6 +2715,8 @@ export const useStore = create<AppState>((set, get) => ({
       console.warn('[store] refreshContextSize failed:', err)
     }
   },
+  // v0.23.1：缓存命中统计初始为 null（未报告）
+  cacheUsage: null,
   refreshMemory: async (taskId) => {
     try {
       const memory = await ark.memory.list(taskId)
@@ -3137,6 +3162,13 @@ export const useStore = create<AppState>((set, get) => ({
       }),
     )
 
+    // v0.24.1：agent 自主浏览器 —— 收到 browser.open 请求时记录目标并展开 Browser 标签
+    unsubs.push(
+      ark.browser.onLoadRequest((req) => {
+        set((s) => ({ browserLoad: req, inspectorTab: 'browser' }))
+      }),
+    )
+
     // v0.14.0 Task 4：按工具维度的并行 Act 进度（Main → Renderer）
     // 维护一个 per-requestId 字典 + 每 task 列表；UI 不会因多 act 并发互相覆盖
     unsubs.push(
@@ -3223,6 +3255,17 @@ export const useStore = create<AppState>((set, get) => ({
               (event.cacheHitTokens !== undefined ? ` cacheHit=${event.cacheHitTokens}` : '') +
               ` ⏱${event.durationMs}ms`,
           })
+          // v0.23.1：累计缓存命中统计（端点上报过即标记 reported，UI 据此显示命中率）
+          if (event.cacheHitTokens !== undefined || event.cacheMissTokens !== undefined) {
+            const prev = get().cacheUsage
+            set({
+              cacheUsage: {
+                hitTokens: (prev?.hitTokens ?? 0) + (event.cacheHitTokens ?? 0),
+                missTokens: (prev?.missTokens ?? 0) + (event.cacheMissTokens ?? 0),
+                reported: true,
+              },
+            })
+          }
         } else if (event.type === 'act_end') {
           get().appendLog({
             ts: Date.now(),

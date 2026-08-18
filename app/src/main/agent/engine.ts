@@ -69,13 +69,11 @@ import {
   estimateTextTokens,
   contextBudget,
   shouldCompact,
-  applyMicroCompact,
   truncateLongContent,
   MAX_REASONING_CONTENT,
   MAX_OBSERVATION_CONTENT,
   MICRO_COMPACT_PLACEHOLDER,
   OBSERVATION_TRUNCATED_MARK,
-  RECENT_TOOL_TURNS,
 } from './context.js'
 import { getMemoryConfig, getSettings } from '../ipc/settings.js'
 // v0.8.0 知识库钩子
@@ -119,7 +117,7 @@ export interface RunOptions {
   startGeneration?: number
 }
 
-const MAX_ITERATIONS = 60
+const MAX_ITERATIONS = 80
 // polish4 §D1.2：单 tool 调用次数上限（防 infinite loop / agent 反复调同 tool）
 // v0.16.3 调整：预算拆为两层：
 // 1. 调用签名层（MD5(toolName + args)）：防止同参数反复执行，上限统一 3
@@ -343,8 +341,11 @@ export async function runReActLoop(
         // v0.17.5：过滤纯阶段标题型条目（"阶段 N：xxx" 这种总结性条目不应该是可勾选项，
         // 否则 LLM 调一次 file-reader 就把整阶段标 done）。只保留含具体动作动词的子项。
         const filteredItems = plan.items.filter((text) => !isPhaseHeader(text))
+        // v0.24.x fix：全被阶段标题过滤为空时回退原始 items —— 否则清单恒为空，
+        // LLM 调 todo_update 会以 item_index=0 越界（清单共 0 项）报错并死循环。
+        const keepItems = filteredItems.length > 0 ? filteredItems : plan.items
         const now = Date.now()
-        const planItems: PlanItem[] = filteredItems.map((text, i) => ({
+        const planItems: PlanItem[] = keepItems.map((text, i) => ({
           id: `plan_${i}_${now}`,
           text,
           // v0.18.x：首项直接进入 running，让清单在任务开始就有反应，
@@ -394,6 +395,25 @@ export async function runReActLoop(
       } else {
         // polish4 §B1.2：plan 失败不污染 L1，ReAct 循环从 step 1 直接进入 Reason
         logger.warn('Agent', 'plan skipped (generatePlan returned null / empty)', task.id)
+        // v0.24.x fix：plan 生成失败时仍写入兜底单步清单（仅 UI/索引用，不写 L1）。
+        // 否则清单恒为空，LLM 调 todo_update(item_index=0) 会以"清单共 0 项"越界报错并死循环。
+        const fallbackText = task.input?.text?.trim() || task.title || '执行用户请求'
+        const nowFallback = Date.now()
+        const fallbackPlanItems: PlanItem[] = [
+          {
+            id: `plan_fallback_${nowFallback}`,
+            // v0.24.x：不走 sanitizePlanItemText，避免用户原标题较长时被截断 → 列表项为空。
+            // 兜底项本身就是用户原文，"执行用户请求"是占位。
+            text: fallbackText.slice(0, 80).trimEnd() || '执行用户请求',
+            status: 'running' as const,
+            createdAt: nowFallback,
+            updatedAt: nowFallback,
+          },
+        ]
+        task.planItems = fallbackPlanItems
+        await updateTask(task.id, { planItems: fallbackPlanItems })
+        broadcastPlanListSnapshot(task.id, fallbackPlanItems, 'plan-fallback')
+        logger.info('Agent', `plan-fallback: 写入兜底单步清单（${fallbackPlanItems[0]?.text}）`, task.id)
       }
     }
 
@@ -413,44 +433,147 @@ export async function runReActLoop(
     // v0.17.x：skill 准则已在计划生成前预加载（preloadedCoreSkillHint），
     // 这里直接复用为 pendingSystemHint，保证首轮 Reason 与计划生成看到同一份准则。
     let pendingSystemHint: string | undefined = preloadedCoreSkillHint
+
+    // v0.24.1：显式要求技能自动加载 —— 用户说 "Use Skill: X" 后 task.skillIds 会带上该技能，
+    // 引擎在首轮 Reason 前自动加载其 SKILL.md 指令并广播一个可见步骤，保证「调用技能且真正使用」，
+    // 不再依赖模型自觉 invoke（用户反馈过“调用了 skill 却没实现使用技能”）。
+    if (startIter === 0) {
+      const explicitSkillIds = Array.from(new Set((task.skillIds ?? []).filter((x): x is string => typeof x === 'string')))
+      for (const sid of explicitSkillIds) {
+        try {
+          const s = await getSkill(sid)
+          if (!s?.instructionMd) continue
+          if (sid === coreSkillId) {
+            // 文档驱动技能已由 preloadedCoreSkillHint 注入 system —— 只广播可见步骤
+            broadcastSkillAutoLoaded(task, s.name, s.instructionMd)
+            continue
+          }
+          const full = await readFile(s.instructionMd, 'utf-8')
+          const block =
+            `## 技能「${s.name}」指令（用户显式要求使用，必须严格遵循执行）\n` +
+            (full.length > 8000 ? full.slice(0, 8000) + `\n\n...（指令超过 8KB，已截断，完整内容见技能文件 ${s.instructionMd}）` : full)
+          pendingSystemHint = pendingSystemHint ? `${pendingSystemHint}\n\n---\n${block}` : block
+          broadcastSkillAutoLoaded(task, s.name, s.instructionMd)
+          logger.info('Tool', `skill auto-loaded: ${s.id} (${full.length} chars)`, task.id)
+        } catch (err) {
+          logger.warn('Tool', `skill auto-load skipped: ${(err as Error).message}`, task.id)
+        }
+      }
+    }
     // v0.16.7+：续聊路径 plan 重评提示（紧跟 react-core-skills preload 后）
     if (startIter > 0) {
-      // v0.21.0：清单衔接 —— 旧清单全部完成（无 running/pending）但用户追加新需求时，
-      // 引擎自动追加一个 running「承接项」，让「已完成清单」与「新处理任务」衔接，
-      // 而非旧清单纹丝不动、新需求无清单承接（借鉴 WorkBuddy Continue Tasks + DeepSeek 串行工作流）。
+      // v0.24.x：plan-regen 决策（替代 v0.21.0 continuation 兜底）
+      // 旧逻辑只在「旧 plan 全部完成」时追加一个「续接新需求」承接项。
+      // 用户体验上：旧清单全部 done 后新指令仍要 Agent 自己 plan，无脑追加「续接新需求」
+      // 反而成了「原任务完成 + 新任务承接」两条线、不一致。
+      // 新逻辑：若旧 plan 全部 done / failed / cancelled / skipped
+      //   → 调 generatePlan 重新生成 planItems，覆盖旧 plan（broadcastPlanListSnapshot source='plan-regen'）。
+      // 若旧 plan 还有 running/pending 项
+      //   → 保留旧 plan + 追加 continuation 承接项（保持 v0.21.0 行为，避免打断在飞清单）。
       const planItems = task.planItems ?? []
       const hasActive = planItems.some(
         (p) => p.status === 'running' || p.status === 'pending',
       )
-      if (planItems.length > 0 && !hasActive) {
-        const latestUser = [...allL1]
-          .reverse()
-          .find((m) => m.kind === 'user_message' && m.content?.trim())
-        const brief = (latestUser?.content ?? '').trim().replace(/\s+/g, ' ')
-        const text = brief
-          ? `续接新需求：${brief.length > 80 ? brief.slice(0, 80) + '…' : brief}`
-          : '处理用户追加的新需求'
-        const now = Date.now()
+      const isAllFinished =
+        planItems.length > 0 &&
+        planItems.every(
+          (p) =>
+            p.status === 'done' ||
+            p.status === 'failed' ||
+            p.status === 'cancelled' ||
+            p.status === 'skipped',
+        )
+      if (planItems.length > 0 && !hasActive && isAllFinished) {
+        // 旧 plan 全部完成 / 失败 / 跳过：自动重新生成 plan（不沿用旧 plan）
+        let newPlan: PlanContent | null = null
+        try {
+          newPlan = await generatePlan(
+            task,
+            agent,
+            opts.modelId,
+            signal,
+            preloadedCoreSkillHint,
+            docDriven,
+          )
+        } catch (err) {
+          logger.warn(
+            'Agent',
+            `plan-regen failed: ${(err as Error).message}`,
+            task.id,
+          )
+          newPlan = null
+        }
+        if (newPlan && newPlan.items.length > 0) {
+          const filtered = newPlan.items.filter((text) => !isPhaseHeader(text))
+          const now = Date.now()
+          const newPlanItems: PlanItem[] = filtered.map((text, i) => ({
+            id: `plan_${i}_${now}_regen`,
+            text,
+            status: i === 0 ? 'running' : 'pending',
+            createdAt: now,
+            updatedAt: now,
+            source: 'plan-regen',
+          }))
+          task.planItems = newPlanItems
+          await updateTask(task.id, { planItems: newPlanItems })
+          broadcastPlanListSnapshot(task.id, newPlanItems, 'plan-regen')
+          logger.info(
+            'Agent',
+            `plan-regen: ${filtered.length} items (replaced ${planItems.length} finished items)`,
+            task.id,
+          )
+          // plan-regen 成功 → 直接继续（不再追加 continuation、不再注入 replan hint）
+          // fall through 到下面的循环即可
+        } else {
+          // generatePlan 失败 → 降级到 v0.21.0 续接模式，确保任务不会卡死
+          const latestUser = [...allL1]
+            .reverse()
+            .find((m) => m.kind === 'user_message' && m.content?.trim())
+          const brief = (latestUser?.content ?? '').trim().replace(/\s+/g, ' ')
+          const text = brief
+            ? `续接新需求：${brief.length > 80 ? brief.slice(0, 80) + '…' : brief}`
+            : '处理用户追加的新需求'
+          const now = Date.now()
+          const continuation: PlanItem = {
+            id: genId('plan'),
+            text,
+            status: 'running',
+            createdAt: now,
+            updatedAt: now,
+            source: 'continuation',
+          }
+          task.planItems = [...planItems, continuation]
+          await updateTask(task.id, { planItems: task.planItems })
+          broadcastPlanListSnapshot(task.id, task.planItems, 'continuation')
+          logger.warn(
+            'Agent',
+            `plan-regen failed → fallback to continuation: ${text}`,
+            task.id,
+          )
+        }
+      } else if (planItems.length > 0 && !hasActive) {
+        // 旧 plan 空但仍有「非结束态」空壳（理论不会发生）→ 同上兜底
         const continuation: PlanItem = {
           id: genId('plan'),
-          text,
+          text: '处理用户追加的新需求',
           status: 'running',
-          createdAt: now,
-          updatedAt: now,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
           source: 'continuation',
         }
         task.planItems = [...planItems, continuation]
         await updateTask(task.id, { planItems: task.planItems })
         broadcastPlanListSnapshot(task.id, task.planItems, 'continuation')
-        logger.info('Agent', `continuation plan item appended: ${text}`, task.id)
       }
+      // 旧 plan 还有 active 项（running/pending）→ 保留原 plan，不追加 continuation，
+      // 让 Agent 自然推进已有清单；replanHint 仍然注入提示 Agent 评估新旧指令一致性。
 
-      const replanHint = `## 续聊计划重评（v0.16.7+ 硬约束）
+      const replanHint = `## 续聊计划重评（v0.24.x）
 用户追加了新指令。先评估现有 plan 与新指令的一致性：
 1. 若新指令仍属于当前 plan 的某一步 → 直接继续，标记该 step 为 in_progress。
 2. 若新指令偏离原 plan 但属于同一目标 → 用 ask_user 让用户确认是否调整 plan。
-3. 若新指令是全新目标 → 用 ask_user 让用户确认：(a) 沿用旧 plan 完成后再说、(b) 重置 plan。
-禁止在没经用户确认时静默重置原 plan。`
+3. 若新指令是全新目标（已有 plan 已全部完成 / 失败 / 跳过）→ 引擎已自动重新生成 plan，按新 plan 推进。
+禁止在没经用户确认时静默重置进行中的 plan。`
       pendingSystemHint = pendingSystemHint
         ? `${pendingSystemHint}\n\n---\n${replanHint}`
         : replanHint
@@ -1284,13 +1407,23 @@ export async function runReActLoop(
       }
     }
 
-    // 超过迭代上限：失败但仍要归档 L1（v0.9.1 §Task 7 — 失败路径也保留 L3b/L4a 钩子）
+    // 超过迭代上限（v0.23.2：不再硬报错中断，改为优雅暂停 + ask_user 引导续跑）。
+    // 旧逻辑直接置 failed → 前端进入错误态，用户被迫重开任务；现改为 paused +
+    // 选项卡，用户可"继续运行"（appendMessage 自动续跑，迭代计数从 L1 继续）
+    // 或"就此结束"（作为 user 消息传给 LLM，走 task_complete 正常收尾）。
     await emitEvent(task.id, { type: 'max_iterations_reached', iteration })
-    await markRunningPlanItemFailed(task)
-    await updateTask(task.id, { status: 'failed' })
-    broadcastTaskStatus({ ...task, status: 'failed' })
-    logger.warn('Agent', `max iterations reached for ${task.id}`, task.id)
-    await runDoneMemoryHooks(task, agent, opts.modelId, '')
+    await emitEvent(task.id, {
+      type: 'ask_user',
+      iteration,
+      question: `已达到单次运行迭代上限（${maxIter} 轮），任务尚未标记完成。进度已保留，可以继续运行或就此结束。`,
+      suggestions: [
+        { label: '继续运行', description: '从中断处继续执行任务' },
+        { label: '就此结束', description: '保留当前进度并收尾' },
+      ],
+    })
+    await updateTask(task.id, { status: 'paused' })
+    broadcastTaskStatus({ ...task, status: 'paused' })
+    logger.warn('Agent', `max iterations reached for ${task.id} — paused for user decision`, task.id)
   } catch (err) {
     // v0.8.1：AbortError 属于用户主动中断（Esc/停止/暂停/取消），
     // 不是真正的失败——交给 handleAbort 统一处理 paused/cancelled，
@@ -1671,6 +1804,8 @@ const PLAN_SYSTEM_PROMPT = `你是一个任务规划助手。你需要先评估�
 - 步骤之间相互独立、按执行顺序排列
 - 每步一行短句（参考样式："整体验证：typecheck + npm test"、"electron-builder 打包 .app"），禁止长句、子句嵌套或多行描述
 - 只输出 JSON 字符串数组，不要任何解释、前后缀或代码块标记
+- **硬性格式约束（v0.24.1）**：最终回复必须只包含 JSON 数组本身（如 ["a","b"]），禁止 Markdown 代码块、禁止序号前缀（"1. "）、禁止任何正文说明。若你是思考型模型，思考过程只放在内部，不要把思考写进回复。
+- 如果实在无法给出有效步骤，输出 []（空数组）即可
 
 **示例输出（对话级）**：[]
 **示例输出（Plan 级）**：["定位 auth middleware 文件并梳理流程", "在 session.ts 中修复 token 校验逻辑", "补全单元测试覆盖回归用例", "运行 typecheck 与 lint 确认无回归"]
@@ -1704,8 +1839,10 @@ const PLAN_SYSTEM_PROMPT_DOC_DRIVEN = `你是文档驱动开发的任务规划�
 - 小型功能允许合并阶段 1~5 为一份精简设计文档，但阶段顺序不变
 
 **只输出 JSON 字符串数组，不要任何解释、前后缀或代码块标记**
+- **硬性格式约束（v0.24.1）**：最终回复必须只包含 JSON 数组本身；禁止 Markdown 代码块、禁止序号前缀、禁止正文说明。思考型模型的思考过程只放内部。
+- 每个清单项含动作动词（调研/编写/产出/编码/测试/打包…），不要纯阶段标题
 
-**示例**：["阶段 1：开源调研与选型", "阶段 2：产出 PRD", "阶段 3：产出交互文档", "阶段 4：产出 HTML 原型", "阶段 5：产出系统设计", "阶段 6：编码实现核心功能", "阶段 7：功能测试", "阶段 8：UI 测试", "阶段 9：执行 UX 校验", "阶段 10：打包交付"]`
+**示例**：["阶段 1：调研开源项目并产出调研文档", "阶段 2：编写 PRD 与功能范围", "阶段 3：编写交互文档与设计 token", "阶段 4：产出 HTML 交互原型", "阶段 5：编写系统设计文档", "阶段 6：编码实现核心功能", "阶段 7：功能测试并产出报告", "阶段 8：UI 测试并产出报告", "阶段 9：执行 UX 校验", "阶段 10：打包交付"]`
 
 /** v0.9.x：generatePlan 首次解析失败时的降级精简 prompt（强制 3~5 步紧凑清单） */
 const PLAN_SYSTEM_PROMPT_RETRY = `你是一个任务规划助手。请将用户请求拆解为 3~5 个简短、可执行的步骤清单。
@@ -1713,6 +1850,7 @@ const PLAN_SYSTEM_PROMPT_RETRY = `你是一个任务规划助手。请将用户�
 - 每步一行、20 字以内动宾短语，按执行顺序排列
 - 步骤应针对具体任务（如涉及新项目，包含"创建项目目录""实现核心功能""测试运行"等实际步骤），禁止通用模板
 - 只输出 JSON 字符串数组，不要任何解释、前后缀或代码块标记
+- **硬性格式约束（v0.24.1）**：最终回复必须只包含 JSON 数组本身；思考型模型的思考过程只放内部，不要写进回复
 示例输出：["创建项目目录并初始化结构", "实现核心功能", "编写测试并运行验证"]`
 
 /**
@@ -1839,6 +1977,20 @@ function sanitizePlanItemText(x: string): string {
 
 function parsePlanItems(raw: string): string[] | null {
   if (!raw) return null
+  // 1) 主格式：JSON 字符串数组（可容忍代码块围栏 / 前后缀文本）
+  const jsonItems = parsePlanItemsJson(raw)
+  if (jsonItems && jsonItems.length > 0) return jsonItems
+  // 2) 容错：编号 / 无序列表行（"1. xxx" / "- xxx" / "• xxx"）
+  const lineItems = parsePlanItemsLines(raw)
+  if (lineItems && lineItems.length > 0) return lineItems
+  // 3) 容错：箭头链（"定位问题 → 直接修复 → 验证 → 汇报"）
+  const arrowItems = parsePlanItemsArrows(raw)
+  if (arrowItems && arrowItems.length > 0) return arrowItems
+  return null
+}
+
+/** 主解析：从文本中提取 JSON 数组（容忍 ``` 围栏 / 前后缀）。 */
+function parsePlanItemsJson(raw: string): string[] | null {
   let text = raw.replace(/```(?:json)?\s*/g, '').replace(/```/g, '').trim()
   const start = text.indexOf('[')
   const end = text.lastIndexOf(']')
@@ -1854,6 +2006,38 @@ function parsePlanItems(raw: string): string[] | null {
   } catch {
     return null
   }
+}
+
+/** 容错：编号 / 无序列表行解析（v0.24.1 —— 思考型模型常输出散文式步骤而非 JSON）。 */
+function parsePlanItemsLines(raw: string): string[] | null {
+  const lines = raw
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+  const items: string[] = []
+  for (const line of lines) {
+    const m = line.match(/^(?:\d+[.、)）:]|[一二三四五六七八九十]+[、.．]|[-*•·])\s*(.+?)[。；;]?\s*$/)
+    if (!m) continue
+    const text = sanitizePlanItemText(m[1])
+    if (text && !isNoisePlanItem(text)) items.push(text)
+  }
+  return items.length > 0 ? items : null
+}
+
+/** 容错：箭头链解析（"A → B → C" / "A -> B" / "A => B"）。 */
+function parsePlanItemsArrows(raw: string): string[] | null {
+  const parts = raw.split(/\s*(?:→|->|=>|⇒|→)\s*/)
+  if (parts.length < 2) return null
+  const items: string[] = []
+  for (const part of parts) {
+    const cleaned = part
+      .replace(/^[\s\-*•·\d.、)）:：]+/, '')
+      .replace(/[。；;,.，]$/, '')
+      .trim()
+    const text = sanitizePlanItemText(cleaned)
+    if (text && !isNoisePlanItem(text)) items.push(text)
+  }
+  return items.length >= 2 ? items.slice(0, 12) : null
 }
 
 /**
@@ -2086,6 +2270,26 @@ function isPhaseHeader(text: string): boolean {
   return !actionVerbs.test(afterPrefix)
 }
 
+/** v0.24.1：广播「技能已自动加载」可见步骤（显式 Use Skill: X 时，首轮 Reason 前调用）。 */
+function broadcastSkillAutoLoaded(task: Task, skillName: string, instructionMd: string): void {
+  const now = Date.now()
+  const step: ReActStep = {
+    id: genId('step'),
+    taskId: task.id,
+    iteration: 0,
+    type: 'act',
+    toolName: skillName,
+    toolArgs: JSON.stringify({ action: '自动加载指令' }, null, 2),
+    intent: `自动加载技能「${skillName}」指令`,
+    startedAt: now,
+    durationMs: 0,
+    status: 'success',
+    result: { instructionLoaded: true, instructionMd },
+    resultSummary: `已自动加载技能「${skillName}」指令（${instructionMd}），请严格按指令执行`,
+  }
+  broadcastStep(step)
+}
+
 function buildObservationSummary(
   tool: string,
   result: unknown,
@@ -2115,6 +2319,14 @@ function buildObservationSummary(
   if (!ok) {
     return `[${tool}] failed: ${summary}${suggestionFor(tool)}`
   }
+  // v0.24.0：统一消费 result.hint（防重读警告 / 拦截指令 / 零命中提示）。
+  // v0.16.6 引入 hint 后一直没人读它——警告从未到达模型，这是"重读打转"未被纠正的根因之一。
+  const hintText =
+    result !== null && typeof result === 'object' &&
+    typeof (result as Record<string, unknown>).hint === 'string'
+      ? (result as Record<string, unknown>).hint as string
+      : ''
+  const withHint = (body: string) => (hintText ? `${body}\n\n⚠️ ${hintText}` : body)
   // v0.6.1：防御非标准返回结构（如用户拒绝执行 → { error }，或工具返回非对象）
   // 修复 v0.6.0 缺陷：result 缺字段时访问 .slice 抛 TypeError，导致整个 ReAct loop failed
   if (result === null || typeof result !== 'object') {
@@ -2128,10 +2340,13 @@ function buildObservationSummary(
   const str = (v: unknown): string => (typeof v === 'string' ? v : '')
   if (tool === 'file-reader') {
     const r = result as { content: string; lines: number; size: number; truncated: boolean; path: string }
-    // v0.18.x fix: 600→200，避免 thought stream 被大文件内容塞爆；
-    // 行数/字节数已带在头部，详情按需在 Inspector 面板看全文。
-    const preview = safeSlice(str(r.content), 200)
-    return `[file-reader] ${r.path} (${r.lines} lines, ${r.size} bytes)\n\n${preview}${r.truncated ? '\n\n… (truncated)' : ''}`
+    // v0.24.x fix: 200→4000，避免 thought stream 只显示头注释导致 LLM 误判文件已读完。
+    // 实测：user 反馈 file-reader 反复返回 "...(truncated)" 头注释（200 字符太少），
+    // LLM 看不清实际代码 → 反复调 file-reader 换 maxLines 重读同一文件 → 触发防重读 block。
+    // 4000 字符 ≈ 60~80 行 JS/CSS，能容纳大多数 UI/工具函数实现段，
+    // 详情在 Inspector 面板按需查看全文。
+    const preview = safeSlice(str(r.content), 4000)
+    return withHint(`[file-reader] ${r.path} (${r.lines} lines, ${r.size} bytes)\n\n${preview}${r.truncated ? '\n\n… (truncated, 继续读用 startLine/maxLines=0)' : ''}`)
   }
   // v0.18.x fix：写文件 / 编辑文件只回传摘要（路径 + 字节/行数/替换数），
   // 不回写文件内容，避免把整段代码透传进 thought stream / 工具卡，导致显示过长。
@@ -2175,7 +2390,9 @@ function buildObservationSummary(
     const lines = (r.hits ?? []).map((h, i) => `${i + 1}. ${h.taskTitle}\n   ${safeSlice(h.snippet, 400)}`).join('\n\n')
     return `[session-search] query: "${r.query}" · ${r.total} archive hits\n\n${lines}`
   }
-  return `[${tool}] ${summary}\n\n${safeSlice(JSON.stringify(result), 800)}`
+  // v0.24.0：default 分支剥离 hint 字段（已由 withHint 前置送达），避免 JSON 里重复一遍
+  const { hint: _stripped, ...rest } = anyResult as Record<string, unknown>
+  return withHint(`[${tool}] ${summary}\n\n${safeSlice(JSON.stringify(rest), 800)}`)
 }
 
 /* ============================================================
@@ -2317,7 +2534,42 @@ async function executeAct(
       const planItems = ctx.task.planItems ?? []
       const durationMs = Date.now() - actStartedAt
 
-      // 校验：索引越界或状态非法 → 返回失败，让 LLM 下一轮修正
+      // 校验：索引越界或状态非法 → 返回失败，让 LLM 下一轮修正。
+      // v0.24.x：清单为空时宽容 —— 自动追加被引用项（以 comment 或占位文本），
+      // 避免 LLM 因"清单共 0 项"反复报错死循环。
+      if (planItems.length === 0 && itemIndex === 0) {
+        const nowAppend = Date.now()
+        const appended: PlanItem = {
+          id: `plan_append_${nowAppend}`,
+          text: sanitizePlanItemText(comment || '执行任务'),
+          status: (status === 'done' ? 'done' : 'running') as PlanItem['status'],
+          createdAt: nowAppend,
+          updatedAt: nowAppend,
+        }
+        if (status === 'done' || status === 'failed' || status === 'skipped' || status === 'cancelled') {
+          appended.completedAt = nowAppend
+        }
+        planItems.push(appended)
+        await updateTask(placeholder.taskId, { planItems })
+        broadcastPlanItemStatus(placeholder.taskId, [
+          {
+            planItemId: appended.id,
+            index: 0,
+            fromStatus: 'pending',
+            status: appended.status,
+            source: 'todo-update',
+            reason: comment || '清单为空自动追加',
+            ts_iteration: ctx.iteration,
+          },
+        ])
+        return {
+          completedStep: { ...placeholder, result: { item_index: 0, status, overview: `[~] 1. ${appended.text}` }, resultSummary: `清单为空，已自动追加第 1 项：${appended.text}`, durationMs, status: 'success' },
+          result: { item_index: 0, status, overview: `[~] 1. ${appended.text}` },
+          resultSummary: `清单为空，已自动追加第 1 项：${appended.text}`,
+          durationMs,
+          ok: true,
+        }
+      }
       if (!Number.isInteger(itemIndex) || itemIndex < 0 || itemIndex >= planItems.length) {
         const errMsg = `todo_update 参数非法：item_index=${itemIndex} 越界（清单共 ${planItems.length} 项，索引 0~${planItems.length - 1}）`
         logger.warn('Agent', errMsg, placeholder.taskId)
@@ -2345,9 +2597,14 @@ async function executeAct(
       if (status === 'done' || status === 'failed' || status === 'skipped' || status === 'cancelled') {
         target.completedAt = Date.now()
       }
+      // v0.24.x fix：记录是否自动推进了下一项。原代码在第二个 if 里重新判断
+      // planItems[itemIndex+1].status === 'pending'，但该状态已在上面被改成 'running'，
+      // 导致「下一项标 running」的 patch 永远不广播 —— 清单只能 done 当前项、下一项卡在 pending。
+      let advancedNext = false
       if (status === 'done' && itemIndex + 1 < planItems.length && planItems[itemIndex + 1].status === 'pending') {
         planItems[itemIndex + 1].status = 'running'
         planItems[itemIndex + 1].updatedAt = Date.now()
+        advancedNext = true
       }
       await updateTask(placeholder.taskId, { planItems })
 
@@ -2364,7 +2621,7 @@ async function executeAct(
           ts_iteration: ctx.iteration,
         },
       ])
-      if (status === 'done' && itemIndex + 1 < planItems.length && planItems[itemIndex + 1].status === 'pending') {
+      if (advancedNext) {
         const next = planItems[itemIndex + 1]
         broadcastPlanItemStatus(placeholder.taskId, [
           {
@@ -2782,20 +3039,17 @@ async function assembleMessages(
   if (dropped > 0) {
     logger.warn('Agent', `dropped ${dropped} tool responses (no matching toolCall)`, task.id)
   }
-  // Task 2 Layer 1：本地微压缩 —— 仅清空更早轮 tool 结果原文与 reasoning_content，
-  // 零 AI 调用；最近 RECENT_TOOL_TURNS 轮完整内容保留（截断仅针对更早轮，互不冲突）。
-  const compacted = applyMicroCompact(messages, RECENT_TOOL_TURNS)
-  if (compacted.clearedToolResults > 0 || compacted.droppedReasoning > 0) {
-    logger.debug(
-      'Agent',
-      `micro-compact: cleared ${compacted.clearedToolResults} tool result(s), dropped ${compacted.droppedReasoning} reasoning`,
-      task.id,
-    )
-  }
+  // v0.23.2 缓存修复：移除每轮滑动的 applyMicroCompact。
+  // 旧逻辑每迭代把"3 轮前"的完整工具结果原地替换为占位符 → 相邻两次请求的前缀
+  // 在倒数第 3 轮处分叉，尾部全量内容永不命中前缀缓存（实测命中率 ~50%）。
+  // DeepSeek/Claude 命中率 90%+ 的 harness 共性是「历史不可变」：消息只追加、
+  // 绝不回改。现改为 append-only——上下文压力交给写时截断（MAX_OBSERVATION_CONTENT）
+  // 与预算阀（maybePrecallCompact / maybeAutoCompress，压缩时一次性断缓存后再次稳定）。
+  // applyMicroCompact 纯函数保留（context.test 仍覆盖），仅不再在组装路径调用。
   // v0.14.0 防御：剥离"悬空 tool_calls"——历史脏数据（如旧 ask_user/task_complete 分支
   // 未补写 observation）会在消息序列里留下带 tool_calls 却无配对 tool 响应的 assistant
   // 消息，OpenAI 兼容服务端会 400 "insufficient tool messages following tool_calls message"。
-  return reconcileToolCalls(compacted.messages)
+  return reconcileToolCalls(messages)
 }
 
 /**

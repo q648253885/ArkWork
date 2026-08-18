@@ -92,6 +92,10 @@ app.whenReady().then(async () => {
   // 创建主窗口
   createMainWindow()
 
+  // v0.24.1：agent 自主浏览器控制器（捕获右栏 webview 的 WebContents）
+  const { initBrowserController } = await import('./browser/controller.js')
+  initBrowserController()
+
   logger.info('System', 'ArkWork ready')
 })
 

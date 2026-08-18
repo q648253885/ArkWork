@@ -126,6 +126,13 @@ ArkWork/
 - [交互文档（v0.3.0 基线）](./docs/02-interaction.md)
 - [各版本增量设计](./docs/versions/)
 
+### 最新版本：v0.24.1 — Agent 自主浏览器 + 技能自动加载 + 清单容错
+
+- [v0.24.1 总览](./docs/versions/v0.24.1/README.md)
+- [01 — Agent 自主浏览器](./docs/versions/v0.24.1/01-agent-browser.md)
+- [02 — 显式技能自动加载](./docs/versions/v0.24.1/02-skill-autoload.md)
+- [03 — 计划清单容错解析](./docs/versions/v0.24.1/03-plan-fallback.md)
+
 ### 用户产物（按版本归档）
 
 面向最终用户的 README 与使用手册，按版本归档在 `products/` 下，不混入 `.arkwork/` 目录：

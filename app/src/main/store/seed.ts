@@ -110,13 +110,13 @@ const BUILTIN_AGENTS: Agent[] = [
 - 任务完成调用 task_complete，参数包含：改了什么 / 验证结果 / 遗留风险。
 - 需要用户输入或门禁确认时调用 ask_user。
 - 最多 60 次迭代；单次工具超时 30 秒。工具调用预算按签名/类别动态管控（写入类 40、只读类 16），避免重复调用。`,
-    defaultSkillIds: ['S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.web-search', 'S-core.fetch-url', 'S-core.shell', 'S-core.todo-update'],
+    defaultSkillIds: ['S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.web-search', 'S-core.fetch-url', 'S-core.shell', 'S-core.browser', 'S-core.todo-update'],
     defaultMcpIds: [],
     defaultModelId: '',
     defaultKbIds: [],
     defaultConfig: { temperature: 0.5, maxIterations: 60 },
     isBuiltin: true,
-    version: '0.19.0',
+    version: '0.24.1',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
   },
@@ -209,13 +209,13 @@ const BUILTIN_AGENTS: Agent[] = [
 - 任务完成调用 task_complete，参数包含：改了什么 / 验证结果 / 文档同步情况 / 遗留风险。
 - 需要用户输入或门禁确认时调用 ask_user。
 - 最多 80 次迭代；单次工具超时 30 秒。工具调用预算按签名/类别动态管控（写入类 40、只读类 16），避免重复调用。`,
-    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.todo-update'],
+    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.browser', 'S-core.todo-update'],
     defaultMcpIds: [],
     defaultModelId: '',
     defaultKbIds: [],
     defaultConfig: { temperature: 0.3, maxIterations: 80 },
     isBuiltin: true,
-    version: '0.19.0',
+    version: '0.24.1',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
     // v0.15.0 Task 6：@coder 默认 acceptEdits —— 工作区内轻写（sed -i/tee/mkdir/cp/...）不再每次弹确认；
@@ -237,7 +237,7 @@ const BUILTIN_SKILLS: Skill[] = [
   {
     id: 'S-core.file-reader',
     name: 'file-reader',
-    description: '读取工作区内的文件或目录内容（文本、代码、JSON、目录列表等）',
+    description: '读取工作区内的文件或目录内容（文本、代码、JSON、目录列表等）。重要：不传 maxLines 默认读全文；只有文件过大需要分页时才传 maxLines + startLine。',
     namespace: 'core',
     source: 'builtin',
     builtinHandler: 'file-reader',
@@ -245,7 +245,8 @@ const BUILTIN_SKILLS: Skill[] = [
       type: 'object',
       properties: {
         path: { type: 'string', description: '文件或目录的绝对路径，或相对于当前工作区的路径（如 README.md、src/、.）' },
-        maxLines: { type: 'number', description: '最多读取行数（0 表示全部）' },
+        maxLines: { type: 'number', description: '最多读取行数；不传或传 0 表示读全文。只有文件 > 400 行需要分页时才使用。' },
+        startLine: { type: 'number', description: '起始行（从 0 开始；与 maxLines 配合实现分页）' },
       },
       required: ['path'],
     },
@@ -400,6 +401,38 @@ const BUILTIN_SKILLS: Skill[] = [
     needsConfirmation: true,
     enabled: true,
     tags: ['shell', 'exec'],
+  },
+  {
+    id: 'S-core.browser',
+    name: 'browser',
+    description:
+      '在 ArkWork 内置浏览器（右栏 webview）中打开并测试网页或本地 HTML 文件，支持自主验证与跟进。' +
+      '子动作：open（打开 URL 或本地文件）、eval（在页面执行 JS 探测/断言）、snapshot（页面快照：标题/URL/正文/画布）、' +
+      'console（读取页面 console 日志，定位 JS 错误）、screenshot（截图留证）、close（结束会话）。' +
+      '适合：改完网页后自查运行效果、检查控制台报错、验证交互是否生效。',
+    namespace: 'core',
+    source: 'builtin',
+    builtinHandler: 'browser',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['open', 'eval', 'snapshot', 'console', 'screenshot', 'close'],
+          description: '要执行的浏览器动作',
+        },
+        url: { type: 'string', description: 'open 时的 URL（http/https）；无协议且像路径时视为本地文件' },
+        path: { type: 'string', description: 'open 时的本地 HTML 文件路径（相对工作区或绝对路径）' },
+        js: { type: 'string', description: 'eval 时要执行的 JS 表达式/语句，建议返回可序列化值或字符串' },
+        file: { type: 'string', description: 'screenshot 的保存路径（相对工作区或绝对路径；省略则存 .arkwork/browser-shots/）' },
+        limit: { type: 'number', description: 'console 最多返回条数（默认 100）' },
+      },
+      required: ['action'],
+    },
+    timeout: 30_000,
+    needsConfirmation: false,
+    enabled: true,
+    tags: ['browser', 'web', 'test'],
   },
   {
     id: 'S-core.task-complete',

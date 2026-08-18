@@ -239,6 +239,16 @@ const ark: ArkApi = {
       return () => ipcRenderer.removeListener('log:append', handler)
     },
   },
+  // v0.24.1：agent 自主驱动的内置浏览器（webview 加载请求）
+  browser: {
+    onLoadRequest: (cb) => {
+      const handler = (_e: IpcRendererEvent, req: Parameters<typeof cb>[0]) => cb(req)
+      ipcRenderer.on('browser:load', handler)
+      return () => ipcRenderer.removeListener('browser:load', handler)
+    },
+    loadDone: (requestId, error) => ipcRenderer.invoke('browser:load-done', { requestId, error }),
+    resolve: (input) => ipcRenderer.invoke('browser:resolve', input),
+  },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (patch) => ipcRenderer.invoke('settings:set', patch),

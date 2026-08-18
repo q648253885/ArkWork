@@ -2,6 +2,7 @@ import { useStore } from '../store'
 import { STATUS_CHAR, STATUS_COLOR } from '../constants'
 import type { TaskStatus } from '../types'
 import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 /* ============================================================
  * StatusDot — 任务状态指示
@@ -100,7 +101,7 @@ export function Tooltip({
     activeRef.current = true
     if (timerRef.current) return
     timerRef.current = window.setTimeout(() => {
-      if (activeRef.current) setOpen(true)
+      if (activeRef.current) handleOpen()
     }, immediate ? 0 : delay)
   }
   const hide = () => {
@@ -129,22 +130,130 @@ export function Tooltip({
     if (typeof t.matches === 'function' && t.matches(':focus-visible')) show(true)
   }
 
-  const posCls =
-    placement === 'top'
-      ? 'bottom-full mb-1.5 left-1/2 -translate-x-1/2'
-      : placement === 'bottom'
-        ? 'top-full mt-1.5 left-1/2 -translate-x-1/2'
-        : placement === 'left'
-          ? 'right-full mr-1.5 top-1/2 -translate-y-1/2'
-          : 'left-full ml-1.5 top-1/2 -translate-y-1/2'
+  // v0.24.x fix：tooltip 改用 portal 渲染到 body + fixed 定位 ——
+  // 之前 absolute 定位会被左右侧边栏（overflow 容器）裁剪/遮挡，
+  // 且 z-50 低于侧边面板的堆叠上下文。portal 后脱离裁剪容器，
+  // fixed + zIndex 9999 保证永远显示在最顶层。
+  const wrapperRef = useRef<HTMLSpanElement>(null)
+  const tipRef = useRef<HTMLSpanElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+
+  const computePos = () => {
+    const wrap = wrapperRef.current
+    const tip = tipRef.current
+    if (!wrap || !tip) return
+    const wr = wrap.getBoundingClientRect()
+    const tr = tip.getBoundingClientRect()
+    const gap = 8
+    let top = 0
+    let left = 0
+    if (placement === 'top') {
+      top = wr.top - tr.height - gap
+      left = wr.left + wr.width / 2 - tr.width / 2
+    } else if (placement === 'bottom') {
+      top = wr.bottom + gap
+      left = wr.left + wr.width / 2 - tr.width / 2
+    } else if (placement === 'left') {
+      top = wr.top + wr.height / 2 - tr.height / 2
+      left = wr.left - tr.width - gap
+    } else {
+      top = wr.top + wr.height / 2 - tr.height / 2
+      left = wr.right + gap
+    }
+    // 视口内收边，避免 tooltip 超出屏幕
+    const pad = 8
+    top = Math.max(pad, Math.min(top, window.innerHeight - tr.height - pad))
+    left = Math.max(pad, Math.min(left, window.innerWidth - tr.width - pad))
+    setPos({ top, left })
+  }
+
+  // open 后先渲染再量尺寸定位（避免首次量到 0 尺寸）
+  const [measured, setMeasured] = useState(false)
+  const handleOpen = () => {
+    setOpen(true)
+    setMeasured(false)
+    requestAnimationFrame(() => {
+      computePos()
+      setMeasured(true)
+    })
+  }
 
   const hasRich = !!(kbd || desc || cap)
   const wrapperCls = block
     ? `relative block ${className ?? ''}`
     : `relative inline-flex ${className ?? ''}`
 
+  const tooltipEl = open
+    ? createPortal(
+        <span
+          ref={tipRef}
+          role="tooltip"
+          onMouseEnter={onTipEnter}
+          onMouseLeave={onTipLeave}
+          className="pointer-events-auto"
+          style={{
+            position: 'fixed',
+            top: pos?.top ?? 0,
+            left: pos?.left ?? 0,
+            zIndex: 9999,
+            background: 'var(--tooltip-bg)',
+            color: 'var(--tooltip-text)',
+            borderRadius: '8px',
+            padding: hasRich ? '8px 11px' : '5px 9px',
+            boxShadow: 'var(--shadow-md)',
+            maxWidth: '340px',
+            whiteSpace: hasRich ? 'normal' : 'nowrap',
+            opacity: measured ? 1 : 0,
+            transition: 'opacity 140ms ease',
+            pointerEvents: measured ? 'auto' : 'none',
+          }}
+          aria-hidden={!measured}
+        >
+          <span className="flex items-center gap-1.5 text-xs font-medium leading-relaxed whitespace-nowrap">
+            {label}
+            {kbd && (
+              <span
+                className="inline-flex items-center font-mono text-[10.5px] leading-none px-1.5 py-0.5 rounded"
+                style={{
+                  background: 'var(--tooltip-kbd-bg)',
+                  border: '1px solid var(--tooltip-kbd-border)',
+                  marginLeft: '3px',
+                }}
+              >
+                {kbd}
+              </span>
+            )}
+          </span>
+          {desc && (
+            <span
+              className="block text-[11.5px] opacity-85 mt-1 leading-snug"
+              style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+            >
+              {desc}
+            </span>
+          )}
+          {cap && (
+            <span
+              className="block text-[11px] opacity-90 mt-1.5 pt-1.5 border-t leading-relaxed"
+              style={{
+                borderColor: 'var(--tooltip-kbd-border)',
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+              }}
+            >
+              {cap}
+            </span>
+          )}
+        </span>,
+        document.body,
+      )
+    : null
+
   return (
     <span
+      ref={wrapperRef}
       className={wrapperCls.trim()}
       onMouseEnter={() => show()}
       onMouseLeave={hide}
@@ -152,50 +261,7 @@ export function Tooltip({
       onBlur={hide}
     >
       {children}
-      <span
-        role="tooltip"
-        onMouseEnter={onTipEnter}
-        onMouseLeave={onTipLeave}
-        className={`pointer-events-auto absolute ${posCls} z-50 ${
-          open ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-0.5'
-        }`}
-        style={{
-          background: 'var(--tooltip-bg)',
-          color: 'var(--tooltip-text)',
-          borderRadius: '8px',
-          padding: hasRich ? '8px 11px' : '5px 9px',
-          boxShadow: 'var(--shadow-md)',
-          maxWidth: '340px',
-          whiteSpace: hasRich ? 'normal' : 'nowrap',
-          transition: 'opacity 140ms ease, transform 140ms ease',
-          pointerEvents: open ? 'auto' : 'none',
-        }}
-        aria-hidden={!open}
-      >
-        <span className="flex items-center gap-1.5 text-xs font-medium leading-relaxed">
-          {label}
-          {kbd && (
-            <span
-              className="inline-flex items-center font-mono text-[10.5px] leading-none px-1.5 py-0.5 rounded"
-              style={{
-                background: 'var(--tooltip-kbd-bg)',
-                border: '1px solid var(--tooltip-kbd-border)',
-                marginLeft: '3px',
-              }}
-            >
-              {kbd}
-            </span>
-          )}
-        </span>
-        {desc && (
-          <span className="block text-[11.5px] opacity-85 mt-1 leading-snug">{desc}</span>
-        )}
-        {cap && (
-          <span className="block text-[11px] opacity-90 mt-1.5 pt-1.5 border-t leading-relaxed" style={{ borderColor: 'var(--tooltip-kbd-border)' }}>
-            {cap}
-          </span>
-        )}
-      </span>
+      {tooltipEl}
     </span>
   )
 }

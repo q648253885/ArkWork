@@ -387,17 +387,28 @@ function detectShellFileOp(
         example: 'glob-search({ pattern: "**/*.test.ts" })',
       }
     case 'ls':
-      return {
-        op: 'ls 列目录',
-        alternative: 'glob-search({ pattern: "<dir>/*" }) 或 file-reader({ path: "<dir>" })',
-        example: 'glob-search({ pattern: "src/main/*.ts" })',
-      }
+      // v0.24.x：ls 列目录不在 file-reader/grep-search 的"读取文件内容"语义范畴，
+      // 属于纯目录枚举（dirent），与 `cat`/`head`/`grep` 读取文件内容不同。
+      // permissions.ts WORKSPACE_READONLY_COMMANDS 已把 ls 归为 allow，
+      // 不应再在文件操作守卫里阻拦 —— 否则 LLM 会反复用 file-reader 列目录、
+      // glob-search 反而不能直接给完整路径列表。
+      return null
     case 'tree':
-      return {
-        op: 'tree 递归列目录',
-        alternative: 'glob-search({ pattern: "<dir>/**/*" })',
-        example: 'glob-search({ pattern: "src/main/**/*" })',
-      }
+      // tree 同上：递归列目录，与 ls 同质，权限层已放行
+      return null
+    case 'stat':
+      // stat 查看文件元信息（大小/时间），不读内容，权限层已放行
+      return null
+    case 'file':
+      // file 命令判断文件类型，不读内容
+      return null
+    case 'du':
+      // du 看磁盘占用，不读内容
+      return null
+    case 'realpath':
+    case 'readlink':
+      // 路径解析，不读内容
+      return null
     case 'sed':
     case 'awk':
       // sed -i / awk '{print}' 都是文件操作；awk 处理 stdin 流式数据允许

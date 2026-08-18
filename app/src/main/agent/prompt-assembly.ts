@@ -11,6 +11,7 @@
  * ============================================================ */
 import type { Agent, PromptSection } from '@shared/types/agent'
 import type { PlanItem } from '@shared/types/task'
+import { buildWorkspaceContext } from './workspace-context.js'
 
 /** 组装系统提示词的运行时上下文。 */
 export interface SystemPromptContext {
@@ -23,6 +24,16 @@ export interface SystemPromptContext {
   /** 任务计划清单（可为空；仅用于决定是否注入静态计划约束，不含每轮进度） */
   planItems?: PlanItem[]
 }
+
+/** 各段排序权重（升序渲染；与旧 engine.ts 拼装顺序一一对应） */
+const ORDER = {
+  workspaceContext: -100,  // v0.24.x：ArkWork 系统提示词最先（env / stack / tree / AGENTS.md），位于 coreRules 之前
+  coreRules: 0,
+  personality: 100,
+  workspace: 200,
+  memory: 300,
+  planConstraint: 500,
+} as const
 
 /**
  * 构建人格段（自 engine.ts 迁入，行为不变）。
@@ -39,14 +50,9 @@ export function buildPersonalitySegment(agent: Agent): string {
   return `## 人格设定\n${lines.join('\n')}`
 }
 
-/** 各段排序权重（升序渲染；与旧 engine.ts 拼装顺序一一对应） */
-const ORDER = {
-  coreRules: 0,
-  personality: 100,
-  workspace: 200,
-  memory: 300,
-  planConstraint: 500,
-} as const
+/** 各段排序权重（升序渲染；与旧 engine.ts 拼装顺序一一对应）
+ * v0.24.x：移除 —— 改为模块顶部 const，附带 workspaceContext 权重
+ */
 
 /**
  * 构建有序系统提示词 section 列表。
@@ -74,6 +80,23 @@ export function buildSystemSections(ctx: SystemPromptContext): PromptSection[] {
     `## 当前工作区\n工作区根目录：${ctx.workspaceDir}\n` +
     `使用 file-reader 的 path="." 可列出工作区根目录内容，path="src/" 等相对路径基于此目录解析。`
   sections.push({ id: 'workspace', order: ORDER.workspace, text: wsHint })
+
+  // v0.24.x：工作区上下文感知（借鉴 opencode / claude code）——
+  // 自动注入 <env> 环境 / <stack> 技术栈 / <project> 目录树 / <agents-md> 项目规则。
+  // 一次性构建、运行期稳定，可放 system 命中前缀缓存。
+  // 失败时 buildWorkspaceContext 内部 catch + 静默，不会阻塞主流程。
+  try {
+    const wsCtx = buildWorkspaceContext(ctx.workspaceDir)
+    if (wsCtx.combined.trim().length > 0) {
+      sections.push({
+        id: 'workspace-context',
+        order: ORDER.workspaceContext,
+        text: wsCtx.combined,
+      })
+    }
+  } catch {
+    // 工作区上下文构建失败（IO 异常 / 权限不足）—— 静默跳过
+  }
 
   // memory（记忆注入，运行期构建一次）
   if (ctx.memoryInjection) {

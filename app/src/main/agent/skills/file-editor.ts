@@ -15,6 +15,8 @@ import {
   logError,
   type FileToolContext,
 } from './file-tool-safety.js'
+import { invalidateReadsOf } from './read-repeat-guard.js'
+import type { SkillContext } from '../registry.js'
 
 export interface FileEditorArgs {
   path: string
@@ -74,6 +76,8 @@ export async function fileEditor(
 
     await writeFile(abs, newContent, 'utf-8')
     await logInfo('Tool', `file-editor: ${rawPath} replacements=${replacements}`, ctx.taskId)
+    // v0.24.0：文件已变更，清除该路径的重复读记录（改后重读验证是合法行为）
+    invalidateReadsOf(ctx as SkillContext, rawPath)
     return { path: rawPath, replacements }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)

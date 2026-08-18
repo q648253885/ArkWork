@@ -47,6 +47,7 @@ export type PlanItemSource =
   | 'user-retry'
   | 'user-mark-done'
   | 'plan-regen'
+  | 'plan-fallback'
   /** v0.21.0：续聊时旧清单全完成后，引擎自动追加的「新需求承接项」 */
   | 'continuation'
 

@@ -25,6 +25,7 @@ import { registerPermissionHandlers } from './permission.js'
 import { registerContextHandlers } from './context.js'
 import { registerProgressHandlers } from './progress.js'
 import { registerPlanItemHandlers } from './plan-items.js'
+import { registerBrowserHandlers } from './browser.js'
 import { logger } from '../system/logger.js'
 
 export function registerIpcHandlers(): void {
@@ -58,6 +59,9 @@ export function registerIpcHandlers(): void {
 
   // v0.18.0：planItem 用户手动切状态 + planItems 快照兜底
   registerPlanItemHandlers()
+
+  // v0.24.1：agent 自主浏览器（webview 加载结果回传）
+  registerBrowserHandlers()
 
   logger.info('System', 'IPC handlers registered')
 }

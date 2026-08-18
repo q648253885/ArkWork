@@ -89,8 +89,13 @@ export function shouldCompact(payloadTokens: number, budget: number): boolean {
   return payloadTokens + outputReserve() > budget
 }
 
-/** 单条 reasoning_content 传回 LLM 的最大字符数（v0.15.0 沿用 4000） */
-export const MAX_REASONING_CONTENT = 4000
+/**
+ * 单条 reasoning_content 传回 LLM 的最大字符数。
+ * v0.24.0：4000 → 1500。实测（T-20260817-106u4s，105 轮 / 1.56M tokens）
+ * reasoning 每轮全量回传是历史膨胀主因；决策结论 1500 字符已足够，
+ * 早期思考过程对后续轮次无增量价值。
+ */
+export const MAX_REASONING_CONTENT = 1500
 
 /** 单条 tool observation 传回 LLM 的最大字符数 */
 export const MAX_OBSERVATION_CONTENT = 8000

@@ -111,17 +111,21 @@ export class OpenAIAdapter implements LlmAdapter {
 
 /**
  * v0.20.0：从 OpenAI 兼容端点的 usage 提取缓存命中统计。
+ * v0.23.1：补齐字段口径（此前只认 DeepSeek/MiniMax 两种，其他端点一律返回
+ * undefined，UI 命中率恒为 0）——
  * - DeepSeek：usage.prompt_cache_hit_tokens / prompt_cache_miss_tokens
- * - MiniMax：usage.prompt_tokens_details.cached_tokens（未命中 = prompt_tokens - cached）
- * 两者都没有时返回 undefined（表示该端点未报告缓存信息）。
+ * - Moonshot Kimi：usage.cached_tokens（顶层）
+ * - OpenAI / MiniMax / 智谱：usage.prompt_tokens_details.cached_tokens
+ * 都没有时返回 undefined（表示该端点未报告缓存信息）。
  */
-function extractCacheUsage(
+export function extractCacheUsage(
   usage: OpenAI.Completions.CompletionUsage | null | undefined,
 ): LlmCacheUsage | undefined {
   if (!usage) return undefined
   const raw = usage as unknown as Record<string, unknown>
   const promptTokens = usage.prompt_tokens ?? 0
 
+  // DeepSeek 风格：prompt_cache_hit_tokens / prompt_cache_miss_tokens
   const hit = raw.prompt_cache_hit_tokens
   const miss = raw.prompt_cache_miss_tokens
   if (typeof hit === 'number' || typeof miss === 'number') {
@@ -131,6 +135,13 @@ function extractCacheUsage(
     return { hitTokens, missTokens }
   }
 
+  // Moonshot Kimi 风格：顶层 cached_tokens（v0.23.1 补）
+  const topLevelCached = raw.cached_tokens
+  if (typeof topLevelCached === 'number') {
+    return { hitTokens: topLevelCached, missTokens: Math.max(0, promptTokens - topLevelCached) }
+  }
+
+  // OpenAI / MiniMax / 智谱风格：prompt_tokens_details.cached_tokens
   const details = raw.prompt_tokens_details as Record<string, unknown> | undefined
   const cached = details?.cached_tokens
   if (typeof cached === 'number') {

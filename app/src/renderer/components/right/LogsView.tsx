@@ -231,31 +231,33 @@ export function LogsView() {
   return (
     <div className="flex flex-col h-full" onClick={() => setCtxMenu(null)}>
       {/* 工具栏：搜索 + 等级筛选 + 复制 */}
-      <div className="px-3 py-2 border-b border-border-subtle flex items-center gap-1.5">
+      <div className="px-3 py-2 border-b border-border-subtle flex items-center gap-1.5 flex-wrap">
         <Icon.Search width={16} height={16} className="text-text-tertiary flex-shrink-0" />
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="过滤日志..."
-          className="flex-1 px-1 py-0.5 text-xs text-text-primary placeholder:text-text-tertiary bg-transparent outline-none"
+          className="flex-1 min-w-[80px] px-1 py-0.5 text-xs text-text-primary placeholder:text-text-tertiary bg-transparent outline-none"
         />
-        {(['DEBUG', 'INFO', 'WARN', 'ERROR'] as const).map((lv) => {
-          const active = levelFilter.size === 0 || levelFilter.has(lv)
-          return (
-            <button
-              key={lv}
-              onClick={() => toggleLevel(lv)}
-              className={`px-1.5 py-0.5 rounded-md text-2xs font-medium border transition-colors ${
-                active
-                  ? 'border-border-default'
-                  : 'border-border-subtle text-text-tertiary opacity-50'
-              }`}
-              style={active ? { color: LEVEL_COLOR[lv] } : undefined}
-            >
-              {lv}
-            </button>
-          )
-        })}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {(['DEBUG', 'INFO', 'WARN', 'ERROR'] as const).map((lv) => {
+            const active = levelFilter.size === 0 || levelFilter.has(lv)
+            return (
+              <button
+                key={lv}
+                onClick={() => toggleLevel(lv)}
+                className={`px-1 py-0.5 rounded text-[10px] leading-none font-medium border transition-colors ${
+                  active
+                    ? 'border-border-default'
+                    : 'border-border-subtle text-text-tertiary opacity-50'
+                }`}
+                style={active ? { color: LEVEL_COLOR[lv] } : undefined}
+              >
+                {lv}
+              </button>
+            )
+          })}
+        </div>
         {/* polish4 §E1.1：复制按钮 */}
         <button
           onClick={() => void handleCopy(filtered, '已复制筛选后日志')}

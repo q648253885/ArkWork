@@ -102,6 +102,7 @@ export type BuiltinHandler =
   | 'web-search'
   | 'shell'
   | 'fetch-url'
+  | 'browser'
   | 'task_complete'
   | 'ask_user'
   | 'delegate-agent'

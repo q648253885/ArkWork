@@ -63,19 +63,37 @@ export function RunConsole({
   // ask_user 暂停态：Agent 提问全文（非 ask_user 暂停时为 null，不展示卡片）
   const askUserQuestion = useStore((s) => s.askUserQuestion)
   const suggestions = useStore((s) => s.suggestions)
+  // v0.24.x：限制 description 最大 40 字（输入区"Agent 正在干嘛"短描述原则）
+  // 此前 lastAct.intent 来自 LLM thought，可能一整段话直接铺在输入框顶端，UI
+  // 出现"运行控制台里塞了一篇思考"体感——参考 Trae harness / DeepSeek Harness，
+  // 输入区只显式一个动作动词短语，不展开 thought 全文。
+  const DESCRIPTION_MAX = 40
+  const truncate40 = (s: string): string => {
+    const cleaned = s.replace(/\n+/g, ' ').trim()
+    return cleaned.length > DESCRIPTION_MAX ? cleaned.slice(0, DESCRIPTION_MAX) + '…' : cleaned
+  }
   const description = useMemo(() => {
+    const truncated = (raw: string): string => {
+      // 先尝试按 40 字截断；若截断前末尾是省略号 / 句号，则不再附加 …
+      const trimmed = truncate40(raw)
+      return trimmed
+    }
     if (status === 'running') {
       const lastAct = [...steps].reverse().find((s) => s.type === 'act')
       if (lastAct) {
         const failed = lastAct.status === 'failed'
-        return failed ? '工具调用失败，正在处理…' : (lastAct.intent || executionDescription(lastAct.toolName))
+        const raw = failed ? '工具调用失败，正在处理…' : (lastAct.intent || executionDescription(lastAct.toolName))
+        return truncated(raw)
       }
       const lastReason = [...steps].reverse().find((s) => s.type === 'reason')
-      return reasoningDescription(lastReason ? 'finalizing' : 'thinking')
+      return truncated(reasoningDescription(lastReason ? 'finalizing' : 'thinking'))
     }
     if (status === 'paused') {
       const lastAct = [...steps].reverse().find((s) => s.type === 'act')
-      return lastAct ? `${(lastAct.intent || executionDescription(lastAct.toolName)).replace(/…$/, '')}（已暂停）` : '已暂停 · 等待你的指令…'
+      const raw = lastAct
+        ? `${(lastAct.intent || executionDescription(lastAct.toolName)).replace(/…$/, '')}（已暂停）`
+        : '已暂停 · 等待你的指令…'
+      return truncated(raw)
     }
     if (status === 'error') {
       return '运行出错 · 请查看上方错误信息'
@@ -83,7 +101,7 @@ export function RunConsole({
     if (status === 'cancelled') {
       return '已中断 · 可点击右侧重新执行'
     }
-    return reasoningDescription('thinking')
+    return truncated(reasoningDescription('thinking'))
   }, [status, steps])
 
   const handleAppendAndResume = () => {
@@ -150,15 +168,20 @@ export function RunConsole({
                 />
               </div>
             )}
-            {/* v0.16.x：选项都不符合时 — 紧贴问题下方提供「自定义回答」输入区，
-                用户可直接键入补充内容后点「提交」续聊，无需回到底部 textarea。
-                提交走与建议卡片相同的 onAppendAndResume 通道（appendMessage → runTask）。 */}
-            {onAppendAndResume && (
+            {/* v0.23.1：有选项卡时不再提供输入框（与选项卡重叠且交互混乱），
+                只保留一行提示；无选项卡的开放式提问才显示自定义回答输入。 */}
+            {suggestions.length > 0 ? (
+              <div className="mt-2 flex items-center gap-1.5 px-0.5 text-2xs text-text-tertiary">
+                <Icon.Check width={12} height={12} className="flex-shrink-0" />
+                <span>点击上方选项即可作答 · 选择后任务自动继续</span>
+              </div>
+            ) : (
+              onAppendAndResume && (
               <div className="mt-2">
                 <div className="flex items-center gap-1.5 mb-1.5 px-0.5">
                   <Icon.Edit width={12} height={12} className="text-text-tertiary flex-shrink-0" />
                   <span className="text-2xs text-text-tertiary uppercase tracking-wider font-medium">
-                    都不符合？自己说
+                    输入你的回答
                   </span>
                 </div>
                 <div className="flex items-start gap-2">
@@ -187,6 +210,7 @@ export function RunConsole({
                   </button>
                 </div>
               </div>
+              )
             )}
           </div>
         )}
@@ -203,8 +227,9 @@ export function RunConsole({
 
           <div className="flex-1" />
 
-          {/* 暂停态：追加指令输入框 */}
-          {status === 'paused' && (
+          {/* 暂停态：追加指令输入框（v0.23.1：ask_user 暂停态隐藏——选项卡才是主交互，
+              输入框与选项卡重叠的问题由此消除；普通暂停仍可追加指令） */}
+          {status === 'paused' && !askUserQuestion && (
             <div className="flex items-center gap-2 flex-1 max-w-[480px]">
               <textarea
                 ref={appendRef}

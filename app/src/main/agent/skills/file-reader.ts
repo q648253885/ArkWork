@@ -9,7 +9,7 @@ import { isAbsolute, resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import { logger } from '../../system/logger.js'
 import type { SkillContext } from '../registry.js'
-import { checkRepeatRead } from './read-repeat-guard.js'
+import { checkRepeatRead, recordRepeatResult } from './read-repeat-guard.js'
 
 export interface FileReaderArgs {
   path: string
@@ -51,12 +51,42 @@ export async function fileReader(
     throw new Error(`file not found: ${args.path}（已解析为 ${abs}）`)
   }
 
-  // v0.16.6+：重复读同一文件/同一段 → 给 Agent 友好提示（不阻断）
-  const repeatHint = checkRepeatRead(ctx, 'file-reader', {
-    path: args.path,
-    maxLines: args.maxLines ?? 0,
-    startLine: args.startLine ?? 0,
+  // v0.24.1：签名规范化——用解析后的绝对路径（容忍 LLM 的绝对/相对混用），
+  // startLine 按 50 行对齐成"页"，忽略 maxLines（分页参数漂移不再绕过防重读）。
+  // 实测（MiniMax-M3 重跑 t2 修复 game）：模型以 maxLines 3→100→293 变化反复读
+  // 同一文件，旧签名(含 maxLines)永远不匹配 → 防重读 0 拦截、40 轮打转。
+  const sig = {
+    path: abs,
+    page: Math.floor((args.startLine ?? 0) / 50),
+  }
+  // v0.24.2：文件级读取预算——同文件换 startLine 分页反复读同样拦截。
+  // 实测（第三次重跑）：模型改用 startLine 分页变体把同一小文件读了 15+ 次，
+  // 页级签名（path+page）随页变化永不命中。文件级预算按 path 累计，
+  // 第 4 次警告、第 6 次起拦截，编辑后由 invalidateReadsOf 重置。
+  const fileSig = { path: abs }
+  const pageVerdict = checkRepeatRead(ctx, 'file-reader', sig)
+  const fileVerdict = checkRepeatRead(ctx, 'file-reader', fileSig, {
+    warnThreshold: 4,
+    blockThreshold: 6,
   })
+  const verdict =
+    pageVerdict.action === 'block' || fileVerdict.action === 'block'
+      ? pageVerdict.action === 'block' ? pageVerdict : fileVerdict
+      : pageVerdict.action === 'warn' ? pageVerdict
+      : fileVerdict.action === 'warn' ? fileVerdict
+      : pageVerdict
+  if (verdict.action === 'block') {
+    logger.warn('Tool', `file-reader: 重复读已拦截（${args.path}），返回行动指令`, ctx.taskId)
+    return {
+      path: args.path,
+      content: verdict.observation,
+      lines: 0,
+      size: 0,
+      truncated: false,
+      blocked: true,
+    } as FileReaderResult & { blocked?: boolean }
+  }
+  const repeatHint = verdict.action === 'warn' ? verdict.hint : null
 
   const fs = await import('node:fs/promises')
   const s = await fs.stat(abs)
@@ -92,6 +122,12 @@ export async function fileReader(
     : sliced.join('\n')
 
   logger.info('Tool', `file-reader.read(${args.path}) → ${allLines.length} lines, ${s.size} bytes`, ctx.taskId)
+
+  // v0.24.0：记录内容头，供防重读 block 时回带（页级 + 文件级都记录）
+  if (!s.isDirectory()) {
+    recordRepeatResult(ctx, 'file-reader', sig, content)
+    recordRepeatResult(ctx, 'file-reader', fileSig, content)
+  }
 
   const result: FileReaderResult & { hint?: string } = {
     path: args.path,
