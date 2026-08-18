@@ -17,13 +17,14 @@ import { AutomationsPanel } from './panels/AutomationsPanel'
 import { KbPanel } from './panels/KbPanel'
 import { MemoryPanel } from './panels/MemoryPanel'
 import { AgentsPanel } from './panels/AgentsPanel'
-import { SkillsPanel } from './panels/SkillsPanel'
+import { AbilitiesPanel } from './panels/AbilitiesPanel'
 import { SettingsContent } from './SettingsContent'
 
 /** 统一页面头部元信息：图标 + 标题 + 说明（spec §Requirement: 统一功能页面容器） */
 const MODULE_META: Record<ModulePageId, { title: string; subtitle: string; icon: keyof typeof Icon; shortcut?: string }> = {
   automations: { title: '自动化', subtitle: '定时或手动触发的 Agent 任务', icon: 'Clock', shortcut: '⌘5' },
-  skills:      { title: '技能',   subtitle: 'Skill 列表 · 启用/禁用 · 导入/导出', icon: 'Bolt',  shortcut: '⌘2' },
+  // v0.24.2：能力中心统一收纳技能 + 插件（MCP），page id 沿用 'skills' 仅 title 变更
+  skills:      { title: '能力',   subtitle: '技能 · 插件（MCP Server）统一管理', icon: 'Bolt',  shortcut: '⌘2' },
   agents:      { title: '智能体', subtitle: 'Agent 角色 · 人格 · 默认模型',    icon: 'Bot',   shortcut: '⌘1' },
   kb:          { title: '知识库', subtitle: '文档解析 · 检索注入',              icon: 'Book',  shortcut: '⌘3' },
   memory:      { title: '记忆',   subtitle: 'L1–L4 四层记忆视图',               icon: 'Brain', shortcut: '⌘4' },
@@ -104,10 +105,9 @@ function ModuleHeader({
 
 /* ============================================================
  * ModuleBody — 按 page 路由到对应 panel / SettingsContent
- * 智能体与技能拆分为独立面板（fix-workspace-task-automation-memory Task 3）：
+ * v0.24.2：
  *   - 'agents'  → AgentsPanel（智能体列表 + 创建/编辑 + AgentEditor 弹窗挂载）
- *   - 'skills'  → SkillsPanel（技能列表 + 启用/禁用 + 编辑/导出/删除）
- * 市场 tab 不再作为两者内部默认 Tab（市场入口暂不在本轮范围）。
+ *   - 'skills'  → AbilitiesPanel（能力中心：技能 + 插件 两子 Tab）
  * 设置走 SettingsContent（不再是 SettingsDialog Modal）。
  * ============================================================ */
 function ModuleBody({ page }: { page: ModulePageId }) {
@@ -115,7 +115,9 @@ function ModuleBody({ page }: { page: ModulePageId }) {
     case 'automations':
       return <div className="max-w-[960px] mx-auto p-6"><AutomationsPanel /></div>
     case 'skills':
-      return <div className="max-w-[960px] mx-auto p-6"><SkillsPanel /></div>
+      // v0.24.2：能力中心 — 容器自带「技能」「插件」两个子 Tab，
+      // 外层 p-6 让 Tab 切换条与原有 SkillPanel 顶部对齐。
+      return <div className="max-w-[960px] mx-auto p-6"><AbilitiesPanel /></div>
     case 'agents':
       // AgentsPanel 内置 AgentEditor 弹窗生命周期（agent + open 状态）
       return <div className="max-w-[960px] mx-auto p-6"><AgentsPanel /></div>

@@ -153,6 +153,12 @@ export async function connectMcp(serverId: string): Promise<McpTool[]> {
       void heartbeatOnce(serverId)
     }, HEARTBEAT_INTERVAL_MS)
 
+    // v0.24.2.1：连接成功 → 失效 skill 缓存，下一次 listSkills 会重新注入 MCP tools
+    try {
+      const { invalidateSkillCache } = await import('../agent/registry.js')
+      invalidateSkillCache()
+    } catch { /* ignore — cache 失效失败不影响 MCP 连接 */ }
+
     return tools
   } catch (err) {
     entry.status = 'error'
@@ -193,6 +199,11 @@ async function disconnectMcpInternal(serverId: string, clearStatus: boolean): Pr
   if (clearStatus) {
     logger.info('System', `[mcp:${serverId}] disconnected`)
   }
+  // v0.24.2.1：断开连接 → 失效 skill 缓存，让 listSkills 下次不再注入已断开的 MCP tool
+  try {
+    const { invalidateSkillCache } = await import('../agent/registry.js')
+    invalidateSkillCache()
+  } catch { /* ignore */ }
 }
 
 /** 断开全部连接（app 退出时调用） */

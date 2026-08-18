@@ -25,7 +25,7 @@ import {
   type ToolPipelineContext,
   type PreExecuteOutcome,
 } from './tool-pipeline.js'
-import type { Agent, Skill } from '@shared/types/agent'
+import type { Agent, Skill, McpServer } from '@shared/types/agent'
 import type { Task } from '@shared/types/task'
 import type { LlmTool } from '../llm/adapter.js'
 import type { ToolConfirmRequest } from '@shared/types/ipc'
@@ -194,6 +194,8 @@ const skillCacheByWorkspace = new Map<string, Skill[]>()
  * v0.6.0：从文件夹存储读取（{arkworkDir}/skills/{id}/skill.json），
  * 首次启动若不存在则迁移旧 skills.json，再不济返回 builtin。
  * v0.19.0 M5：改为 discoverSkills 分层扫描；渐进式披露保持不变（仅读 skill.json，不读 SKILL.md）。
+ * v0.24.2.1：合并已连接 MCP server 的 tools 作为 source='mcp' 的运行时 Skill
+ *   （MCP 连接断开 / 工具下架时自动从 Agent 工具集移除，无需失效缓存兜底）。
  */
 export async function listSkills(): Promise<Skill[]> {
   const workspaceDir = getWorkspaceDir()
@@ -206,6 +208,17 @@ export async function listSkills(): Promise<Skill[]> {
   }
   // 2. 分层发现（project / user / bundled 合并 + 遮蔽）
   const skills = await discoverSkills(workspaceDir)
+  // 3. v0.24.2.1：注入已连接 MCP server 的 tools 作为 source='mcp' 运行时 Skill。
+  //    走动态导入避免 registry ↔ mcp/client 循环依赖（client.ts 当前不依赖 registry，
+  //    但保持单向约定）。disconnected / error / connecting 的 server 不注入。
+  try {
+    const { listMcpServers } = await import('../mcp/client.js')
+    const mcpServers = await listMcpServers()
+    skills.push(...mcpServersToSkills(mcpServers))
+  } catch (err) {
+    // mcp 模块不可用（未启用 / 加载失败）不阻塞主路径
+    logger.warn('Tool', `listSkills: mcp injection skipped: ${(err as Error).message}`)
+  }
   skillCacheByWorkspace.set(workspaceDir, skills)
   return skills
 }
@@ -213,6 +226,35 @@ export async function listSkills(): Promise<Skill[]> {
 export async function getSkill(id: string): Promise<Skill | null> {
   const skills = await listSkills()
   return skills.find((s) => s.id === id) ?? null
+}
+
+/**
+ * v0.24.2.1：把已 connected 的 MCP server 列表转为 source='mcp' 的 Skill 列表，
+ * 仅作纯函数供 listSkills() 与测试复用。
+ * - 仅 status==='connected' 的 server 注入；disconnected / connecting / error 跳过
+ * - id 格式：M-{namespace}.{toolName}（与 mcp-servers.ts 的 namespace 命名对齐）
+ * - layer='runtime' 标记为运行时注入，不参与文件夹持久化
+ */
+export function mcpServersToSkills(servers: McpServer[]): Skill[] {
+  const out: Skill[] = []
+  for (const s of servers) {
+    if (s.status !== 'connected') continue
+    for (const t of s.tools) {
+      out.push({
+        id: `M-${s.namespace}.${t.name}`,
+        name: t.name,
+        description: t.description ?? '',
+        namespace: s.namespace,
+        source: 'mcp',
+        mcpRef: { serverId: s.id, toolName: t.name },
+        inputSchema: t.inputSchema ?? { type: 'object', properties: {} },
+        enabled: s.enabled,
+        needsConfirmation: t.needsConfirmation ?? false,
+        layer: 'runtime',
+      })
+    }
+  }
+  return out
 }
 
 /**

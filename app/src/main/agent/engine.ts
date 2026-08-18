@@ -3115,7 +3115,22 @@ export function reconcileToolCalls(messages: LlmMessage[]): LlmMessage[] {
 async function assembleTools(agent: Agent, task: Task): Promise<LlmTool[] | undefined> {
   const skills = await listSkills()
   // v0.6.0（F1）：合并 agent 默认 skills + task 会话级 skills，去重，过滤已禁用
-  const mergedIds = [...new Set([...agent.defaultSkillIds, ...(task.skillIds || [])])]
+  // v0.24.2.1：补上 MCP — agent.defaultMcpIds 与 task.mcpIds 内的 server 对应的全部
+  //   source='mcp' Skill 一并纳入工具集（与 automations.ts:204 的合并方式对齐）。
+  const skillIdSet = new Set<string>([
+    ...agent.defaultSkillIds,
+    ...(task.skillIds || []),
+  ])
+  const mcpServerIdSet = new Set<string>([
+    ...(agent.defaultMcpIds || []),
+    ...(task.mcpIds || []),
+  ])
+  for (const s of skills) {
+    if (s.source === 'mcp' && s.mcpRef && mcpServerIdSet.has(s.mcpRef.serverId)) {
+      skillIdSet.add(s.id)
+    }
+  }
+  const mergedIds = [...skillIdSet]
   const available = skills.filter(
     (s) => mergedIds.includes(s.id) && s.enabled !== false,
   )

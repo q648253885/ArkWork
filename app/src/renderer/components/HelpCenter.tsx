@@ -155,7 +155,7 @@ const SECTIONS: HelpSection[] = [
       '从 zip 导入时整个 zip 内容（所有 .md / 子目录文件）都会被解压到 Skill 文件夹。',
     ],
     actions: [
-      { kind: 'module', page: 'skills', label: '打开技能页面' },
+      { kind: 'module', page: 'skills', label: '打开能力中心' },
     ],
   },
   {

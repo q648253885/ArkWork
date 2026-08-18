@@ -543,7 +543,8 @@ function MenuRow({
 // 导出供 App.tsx 的 CollapsedSidebar 共用，确保折叠/展开态顺序与文案一致
 export const CAPABILITY_ENTRIES: { page: ModulePage; icon: IconName; label: string; shortcut: string }[] = [
   { page: 'agents',      icon: 'Bot',      label: '智能体', shortcut: '⌘1' },
-  { page: 'skills',      icon: 'Bolt',     label: '技能',   shortcut: '⌘2' },
+  // v0.24.2：能力中心统一收纳技能 + 插件，label 与 LeftNav / ModulePage 对齐
+  { page: 'skills',      icon: 'Bolt',     label: '能力',   shortcut: '⌘2' },
   { page: 'kb',          icon: 'Book',     label: '知识',   shortcut: '⌘3' },
   { page: 'memory',      icon: 'Brain',    label: '记忆',   shortcut: '⌘4' },
   { page: 'automations', icon: 'Clock',    label: '自动化', shortcut: '⌘5' },

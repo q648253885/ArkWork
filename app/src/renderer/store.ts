@@ -1703,11 +1703,16 @@ export const useStore = create<AppState>((set, get) => ({
         return null
       }
       const skillIds = get().selectedSkillIds
+      // v0.24.2.1：透传当前选中的 MCP server 列表，让 engine.assembleTools 把
+      //   对应 server 的所有 tool 纳入 LLM 工具集（之前仅 selectedSkillIds，
+      //   MCP tools 永远到不了 Agent 视野）。
+      const mcpIds = get().selectedMcpIds
       const task = await ark.task.create({
         title: input.title,
         text: input.text,
         agentId,
         skillIds,
+        mcpIds,
         modelId,
       })
       await get().refreshTasks()
@@ -1753,6 +1758,15 @@ export const useStore = create<AppState>((set, get) => ({
           const merged = [...new Set([...(existing.skillIds ?? []), ...pickedSkills])]
           if (merged.length !== (existing.skillIds ?? []).length) {
             await ark.task.update({ id: taskId, skillIds: merged })
+          }
+        }
+        // v0.24.2.1：镜像 skillIds 处理 — 续聊也合并 mcpIds，避免「上一轮没勾选
+        //   MCP → 本轮续聊后 Agent 仍看不见插件工具」。
+        const pickedMcps = get().selectedMcpIds
+        if (pickedMcps.length > 0) {
+          const mergedMcps = [...new Set([...(existing.mcpIds ?? []), ...pickedMcps])]
+          if (mergedMcps.length !== (existing.mcpIds ?? []).length) {
+            await ark.task.update({ id: taskId, mcpIds: mergedMcps })
           }
         }
         await ark.task.appendMessage(taskId, text)

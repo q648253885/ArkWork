@@ -98,21 +98,23 @@ function ModuleRow({
   const automations = useStore((s) => s.automations)
   const knowledgeBases = useStore((s) => s.knowledgeBases)
   const skills = useStore((s) => s.skills)
+  const mcps = useStore((s) => s.mcps)
   const memory = useStore((s) => s.memory)
   const IconComp = Icon[icon]
   const active = modulePage === page
 
-  // 徽标（沿用 v0.8.0 口径的简化版）：自动化=启用数，能力=已装数，知识库=条目数，记忆=生效上下文数
+  // 徽标（沿用 v0.8.0 口径的简化版）：自动化=启用数，能力=技能+插件，知识库=条目数，记忆=生效上下文数
   let badge = 0
   if (page === 'automations') badge = automations.filter((a) => a.status === 'active').length
-  else if (page === 'skills') badge = skills.length
+  else if (page === 'skills') badge = skills.length + mcps.length
   else if (page === 'kb') badge = knowledgeBases.length
   else if (page === 'memory') badge = memory.filter((m) => m.enabled && !m.archivedAt).length
 
   // 模块页 L2 描述（v0.12.0 Tooltip 增强）
   const descriptions: Record<ModulePage, string> = {
     automations: '定时任务 / 触发器配置',
-    skills: '内置 + 市场安装的工具能力',
+    // v0.24.2：能力中心统一收纳技能 + MCP 插件
+    skills: '技能 + 插件（MCP），统一管理',
     agents: '智能体 CRUD，含系统提示词',
     kb: '本地文件切块索引 + 全文检索',
     memory: 'L1/L2/L3/L4 四层记忆查看',
