@@ -17,6 +17,17 @@ import { callLlmWithRetry, withLlmTimeout, isContextOverflowError } from './llm-
 import { invokeSkill, skillToLlmTool, skillToolName, listSkills, getSkill, type SkillContext } from './registry.js'
 // v0.19.0 M1：系统提示词组装器（收敛 parts.push 硬拼逻辑）
 import { buildSystemSections, renderSystemPrompt, buildPersonalitySegment } from './prompt-assembly.js'
+// v0.25.0 F1：提示词契约层（契约注册 + always-on 技能段 + 契约装配 + 门禁状态机）
+import { collectAlwaysOnSections, assembleSystemPrompt } from './prompt/sections.js'
+import {
+  collectGateSpecs,
+  initGateStates,
+  checkGateBeforeAdvance,
+  confirmGate,
+  findGateForStageDoc,
+  isDocDrivenAgent,
+} from './prompt/gates.js'
+import type { GateSpec } from '@shared/types/agent'
 // v0.19.0 M2：唯一真源会话事件日志（Reason/Act/tool 事件落盘 session.jsonl）
 import { appendSessionEvent } from './session-log.js'
 // v0.19.0 M3：轮次/步骤收件箱 + 停止候选钩子（turn/step 语义）
@@ -57,6 +68,7 @@ import { applyPending, getCuratedSnapshot } from '../memory/l3-curated.js'
 import { archiveTaskL1, initArchiveIndex } from '../memory/l3-archive.js'
 import { getProfile, synthesizeFromTaskL1 } from '../memory/l4-profile.js'
 import { evaluateDistillTrigger, autoPromoteDistill, getDistillMetrics } from '../memory/distill.js'
+import { runForSkillForge } from '../memory/skill-forge.js'
 import { compressMemory } from '../ipc/memory.js'
 // v0.15.0：统一压缩路径——自动压缩与 Turn Phase-0 均走两阶段 compact()（联动 L3b + 压缩后蒸馏）
 import { compactTask } from '../memory/compaction.js'
@@ -245,66 +257,90 @@ export async function runReActLoop(
       logger.warn('Agent', `archive index init failed: ${(e as Error).message}`, task.id),
     )
 
-    // v0.16.7+：默认内置 @coder / @general 等系统提示词带 react-core-skills 摘要，
-    // 但 SKILL.md 全文只在 invokeSkill 时按需加载。问题是 Agent 经常"知道要调用"却
-    // 不立即调用，导致 SKILL.md 全文从未被注入——本轮准则失效。
-    // 修复：run 入口检测 agent.skillIds 是否含 react-core-skills，有则提前把 instructionMd
-    // 全文加载到 preloadedCoreSkillHint——既注入首轮 Reason 系统提示，也注入计划生成，
-    // 保证「计划清单」与文档驱动开发阶段严格对齐（v0.17.x 修复清单与执行内容不匹配）。
-    let preloadedCoreSkillHint: string | undefined
-    // v0.17.5：docDriven 标记 —— 供 generatePlan 选择文档驱动 prompt 与阶段写入守卫。
-    // 每次 run 都检测（不只在首轮），确保续聊时写入守卫持续生效。
-    // 通过 getSkill() 查找技能对象，检查名称（不只看 ID），解决中文名技能匹配失败问题。
-    let docDriven = false
-    let coreSkillId: string | undefined
-    try {
-      const skillIds = (task.skillIds ?? agent.defaultSkillIds ?? []) as string[]
-      // 先按 ID 快速匹配
-      coreSkillId = skillIds.find((id) =>
-        /react.core.skills|文档驱动|doc.?driven|structured.?dev/i.test(id)
+    // v0.25.0 F1：常驻技能（always-on）+ 门禁状态机初始化。
+    // 替代旧「preloadedCoreSkillHint 预加载 + docDriven 正则特判」：
+    //  - 指令体经契约段 skill:{id} 注入 system 的 agent-static 段（任务全程生效，
+    //    同一 agent 逐字节稳定 → 命中前缀缓存），不再走单轮 pendingSystemHint；
+    //  - docDriven 改由「agent.alwaysOnSkillIds 技能的 planPrompt/名称」通用机制判定；
+    //  - frontmatter gates 收集进 task.gateStates（持久化，todo_update 拦截 + ask_user 写回）。
+    const alwaysOnContracts = await collectAlwaysOnSections(agent)
+    const alwaysOnSkillIdSet = new Set(agent.alwaysOnSkillIds ?? [])
+    const docDriven = isDocDrivenAgent(agent, []) || isCoreSkillsEnabled(task, agent)
+    if (alwaysOnContracts.length > 0) {
+      logger.info(
+        'Agent',
+        `always-on skills injected: ${alwaysOnContracts.map((c) => c.id).join(', ')}`,
+        task.id,
       )
-      // ID 匹配失败时，逐个 getSkill 检查名称（中文名技能的 ID 会被剥离中文）
-      if (!coreSkillId) {
-        for (const sid of skillIds) {
-          try {
-            const s = await getSkill(sid)
-            if (s && /文档驱动|react.core.skills|doc.?driven|structured.?dev/i.test(s.name)) {
-              coreSkillId = sid
-              break
-            }
-          } catch { /* ignore */ }
-        }
-      }
-      docDriven = !!coreSkillId
-    } catch (err) {
-      logger.warn('Tool', `docDriven detect skipped: ${(err as Error).message}`, task.id)
     }
 
-    // v0.17.5：仅首轮加载完整技能指令（preloadedCoreSkillHint 供 generatePlan 注入）
-    if (startIter === 0 && coreSkillId) {
+    // 门禁初始化：always-on 技能 + 任务显式技能的 frontmatter gates → task.gateStates。
+    // 续聊 run 重新收集（幂等合并：已存在的 gate 保留状态，仅刷新声明快照）。
+    try {
+      const gateSourceSkills = await Promise.all(
+        [...(agent.alwaysOnSkillIds ?? []), ...(task.skillIds ?? [])].map((sid) =>
+          getSkill(sid).catch(() => null),
+        ),
+      )
+      const specs = await collectGateSpecs(gateSourceSkills.filter((s): s is NonNullable<typeof s> => !!s))
+      if (specs.length > 0) {
+        initGateStates(task, specs)
+        logger.info('Agent', `gates initialized: ${specs.map((g) => g.id).join(', ')}`, task.id)
+      }
+    } catch (err) {
+      logger.warn('Agent', `gate init skipped: ${(err as Error).message}`, task.id)
+    }
+
+    // v0.25.0 F1：消费 pendingGateBlock —— 上一次 run 被 todo_update 门禁拦截后，
+    // LLM 已按指令 ask_user 且用户已答复（答复即本轮 run 的最新 user_message）。
+    // 据答复写回 gateStates（含「跳过」语义识别），中断续聊后状态机不丢。
+    if (task.pendingGateBlock) {
+      const gateId = task.pendingGateBlock.gateId
       try {
-        const coreSkill = await getSkill(coreSkillId)
-        if (coreSkill?.instructionMd) {
-          const full = await readFile(coreSkill.instructionMd, 'utf-8')
-          preloadedCoreSkillHint =
-            `## 文档驱动开发准则（自动注入 · ${coreSkill.name}）\n${full}\n\n` +
-            `## 清单与阶段关联（硬约束 · v0.17.4）\n` +
-            `计划清单已按文档驱动开发阶段生成（开源调研 → PRD → 交互文档 → HTML 原型 → 系统设计 → 编码 → 功能测试 → UI 测试 → UX 校验 → 交付打包）。\n` +
-            `HTML 原型是设计文档的一部分（产出 docs/v1.0/prototype/*.html），不是编码步骤。\n` +
-            `在系统设计（03-system-design.md）冻结前，禁止执行任何编码/脚手架操作（初始化项目、搭建 src、写 package.json、实现功能、写测试）。\n` +
-            `每步执行前声明"正在执行计划第 N 步"，完成后继续下一步，禁止跳步。`
-          logger.info(
-            'Tool',
-            `react-core-skills preloaded (${full.length} chars) for task ${task.id}`,
-            task.id,
-          )
-        }
-      } catch (err) {
-        logger.warn(
-          'Tool',
-          `react-core-skills preload skipped: ${(err as Error).message}`,
-          task.id,
+        const latestUser = [...allL1]
+          .reverse()
+          .find((m) => m.kind === 'user_message' && m.content?.trim())
+        const reply = (latestUser?.content ?? '').trim()
+        const wantsSkip = /跳过|无需确认|不用确认|跳过该门禁|skip/i.test(reply)
+        confirmGate(
+          task,
+          gateId,
+          reply ? `用户答复：${reply.slice(0, 80)}` : '用户已答复门禁提问',
+          wantsSkip ? 'skipped' : 'passed',
         )
+        logger.info('Agent', `gate ${gateId} confirmed (${wantsSkip ? 'skipped' : 'passed'})`, task.id)
+      } catch (err) {
+        logger.warn('Agent', `gate confirm failed: ${(err as Error).message}`, task.id)
+      }
+      task.pendingGateBlock = undefined
+      await updateTask(task.id, {
+        gateStates: task.gateStates,
+        pendingGateBlock: undefined,
+      })
+    }
+
+    // v0.25.0 F1：常驻技能指令体供 generatePlan 注入（计划清单与阶段严格对齐，
+    // 沿用 v0.17.x「清单与阶段关联」硬约束文本）。
+    let alwaysOnPlanHint: string | undefined
+    if (alwaysOnContracts.length > 0) {
+      const texts = await Promise.all(
+        alwaysOnContracts.map(async (c) => {
+          try {
+            return await c.build({ agent, workspaceDir: getWorkspaceDir() })
+          } catch {
+            return null
+          }
+        }),
+      )
+      const joined = texts.filter((t): t is string => !!t && t.trim().length > 0).join('\n\n---\n')
+      if (joined) {
+        alwaysOnPlanHint =
+          `${joined}\n\n---\n` +
+          `## 清单与阶段关联（硬约束 · v0.17.4）\n` +
+          `计划清单已按文档驱动开发阶段生成（开源调研 → PRD → 交互文档 → HTML 原型 → 系统设计 → 编码 → 功能测试 → UI 测试 → UX 校验 → 交付打包）。\n` +
+          `HTML 原型是设计文档的一部分（产出 docs/v1.0/prototype/*.html），不是编码步骤。\n` +
+          `在系统设计（03-system-design.md）冻结前，禁止执行任何编码/脚手架操作（初始化项目、搭建 src、写 package.json、实现功能、写测试）。\n` +
+          `每步执行前声明"正在执行计划第 N 步"，完成后继续下一步，禁止跳步。`
       }
     }
 
@@ -330,7 +366,7 @@ export async function runReActLoop(
       const planStartedAt = Date.now()
       let plan: PlanContent | null = null
       try {
-        plan = await generatePlan(task, agent, opts.modelId, signal, preloadedCoreSkillHint, docDriven)
+        plan = await generatePlan(task, agent, opts.modelId, signal, alwaysOnPlanHint, docDriven)
       } catch (err) {
         logger.warn('Agent', `plan generation failed: ${(err as Error).message}`, task.id)
         plan = null
@@ -428,33 +464,36 @@ export async function runReActLoop(
     )
 
     let iteration = startIter
-    // v0.6.0：渐进式披露 — 上一轮 invokeSkill 加载的 instructionMd hint，
-    // 在下一轮 Reason 时合并到 system prompt（仅持续一轮，避免无限累积 token）
-    // v0.17.x：skill 准则已在计划生成前预加载（preloadedCoreSkillHint），
-    // 这里直接复用为 pendingSystemHint，保证首轮 Reason 与计划生成看到同一份准则。
-    let pendingSystemHint: string | undefined = preloadedCoreSkillHint
+    // v0.25.0 F1：pendingSystemHint 仅承载「运行期瞬时提示」（工具预算告警 / 续聊
+    // plan 重评 / 只读停滞提醒），当轮消息尾部注入后清空。
+    // 技能指令体不再走此通道 —— on-demand 技能经 appendL1 kind='skill_instruction'
+    // 持续生效至任务结束（与 plan_status 同管道，复用归档/压缩策略）；
+    // always-on 技能经契约段 skill:{id} 进 system（见 collectAlwaysOnSections）。
+    let pendingSystemHint: string | undefined
 
     // v0.24.1：显式要求技能自动加载 —— 用户说 "Use Skill: X" 后 task.skillIds 会带上该技能，
     // 引擎在首轮 Reason 前自动加载其 SKILL.md 指令并广播一个可见步骤，保证「调用技能且真正使用」，
     // 不再依赖模型自觉 invoke（用户反馈过“调用了 skill 却没实现使用技能”）。
+    // v0.25.0 F1：注入方式改为 L1 skill_instruction（持续生效），always-on 技能已在 system。
     if (startIter === 0) {
       const explicitSkillIds = Array.from(new Set((task.skillIds ?? []).filter((x): x is string => typeof x === 'string')))
       for (const sid of explicitSkillIds) {
         try {
           const s = await getSkill(sid)
           if (!s?.instructionMd) continue
-          if (sid === coreSkillId) {
-            // 文档驱动技能已由 preloadedCoreSkillHint 注入 system —— 只广播可见步骤
+          if (alwaysOnSkillIdSet.has(sid)) {
+            // 常驻技能指令体已进 system agent-static 段 —— 只广播可见步骤
             broadcastSkillAutoLoaded(task, s.name, s.instructionMd)
             continue
           }
           const full = await readFile(s.instructionMd, 'utf-8')
+          const body = full.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim() || full
           const block =
             `## 技能「${s.name}」指令（用户显式要求使用，必须严格遵循执行）\n` +
-            (full.length > 8000 ? full.slice(0, 8000) + `\n\n...（指令超过 8KB，已截断，完整内容见技能文件 ${s.instructionMd}）` : full)
-          pendingSystemHint = pendingSystemHint ? `${pendingSystemHint}\n\n---\n${block}` : block
+            (body.length > 8000 ? body.slice(0, 8000) + `\n\n...（指令超过 8KB，已截断，完整内容见技能文件 ${s.instructionMd}）` : body)
+          await injectSkillInstruction(task, { id: s.id, name: s.name }, block, 0)
           broadcastSkillAutoLoaded(task, s.name, s.instructionMd)
-          logger.info('Tool', `skill auto-loaded: ${s.id} (${full.length} chars)`, task.id)
+          logger.info('Tool', `skill auto-loaded: ${s.id} (${body.length} chars)`, task.id)
         } catch (err) {
           logger.warn('Tool', `skill auto-load skipped: ${(err as Error).message}`, task.id)
         }
@@ -492,7 +531,7 @@ export async function runReActLoop(
             agent,
             opts.modelId,
             signal,
-            preloadedCoreSkillHint,
+            alwaysOnPlanHint,
             docDriven,
           )
         } catch (err) {
@@ -629,15 +668,20 @@ export async function runReActLoop(
       // v0.8.0：注入 L3a 策展记忆 + L4a 用户画像（memoryInjection 在 run 启动时构建）
       // 必须先于 adapter.complete 构建 systemPrompt，否则下一轮 Reason 会 TDZ 报错。
       // v0.19.0 M1：由 prompt-assembly 组装器统一渲染
-      // v0.20.0：仅保留稳定段，动态 skill / plan 进度移出 system
-      const systemPrompt = renderSystemPrompt(
-        buildSystemSections({
-          agent,
-          workspaceDir: getWorkspaceDir(),
-          memoryInjection,
-          planItems: task.planItems,
-        }),
-      )
+      // v0.25.0 F1：按契约装配 system prompt（替代 buildSystemSections 的散段逻辑）。
+      // alwaysOnContracts 已在 run 入口加载并完成预算/合法性校验（required 缺失启动期 throw）；
+      // 同 agent 逐字节稳定 → 命中前缀缓存。pendingSystemHint 仅承载运行期瞬时提示。
+      const systemPrompt = (
+        await assembleSystemPrompt(
+          {
+            agent,
+            workspaceDir: getWorkspaceDir(),
+            memoryInjection,
+            planItems: task.planItems,
+          },
+          alwaysOnContracts,
+        )
+      ).text
       pendingSystemHint = undefined  // 用完即清，下一轮若不调用 skill 则不再注入
 
       const adapter = await getAdapter(opts.modelId)
@@ -807,6 +851,8 @@ export async function runReActLoop(
         iteration,
         type: 'reason',
         thought: response.thought,
+        // v0.25.0 F4：阶段叙述（结论 + 下一步），与 thought 分离；缺省 → UI 回落旧版 hint
+        say: response.say,
         action: response.action ?? undefined,
         startedAt,
         durationMs,
@@ -822,6 +868,7 @@ export async function runReActLoop(
         type: 'reason_end',
         iteration,
         thought: response.thought,
+        say: response.say,
         action: response.action,
         tokensIn: response.tokensIn,
         tokensOut: response.tokensOut,
@@ -2270,6 +2317,46 @@ function isPhaseHeader(text: string): boolean {
   return !actionVerbs.test(afterPrefix)
 }
 
+/**
+ * v0.25.0 F1：on-demand 技能指令体注入 L1 skill_instruction（持续生效至任务结束）。
+ * 替代旧 `pendingSystemHint` 单轮机制 —— 同一技能按 skillId 去重取最新一条，
+ * 装配阶段 assembleMessages 把 skill_instruction 作为独立 user 消息注入（与 plan_status 同管道），
+ * 复用既有归档/压缩策略（压缩时与 system_prompt 同等保留）。
+ * 错误场景：appendL1 失败 → 抛错（让 invokeSkill 上层走软失败通道）。
+ */
+async function injectSkillInstruction(
+  task: Task,
+  skill: { id: string; name: string },
+  text: string,
+  iteration: number,
+): Promise<void> {
+  if (!text || !text.trim()) return
+  // 按 skillId 去重：先 archive 旧 skill_instruction（同 skillId），再 appendL1 写入最新一条。
+  try {
+    const { archiveL1 } = await import('../memory/l1-working.js')
+    const { listEnabledL1 } = await import('../memory/l1-working.js')
+    const existing = await listEnabledL1(task.id)
+    const oldIds = existing
+      .filter((m) => m.kind === 'skill_instruction' && (m.meta ?? '').includes(`"skillId":"${skill.id}"`))
+      .map((m) => m.id)
+    if (oldIds.length > 0) {
+      await archiveL1(task.id, oldIds[0]) // archiveL1 接受单 id；其余 batch archive
+      for (let i = 1; i < oldIds.length; i++) await archiveL1(task.id, oldIds[i])
+    }
+  } catch (err) {
+    logger.warn('Agent', `injectSkillInstruction dedupe skipped: ${(err as Error).message}`, task.id)
+  }
+  await appendL1({
+    taskId: task.id,
+    role: 'assistant',
+    kind: 'skill_instruction',
+    iteration,
+    content: text,
+    meta: JSON.stringify({ skillId: skill.id, skillName: skill.name }),
+  })
+  logger.info('Tool', `skill_instruction injected: ${skill.id} (${text.length} chars)`, task.id)
+}
+
 /** v0.24.1：广播「技能已自动加载」可见步骤（显式 Use Skill: X 时，首轮 Reason 前调用）。 */
 function broadcastSkillAutoLoaded(task: Task, skillName: string, instructionMd: string): void {
   const now = Date.now()
@@ -2481,6 +2568,27 @@ async function executeAct(
     task: ctx.task,
     // Task 8：会话级 KB 开关（task.kbEnabled 默认 undefined = 视为开启）
     kbSessionEnabled: settings.kbEnabled !== false && ctx.task?.kbEnabled !== false,
+    // v0.25.0 F1：技能指令体生命周期回调（三态）
+    //  - always-on：指令体已在 system agent-static 段（collectAlwaysOnSections），跳过注入
+    //  - on-demand：appendL1 kind='skill_instruction'，持续生效至任务结束
+    //  - hint-only：不注入指令体（仅 description 进 tools 列表）
+    onInstructionLoaded: async (payload) => {
+      if (payload.instructionMode === 'hint-only') {
+        logger.debug('Tool', `skill '${payload.skillId}' hint-only — skip instruction injection`, placeholder.taskId)
+        return
+      }
+      if (payload.instructionMode === 'always-on') {
+        logger.debug('Tool', `skill '${payload.skillId}' always-on — instruction already in system`, placeholder.taskId)
+        return
+      }
+      // on-demand：写 L1 skill_instruction（持久化，与 plan_status 同管道）
+      await injectSkillInstruction(
+        ctx.task,
+        { id: payload.skillId, name: payload.skillName },
+        payload.text,
+        ctx.iteration ?? 0,
+      )
+    },
   }
   let result: unknown
   let resultSummary = ''
@@ -2584,6 +2692,34 @@ async function executeAct(
         return {
           completedStep: { ...placeholder, result: { error: errMsg }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg, softFail: true },
           result: { error: errMsg }, resultSummary: errMsg, durationMs, ok: false, errorMessage: errMsg,
+        }
+      }
+
+      // v0.25.0 F1：门禁拦截 —— 标 done 时若存在与该条目关联的 pending gate，
+      // 拦截返回 softFail + 行动指令（不 throw）。LLM 据此调 ask_user 完成确认，
+      // 用户答复后下一轮 run 由 pendingGateBlock 消费写回 gateStates。
+      // 失败/取消/跳过不拦截（仅「done」代表阶段真正完成 → 才需要门禁通过）。
+      if (status === 'done') {
+        const itemText = planItems[itemIndex]?.text ?? String(args.item_index ?? '')
+        const gateBlock = checkGateBeforeAdvance(ctx.task, itemText)
+        if (gateBlock) {
+          logger.warn(
+            'Agent',
+            `todo_update blocked by gate ${gateBlock.gateId} on item=${itemIndex}`,
+            placeholder.taskId,
+          )
+          // 写 pendingGateBlock 供下次 run 入口消费
+          ctx.task.pendingGateBlock = { gateId: gateBlock.gateId }
+          await updateTask(placeholder.taskId, { pendingGateBlock: ctx.task.pendingGateBlock })
+          const errMsg = gateBlock.instruction
+          return {
+            completedStep: { ...placeholder, result: { error: errMsg, gateId: gateBlock.gateId }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg, softFail: true },
+            result: { error: errMsg, gateId: gateBlock.gateId },
+            resultSummary: errMsg,
+            durationMs,
+            ok: false,
+            errorMessage: errMsg,
+          }
         }
       }
 
@@ -2940,6 +3076,14 @@ async function assembleMessages(
       messages.push({
         role: 'user',
         content: `[清单状态 — 引擎独立判断（不是 LLM 自报），你必须以此为准]\n${m.content}`,
+      })
+    } else if (m.role === 'assistant' && m.kind === 'skill_instruction') {
+      // v0.25.0 F1：on-demand 技能指令体（持续生效至任务结束，与 plan_status 同管道）。
+      // 注入为独立 user 消息，让 LLM 在后续 Reason 轮次能持续看到准则型指令
+      // （之前 pendingSystemHint 一轮清空 → 门禁遗漏；现以 L1 持久化 + 装载时最新一条去重）。
+      messages.push({
+        role: 'user',
+        content: `[技能指令 — 已加载，持续生效至任务结束]\n${m.content}`,
       })
     } else if (m.role === 'assistant' && m.kind === 'reasoning') {
       // polish4 §A3.1：从 m.meta 解析 assistant 该轮的 actions（含 actionId + toolCallId）。
@@ -3334,18 +3478,37 @@ async function runDoneMemoryHooks(
     const ctx = buildDistillContext(task.id, l1Items)
     const metrics = await getDistillMetrics(task.id, l1Items)
     const evalResult = await evaluateDistillTrigger({ ...ctx, ...metrics })
-    if (!evalResult.trigger || !evalResult.category) return
-
-    const message = await autoPromoteDistill({ ...ctx, ...metrics }, evalResult.category, modelId)
-    await emitEvent(task.id, {
-      type: 'distill_completed',
-      iteration: 0,
-      taskId: task.id,
-      category: evalResult.category,
-      message,
-    })
+    if (evalResult.trigger && evalResult.category) {
+      const message = await autoPromoteDistill({ ...ctx, ...metrics }, evalResult.category, modelId)
+      await emitEvent(task.id, {
+        type: 'distill_completed',
+        iteration: 0,
+        taskId: task.id,
+        category: evalResult.category,
+        message,
+      })
+    }
   } catch (err) {
     logger.warn('Memory', `distill evaluation failed (silent): ${(err as Error).message}`, task.id)
+  }
+
+  // 4. v0.25.0 F3：技能创建严格管线（skill-forge 五阶段）—— L2 步骤产物为唯一合法候选
+  try {
+    const forgeResult = await runForSkillForge(task.id, modelId)
+    if (forgeResult.skill) {
+      await emitEvent(task.id, {
+        type: 'distill_completed',
+        iteration: 0,
+        taskId: task.id,
+        category: 'skill',
+        message: forgeResult.reason,
+      })
+    } else if (forgeResult.stage === 'value-judge' || forgeResult.stage === 'integrity') {
+      // 评估未通过 / 校验未过：发轻量事件给 UI（任务完成提示中说明）
+      logger.info('Memory', `skill-forge ${forgeResult.stage} not passed: ${forgeResult.reason}`, task.id)
+    }
+  } catch (err) {
+    logger.warn('Memory', `skill-forge failed (silent): ${(err as Error).message}`, task.id)
   }
 }
 

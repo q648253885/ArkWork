@@ -12,6 +12,7 @@ import type {
   LlmMessage,
   LlmTool,
 } from './adapter.js'
+import { extractSayMarker } from './say-marker.js'
 import type { ReActAction } from '@shared/types/react'
 
 export interface AnthropicOptions {

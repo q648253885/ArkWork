@@ -38,6 +38,12 @@ export interface Agent {
   styleGuide?: string           // "要点式，先结论，代码注释英文"
   defaultSkillIds: string[]     // 固有能力（运行时强制启用，不可在任务内移除）
   defaultMcpIds: string[]
+  /**
+   * v0.25.0 F1：常驻能力清单。run 启动时把对应技能的 SKILL.md 指令体
+   * 注入 system 的 agent-static 段（契约段 id = skill:{skillId}），
+   * 任务全程生效（如 @coder 内化文档驱动开发）。缺省 [] 行为不变。
+   */
+  alwaysOnSkillIds?: string[]
   defaultModelId: string
   defaultKbIds: string[]
   defaultConfig: TaskConfig
@@ -153,6 +159,51 @@ export interface Skill {
    * 用于按 agent / workspace 过滤注入到 LLM 的工具集。
    */
   scopes?: string[]
+  /**
+   * v0.25.0 F1：指令体生命周期（从 SKILL.md frontmatter 解析，缺省 on-demand）。
+   * - always-on：配合 agent.alwaysOnSkillIds，指令体进 system agent-static 段（任务全程生效）
+   * - on-demand：invoke 时以 L1 standalone-message（kind='skill_instruction'）注入，
+   *   持续生效至任务结束（不再是单轮 hint）
+   * - hint-only：仅 description 进 tools 列表，不注入指令体
+   */
+  instructionMode?: 'always-on' | 'on-demand' | 'hint-only'
+  /**
+   * v0.25.0 F1：门禁声明（从 SKILL.md frontmatter 解析）。引擎据此持久化
+   * task.gateStates 状态机；未确认的门禁阻塞下游阶段（todo_update 标 done 时拦截）。
+   */
+  gates?: GateSpec[]
+  /**
+   * v0.25.0 F1：计划生成覆写声明（skill manifest 级通用机制）。
+   * 如 'doc-driven' → generatePlan 使用文档驱动计划 prompt（替代旧 docDriven 正则特判）。
+   */
+  planPrompt?: string
+}
+
+/**
+ * v0.25.0 F1：门禁契约（SKILL.md frontmatter 声明）。
+ * after：触发点描述（如「产出 01-prd.md」，与 todo 条目文本做包含匹配）；
+ * ask：门禁确认时要向用户提出的问题。
+ */
+export interface GateSpec {
+  id: string
+  after: string
+  ask: string
+}
+
+/**
+ * v0.25.0 F1：门禁运行时状态（持久化在 task.gateStates，中断续聊可恢复）。
+ * after/ask 为 GateSpec 快照——续聊 run 重新收集技能时 specs 可能不重复加载，
+ * 状态机自带声明即可独立完成「todo_update 拦截 → ask_user 确认」闭环。
+ */
+export interface GateState {
+  gateId: string
+  status: 'pending' | 'passed' | 'skipped'
+  confirmedAt?: number
+  note?: string
+  /** 触发点描述快照（来自 GateSpec.after，如「产出 01-prd.md」） */
+  after?: string
+  /** 门禁问题快照（来自 GateSpec.ask） */
+  ask?: string
 }
 
 export interface McpServer {

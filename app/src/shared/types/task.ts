@@ -3,6 +3,8 @@
  * 设计文档 §10.2
  * ============================================================ */
 
+import type { GateState } from './agent.js'
+
 export type TaskStatus =
   | 'pending'
   | 'running'
@@ -119,6 +121,16 @@ export interface Task {
   automationId?: string
   /** v0.14.0 Task 1：任务关联的 PlanItem 六态列表（v0.13.1 无此字段，可选） */
   planItems?: PlanItem[]
+  /**
+   * v0.25.0 F1：门禁状态机（run 启动时从 always-on / 已激活技能的 frontmatter
+   * gates 初始化；ask_user 确认后写回）。持久化于 tasks.json，续聊可恢复。
+   */
+  gateStates?: GateState[]
+  /**
+   * v0.25.0 F1：被门禁拦截的待确认项（todo_update 标 done 被 gate 阻塞时写入；
+   * 下一次 ask_user 完成后消费并清空）。
+   */
+  pendingGateBlock?: { gateId: string }
   /** 任务失败时的错误信息摘要 */
   errorMessage?: string
 }

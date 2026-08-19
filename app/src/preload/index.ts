@@ -249,6 +249,16 @@ const ark: ArkApi = {
     loadDone: (requestId, error) => ipcRenderer.invoke('browser:load-done', { requestId, error }),
     resolve: (input) => ipcRenderer.invoke('browser:resolve', input),
   },
+  // v0.25.0 F2：WebContentsView 多 Tab 路由（view-manager）
+  browserTabs: {
+    create: (args) => ipcRenderer.invoke('browser:tabs:create', args ?? {}),
+    close: (args) => ipcRenderer.invoke('browser:tabs:close', args),
+    activate: (args) => ipcRenderer.invoke('browser:tabs:activate', args),
+    navigate: (args) => ipcRenderer.invoke('browser:tabs:navigate', args),
+    setBounds: (args) => ipcRenderer.invoke('browser:tabs:set-bounds', args),
+    list: () => ipcRenderer.invoke('browser:tabs:list'),
+    setAgentDriven: (args) => ipcRenderer.invoke('browser:tabs:set-agent-driven', args),
+  },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (patch) => ipcRenderer.invoke('settings:set', patch),

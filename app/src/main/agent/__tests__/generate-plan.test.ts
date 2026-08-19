@@ -354,13 +354,13 @@ test('v0.9.1: READONLY_TOOLS 存在且含 file-reader', () => {
   )
 })
 
-test('v0.19.0: seed.ts 使用 syncBuiltinAgentsToLatest 统一同步内置 Agent 到 0.24.1', () => {
+test('v0.19.0: seed.ts 使用 syncBuiltinAgentsToLatest 统一同步内置 Agent 到 0.25.0', () => {
   const src = readFileSync(
     fileURLToPath(new URL('../../store/seed.ts', import.meta.url)),
     'utf8',
   )
   assert.match(src, /async\s+function\s+syncBuiltinAgentsToLatest/, 'seed.ts 应定义 syncBuiltinAgentsToLatest')
-  assert.match(src, /version:\s*'0\.24\.1'/, '@default.version 应保持 0.24.1')
+  assert.match(src, /version:\s*'0\.25\.0'/, '@default.version 应保持 0.25.0')
   assert.match(src, /systemSections/, '内置 Agent 应派生 systemSections')
   assert.match(src, /## 1\. 技能优先/, '@default.systemPrompt 应含技能优先段')
   assert.match(src, /## 2\. 工具选择层级/, '@default.systemPrompt 应含工具选择层级段')

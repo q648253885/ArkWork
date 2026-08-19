@@ -1,6 +1,6 @@
 {
   "name": "arkwork",
-  "version": "0.24.3",
+  "version": "0.25.0",
   "description": "Local-first AI Agent workbench — ReAct loop visible, controllable, reusable.",
   "main": "out/main/index.js",
   "author": "ArkWork",
@@ -12,7 +12,7 @@
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test": "tsx --test src/shared/utils/__tests__/plan-noise.test.ts && tsx --test src/main/agent/__tests__/generate-plan.test.ts && tsx --test src/main/agent/__tests__/file-tools.test.ts && tsx --test src/main/agent/__tests__/todo-update-and-phase-header.test.ts && tsx --test src/main/agent/__tests__/v018-plan-item-patch-broadcast.test.ts && tsx --test src/main/agent/__tests__/v018-todo-ui-and-summary.test.ts && tsx --test src/main/agent/__tests__/e2e-v0175-task-flow.test.ts && tsx --test src/main/skills/builtin/react-core-skills/__tests__/stage-gates.test.ts && tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs --test src/main/store/__tests__/skills-zip-export.test.ts && tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs --test src/main/store/__tests__/tasks.migrate.test.ts",
+    "test": "tsx --test src/shared/utils/__tests__/plan-noise.test.ts && tsx --test src/main/agent/__tests__/generate-plan.test.ts && tsx --test src/main/agent/__tests__/file-tools.test.ts && tsx --test src/main/agent/__tests__/todo-update-and-phase-header.test.ts && tsx --test src/main/agent/__tests__/v018-plan-item-patch-broadcast.test.ts && tsx --test src/main/agent/__tests__/v018-todo-ui-and-summary.test.ts && tsx --test src/main/agent/__tests__/e2e-v0175-task-flow.test.ts && tsx --test src/main/skills/builtin/react-core-skills/__tests__/stage-gates.test.ts && tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs --test src/main/store/__tests__/skills-zip-export.test.ts && tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs --test src/main/store/__tests__/tasks.migrate.test.ts && tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs --test src/main/agent/prompt/__tests__/contract.test.ts && tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs --test src/main/agent/prompt/__tests__/gates.test.ts && tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs --test src/main/agent/prompt/__tests__/sections.test.ts && tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs --test src/main/memory/__tests__/skill-forge.test.ts && tsx --test src/main/llm/__tests__/say-marker.test.ts",
     "test:file-tools": "tsx --test src/main/agent/__tests__/file-tools.test.ts",
     "test:v0175": "tsx --test src/main/agent/__tests__/todo-update-and-phase-header.test.ts && tsx --test src/main/agent/__tests__/e2e-v0175-task-flow.test.ts",
     "test:v0180": "tsx --test src/main/agent/__tests__/v018-plan-item-patch-broadcast.test.ts",
@@ -22,6 +22,8 @@
     "test:generate-plan": "tsx --test src/main/agent/__tests__/generate-plan.test.ts",
     "test:cache": "tsx --test src/main/llm/__tests__/cache-usage.test.ts",
     "test:anti-loop": "tsx --test src/main/agent/__tests__/read-repeat-guard.test.ts",
+    "test:f1-prompt": "tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs --test src/main/agent/prompt/__tests__/contract.test.ts && tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs --test src/main/agent/prompt/__tests__/gates.test.ts && tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs --test src/main/agent/prompt/__tests__/sections.test.ts",
+    "test:f3-forge": "tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs --test src/main/memory/__tests__/skill-forge.test.ts",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:dir": "electron-vite build && electron-builder --mac --dir",
     "build:win": "electron-vite build && electron-builder --win"

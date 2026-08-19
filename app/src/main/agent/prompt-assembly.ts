@@ -75,10 +75,11 @@ export function buildSystemSections(ctx: SystemPromptContext): PromptSection[] {
   const personality = buildPersonalitySegment(ctx.agent)
   if (personality) sections.push({ id: 'personality', order: ORDER.personality, text: personality })
 
-  // workspace（工作区路径，运行时固定）
+  // workspace（file-reader 用法说明；v0.25.0 F1：根目录声明删除——<env> 段为权威来源，避免重复）
   const wsHint =
-    `## 当前工作区\n工作区根目录：${ctx.workspaceDir}\n` +
-    `使用 file-reader 的 path="." 可列出工作区根目录内容，path="src/" 等相对路径基于此目录解析。`
+    `## 当前工作区\n` +
+    `工作区根目录见上方 <env> 段（权威来源，此处不再重复声明）。\n` +
+    `使用 file-reader 的 path="." 可列出工作区根目录内容，path="src/" 等相对路径基于该目录解析。`
   sections.push({ id: 'workspace', order: ORDER.workspace, text: wsHint })
 
   // v0.24.x：工作区上下文感知（借鉴 opencode / claude code）——

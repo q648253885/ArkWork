@@ -18,6 +18,7 @@ import { Icon } from '../icons'
 import { useStore } from '../store'
 import type { ReActStep } from '../types'
 import type { ToolProgressEvent } from '@shared/types/ipc'
+import { Markdown } from './Markdown'
 
 interface ThoughtStreamProps {
   steps: ReActStep[]
@@ -455,10 +456,14 @@ function ToolCard({ step, observation }: { step: ReActStep; observation?: ReActS
             )
           )}
           {step.resultSummary && (
-            <div className="tool-card__result">{step.resultSummary}</div>
+            <div className="tool-card__result md-body">
+              <Markdown content={step.resultSummary} />
+            </div>
           )}
           {obsSummary && (
-            <div className="tool-card__result text-text-tertiary">{obsSummary}</div>
+            <div className="tool-card__result text-text-tertiary md-body">
+              <Markdown content={obsSummary} />
+            </div>
           )}
           {/* v0.13.0：操作行 — 复制 / 重试 / 详情 toggle */}
           <div className="tool-card__actions">

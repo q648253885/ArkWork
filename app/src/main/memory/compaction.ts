@@ -22,7 +22,6 @@ import {
 // v0.15.0：模板对外只读暴露，供测试与 UI 校验六段式结构
 export { COMPACTION_SUMMARY_TEMPLATE, COMPACTION_SYSTEM_PROMPT }
 import { archiveCompactionSummary } from './l3-archive.js'
-import { evaluateCompactionDistillTrigger } from './distill.js'
 import type { L1Snapshot, MemoryItem } from '@shared/types/memory'
 import type { LlmAdapter } from '../llm/adapter.js'
 
@@ -573,7 +572,8 @@ export async function compact(
   })
 
   try {
-    await evaluateCompactionDistillTrigger(summary, l1.taskId, opts.modelId)
+    // v0.25.0 F3：压缩后不再自动评估蒸馏（避免空 transcript 蒸技能；详见设计文档 §5.1）。
+    // 技能创建严格走 skill-forge 管线，由 task-done 时机触发。
   } catch (err) {
     logger.warn('Memory', `compaction distill evaluation failed: ${(err as Error).message}`, l1.taskId)
   }

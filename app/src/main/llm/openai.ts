@@ -11,6 +11,7 @@ import type {
   LlmMessage,
   LlmTool,
 } from './adapter.js'
+import { extractSayMarker } from './say-marker.js'
 import type { ReActAction } from '@shared/types/react'
 
 export interface OpenAIOptions {
@@ -93,9 +94,12 @@ export class OpenAIAdapter implements LlmAdapter {
       toolCallId = toolCallIds[0]
     }
 
+    // v0.25.0 F4：从 content 抽取 SAY 标记块（剥离后 thought 不污染内部思考）
+    const { thought: cleanThought, say } = extractSayMarker(content)
     return {
       content,
-      thought: content,
+      thought: cleanThought,
+      say,
       action,
       actions: actions.length > 0 ? actions : undefined,
       toolCallIds: toolCallIds.length > 0 ? toolCallIds : undefined,

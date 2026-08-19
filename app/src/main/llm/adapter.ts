@@ -58,6 +58,9 @@ export interface LlmCompleteRequest {
 export interface LlmCompleteResponse {
   content: string                  // assistant 的文本回复
   thought: string                  // 解析后的 Reasoning（去掉 tool_call 部分）
+  /** v0.25.0 F4：给用户看的阶段叙述（结论 + 下一步），由模型通过 JSON `say` 字段或单独 marker 输出；
+   * 与 thought 分离，不进入 L1 对话历史（仅 step 展示层负载） */
+  say?: string
   action: ReActAction | null       // 工具调用解析结果（兼容旧单调用路径）
   /** 同一轮返回的工具调用；多个调用可在无依赖时并行执行 */
   actions?: ReActAction[]

@@ -1,3 +1,36 @@
+---
+name: react-core-skills
+description: 软件工程文档驱动开发准则
+# v0.25.0 F1：指令体生命周期
+#  - always-on：与 @coder.alwaysOnSkillIds 配合，指令体进 system agent-static 段，任务全程生效
+#  - frontmatter gates：引擎在 run 启动时初始化 task.gateStates；
+#    todo_update 标 done 时若关联 gate 仍 pending → softFail 拦截，要求 LLM 先调 ask_user 确认
+instructionMode: always-on
+planPrompt: doc-driven
+gates:
+  - id: research-confirmed
+    after: 产出 00-opensource-research.md
+    ask: 开源调研结论 + 候选项目对比 + 是否继续进入阶段 1 PRD
+  - id: prd-confirmed
+    after: 产出 01-prd.md
+    ask: PRD 要点总结（P0/P1/P2 功能清单）+ 待确认项
+  - id: interaction-confirmed
+    after: 产出 02-interaction.md
+    ask: 交互流程 / 主页面清单 / 五态设计是否确认
+  - id: prototype-frozen
+    after: 产出 prototype/
+    ask: HTML 原型视觉是否冻结（确认后系统设计阶段不得再改视觉）
+  - id: design-confirmed
+    after: 产出 03-system-design.md
+    ask: 技术方案 / 数据模型 / 接口契约是否确认（确认后才允许进入编码阶段）
+  - id: function-test-passed
+    after: 产出 04-function-test-report.md
+    ask: 功能测试结果 + 是否进入 UI/UX 验证阶段
+  - id: ux-review-passed
+    after: 产出 05-ui-test-report.md
+    ask: UI/UX 校验结果 + 是否进入交付打包阶段
+---
+
 # react-core-skills
 
 软件工程文档驱动开发准则。收到软件开发任务后，先识别所属场景并路由到对应必产文档链，逐阶段产出文档，**每阶段必须经用户门禁确认后才进入下一阶段**。文档是代码的蓝图而非事后补的说明，禁止代码与文档静默分叉。

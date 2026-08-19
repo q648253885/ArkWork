@@ -26,6 +26,8 @@ import { registerContextHandlers } from './context.js'
 import { registerProgressHandlers } from './progress.js'
 import { registerPlanItemHandlers } from './plan-items.js'
 import { registerBrowserHandlers } from './browser.js'
+// v0.25.0 F2：WebContentsView Tab 化路由
+import { registerBrowserTabHandlers } from './browser-tabs.js'
 import { logger } from '../system/logger.js'
 
 export function registerIpcHandlers(): void {
@@ -62,6 +64,8 @@ export function registerIpcHandlers(): void {
 
   // v0.24.1：agent 自主浏览器（webview 加载结果回传）
   registerBrowserHandlers()
+  // v0.25.0 F2：WebContentsView Tab 化路由（view-manager）
+  registerBrowserTabHandlers()
 
   logger.info('System', 'IPC handlers registered')
 }

@@ -116,7 +116,7 @@ const BUILTIN_AGENTS: Agent[] = [
     defaultKbIds: [],
     defaultConfig: { temperature: 0.5, maxIterations: 60 },
     isBuiltin: true,
-    version: '0.24.1',
+    version: '0.25.0',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
   },
@@ -211,11 +211,15 @@ const BUILTIN_AGENTS: Agent[] = [
 - 最多 80 次迭代；单次工具超时 30 秒。工具调用预算按签名/类别动态管控（写入类 40、只读类 16），避免重复调用。`,
     defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.browser', 'S-core.todo-update'],
     defaultMcpIds: [],
+    // v0.25.0 F1：常驻能力 — run 启动时把 SKILL.md 指令体注入 system agent-static 段，
+    // 任务全程生效。react-core-skills 的 frontmatter gates 同步初始化 task.gateStates，
+    // 门禁机制阻断跳过阶段的行为（todo_update 标 done 时校验）。
+    alwaysOnSkillIds: ['S-core.react-core-skills'],
     defaultModelId: '',
     defaultKbIds: [],
     defaultConfig: { temperature: 0.3, maxIterations: 80 },
     isBuiltin: true,
-    version: '0.24.1',
+    version: '0.25.0',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
     // v0.15.0 Task 6：@coder 默认 acceptEdits —— 工作区内轻写（sed -i/tee/mkdir/cp/...）不再每次弹确认；

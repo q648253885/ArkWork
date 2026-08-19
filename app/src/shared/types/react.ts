@@ -29,6 +29,9 @@ export interface ReActStep {
 
   // for reason
   thought?: string
+  /** v0.25.0 F4：给用户看的阶段叙述（结论 + 下一步），由模型在 reason 阶段产出；
+   * 与 thought（内部思考，默认折叠）分离；缺省时 UI 回落旧版「要做什么」hint */
+  say?: string
   action?: ReActAction
 
   // for act
@@ -82,6 +85,8 @@ export type ReActEvent =
       /** v0.20.0：本轮输入未命中缓存的 token 数 */
       cacheMissTokens?: number
       durationMs: number
+      /** v0.25.0 F4：阶段叙述（结论 + 下一步），与 thought 分离；模型未输出时为 undefined */
+      say?: string
     }
   | { type: 'act_start'; iteration: number; tool: string; args: Record<string, unknown> }
   | {

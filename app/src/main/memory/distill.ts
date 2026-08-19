@@ -12,7 +12,7 @@
  * 失败静默降级为仅归档（不阻塞任务完成）。
  * 设计文档：versions/v0.8.0/01-memory.md §7
  * ============================================================ */
-import { readFile, writeFile, mkdir, readdir, stat, rm } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, readdir, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { getWorkspaceDir, getTaskMemoryDir, getTaskDir } from '../store/db.js'
@@ -20,15 +20,22 @@ import { getAdapter } from '../llm/registry.js'
 import { logger } from '../system/logger.js'
 import { addPendingLine } from './l3-curated.js'
 import { synthesizeFromTaskL1 } from './l4-profile.js'
-import { removeL1Items, listL1 } from './l1-working.js'
-import { convertToKb, convertToSkill } from './convert.js'
+import { listL1 } from './l1-working.js'
+import { convertToKb } from './convert.js'
 import type { MemoryItem, DistillDraft } from '@shared/types/memory'
+
+/* ============================================================
+ * v0.25.0 F3 重写要点（设计文档 §5）：
+ *  - 关闭 reuseCount ≥5 蒸技能分支（distill.ts 旧 evaluateDistillTrigger 内 elif）
+ *  - 关闭 evaluateCompactionDistillTrigger 整函数（空 transcript 蒸技能，已在 §5.1 删除）
+ *  - 关闭 clearDistilledSources 的全部调用（L1/L2 不再因蒸馏被删除，由既有压缩/归档策略管理）
+ *  - 蒸馏类别仅保留 facts / observations；skill 类别一律改走 skill-forge 管线
+ *  - L1 不再是蒸馏源；L2 仅作为技能候选的合法来源，且必须经 forge 五阶段校验
+ * ============================================================ */
 
 export const DISTILL_THRESHOLDS = {
   /** 同一主题/关键词的观察累计门槛 */
   topicObservations: 10,
-  /** 单用户跨会话同一技能/KB 复用次数门槛 */
-  reuseCount: 5,
   /** L2 条目（步骤产物文件）总量门槛 */
   l2Count: 50,
   /** L2 文件体积门槛 */
@@ -51,8 +58,6 @@ export interface DistillTriggerContext {
   hadPreferenceExpression: boolean
   /** 同一主题/关键词的 L2/L1 观察累计次数 */
   topicObservationCount?: number
-  /** 单用户跨会话同一技能/KB 的累计触发次数 */
-  reuseCount?: number
   /** 当前任务 L2 文件总字节数 */
   l2Bytes?: number
   /** 当前任务 L2 条目（步骤产物文件）总数 */
@@ -66,7 +71,8 @@ export interface DistillTriggerContext {
 export interface DistillEvaluation {
   trigger: boolean
   reason: string
-  category: 'facts' | 'skill' | 'observations' | null
+  /** v0.25.0 F3：蒸馏类别仅保留 facts / observations；skill 改走 skill-forge */
+  category: 'facts' | 'observations' | null
 }
 
 export async function getDistillMetrics(
@@ -75,7 +81,7 @@ export async function getDistillMetrics(
 ): Promise<
   Pick<
     DistillTriggerContext,
-    'topicObservationCount' | 'reuseCount' | 'l2Bytes' | 'l2Count' | 'staleL1Count' | 'staleL2Days'
+    'topicObservationCount' | 'l2Bytes' | 'l2Count' | 'staleL1Count' | 'staleL2Days'
   >
 > {
   const observations = l1Items.filter((m) => m.kind === 'observation' && !m.archivedAt)
@@ -93,7 +99,6 @@ export async function getDistillMetrics(
   const l2 = await getL2Stats(taskId)
   return {
     topicObservationCount: Math.max(0, ...topicCounts.values()),
-    reuseCount: await getReuseCount(observations),
     l2Bytes: l2.bytes,
     l2Count: l2.count,
     staleL1Count,
@@ -103,22 +108,17 @@ export async function getDistillMetrics(
 
 export async function autoPromoteDistill(
   ctx: DistillTriggerContext,
-  category: 'facts' | 'skill' | 'observations',
+  category: 'facts' | 'observations',
   modelId: string,
   draftOverride?: DistillDraft,
 ): Promise<string> {
   const draft = draftOverride ?? (await generateDistillDraft(ctx, category, modelId))
-  if (draft.kind === 'skill' && draft.skillMd) {
-    const result = await convertToSkill({ kind: 'l1', taskId: ctx.taskId, content: draft.skillMd }, draft.skillMd)
-    await clearDistilledSources(ctx.taskId, ctx.l1Items)
-    logger.info('Memory', `automatic distill promoted to skill ${result.skill.id}`, ctx.taskId)
-    return `已自动合并为技能「${result.skill.name}」`
-  }
+  // v0.25.0 F3：skill 类别禁用（已切到 skill-forge）；函数只处理 facts / observations
   if (draft.kind === 'observations' && draft.observations?.length) {
     for (const observation of draft.observations) {
       await addPendingLine('user.md', observation, ctx.taskId)
     }
-    await clearDistilledSources(ctx.taskId, ctx.l1Items)
+    // F3：不再 clearDistilledSources —— L1 由既有压缩/归档策略管理
     logger.info('Memory', `automatic distill promoted ${draft.observations.length} profile observations`, ctx.taskId)
     return `已自动合并 ${draft.observations.length} 条用户画像观察`
   }
@@ -128,34 +128,16 @@ export async function autoPromoteDistill(
       taskId: ctx.taskId,
       content: draft.facts.map((fact) => `- ${fact}`).join('\\n'),
     })
-    await clearDistilledSources(ctx.taskId, ctx.l1Items)
+    // F3：不再 clearDistilledSources —— L1 由既有压缩/归档策略管理
     logger.info('Memory', `automatic distill promoted to KB ${result.kbFileId}`, ctx.taskId)
     return '已自动合并到知识库'
   }
   return '自动蒸馏未提取到可晋升内容'
 }
 
-/** 跨会话复用计数文件（单用户累计触发同一技能/KB 的次数） */
-const REUSE_FILE = 'distill-reuse.json'
-
-function reusePath(): string {
-  return join(getWorkspaceDir(), '.arkwork', REUSE_FILE)
-}
-
-async function getReuseCount(l1Items: MemoryItem[]): Promise<number> {
-  const counts = existsSync(reusePath())
-    ? JSON.parse(await readFile(reusePath(), 'utf-8')) as Record<string, number>
-    : {}
-  const keys = new Set(l1Items.filter((m) => m.kind === 'observation' && m.meta).map((m) => m.meta as string))
-  let max = 0
-  for (const key of keys) {
-    counts[key] = (counts[key] ?? 0) + 1
-    max = Math.max(max, counts[key])
-  }
-  await mkdir(dirname(reusePath()), { recursive: true })
-  await writeFile(reusePath(), JSON.stringify(counts, null, 2), 'utf-8')
-  return max
-}
+/** v0.25.0 F3：跨会话复用计数（旧 getReuseCount / REUSE_FILE）已废弃 —— 不再作为自动蒸馏触发条件；
+ * 该指标仅保留供 UI 评估面板使用（不写入 distill-reuse.json、不参与触发判定）。
+ * 如需恢复评估输入，应由调用方独立采集并传入 topicObservationCount。 */
 
 /** L2 统计：字节数 / 条目（文件）总数 / 最老文件距今的天数（Task 10 时限） */
 async function getL2Stats(taskId: string): Promise<{ bytes: number; count: number; oldestDays: number }> {
@@ -185,18 +167,21 @@ async function getL2Stats(taskId: string): Promise<{ bytes: number; count: numbe
 }
 
 async function clearDistilledSources(taskId: string, items: MemoryItem[]): Promise<void> {
-  await removeL1Items(taskId, items.map((m) => m.id))
-  const l2Dir = join(getTaskDir(taskId), '.arkwork', 'steps')
-  if (existsSync(l2Dir)) await rm(l2Dir, { recursive: true, force: true })
+  // v0.25.0 F3：禁用 —— L1/L2 不再因蒸馏被清除；保留 stub 以兼容历史外部引用。
+  // 调用点已全部移除；如未来需要重做蒸馏清理，应改走 l1 archive + l2 retention 通道。
+  void taskId
+  void items
 }
 
 /**
  * 评估是否自动触发蒸馏（Task 10：仅按规模门槛，命中即后台自动执行，不再征询用户）。
+ * v0.25.0 F3 精简：
+ *  - 删 reuseCount ≥5 蒸技能分支（不再自动转技能；技能走 skill-forge）
+ *  - 删 skill 类别（蒸馏类别仅 facts / observations）
  * 触发条件（任一命中）：
  *  - 同一主题/关键词的 L1/L2 观察累计 ≥ topicObservations
- *  - 单用户跨会话同一技能/KB 复用 ≥ reuseCount
  *  - L2 条目总量 ≥ l2Count 或 L2 文件体积 > l2Bytes（L2 → L3 规模门槛）
- *  - L1/L2 存在超过 ttlDays 天的临时条目（时限触发：过期内容参与蒸馏，完成后清理）
+ *  - L1/L2 存在超过 ttlDays 天的临时条目（时限触发）
  * 普通任务（工具调用多、有排错/纠正/偏好表达但不达规模）不会触发。
  * @param ctx - 触发上下文
  * @returns 是否触发 + 原因 + 蒸馏类别
@@ -204,15 +189,12 @@ async function clearDistilledSources(taskId: string, items: MemoryItem[]): Promi
 export async function evaluateDistillTrigger(
   ctx: DistillTriggerContext,
 ): Promise<DistillEvaluation> {
-  let category: 'facts' | 'skill' | 'observations' | null = null
+  let category: 'facts' | 'observations' | null = null
   let reason = ''
 
   if ((ctx.topicObservationCount ?? 0) >= DISTILL_THRESHOLDS.topicObservations) {
     category = ctx.hadPreferenceExpression ? 'observations' : 'facts'
     reason = `同一主题观察累计 ${ctx.topicObservationCount} 条，达到自动蒸馏门槛`
-  } else if ((ctx.reuseCount ?? 0) >= DISTILL_THRESHOLDS.reuseCount) {
-    category = 'skill'
-    reason = `同一技能或知识库跨会话复用 ${ctx.reuseCount} 次，达到自动蒸馏门槛`
   } else if ((ctx.l2Count ?? 0) >= DISTILL_THRESHOLDS.l2Count) {
     category = ctx.hadPreferenceExpression ? 'observations' : 'facts'
     reason = `L2 条目总量 ${ctx.l2Count} 条，达到自动蒸馏门槛`
@@ -259,6 +241,10 @@ export async function acceptDistillDraft(
   taskId: string,
   modelId: string,
 ): Promise<string> {
+  // v0.25.0 F3：技能草稿不再走 autoPromoteDistill —— 应由 skill-forge 五阶段管线接管。
+  if (draft.kind === 'skill') {
+    return '技能草稿请走 skill-forge 管线（task-done 时机触发），不接受 L1 直接蒸馏'
+  }
   const l1Items = await listL1(taskId)
   return autoPromoteDistill(
     {
@@ -298,24 +284,21 @@ export async function dismissDistillDraft(category: string): Promise<void> {
 }
 
 /**
- * 生成蒸馏草稿——用 LLM 从 L1 提取事实/起草 SKILL.md/提取观察。
+ * 生成蒸馏草稿——用 LLM 从 L1 提取事实/提取观察。
+ * v0.25.0 F3：skill 类别由 skill-forge 接管，不再在本函数中生成（详见设计文档 §5.3）。
  * @param ctx - 触发上下文
- * @param category - 蒸馏类别
+ * @param category - 蒸馏类别（仅 facts / observations）
  * @param modelId - 用于草稿生成的模型
- * @returns 蒸馏草稿（facts / skillMd / observations）
+ * @returns 蒸馏草稿
  */
 export async function generateDistillDraft(
   ctx: DistillTriggerContext,
-  category: 'facts' | 'skill' | 'observations',
+  category: 'facts' | 'observations',
   modelId: string,
 ): Promise<DistillDraft> {
   const transcript = buildTranscript(ctx.l1Items)
   const adapter = await getAdapter(modelId)
 
-  if (category === 'skill') {
-    const skillMd = await draftSkillMd(transcript, adapter)
-    return { kind: 'skill', skillMd, triggerReason: '排错成功蒸馏' }
-  }
   if (category === 'observations') {
     const observations = await draftObservations(transcript, adapter)
     return { kind: 'observations', observations, triggerReason: '偏好表达提取' }
@@ -325,7 +308,7 @@ export async function generateDistillDraft(
   return { kind: 'facts', facts, triggerReason: '可复用事实提取' }
 }
 
-/** 把 L1 条目拼成对话记录供 LLM 分析 */
+/** 把 L1 条目拼成对话记录供 LLM 分析（仅 facts/observations 用；技能改走 skill-forge） */
 function buildTranscript(items: MemoryItem[]): string {
   return items
     .filter((m) => !m.archivedAt && m.kind !== 'system_prompt')
@@ -364,22 +347,6 @@ async function draftObservations(
   return parseStringArray(resp.content)
 }
 
-async function draftSkillMd(
-  transcript: string,
-  adapter: Awaited<ReturnType<typeof getAdapter>>,
-): Promise<string> {
-  const resp = await adapter.complete({
-    system:
-      '你是技能蒸馏助手。从以下排错成功的任务对话中，提炼出一个可复用的 SKILL.md 技能指令。\n' +
-      '格式：\n---\nname: <skill-name>\ndescription: <一句话描述>\n---\n# 指令体\n<具体步骤/检查清单>\n' +
-      '直接输出 SKILL.md 全文，不要解释。',
-    messages: [{ role: 'user', content: transcript }],
-    temperature: 0.3,
-    maxTokens: 1000,
-  })
-  return resp.content.trim()
-}
-
 function parseStringArray(raw: string): string[] {
   try {
     const start = raw.indexOf('[')
@@ -395,59 +362,3 @@ function parseStringArray(raw: string): string[] {
 
 // 复用：L4a 合成入口（供 engine 在 run done 时直接调用，避免循环依赖）
 export { synthesizeFromTaskL1 }
-
-/**
- * v0.15.0：压缩完成后评估是否触发蒸馏/转技能。
- * 简化策略：取摘要前若干关键词，与 L3b 历史命中数比对；
- * 同一主题累计 ≥ 3 份时触发 skill 蒸馏。
- */
-export async function evaluateCompactionDistillTrigger(
-  summary: string,
-  taskId: string,
-  modelId?: string,
-): Promise<void> {
-  const keywords = extractKeyEntities([summary], 3)
-  if (keywords.length === 0) return
-  try {
-    const { searchArchive } = await import('./l3-archive.js')
-    let totalHits = 0
-    for (const kw of keywords) {
-      const hits = await searchArchive(kw, 10)
-      totalHits += hits.length
-    }
-    if (totalHits >= 3 && modelId) {
-      logger.info(
-        'Memory',
-        `evaluateCompactionDistillTrigger: 关键词命中 ${totalHits} 条，建议蒸馏 (task=${taskId})`,
-      )
-      const draft = await generateDistillDraft(
-        { taskId, l1Items: [], toolCallCount: 0, hadErrorRecovery: false, hadUserCorrection: false, hadPreferenceExpression: false },
-        'skill',
-        modelId,
-      )
-      if (draft.kind === 'skill') {
-        const skillMd = draft.skillMd ?? ''
-        if (skillMd) {
-          await convertToSkill({ kind: 'l1', taskId, content: skillMd }, skillMd)
-        }
-      }
-    }
-  } catch (err) {
-    logger.warn('Memory', `evaluateCompactionDistillTrigger failed: ${(err as Error).message}`, taskId)
-  }
-}
-
-function extractKeyEntities(texts: string[], limit: number): string[] {
-  const freq = new Map<string, number>()
-  for (const text of texts) {
-    for (const m of text.matchAll(/[\u4e00-\u9fff]{3,8}|[A-Za-z][A-Za-z0-9_-]{3,}/g)) {
-      const w = m[0].toLowerCase()
-      if (w.length < 3) continue
-      freq.set(w, (freq.get(w) ?? 0) + 1)
-    }
-  }
-  return [...freq.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit)
-    .map(([w]) => w)
-}

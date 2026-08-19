@@ -24,6 +24,8 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { getMainWindow } from '../window.js'
 import { getWorkspaceDir } from '../store/db.js'
 import { logger } from '../system/logger.js'
+// v0.25.0 F2：view-manager 提供 Tab 化的 WebContentsView；controller 优先用它
+import { getActiveDockTab, createTab as vmCreateTab } from './view-manager.js'
 
 const CONSOLE_CAP = 200
 const OPEN_TIMEOUT_MS = 20_000

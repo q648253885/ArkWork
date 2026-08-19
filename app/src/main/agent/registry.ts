@@ -50,6 +50,7 @@ import { spec, type SpecArgs, type SpecResult } from '../skills/builtin/spec/ind
 import { plan, type PlanArgs, type PlanResult } from '../skills/builtin/plan/index.js'
 import { bugfix, type BugfixArgs, type BugfixResult } from '../skills/builtin/bugfix/index.js'
 import { reactCoreSkills, type ReactCoreSkillsArgs, type ReactCoreSkillsResult } from '../skills/builtin/react-core-skills/index.js'
+import { parseSkillFrontmatter } from './prompt/gates.js'
 import { logger } from '../system/logger.js'
 
 /**
@@ -78,6 +79,21 @@ export interface SkillContext {
   isSubAgent?: boolean
   /** invokeSkill 加载 instructionMd 后写入，engine 下一轮合并到 system 提示 */
   additionalSystemHint?: string
+  /**
+   * v0.25.0 F1：指令体生命周期回调（三态）。
+   * invokeSkill 加载 SKILL.md 后解析 frontmatter 并回调：
+   *  - always-on：指令体已在 system agent-static 段（engine 回调内跳过）
+   *  - on-demand（缺省）：engine 回调内 appendL1 kind='skill_instruction'（持续生效至任务结束）
+   *  - hint-only：不注入指令体（仅 description 进 tools 列表）
+   * 同时携带 frontmatter gates 供 engine 合并 task.gateStates 状态机。
+   */
+  onInstructionLoaded?: (payload: {
+    skillId: string
+    skillName: string
+    text: string
+    instructionMode: 'always-on' | 'on-demand' | 'hint-only'
+    gates?: import('@shared/types/agent').GateSpec[]
+  }) => Promise<void>
   /** 用户确认回调（v0.8.1：经 IPC 推送到 renderer 美观浮层展示；
    *  v0.14.0 Task 6：返回结果区分「显式拒绝 / 超时 / 关闭」，只有显式拒绝才算用户拒绝） */
   confirm?: (req: ToolConfirmRequest) => Promise<ConfirmOutcome>
@@ -319,6 +335,23 @@ export async function invokeSkill(
       ctx.additionalSystemHint = extrasHint
         ? `${instruction}\n\n---\n${extrasHint}`
         : instruction
+      // v0.25.0 F1：指令体生命周期回调（三态）。engine 据此注入 L1 skill_instruction
+      //（on-demand 持续生效至任务结束）或跳过（always-on 已进 system / hint-only 不注入）。
+      if (ctx.onInstructionLoaded) {
+        try {
+          const fm = parseSkillFrontmatter(instruction)
+          const mode = fm.instructionMode ?? skill.instructionMode ?? 'on-demand'
+          await ctx.onInstructionLoaded({
+            skillId: skill.id,
+            skillName: skill.name,
+            text: ctx.additionalSystemHint,
+            instructionMode: mode,
+            gates: fm.gates ?? skill.gates,
+          })
+        } catch (cbErr) {
+          logger.warn('Tool', `onInstructionLoaded callback failed for ${skill.id}: ${(cbErr as Error).message}`, ctx.taskId)
+        }
+      }
     } catch (err) {
       logger.warn('Tool', `failed to load instructionMd for ${skill.id}: ${(err as Error).message}`, ctx.taskId)
     }

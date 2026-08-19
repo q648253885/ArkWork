@@ -573,55 +573,57 @@ textarea {
  * v0.4.0 — 全部走 CSS 变量，浅深皮肤通用
  * ============================================================ */
 .md-body {
-  /* DSH AssistantMarkdown：16/28 主体节奏、block 间距 16px */
-  font-size: 16px;
-  line-height: 28px;
+  /* v0.25.0 F4：交互区字号阶梯下调（设计文档 §6.3）
+   * 主体 14/24（DSH 紧凑节奏），block gap 16→12；h1~h4 同步降阶；code-block 13→12.5
+   * Tailwind 自定义字号类（text-xs 等）不动，避免全站连带 */
+  font-size: 14px;
+  line-height: 24px;
   color: var(--text-primary);
   word-wrap: break-word;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   /* v0.6.1：交互区内容必须可选区复制（覆盖 body 的 user-select:none） */
   user-select: text;
   -webkit-user-select: text;
 }
 .md-body > *:first-child { margin-top: 0; }
 .md-body > *:last-child  { margin-bottom: 0; }
-/* DSH markdown 字体阶梯（DSH --dsw-font-markdown-*）：
-   H1 700 24/34、H2 700 22/32、H3 700 20/30、H4 600 16/28 */
+/* DSH markdown 字体阶梯（v0.25.0 F4 下调）：
+   H1 700 20/28、H2 700 18/26、H3 700 16/24、H4 600 14/24（与主体对齐）*/
 .md-body h1 {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
-  line-height: 34px;
+  line-height: 28px;
   margin: 0;
   color: var(--text-primary);
   letter-spacing: -0.01em;
 }
 .md-body h2 {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
-  line-height: 32px;
+  line-height: 26px;
   margin: 0;
   color: var(--text-primary);
   letter-spacing: -0.005em;
 }
 .md-body h3 {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
-  line-height: 30px;
+  line-height: 24px;
   margin: 0;
   color: var(--text-primary);
 }
 .md-body h4 {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
-  line-height: 28px;
+  line-height: 24px;
   margin: 0;
   color: var(--text-primary);
 }
 .md-body p  { margin: 0; }
-/* DSH markdown 列表：li 28 行、缩进 1.5em */
-.md-body ul, .md-body ol { margin: 0; padding-left: 1.5em; display: flex; flex-direction: column; gap: 6px; }
+/* DSH markdown 列表：li 24 行、缩进 1.5em */
+.md-body ul, .md-body ol { margin: 0; padding-left: 1.5em; display: flex; flex-direction: column; gap: 4px; }
 .md-body li { margin: 0; }
 .md-body ul > li { list-style: disc; }
 .md-body ol > li { list-style: decimal; }
@@ -629,32 +631,32 @@ textarea {
 .md-body a:hover { text-decoration: underline; }
 .md-body strong { font-weight: 600; color: var(--text-primary); }
 .md-body em { font-style: italic; }
-/* DSH inline code：14/22、neutral-bluish-100 底、6px 圆角 */
+/* DSH inline code：13/20、neutral-bluish-100 底、6px 圆角（与主体对齐节奏） */
 .md-body code {
   font-family: var(--font-mono);
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 13px;
+  line-height: 20px;
   background: var(--bg-surface);
   padding: 1px 6px;
   border-radius: 6px;
   color: var(--text-primary);
   word-break: break-word;
 }
-/* DSH markdown 代码块：12px 圆角、neutral-bluish-50 底、16px 18px 内边距、13/22 mono */
+/* DSH markdown 代码块：12px 圆角、neutral-bluish-50 底、12px 14px 内边距、12.5/20 mono */
 .md-body pre {
   position: relative;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
-  padding: 16px 18px;
+  padding: 12px 14px;
   margin: 0;
   overflow-x: auto;
 }
 .md-body pre code {
   background: transparent;
   padding: 0;
-  font-size: 13px;
-  line-height: 22px;
+  font-size: 12.5px;
+  line-height: 20px;
   color: var(--text-primary);
   font-family: var(--font-mono);
 }
@@ -698,8 +700,9 @@ textarea {
 .md-body table {
   border-collapse: collapse;
   margin: 0;
-  font-size: 14px;
-  line-height: 22px;
+  /* v0.25.0 F4：表格字号 14→13（与紧凑节奏对齐） */
+  font-size: 13px;
+  line-height: 20px;
   width: 100%;
 }
 .md-body th, .md-body td {
@@ -1417,8 +1420,9 @@ textarea {
   align-items: center;
   gap: 6px;
   padding: 4px 0 4px 0;
-  font-size: 12px;
-  line-height: 18px;
+  /* v0.25.0 F4：intent-hint 字号 12 → 13（紧凑节奏，与 .say-block 视觉同级） */
+  font-size: 13px;
+  line-height: 20px;
   color: var(--text-secondary);
   border-left: 2px solid var(--business-primary);
   padding-left: 10px;
@@ -1436,9 +1440,58 @@ textarea {
 }
 .intent-hint__text {
   color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 18px;
+  font-size: 13px;
+  line-height: 20px;
   word-break: break-word;
+}
+
+/* ============================================================
+ * v0.25.0 F4 — SayBlock（结论 + 下一步）
+ * 给用户看的阶段叙述主源：左 2px 业务蓝条 + 「结论与下一步」chip + Markdown 富渲染
+ * 与 intent-hint 视觉同级（替代时回落 intent-hint），但承载富文本
+ * ============================================================ */
+.say-block {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 4px 0 4px 10px;
+  margin: 2px 0 4px 0;
+  border-left: 2px solid var(--business-primary);
+}
+.say-block__accent {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--say-accent, var(--business-primary));
+  border-radius: 1px;
+}
+.say-block__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.say-block__chip {
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--business-primary);
+  background: var(--business-primary-soft, rgba(57, 100, 254, 0.12));
+  border-radius: 4px;
+  padding: 1px 6px;
+  letter-spacing: 0;
+  flex-shrink: 0;
+}
+.say-block__content {
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 24px;
+  word-break: break-word;
+}
+/* v0.25.0 F4：streaming 时给光标一点呼吸感（与 ThinkBlock 一致） */
+.say-block[data-active="true"] .say-block__content {
+  position: relative;
 }
 /* .react-observation 在 v0.24.x 已废弃：保留选择器以防旧类名残留造成空白。 */
 .react-observation { display: none; }

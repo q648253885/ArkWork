@@ -209,8 +209,10 @@ export function renderProjectBlock(tree: ProjectTree): string {
 const AGENT_FILE_NAMES = ['AGENTS.md', 'CLAUDE.md', 'CONTEXT.md'] as const
 const GLOBAL_AGENT_PATHS = [
   // 全局兜底（类比 claude code 的 ~/.claude/CLAUDE.md）
-  join(process.env.HOME || '', '.arkworkAGENTS.md'),
-  join(process.env.HOME || '', '.arkworkCLAUDE.md'),
+  // v0.25.0 F1 fix：原路径 join(HOME, '.arkworkAGENTS.md') 少了目录分隔符，
+  // 全局规则文件永不加载 —— 修正为 ~/.arkwork/AGENTS.md / ~/.arkwork/CLAUDE.md
+  join(process.env.HOME || '', '.arkwork', 'AGENTS.md'),
+  join(process.env.HOME || '', '.arkwork', 'CLAUDE.md'),
 ]
 const MAX_AGENT_FILE_BYTES = 8 * 1024  // 单文件 8KB 上限（避免撑爆 system）
 

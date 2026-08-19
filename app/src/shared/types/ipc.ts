@@ -828,6 +828,16 @@ export interface BrowserLoadRequest {
   url: string
 }
 
+/* ---- v0.25.0 F2：WebContentsView Tab 元数据（IPC 镜像，不含 view） ---- */
+export interface BrowserTabMeta {
+  tabId: string
+  url: string
+  title: string
+  favicon?: string
+  host: 'dock' | 'window'
+  agentDriven: boolean
+}
+
 /* ---- 暴露给 Renderer 的 ark API 完整签名 ---- */
 export interface ArkApi {
   task: {
@@ -1020,6 +1030,16 @@ export interface ArkApi {
     loadDone: (requestId: string, error?: string) => Promise<void>
     /** 地址栏输入 → 完整 URL（本地路径转 file://，基于工作区） */
     resolve: (input: string) => Promise<string>
+  }
+  /** v0.25.0 F2：WebContentsView 多 Tab 路由（设计文档 §4.4） */
+  browserTabs: {
+    create: (args?: { url?: string; newTab?: boolean }) => Promise<{ tabId: string }>
+    close: (args: { tabId: string }) => Promise<true>
+    activate: (args: { tabId: string }) => Promise<true>
+    navigate: (args: { tabId: string; url: string }) => Promise<{ ok: boolean; error?: string }>
+    setBounds: (args: { tabId: string; rect: { x: number; y: number; width: number; height: number } }) => Promise<true>
+    list: () => Promise<BrowserTabMeta[]>
+    setAgentDriven: (args: { tabId: string; agentDriven: boolean }) => Promise<true>
   }
   settings: {
     get: () => Promise<AppSettings>
