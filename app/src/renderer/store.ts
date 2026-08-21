@@ -664,6 +664,71 @@ function clamp(value: number, min: number, max: number): number {
   return value
 }
 
+/**
+ * v0.25.0 F2 P1：把 LLM API 原始错误信息归类为用户可读提示。
+ * 输出：
+ *  - 命中常见 HTTP / 厂商错误码 → 返回可操作的友好建议（中文）
+ *  - 未命中 → 返回 null（调用方原样透传）
+ *
+ * 典型命中：
+ *  - 402 / "Insufficient Balance" → 余额不足，请充值或切换模型
+ *  - 401 / "Unauthorized" / "Invalid API Key" → API Key 无效，请检查设置
+ *  - 403 / "Forbidden" → 权限不足 / 地区受限
+ *  - 429 / "Rate Limit" → 限流，请稍后重试
+ *  - 5xx → 服务异常，请稍后重试
+ *  - "context_length_exceeded" / "max_tokens" → 上下文超限
+ *  - "network" / "fetch" / "ECONN" → 网络异常
+ */
+export function classifyLlmError(rawErr: string): string | null {
+  if (!rawErr) return null
+  const err = rawErr.toLowerCase()
+  // 余额不足
+  if (err.includes('insufficient') || err.includes('balance') || /\b402\b/.test(rawErr)) {
+    return 'LLM 账户余额不足。请到对应服务商充值，或在设置中切换其他可用模型。'
+  }
+  // 鉴权失败
+  if (
+    err.includes('unauthorized') ||
+    err.includes('invalid api key') ||
+    err.includes('authentication') ||
+    /\b401\b/.test(rawErr) ||
+    /\b403\b/.test(rawErr) ||
+    err.includes('forbidden') ||
+    err.includes('access denied')
+  ) {
+    return 'API Key 无效或权限不足。请在设置中检查模型凭据，或联系服务商确认账号状态。'
+  }
+  // 限流
+  if (err.includes('rate limit') || err.includes('too many requests') || /\b429\b/.test(rawErr)) {
+    return '请求频率超限（限流）。请稍后重试，或在设置中降低并发 / 切换其他模型。'
+  }
+  // 服务异常
+  if (/\b5\d\d\b/.test(rawErr) || err.includes('internal server') || err.includes('bad gateway')) {
+    return 'LLM 服务端异常（5xx）。请稍后重试；持续失败可在设置中切换其他模型。'
+  }
+  // 上下文超限
+  if (
+    err.includes('context_length_exceeded') ||
+    err.includes('max_tokens') ||
+    err.includes('maximum context length') ||
+    err.includes('prompt is too long')
+  ) {
+    return '上下文超过模型上限。请清理会话历史 / 减少当前任务文档长度，或切换上下文窗口更大的模型。'
+  }
+  // 网络
+  if (
+    err.includes('network') ||
+    err.includes('fetch failed') ||
+    err.includes('econnrefused') ||
+    err.includes('etimedout') ||
+    err.includes('socket hang up') ||
+    err.includes('aborted')
+  ) {
+    return '网络异常，请检查代理 / 网络连通性后重试。'
+  }
+  return null
+}
+
 /** 统计 act 序列中"切换工具"的次数 = 已完成的工具分段数 */
 function countToolSegments(acts: ReActStep[]): number {
   let phase = 0
@@ -2176,11 +2241,12 @@ export const useStore = create<AppState>((set, get) => ({
         // v0.6.4：默认选中 @default agent（通用助手始终存在）
         selectedAgentId: get().selectedAgentId || agents.find((a) => a.id === '@default')?.id || agents[0]?.id || '',
         // v0.3.0：默认选中第一个启用的模型，避免用户每次手动选择
-        selectedModelId:
-          get().selectedModelId ||
-          models.find((m) => m.enabled)?.id ||
-          models[0]?.id ||
-          '',
+        // v0.25.1：优先恢复上次持久化的选择（存在且仍在模型中），否则回退到首个启用模型
+        selectedModelId: (() => {
+          const last = (() => { try { return localStorage.getItem('arkwork:selected-model-id') || '' } catch { return '' } })()
+          if (last && models.some((m) => m.id === last)) return last
+          return get().selectedModelId || models.find((m) => m.enabled)?.id || models[0]?.id || ''
+        })(),
       })
       // v0.9.0 F905：目录加载后同步 RightDock 布局
       const agentId = get().selectedAgentId
@@ -2698,6 +2764,8 @@ export const useStore = create<AppState>((set, get) => ({
       }
     }
     set({ selectedModelId: id })
+    // v0.25.1：持久化所选模型，重启后保持上次选择（例：MiniMax M3）
+    try { localStorage.setItem('arkwork:selected-model-id', id) } catch { /* ignore */ }
   },
   openPicker: null,
   setOpenPicker: (p) => set({ openPicker: p }),
@@ -3312,6 +3380,16 @@ export const useStore = create<AppState>((set, get) => ({
             level: 'ERROR',
             source: 'Agent',
             message: `task_failed: ${event.error}`,
+          })
+          // v0.25.0 F2 P1：把错误详情主动推给用户（toast + 友好分类提示）。
+          // LLM API 错误（402 余额不足 / 401 鉴权 / 429 限流 / 5xx 服务异常）原样透传，
+          // 不让用户在 Composer 看到「运行失败」却不知道原因。
+          const rawErr = String(event.error ?? '').trim()
+          const hint = classifyLlmError(rawErr)
+          get().pushToast({
+            type: 'danger',
+            message: hint ? `任务失败：${rawErr}\n\n💡 ${hint}` : `任务失败：${rawErr || '请查看日志了解详情'}`,
+            duration: 8000,
           })
         } else if (event.type === 'memory_compressed') {
           // v0.9.1：L1 自动压缩事件此前被静默丢弃，现接入 ctx-chip（诚实 UI）

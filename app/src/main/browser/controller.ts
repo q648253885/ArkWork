@@ -90,13 +90,16 @@ export function initBrowserController(): void {
   win.webContents.on('did-attach-webview', (_event, wc: WebContents) => {
     session.wc = wc
     session.currentUrl = wc.getURL()
+    // v0.25.0 F2 P1：把 webview 事件 push 给 renderer（BrowserPanel 占位组件监听）
     wc.on('did-finish-load', () => {
       session.currentUrl = wc.getURL()
       settlePending(null)
+      pushBrowserEventToRenderer('browser:did-finish-load', { url: wc.getURL() })
     })
     wc.on('did-fail-load', (_e, code, desc) => {
       session.currentUrl = wc.getURL()
       settlePending(null, `加载失败（${code}）：${desc}`)
+      pushBrowserEventToRenderer('browser:did-fail-load', { code, desc })
     })
     wc.on('console-message', (_e, level, message, line) => {
       session.consoleLogs.push({ level: String(level), message: String(message).slice(0, 1000), line: Number(line) })
@@ -109,6 +112,17 @@ export function initBrowserController(): void {
     })
     logger.info('System', 'webview attached')
   })
+}
+
+/** v0.25.0 F2 P1：把 webview 生命周期事件 push 给主窗口 renderer（占位组件监听清 loading） */
+function pushBrowserEventToRenderer(channel: string, payload: unknown): void {
+  try {
+    const win = getMainWindow()
+    if (!win || win.isDestroyed()) return
+    win.webContents.send(channel, payload)
+  } catch {
+    /* ignore */
+  }
 }
 
 /** renderer 回传 browser:load-done。 */

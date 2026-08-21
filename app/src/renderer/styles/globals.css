@@ -1411,37 +1411,28 @@ textarea {
   padding: 0 12px 0 14px;
 }
 /* ============================================================
- * v0.24.x — 「要做什么」action 短语蓝色 hint 行（Trae / DeepSeek harness 风格）
+ * v0.24.x — 「要做什么」意图叙述行（Trae / DeepSeek harness 风格）
+ * v0.25.1 — 去除「要做什么」label chip；字号 13→14、颜色提亮至 text-primary，
+ *            与交互区正常输出（.say-block__content 14px/24px）视觉对齐。
  * 置于 iteration 顶部、ThinkBlock 之上，独立条目不嵌套折叠。
- * 复用 turn-status 业务蓝渐变与 11px 字阶，比 body 小、视觉降权不抢戏。
  * ============================================================ */
 .intent-hint {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 4px 0 4px 0;
-  /* v0.25.0 F4：intent-hint 字号 12 → 13（紧凑节奏，与 .say-block 视觉同级） */
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--text-secondary);
+  /* v0.25.1：字号 14px 与 SayBlock 正文一致，line-height 24px */
+  font-size: 14px;
+  line-height: 24px;
+  color: var(--text-primary);
   border-left: 2px solid var(--business-primary);
   padding-left: 10px;
   margin: 2px 0 4px 0;
 }
-.intent-hint__label {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--business-primary);
-  background: var(--business-primary-soft, rgba(57, 100, 254, 0.12));
-  border-radius: 4px;
-  padding: 1px 6px;
-  letter-spacing: 0;
-  flex-shrink: 0;
-}
 .intent-hint__text {
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 20px;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 24px;
   word-break: break-word;
 }
 

@@ -1030,6 +1030,10 @@ export interface ArkApi {
     loadDone: (requestId: string, error?: string) => Promise<void>
     /** 地址栏输入 → 完整 URL（本地路径转 file://，基于工作区） */
     resolve: (input: string) => Promise<string>
+    /** v0.25.0 F2 P1：webview did-finish-load 事件（BrowserPanel 占位监听清 loading） */
+    onDidFinishLoad: (cb: (payload: { url: string }) => void) => () => void
+    /** v0.25.0 F2 P1：webview did-fail-load 事件 */
+    onDidFailLoad: (cb: (payload: { code: number; desc: string }) => void) => () => void
   }
   /** v0.25.0 F2：WebContentsView 多 Tab 路由（设计文档 §4.4） */
   browserTabs: {
@@ -1040,6 +1044,12 @@ export interface ArkApi {
     setBounds: (args: { tabId: string; rect: { x: number; y: number; width: number; height: number } }) => Promise<true>
     list: () => Promise<BrowserTabMeta[]>
     setAgentDriven: (args: { tabId: string; agentDriven: boolean }) => Promise<true>
+    /** v0.25.0 F2 P1：dock → 独立窗口（解决「切标签丢 webContents / 浮窗浏览器不可用」bug） */
+    detach: (args: { tabId: string; bounds?: { x: number; y: number; width: number; height: number } }) => Promise<{ windowId: number }>
+    /** v0.25.0 F2 P1：独立窗口 → dock */
+    attach: (args: { tabId: string }) => Promise<true>
+    /** v0.25.0 F2 P1：宿主变化通知（attach/detach 完成后 push；BrowserPanel 收到后立即 setBounds） */
+    onHostChanged: (cb: (payload: { tabId: string; host: 'dock' | 'window' }) => void) => () => void
   }
   settings: {
     get: () => Promise<AppSettings>

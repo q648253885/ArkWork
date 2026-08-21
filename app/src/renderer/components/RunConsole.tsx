@@ -168,16 +168,17 @@ export function RunConsole({
                 />
               </div>
             )}
-            {/* v0.23.1：有选项卡时不再提供输入框（与选项卡重叠且交互混乱），
-                只保留一行提示；无选项卡的开放式提问才显示自定义回答输入。 */}
-            {suggestions.length > 0 ? (
-              <div className="mt-2 flex items-center gap-1.5 px-0.5 text-2xs text-text-tertiary">
-                <Icon.Check width={12} height={12} className="flex-shrink-0" />
-                <span>点击上方选项即可作答 · 选择后任务自动继续</span>
-              </div>
-            ) : (
-              onAppendAndResume && (
+            {/* v0.25.0 F2 P1：选项卡 + 输入框并存（点击选项快速作答或输入自定义指令）。
+                旧 v0.23.1 注释说"有选项卡时不显示输入框"——但用户反馈"选项不正确+无输入框"，
+                实际场景经常需要"否，但请按 X 调整"这类自定义指令。两者并存更灵活。 */}
+            {onAppendAndResume && (
               <div className="mt-2">
+                {suggestions.length > 0 && (
+                  <div className="flex items-center gap-1.5 mb-1.5 px-0.5 text-2xs text-text-tertiary">
+                    <Icon.Check width={12} height={12} className="flex-shrink-0" />
+                    <span>点击上方选项快速作答，或在下方输入自定义指令</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-1.5 mb-1.5 px-0.5">
                   <Icon.Edit width={12} height={12} className="text-text-tertiary flex-shrink-0" />
                   <span className="text-2xs text-text-tertiary uppercase tracking-wider font-medium">
@@ -210,7 +211,6 @@ export function RunConsole({
                   </button>
                 </div>
               </div>
-              )
             )}
           </div>
         )}

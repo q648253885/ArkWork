@@ -14,6 +14,7 @@ app/release/
 
 # Dev data & caches
 app/.dev-data/
+app/.arkwork/
 **/.DS_Store
 **/Cache/
 **/Code Cache/
@@ -72,3 +73,4 @@ app/fix_lone_surrogates.py
 
 # Runtime audit / eval data
 app/src/main/audit/*.jsonl
+index-*.js

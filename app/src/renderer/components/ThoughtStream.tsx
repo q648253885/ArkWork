@@ -243,11 +243,10 @@ function IterationBlock({ unit, isActive }: { unit: IterationUnit; isActive?: bo
       data-react-iteration={String(unit.iteration)}
       id={`react-iter-${unit.iteration}`}
     >
-      {/* 「要做什么」蓝色 hint 行 — 放在 iteration 开头（think 块之前），
-          与 ThinkBlock / ToolCard 并列作为时间线内的常规条目。 */}
+      {/* v0.25.1：「要做什么」提示 — 去除蓝色 label chip，直接以正文级字号/明度展示意图叙述，
+          与交互区正常输出（SayBlock）视觉对齐、更明亮（原 11px 标签偏小、语义冗余）。 */}
       {intention && (
         <div className="intent-hint">
-          <span className="intent-hint__label">要做什么</span>
           <span className="intent-hint__text">{intention}</span>
         </div>
       )}

@@ -1,6 +1,6 @@
 {
   "name": "arkwork",
-  "version": "0.25.0",
+  "version": "0.25.1",
   "description": "Local-first AI Agent workbench — ReAct loop visible, controllable, reusable.",
   "main": "out/main/index.js",
   "author": "ArkWork",
@@ -54,6 +54,7 @@
     "electron": "^33.2.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
+    "pngjs": "^7.0.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.6.3",

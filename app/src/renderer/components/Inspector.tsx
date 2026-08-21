@@ -134,15 +134,33 @@ export function Inspector() {
       className="flex h-full flex-shrink-0 select-none"
       aria-label="右侧工具窗口栏"
     >
-      {/* 内容面板 — 仅当非折叠时渲染。
-          位于标签栏左侧，宽度受 store 控制（280–480px）。 */}
-      {!rightDockCollapsed && (
+      {/* 内容面板 —— v0.25.0 F2 P1：始终挂载（折叠时容器隐藏），保证 BrowserPanel 内
+          view-manager bounds 同步不停。否则折叠/隐藏时 React 卸载 → ResizeObserver 断开 →
+          webContents 卡在旧 bounds → 再次展开出现漂浮/错位。
+          隐藏方式用 visibility:hidden + width:0（占位为 0 不抢空间），而非 display:none，
+          否则内部 width:100% 计算会塌陷。 */}
+      <div
+        id={`inspector-panel-${inspectorTab}`}
+        role="tabpanel"
+        aria-label={INSPECTOR_TAB_META[inspectorTab].label}
+        aria-hidden={rightDockCollapsed}
+        className="responsive-inspector-panel relative flex flex-col h-full bg-bg-base border-l border-border-subtle flex-shrink-0"
+        style={{
+          '--inspector-width': `${rightDockWidth}px`,
+          width: rightDockCollapsed ? 0 : `${rightDockWidth}px`,
+          minWidth: rightDockCollapsed ? 0 : `${rightDockWidth}px`,
+          overflow: 'hidden',
+          borderLeftWidth: rightDockCollapsed ? 0 : undefined,
+          transition: 'width 160ms var(--ease-out)',
+        } as React.CSSProperties}
+      >
         <div
-          id={`inspector-panel-${inspectorTab}`}
-          role="tabpanel"
-          aria-label={INSPECTOR_TAB_META[inspectorTab].label}
-          className="responsive-inspector-panel relative flex flex-col h-full bg-bg-base border-l border-border-subtle"
-          style={{ '--inspector-width': `${rightDockWidth}px` } as React.CSSProperties}
+          className="flex flex-col h-full"
+          style={{
+            visibility: rightDockCollapsed ? 'hidden' : 'visible',
+            width: `${rightDockWidth}px`,
+            position: rightDockCollapsed ? 'absolute' : 'static',
+          }}
         >
           {/* 左边缘 resize handle — 拖拽调整面板宽度 */}
           <Tooltip label="拖拽调整宽度" desc="280–480px 之间自由拖动" placement="left">
@@ -164,16 +182,26 @@ export function Inspector() {
             />
           </Tooltip>
 
-          {/* 当前标签面板 */}
-          <div className="flex-1 min-h-0 overflow-hidden">
+          {/* 当前标签面板 —— v0.25.0 F2 P1：BrowserPanel 始终挂载，避免切走销毁 webContents */}
+          <div className="flex-1 min-h-0 overflow-hidden relative">
+            {/* 始终挂载 BrowserPanel（display:none 隐藏），webContents 不销毁。
+                v0.25.0 F2 P1 bug-fix：display 同时受 右栏折叠 约束 —— 折叠时也归零，
+                否则 placeholder 仍保有宽度（父节点只做 visibility:hidden），占位区的
+                getBoundingClientRect 继续返回真实尺寸 → 原生 WebContentsView 不会被隐藏，
+                会盖在"折叠后向左扩展的会话区"上（侧栏浏览器遮挡内容）。 */}
+            <div
+              className="absolute inset-0 flex flex-col"
+              style={{ display: inspectorTab === 'browser' && !rightDockCollapsed ? 'flex' : 'none' }}
+            >
+              <BrowserPanel />
+            </div>
             {inspectorTab === 'todos' && <TodoPanel />}
             {inspectorTab === 'context' && <ContextPanel />}
             {inspectorTab === 'files' && <FilesPanel />}
             {inspectorTab === 'logs' && <LogsView />}
-            {inspectorTab === 'browser' && <BrowserPanel />}
           </div>
         </div>
-      )}
+      </div>
 
       {/* 垂直标签栏 — 始终常驻于窗口最右边 */}
       <div

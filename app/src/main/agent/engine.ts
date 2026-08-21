@@ -1045,14 +1045,37 @@ export async function runReActLoop(
           continue
         }
         // v0.18.x：suggestions 不足 2 个时注入兜底选项，避免前端拿不到建议卡
+        // v0.25.0 F2 P1：兜底改为 context-aware —— 根据 question 关键字生成更合理的选项。
+        // 同时始终保留「继续」+「暂停补充信息」两项兜底（与 v0.18.x 契约一致；测试断言依赖）。
+        const lowerQ = String(rawQuestion ?? '').toLowerCase()
+        const isFailureQ = /(失败|fail|错误|err|异常|exception|超时)/.test(lowerQ)
+        const isContinueQ = /(继续|下一步|继续运行|下一步要做什么|怎么继续|该做什么|选择下一步|怎么办)/.test(lowerQ)
+        const contextualSuggestions = isFailureQ
+          ? [
+              { label: '重试该步骤', description: '按当前路径再试一次（自动跳过已成功的部分）' },
+              { label: '跳过该步骤', description: '跳过失败步骤，继续后面的任务' },
+              { label: '换个方式重试', description: '尝试其他路径/工具完成此步' },
+            ]
+          : isContinueQ
+            ? [
+                { label: '继续运行', description: '从中断处继续执行任务' },
+                { label: '就此结束', description: '保留当前进度并收尾' },
+                { label: '换个方向', description: '暂停并调整策略' },
+              ]
+            : []
+        // 保底兜底：始终含「继续」+「暂停」两项（v0.18.x 契约；description 描述补充）。
+        const fallbackSuggestions = [
+          { label: '继续', description: '保持当前方向继续执行' },
+          { label: '暂停', description: '先暂停，我来说明补充信息' },
+        ]
         const finalSuggestions =
           validatedSuggestions.length >= 2
             ? validatedSuggestions
             : [
                 ...validatedSuggestions,
-                { label: '继续', description: '保持当前方向继续执行' },
-                { label: '暂停', description: '先暂停，我来说明补充信息' },
-              ].slice(0, 2)
+                ...contextualSuggestions,
+                ...fallbackSuggestions,
+              ].slice(0, 4)
         // v0.14.0 修复：与 task_complete 同理，补写配对 tool observation，
         // 避免 assistant tool_calls 悬空导致后续交互 400。
         // v0.19.x：多 action 时为每个 action 补写配对 observation。

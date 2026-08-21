@@ -248,6 +248,17 @@ const ark: ArkApi = {
     },
     loadDone: (requestId, error) => ipcRenderer.invoke('browser:load-done', { requestId, error }),
     resolve: (input) => ipcRenderer.invoke('browser:resolve', input),
+    // v0.25.0 F2 P1：webview 生命周期事件（webContents.send 推到 renderer）
+    onDidFinishLoad: (cb) => {
+      const handler = (_e: IpcRendererEvent, payload: { url: string }) => cb(payload)
+      ipcRenderer.on('browser:did-finish-load', handler)
+      return () => ipcRenderer.removeListener('browser:did-finish-load', handler)
+    },
+    onDidFailLoad: (cb) => {
+      const handler = (_e: IpcRendererEvent, payload: { code: number; desc: string }) => cb(payload)
+      ipcRenderer.on('browser:did-fail-load', handler)
+      return () => ipcRenderer.removeListener('browser:did-fail-load', handler)
+    },
   },
   // v0.25.0 F2：WebContentsView 多 Tab 路由（view-manager）
   browserTabs: {
@@ -258,6 +269,15 @@ const ark: ArkApi = {
     setBounds: (args) => ipcRenderer.invoke('browser:tabs:set-bounds', args),
     list: () => ipcRenderer.invoke('browser:tabs:list'),
     setAgentDriven: (args) => ipcRenderer.invoke('browser:tabs:set-agent-driven', args),
+    // v0.25.0 F2 P1：dock ↔ 独立窗口（修复「dock 切标签丢内容」「浮窗浏览器不可用」bug）
+    detach: (args) => ipcRenderer.invoke('browser:tabs:detach', args),
+    attach: (args) => ipcRenderer.invoke('browser:tabs:attach', args),
+    // v0.25.0 F2 P1：宿主变化通知（attach/detach 完成后 push；BrowserPanel 收到后立即 setBounds）
+    onHostChanged: (cb) => {
+      const handler = (_e: IpcRendererEvent, payload: { tabId: string; host: 'dock' | 'window' }) => cb(payload)
+      ipcRenderer.on('browser:tab-host-changed', handler)
+      return () => ipcRenderer.removeListener('browser:tab-host-changed', handler)
+    },
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),

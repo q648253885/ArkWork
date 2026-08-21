@@ -15,6 +15,8 @@ import {
   getTabView,
   setAgentDriven,
   closeAllTabs,
+  detachTab,
+  attachTab,
 } from '../browser/view-manager.js'
 import type { BrowserTabMeta } from '@shared/types/ipc'
 import { logger } from '../system/logger.js'
@@ -71,6 +73,15 @@ export function registerBrowserTabHandlers(): void {
   ipcMain.handle('browser:tabs:get-view-id', (_e, _args: { tabId: string }) => {
     const view = getTabView(_args.tabId)
     return view?.webContents.id ?? null
+  })
+
+  // v0.25.0 F2 P1：dock ↔ window Tab 迁移（解决 dock 切标签丢 webContents / 浮窗浏览器不可用 bug）
+  ipcMain.handle('browser:tabs:detach', (_e, args: { tabId: string; bounds?: { x: number; y: number; width: number; height: number } }) => {
+    return detachTab(args.tabId, args.bounds)
+  })
+  ipcMain.handle('browser:tabs:attach', (_e, args: { tabId: string }) => {
+    attachTab(args.tabId)
+    return true
   })
 
   logger.info('System', 'browser:tabs IPC handlers registered')
