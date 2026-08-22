@@ -8,7 +8,7 @@
 import { useMemo, useState } from 'react'
 import { Icon } from '../../icons'
 import { useStore } from '../../store'
-import { EmptyState } from '../ui'
+import { EmptyState, Tooltip } from '../ui'
 interface ShellEntry {
   id: string
   command: string
@@ -64,8 +64,10 @@ export function TerminalPanel() {
   return (
     <div className="flex flex-col h-full">
       {/* 头部 */}
+      {/* v0.27.0 F14：澄清只读属性——副标签「输出查看器」+ 右侧说明图标 */}
       <div className="flex items-center gap-2 px-3 h-9 flex-shrink-0 border-b border-border-subtle">
         <span className="text-sm text-text-primary font-medium">终端</span>
+        <span className="text-2xs text-text-tertiary">输出查看器</span>
         <span className="text-2xs text-text-tertiary tabular">{entries.length} 条命令</span>
         {runningCount > 0 && (
           <span className="flex items-center gap-1 text-2xs text-accent">
@@ -73,6 +75,9 @@ export function TerminalPanel() {
             {runningCount} 执行中
           </span>
         )}
+        <Tooltip label="只读输出视图，不可输入命令" desc="真交互终端在后续版本评估（P2）" className="ml-auto">
+          <Icon.Info width={13} height={13} className="text-text-faint" />
+        </Tooltip>
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 py-1.5">
@@ -80,7 +85,7 @@ export function TerminalPanel() {
           <EmptyState
             icon={<Icon.Terminal width={22} height={22} />}
             title="暂无终端记录"
-            hint="任务执行中的命令会出现在这里"
+            hint="Agent 执行命令的输出在此展示。此处不可输入——命令由 Agent 在受控权限下执行。"
           />
         ) : (
           <div className="space-y-1">

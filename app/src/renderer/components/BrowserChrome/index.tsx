@@ -29,7 +29,14 @@ interface HistState {
   idx: number
 }
 
-export function BrowserChrome({ mode = 'float' }: { mode?: 'float' | 'dock' }) {
+export function BrowserChrome({
+  mode = 'float',
+  onActiveTabChange,
+}: {
+  mode?: 'float' | 'dock'
+  /** v0.27.0 F11：活动 Tab 变化回调 —— BrowserPanel 借此拿到 activeTabId 做占位 bounds 同步 */
+  onActiveTabChange?: (tab: BrowserTabMeta | null) => void
+}) {
   const [tabs, setTabs] = useState<BrowserTabMeta[]>([])
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [address, setAddress] = useState('')
@@ -59,6 +66,16 @@ export function BrowserChrome({ mode = 'float' }: { mode?: 'float' | 'dock' }) {
   }, [])
 
   const current = useMemo(() => tabs.find((t) => t.tabId === currentId) ?? null, [tabs, currentId])
+
+  /* v0.27.0 F11：活动 Tab 变化外抛。轮询每 800ms 生成新 list（引用全变），
+     以 tabId:host 签名去重，仅真实变化时回调 —— 避免 BrowserPanel 无效重渲染 */
+  const emittedSigRef = useRef<string>('__init__')
+  useEffect(() => {
+    const sig = current ? `${current.tabId}:${current.host}` : ''
+    if (sig === emittedSigRef.current) return
+    emittedSigRef.current = sig
+    onActiveTabChange?.(current)
+  }, [current, onActiveTabChange])
 
   /* 导航：非直连 URL 先经主进程 resolve（本地路径 → file:// 等） */
   const load = useCallback(
@@ -275,6 +292,49 @@ export function BrowserChrome({ mode = 'float' }: { mode?: 'float' | 'dock' }) {
     return off
   }, [mode])
 
+  /* v0.27.0 F11/F12：dock 模式直听 agent 的 browser.open（'browser:load' 推送）——
+     有当前 Tab 就地导航；无则新建并激活接管。float 不订阅（浮窗保持被动展示）。 */
+  useEffect(() => {
+    if (mode !== 'dock') return
+    const off = window.ark.browser.onLoadRequest((req) => {
+      void (async () => {
+        const { browserTabs, browser } = window.ark
+        let target = req.url ?? ''
+        if (target && !DIRECT_URL_RE.test(target)) {
+          try {
+            target = await browser.resolve(target)
+          } catch {
+            /* resolve 失败按原文尝试 */
+          }
+        }
+        let tabId = currentIdRef.current
+        const exists = tabId ? tabsRef.current.some((t) => t.tabId === tabId) : false
+        if (!tabId || !exists) {
+          const created = await browserTabs.create({ url: target || undefined, newTab: true })
+          await browserTabs.activate({ tabId: created.tabId })
+          tabId = created.tabId
+          applyCurrentId(tabId)
+          setHist({ items: target ? [target] : [], idx: target ? 0 : -1 })
+        } else {
+          await browserTabs.navigate({ tabId, url: target })
+          setHist((h) => ({ items: [...h.items.slice(0, h.idx + 1), target], idx: h.idx + 1 }))
+        }
+        // 标记 agent 接管 → NavRow/StatusBar/TabStrip 显示接管态
+        try {
+          await browserTabs.setAgentDriven({ tabId, agentDriven: true })
+        } catch {
+          /* ignore */
+        }
+        pendingRef.current = { url: target, since: Date.now() }
+        lastMetaUrlRef.current = target
+        setLoading(true)
+        setStatusText(`正在加载 ${target}`)
+        applyAddress(target)
+      })()
+    })
+    return off
+  }, [mode, applyCurrentId, applyAddress])
+
   const agentDriven = current?.agentDriven ?? false
   const canBack = hist.idx > 0
   const canForward = hist.idx >= 0 && hist.idx < hist.items.length - 1
@@ -307,17 +367,22 @@ export function BrowserChrome({ mode = 'float' }: { mode?: 'float' | 'dock' }) {
 
   if (mode === 'dock') {
     return (
+      // v0.27.0 F11：根节点不再撑满父容器高度（w-full flex-shrink-0），高度由内容行决定 ——
+      // 单 Tab 无 Tab 条时占位区自动获得全部剩余空间（R-dock-1 / 检查单 4：高度不抖动）
       <div
-        className="browser-chrome browser-chrome--dock relative flex h-full min-h-0 flex-col bg-bg-surface"
+        className="browser-chrome browser-chrome--dock relative flex w-full flex-shrink-0 flex-col bg-bg-surface"
         data-browser-chrome=""
       >
-        <TabStrip
-          tabs={tabs}
-          currentId={currentId}
-          onSelect={(id) => void switchTab(id)}
-          onClose={(id) => void closeTab(id)}
-          onNew={() => void newTab()}
-        />
+        {/* R-dock-1：Tab 条仅 >1 个标签时渲染（32px 预算，--browser-tabbar-h 已计入占位实测） */}
+        {tabs.length >= 2 && (
+          <TabStrip
+            tabs={tabs}
+            currentId={currentId}
+            onSelect={(id) => void switchTab(id)}
+            onClose={(id) => void closeTab(id)}
+            onNew={() => void newTab()}
+          />
+        )}
         {navRow}
         <StatusBar statusText={statusText} loading={loading} title={current?.title} agentDriven={agentDriven} />
       </div>

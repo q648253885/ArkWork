@@ -410,7 +410,7 @@ const BUILTIN_SKILLS: Skill[] = [
     id: 'S-core.browser',
     name: 'browser',
     description:
-      '在 ArkWork 内置浏览器（右栏 webview）中打开并测试网页或本地 HTML 文件，支持自主验证与跟进。' +
+      '在 ArkWork 内置浏览器中打开并测试网页或本地 HTML 文件，支持自主验证与跟进。' +
       '子动作：open（打开 URL 或本地文件）、eval（在页面执行 JS 探测/断言）、snapshot（页面快照：标题/URL/正文/画布）、' +
       'console（读取页面 console 日志，定位 JS 错误）、screenshot（截图留证）、close（结束会话）。' +
       '适合：改完网页后自查运行效果、检查控制台报错、验证交互是否生效。',

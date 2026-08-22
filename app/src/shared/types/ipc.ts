@@ -1091,20 +1091,15 @@ export interface ArkApi {
     onAppend: (cb: (entry: LogEntry) => void) => () => void
   }
   /**
-   * v0.24.1：agent 自主驱动的内置浏览器（右栏 BrowserPanel 的 <webview>）。
-   * Main → Renderer 通知加载；Renderer 在 did-finish-load / did-fail-load 后回传结果。
+   * v0.24.1：agent 自主驱动的内置浏览器。
+   * v0.27.0 F12：loadDone / onDidFinishLoad / onDidFailLoad 随 webview 旧轨删除；
+   * 加载结算由主进程 waitForLoad 负责，renderer 仅接收通知与地址解析。
    */
   browser: {
-    /** 订阅 agent 的 browser.open 请求（含 requestId，用于回传加载结果） */
+    /** 订阅 agent 的 browser.open 请求（用于 dock chrome 同步地址栏 / 激活 Tab） */
     onLoadRequest: (cb: (req: BrowserLoadRequest) => void) => () => void
-    /** webview 加载完成（或失败）后回传 */
-    loadDone: (requestId: string, error?: string) => Promise<void>
     /** 地址栏输入 → 完整 URL（本地路径转 file://，基于工作区） */
     resolve: (input: string) => Promise<string>
-    /** v0.25.0 F2 P1：webview did-finish-load 事件（BrowserPanel 占位监听清 loading） */
-    onDidFinishLoad: (cb: (payload: { url: string }) => void) => () => void
-    /** v0.25.0 F2 P1：webview did-fail-load 事件 */
-    onDidFailLoad: (cb: (payload: { code: number; desc: string }) => void) => () => void
   }
   /** v0.25.0 F2：WebContentsView 多 Tab 路由（设计文档 §4.4） */
   browserTabs: {

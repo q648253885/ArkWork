@@ -9,10 +9,10 @@ interface TabStripProps {
   onNew: () => void
 }
 
-/** dock 模式标签条（float 模式不渲染 —— 40px 高度放不下第二行） */
+/** dock 模式标签条（float 模式不渲染）。v0.27.0 F11：32px 预算（h-8+pt-1），仅 >1 Tab 时出现 */
 export function TabStrip({ tabs, currentId, onSelect, onClose, onNew }: TabStripProps) {
   return (
-    <div className="flex h-9 flex-shrink-0 items-end gap-1 bg-bg-surface-2 px-2 pt-1.5">
+    <div className="flex h-8 flex-shrink-0 items-end gap-1 bg-bg-surface-2 px-2 pt-1">
       <div className="flex min-w-0 flex-1 items-end gap-1 overflow-hidden">
         {tabs.map((tab) => {
           const active = tab.tabId === currentId

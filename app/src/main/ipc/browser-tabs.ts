@@ -3,8 +3,11 @@
  *
  * 把 WebContentsView Tab 化路由暴露给 renderer；
  * 复用 browser:load 协议（push browser:load 触发 renderer 激活 Tab 加载 URL）。
+ * v0.27.0 F12：原 ipc/browser.ts 的地址解析（browser:resolve）并入此处，
+ * webview 加载回传（browser:load-done）随旧轨删除。
  * ============================================================ */
 import { ipcMain } from 'electron'
+import { resolveBrowserUrl } from '../browser/controller.js'
 import {
   createTab,
   closeTab,
@@ -82,6 +85,11 @@ export function registerBrowserTabHandlers(): void {
   ipcMain.handle('browser:tabs:attach', (_e, args: { tabId: string }) => {
     attachTab(args.tabId)
     return true
+  })
+
+  // v0.27.0 F12（自 ipc/browser.js 并入）：地址栏 / BrowserChrome 输入 → 完整 URL
+  ipcMain.handle('browser:resolve', (_e, input: string) => {
+    return resolveBrowserUrl(input)
   })
 
   logger.info('System', 'browser:tabs IPC handlers registered')

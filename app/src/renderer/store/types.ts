@@ -35,7 +35,6 @@ import type {
   MarketplaceSource,
   ToolConfirmRequest,
   ToolProgressEvent,
-  BrowserLoadRequest,
   TaskTextDeltaPayload,
   ConfirmRespondReason,
 } from '@shared/types/ipc'
@@ -217,11 +216,6 @@ export interface AppState {
   setInspectorTabOrder: (order: InspectorTabId[]) => void
   hideInspectorTab: (tab: InspectorTabId) => void
   restoreInspectorTab: (tab: InspectorTabId) => void
-
-  // ============================================================
-  // v0.24.1：agent 自主浏览器 —— 主进程 browser.open 的加载请求（含 requestId）
-  browserLoad: BrowserLoadRequest | null
-  setBrowserLoad: (req: BrowserLoadRequest | null) => void
 
   // ============================================================
   // v0.9.0 F900 — 全局模块页（CenterStage 整页切换）

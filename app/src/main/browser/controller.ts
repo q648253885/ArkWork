@@ -17,8 +17,8 @@
  *   - tabs：list/new/select/close（复用 view-manager 导出）
  *   - 归属仲裁：交互原语执行前检查 agentDriven，用户接管中返回明确错误
  *
- * 时序兼容：v0.24.1 的 <webview> pending 单请求模型保留为遗留路径
- * （did-attach-webview → browser:load-done），新链路全部走 view-manager Tab。
+ * v0.27.0 F12：删除 webview 旧轨（did-attach-webview / browser:load-done /
+ * LEGACY_TAB_ID fallback）——浏览器收敛为 view-manager 单轨。
  * ============================================================ */
 import type { WebContents } from 'electron'
 import { pathToFileURL } from 'node:url'
@@ -48,23 +48,12 @@ const INTERACTIVE_SELECTOR =
 
 export type BrowserConsoleEntry = { level: string; message: string; line: number }
 
-interface PendingLoad {
-  requestId: string
-  resolve: () => void
-  reject: (err: Error) => void
-  timer: NodeJS.Timeout
-}
-
 interface BrowserSession {
-  wc: WebContents | null
-  pending: PendingLoad | null
   consoleLogs: BrowserConsoleEntry[]
   currentUrl: string
 }
 
 const session: BrowserSession = {
-  wc: null,
-  pending: null,
   consoleLogs: [],
   currentUrl: '',
 }
@@ -76,75 +65,11 @@ const agentOwnedTabs = new Set<string>()
 /** 已挂过 console/navigation 钩子的 webContents（每 wc 一次）。 */
 const hookedWebContents = new WeakSet<WebContents>()
 
-const LEGACY_TAB_ID = 'legacy-webview'
-
-function failPending(err: Error): void {
-  if (session.pending) {
-    clearTimeout(session.pending.timer)
-    const p = session.pending
-    session.pending = null
-    p.reject(err)
-  }
-}
-
-function settlePending(requestId: string | null, error?: string): void {
-  if (session.pending && (requestId === null || session.pending.requestId === requestId)) {
-    clearTimeout(session.pending.timer)
-    const p = session.pending
-    session.pending = null
-    if (error) p.reject(new Error(error))
-    else p.resolve()
-  }
-}
-
-/** 主窗口创建后调用：捕获 webview 的 WebContents 并挂载事件（遗留 <webview> 路径）。 */
-export function initBrowserController(): void {
-  const win = getMainWindow()
-  if (!win) return
-  win.webContents.on('did-attach-webview', (_event, wc: WebContents) => {
-    session.wc = wc
-    session.currentUrl = wc.getURL()
-    wc.on('did-finish-load', () => {
-      session.currentUrl = wc.getURL()
-      settlePending(null)
-      pushBrowserEventToRenderer('browser:did-finish-load', { url: wc.getURL() })
-    })
-    wc.on('did-fail-load', (_e, code, desc) => {
-      session.currentUrl = wc.getURL()
-      settlePending(null, `加载失败（${code}）：${desc}`)
-      pushBrowserEventToRenderer('browser:did-fail-load', { code, desc })
-    })
-    wc.on('console-message', (_e, level, message, line) => {
-      pushConsoleLog(level, message, line)
-    })
-    wc.on('destroyed', () => {
-      session.wc = null
-    })
-    logger.info('System', 'webview attached')
-  })
-}
-
 function pushConsoleLog(level: unknown, message: unknown, line: unknown): void {
   session.consoleLogs.push({ level: String(level), message: String(message).slice(0, 1000), line: Number(line) })
   if (session.consoleLogs.length > CONSOLE_CAP) {
     session.consoleLogs.splice(0, session.consoleLogs.length - CONSOLE_CAP)
   }
-}
-
-/** v0.25.0 F2 P1：把 webview 生命周期事件 push 给主窗口 renderer（占位组件监听清 loading） */
-function pushBrowserEventToRenderer(channel: string, payload: unknown): void {
-  try {
-    const win = getMainWindow()
-    if (!win || win.isDestroyed()) return
-    win.webContents.send(channel, payload)
-  } catch {
-    /* ignore */
-  }
-}
-
-/** renderer 回传 browser:load-done（遗留 <webview> 路径兼容）。 */
-export function resolveBrowserLoad(requestId: string, error?: string): void {
-  settlePending(requestId, error)
 }
 
 function clearRefs(tabId: string): void {
@@ -176,10 +101,7 @@ function resolveTarget(): { tabId: string; wc: WebContents } | null {
     ensureTabHooks(tab.view.webContents, tab.tabId)
     return { tabId: tab.tabId, wc: tab.view.webContents }
   }
-  if (session.wc && !session.wc.isDestroyed()) {
-    ensureTabHooks(session.wc, LEGACY_TAB_ID)
-    return { tabId: LEGACY_TAB_ID, wc: session.wc }
-  }
+  // v0.27.0 F12：LEGACY_TAB_ID fallback 已随 webview 旧轨删除，仅认 view-manager Tab
   return null
 }
 
@@ -312,7 +234,8 @@ export async function browserOpen(target: BrowserTarget, timeoutMs = OPEN_TIMEOU
   ensureTabHooks(wc, tab.tabId)
   clearRefs(tab.tabId)
 
-  // 兼容：仍通知 renderer（BrowserPanel 可能借此展开面板），但不再等待其回传
+  // v0.27.0 F11/F12：通知 renderer（BrowserChrome dock 模式直听此通道同步地址栏/激活 Tab；
+  // BrowserPanel 订阅仅用于切到 Browser 标签），不再等待回传——结算由上方 waitForLoad 负责。
   const requestId = `bl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   win.webContents.send('browser:load', { requestId, url: src })
 
@@ -816,7 +739,7 @@ export async function browserTabsAction(
 
 /** 结束当前浏览器会话：清空 console 缓冲、ref 注册表与 agent 接管记录。 */
 export function browserClose(): { closed: boolean } {
-  failPending(new Error('browser.close 中断了加载'))
+  // v0.27.0 F12：failPending 已随 webview 旧轨删除（加载结算由 waitForLoad 本地 Promise 负责）
   session.consoleLogs = []
   session.currentUrl = ''
   refRegistry.clear()
@@ -827,7 +750,7 @@ export function browserClose(): { closed: boolean } {
 export function browserSessionInfo(): { opened: boolean; url: string; consoleCount: number } {
   const tab = getAgentActiveTab()
   return {
-    opened: (!!tab && !tab.view.webContents.isDestroyed()) || (!!session.wc && !session.wc.isDestroyed()),
+    opened: !!tab && !tab.view.webContents.isDestroyed(),
     url: session.currentUrl,
     consoleCount: session.consoleLogs.length,
   }

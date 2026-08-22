@@ -338,8 +338,9 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
       return (
         <div className="h-full flex flex-col items-center justify-center text-text-tertiary">
           <Icon.Eye width={22} height={22} />
-          <div className="text-xs mt-2">无标签页</div>
-          <div className="text-2xs mt-1">从文件树打开文件，或使用标题栏 + 复制当前标签</div>
+          <div className="text-xs mt-2">产物预览</div>
+          {/* v0.27.0 F13：入口收敛——URL 一律走内置浏览器，此处只承载任务产物文件 */}
+          <div className="text-2xs mt-1">从文件树或聊天中的任务产物打开 HTML / 图片 / 文本文件；网址请在内置浏览器中打开</div>
         </div>
       )
     }
@@ -415,7 +416,7 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
     ? activeTab.target.kind === 'file'
       ? basename(activeTab.target.path)
       : activeTab.target.url
-    : '预览'
+    : '产物预览' // v0.27.0 F13：空态标题补产物预览语义
 
   const entry = RENDERER_REGISTRY[activeRenderer]
   const showTabBar = tabs.length >= 2

@@ -1,6 +1,6 @@
 /* ============================================================
  * ArkWork — Renderer Global Store（v0.27.0 R3 slice 化装配层）
- * AppState 由 9 个 slice 组合（TS 结构化校验字段覆盖完整性）；
+ * AppState 由 8 个 slice 组合（TS 结构化校验字段覆盖完整性）；
  * init / subscribeAll 在此收口；对外 API 与拆分前完全一致。
  *
  * 设计文档：docs/versions/v0.27.0/03-system-design.md §4
@@ -11,7 +11,6 @@ import { applyThemeClass, friendlyError } from './meta'
 import { subscribeAll as subscribeAllImpl } from './subscriptions'
 import { uiSlice } from './slices/uiSlice'
 import { feedbackSlice } from './slices/feedbackSlice'
-import { browserSlice } from './slices/browserSlice'
 import { tasksSlice } from './slices/tasksSlice'
 import { kbMemorySlice } from './slices/kbMemorySlice'
 import { conversationSlice } from './slices/conversationSlice'
@@ -23,7 +22,6 @@ import type { AppState } from './types'
 export const useStore = create<AppState>((set, get, api) => ({
   ...uiSlice(set, get, api),
   ...feedbackSlice(set, get, api),
-  ...browserSlice(set, get, api),
   ...tasksSlice(set, get, api),
   ...kbMemorySlice(set, get, api),
   ...conversationSlice(set, get, api),

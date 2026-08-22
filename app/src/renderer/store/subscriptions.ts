@@ -146,10 +146,11 @@ export function subscribeAll(
       }),
     )
 
-    // v0.24.1：agent 自主浏览器 —— 收到 browser.open 请求时记录目标并展开 Browser 标签
+    // v0.24.1：agent 自主浏览器 —— 收到 browser.open 请求时切到 Browser 标签
+    // （v0.27.0 F12：browserLoad 状态随 webview 旧轨删除；URL 导航由 BrowserChrome dock 模式直听 IPC）
     unsubs.push(
-      ark.browser.onLoadRequest((req) => {
-        set((s) => ({ browserLoad: req, inspectorTab: 'browser' }))
+      ark.browser.onLoadRequest((_req) => {
+        set((s) => ({ inspectorTab: 'browser' }))
       }),
     )
 

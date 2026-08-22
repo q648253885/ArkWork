@@ -92,9 +92,8 @@ app.whenReady().then(async () => {
   // 创建主窗口
   createMainWindow()
 
-  // v0.24.1：agent 自主浏览器控制器（捕获右栏 webview 的 WebContents）
-  const { initBrowserController } = await import('./browser/controller.js')
-  initBrowserController()
+  // v0.27.0 F12：initBrowserController 已删除（webview 旧轨移除），
+  // 浏览器统一由 view-manager 单轨承载。
 
   logger.info('System', 'ArkWork ready')
 })

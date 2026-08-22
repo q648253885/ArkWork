@@ -245,26 +245,15 @@ const ark: ArkApi = {
       return () => ipcRenderer.removeListener('log:append', handler)
     },
   },
-  // v0.24.1：agent 自主驱动的内置浏览器（webview 加载请求）
+  // v0.24.1：agent 自主驱动的内置浏览器
+  // v0.27.0 F12：loadDone / onDidFinishLoad / onDidFailLoad 随 webview 旧轨删除
   browser: {
     onLoadRequest: (cb) => {
       const handler = (_e: IpcRendererEvent, req: Parameters<typeof cb>[0]) => cb(req)
       ipcRenderer.on('browser:load', handler)
       return () => ipcRenderer.removeListener('browser:load', handler)
     },
-    loadDone: (requestId, error) => ipcRenderer.invoke('browser:load-done', { requestId, error }),
     resolve: (input) => ipcRenderer.invoke('browser:resolve', input),
-    // v0.25.0 F2 P1：webview 生命周期事件（webContents.send 推到 renderer）
-    onDidFinishLoad: (cb) => {
-      const handler = (_e: IpcRendererEvent, payload: { url: string }) => cb(payload)
-      ipcRenderer.on('browser:did-finish-load', handler)
-      return () => ipcRenderer.removeListener('browser:did-finish-load', handler)
-    },
-    onDidFailLoad: (cb) => {
-      const handler = (_e: IpcRendererEvent, payload: { code: number; desc: string }) => cb(payload)
-      ipcRenderer.on('browser:did-fail-load', handler)
-      return () => ipcRenderer.removeListener('browser:did-fail-load', handler)
-    },
   },
   // v0.25.0 F2：WebContentsView 多 Tab 路由（view-manager）
   browserTabs: {
