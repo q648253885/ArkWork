@@ -1,11 +1,21 @@
-/* Node ESM loader: fault-tolerance 测试期间把 'electron' 替换为桩模块。
+/* ============================================================
+ * ArkWork — 统一 Node ESM loader（v0.27.0 R0 单份真源）
+ * 合并自原 store/__tests__ 与 fault-tolerance/__tests__ 两份漂移副本。
+ *
+ * 职责：
+ *  1. 'electron' → src/test/electron-stub.mjs
+ *  2. 各处 system/logger 导入 → src/test/logger.stub.mjs
+ *  3. '@shared/*' 别名解析（与 tsconfig.paths 一致）
+ *
+ * 对不涉及以上三类的模块零副作用——因此所有套件可以统一挂本 loader
+ * 运行，不再需要区分「哪些测试要带 loader」。
  *
  * 使用方式：
  *   cd app
  *   ./node_modules/.bin/tsx \
- *     --experimental-loader ./src/main/fault-tolerance/__tests__/electron-mock-loader.mjs \
- *     --test src/main/fault-tolerance/__tests__/fault-tolerance.test.ts
- */
+ *     --experimental-loader ./src/test/electron-mock-loader.mjs \
+ *     --test <files...>
+ * ============================================================ */
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { dirname, resolve as pathResolve } from 'node:path'
 import { existsSync } from 'node:fs'
@@ -14,9 +24,9 @@ const hereUrl = import.meta.url
 const ELECTRON_STUB_URL = new URL('./electron-stub.mjs', hereUrl).href
 const LOGGER_STUB_URL = new URL('./logger.stub.mjs', hereUrl).href
 
-// 从本 loader 所在目录上溯到 app/ 根（src/main/fault-tolerance/__tests__ → app/）
+// 从本 loader 所在目录上溯到 app/ 根（src/test → app/）
 const HERE_DIR = dirname(fileURLToPath(hereUrl))
-const APP_ROOT = pathResolve(HERE_DIR, '../../../../')
+const APP_ROOT = pathResolve(HERE_DIR, '../')
 
 const CANDIDATE_EXT = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']
 

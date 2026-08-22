@@ -87,3 +87,14 @@ export function planItemToolSteps(steps: ReActStep[], index: number): ReActStep[
   }
   return segments[index] ?? []
 }
+
+/**
+ * v0.27.0 R0：自 store 迁入的纯函数 — 派生计划项。
+ * 仅取真实 plan.items；无真实计划时返回空数组（不展示兜底 5 步）。
+ * 独立于 store 实例，node:test 可直接单测；store 层保留 re-export 兼容旧导入方。
+ */
+export function derivePlanItems(steps: ReActStep[]): string[] {
+  const planStep = steps.find((s) => s.type === 'plan' && s.plan)
+  if (planStep?.plan && planStep.plan.items.length > 0) return planStep.plan.items
+  return []
+}

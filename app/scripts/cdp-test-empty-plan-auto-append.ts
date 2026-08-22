@@ -9,7 +9,7 @@
  *   5. 验证快照含 1 项 planItem（自动追加）
  *
  * 运行（cwd=app，ArkWork.app 已启动 + CDP 9222 端口暴露）：
- *   npx tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs scripts/cdp-test-empty-plan-auto-append.ts
+ *   npx tsx --experimental-loader ./src/test/electron-mock-loader.mjs scripts/cdp-test-empty-plan-auto-append.ts
  * ============================================================ */
 import WebSocket from 'ws'
 

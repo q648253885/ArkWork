@@ -3,7 +3,7 @@
  *
  * 测试运行方式：
  *   ./node_modules/.bin/tsx \
- *     --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs \
+ *     --experimental-loader ./src/test/electron-mock-loader.mjs \
  *     src/main/store/__tests__/tasks.migrate.test.ts
  *
  *   - 使用 Node 18+ 内置 node:test（避免引入 vitest 等新依赖；spec 要求 vitest 但项目未安装且不允许新增依赖）

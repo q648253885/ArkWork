@@ -23,8 +23,8 @@ import {
   planStatusTextClass,
   aggregatePlanStatus,
   planItemToolSteps,
+  derivePlanItems,
 } from '../../../utils/plan-status'
-import { derivePlanItems } from '../../../store'
 
 /** 六态全集 — 必须与 PlanItemStatus 枚举严格一致 */
 const ALL_STATES: readonly PlanItemStatus[] = ['pending', 'running', 'done', 'failed', 'cancelled', 'skipped']

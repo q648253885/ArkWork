@@ -10,7 +10,7 @@
  * 运行方式：
  *   cd app
  *   ./node_modules/.bin/tsx \
- *     --experimental-loader ./src/main/fault-tolerance/__tests__/electron-mock-loader.mjs \
+ *     --experimental-loader ./src/test/electron-mock-loader.mjs \
  *     --test src/main/memory/__tests__/compaction.test.ts
  * ============================================================ */
 import { test } from 'node:test'

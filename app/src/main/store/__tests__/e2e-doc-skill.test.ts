@@ -1,7 +1,7 @@
 /* ============================================================
  * 端到端：导入「文档驱动开发.zip」并验证 references/ assets/ 完整
  * 运行（cwd=app）：
- *   ./node_modules/.bin/tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs \
+ *   ./node_modules/.bin/tsx --experimental-loader ./src/test/electron-mock-loader.mjs \
  *     src/main/store/__tests__/e2e-doc-skill.test.ts
  * ============================================================ */
 import { test } from 'node:test'
@@ -25,6 +25,11 @@ import('node:fs/promises').then(async (fs) => {
 })
 
 test('e2e: 导入「文档驱动开发.zip」后 references/ 全部存在', async () => {
+  // v0.27.0 R0：样本包属机器本地产物（不在仓库内），缺失时跳过而非红——密闭测试链不依赖仓库外文件
+  if (!existsSync(ZIP_PATH)) {
+    console.log(`[e2e] skip: 样本包不存在（${ZIP_PATH}），放置后可单跑本套件`)
+    return
+  }
   const fs = await import('node:fs/promises')
   const skillsDir = join(TEST_ARKWORK_DIR, 'skills')
   if (existsSync(skillsDir)) await fs.rm(skillsDir, { recursive: true, force: true })

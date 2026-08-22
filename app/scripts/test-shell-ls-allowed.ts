@@ -5,7 +5,7 @@
  *      detectShellFileOp 对 ls / tree / stat / file / du / realpath / readlink 返回 null。
  *
  * 运行（cwd=app）：
- *   npx tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs scripts/test-shell-ls-allowed.ts
+ *   npx tsx --experimental-loader ./src/test/electron-mock-loader.mjs scripts/test-shell-ls-allowed.ts
  * ============================================================ */
 import { shell } from '../src/main/agent/skills/shell.js'
 

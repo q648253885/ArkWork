@@ -11,7 +11,7 @@
  *
  * 运行（cwd=app）：
  *   ./node_modules/.bin/tsx \
- *     --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs \
+ *     --experimental-loader ./src/test/electron-mock-loader.mjs \
  *     --test src/main/agent/__tests__/tool-pipeline.test.ts
  * ============================================================ */
 import { test } from 'node:test'

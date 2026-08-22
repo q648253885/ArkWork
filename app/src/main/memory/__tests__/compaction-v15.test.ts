@@ -2,7 +2,7 @@
  * v0.15.0 上下文压缩单测
  * 覆盖：阈值计算、prune 阶段、buildSummarizePrompt、keep.tokens、fuse 机制
  * 运行（cwd=app）：
- *   npx tsx --experimental-loader ./src/main/fault-tolerance/__tests__/electron-mock-loader.mjs \
+ *   npx tsx --experimental-loader ./src/test/electron-mock-loader.mjs \
  *     --test src/main/memory/__tests__/compaction-v15.test.ts
  * ============================================================ */
 import { test } from 'node:test'

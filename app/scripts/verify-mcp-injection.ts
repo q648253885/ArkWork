@@ -10,7 +10,7 @@
  *
  * 运行（cwd=app）：
  *   ./node_modules/.bin/tsx \
- *     --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs \
+ *     --experimental-loader ./src/test/electron-mock-loader.mjs \
  *     scripts/verify-mcp-injection.ts
  * ============================================================ */
 import { writeFile, mkdir, rm, readFile } from 'node:fs/promises'

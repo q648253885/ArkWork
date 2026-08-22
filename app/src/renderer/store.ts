@@ -544,22 +544,13 @@ function formatTimeLabel(ts: number): string {
 }
 
 /* ============================================================
- * v0.14.0 Task 4 — 统一 plan 派生 util
- *   - derivePlanItems(steps)  → 计划项（仅真实 plan.items；无 plan 时返回空）
- *   - derivePlanStates(items, steps) → 逐项状态
- *
- * 之前 CenterStage 的 PlanBar 与 store.derivePlanProgress 各自派生，
- * 数据源重复且 fallback 不一致；现统一收敛到 store 层导出，
- * 对话内 PlanMessage 与 TodoPanel 共用同一结果。无真实 plan 时不再展示
- * 兜底 5 步，保持清单与真实计划严格一致。
+ * v0.14.0 Task 4 — 统一 plan 派生 util（v0.27.0 R0 迁移）
+ *   - derivePlanItems 已迁至 ./utils/plan-status（纯函数层，node:test 直测），
+ *     此处保留 re-export 兼容既有导入方（TodoPanel / CenterStage 等）。
+ *   - derivePlanStates(items, steps) → 逐项状态（仍在本文件，见下）
  * ============================================================ */
 
-/** v0.14.0 Task 4：派生计划项 — 仅取真实 plan.items；无真实计划时返回空数组 */
-export function derivePlanItems(steps: ReActStep[]): string[] {
-  const planStep = steps.find((s) => s.type === 'plan' && s.plan)
-  if (planStep?.plan && planStep.plan.items.length > 0) return planStep.plan.items
-  return []
-}
+export { derivePlanItems } from './utils/plan-status'
 
 /**
  * v0.14.0 Task 4：派生逐项状态（被 deriveConversation / TodoPanel 共用）。

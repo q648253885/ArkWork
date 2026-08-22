@@ -7,7 +7,7 @@
  * 与 T-20260817-106u4s（105 轮 / 132 工具 / 1.56M tokens 未完成）对比。
  *
  * 运行（cwd=app）：
- *   npx tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs scripts/replay-fix-game.ts
+ *   npx tsx --experimental-loader ./src/test/electron-mock-loader.mjs scripts/replay-fix-game.ts
  * ============================================================ */
 import { execSync } from 'node:child_process'
 import { AnthropicAdapter } from '../src/main/llm/anthropic.js'

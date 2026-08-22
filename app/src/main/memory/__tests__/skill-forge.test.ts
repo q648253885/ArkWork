@@ -2,7 +2,7 @@
  * v0.25.0 F3 — skill-forge.ts 单测（完整性校验五项 + 隔离区）
  *
  * 运行（cwd=app）：
- *   npx tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs \
+ *   npx tsx --experimental-loader ./src/test/electron-mock-loader.mjs \
  *          --test src/main/memory/__tests__/skill-forge.test.ts
  * ============================================================ */
 import { test } from 'node:test'

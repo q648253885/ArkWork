@@ -9,10 +9,10 @@
  *
  * 运行（cwd=app）：
  *   ./node_modules/.bin/tsx \
- *     --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs \
+ *     --experimental-loader ./src/test/electron-mock-loader.mjs \
  *     --test src/main/store/__tests__/skills-zip-export.test.ts
  *
- * 复用 store/__tests__/electron-mock-loader.mjs（把 electron 替换为桩，
+ * 复用 src/test/electron-mock-loader.mjs（把 electron 替换为桩，
  * 让 db.ts 的 app.getPath('userData') → /tmp/arkwork-test-userData）。
  * ============================================================ */
 import { test } from 'node:test'

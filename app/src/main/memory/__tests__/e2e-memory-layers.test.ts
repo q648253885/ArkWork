@@ -1,30 +1,31 @@
 /* ============================================================
- * E2E 验证：L1 → L2 → L3a/L3b → L4 全链路记忆分层产物
+ * E2E 验证：L1 → L2 → L3a/L3b 全链路记忆分层产物
  *
  * 在隔离的临时 workspace 驱动真实记忆管线：
  *   L1  appendL1            → .arkwork/memory/{taskId}/l1.jsonl
  *   L2  persistRawL2(大结果) → {workspace}/tasks/{taskId}/.arkwork/steps/{stepId}.json
  *   L3a addPendingLine+applyPending → .arkwork/memory.md / user.md
  *   L3b archiveTaskL1       → .arkwork/archive/items.jsonl + index.json
- *   L4  synthesizeFromTaskL1 → .arkwork/profile.json（真实 LLM 合成）
+ *
+ * v0.27.0 R0：L4（synthesizeFromTaskL1 真实 LLM 合成 → profile.json）已拆分至
+ * e2e-memory-l4-llm.test.ts —— 该用例依赖真实 API key 与网络，不进密闭 npm test 链，
+ * 见 scripts/run-tests.mjs EXCLUSIONS 显式欠账清单。
  *
  * 运行：
  *   cd app
- *   npx tsx --experimental-loader ./src/main/fault-tolerance/__tests__/electron-mock-loader.mjs \
+ *   npx tsx --experimental-loader ./src/test/electron-mock-loader.mjs \
  *     ./src/main/memory/__tests__/e2e-memory-layers.test.ts
  * ============================================================ */
-import { mkdir, readFile, copyFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { setWorkspaceDir, getWorkspaceDir, getArkworkDir } from '../../store/db.js'
+import { setWorkspaceDir, getWorkspaceDir } from '../../store/db.js'
 import { appendL1, listL1 } from '../l1-working.js'
 import { persistRawL2, listRawL2 } from '../l2-file.js'
 import { addPendingLine, applyPending } from '../l3-curated.js'
 import { initArchiveIndex, archiveTaskL1, searchArchive } from '../l3-archive.js'
-import { synthesizeFromTaskL1, getProfile } from '../l4-profile.js'
 
 const TASK_ID = 'T-E2E-layers-001'
 const TASK_TITLE = '验证记忆分层端到端产物'
@@ -33,18 +34,9 @@ const TASK_TITLE = '验证记忆分层端到端产物'
 setWorkspaceDir('/tmp/arkwork-e2e-ws')
 const WS = getWorkspaceDir()
 
-/** 从真实用户数据复制 models.json（含 apiKey），供 L4 真实 LLM 合成 */
-async function ensureModels(): Promise<string> {
-  const arkworkDir = getArkworkDir()
-  const target = join(arkworkDir, 'models.json')
-  const source = join(homedir(), 'Library', 'Application Support', 'ArkWork', 'arkwork-data', 'models.json')
-  if (!existsSync(source)) return 'NO_SOURCE'
-  await mkdir(arkworkDir, { recursive: true })
-  await copyFile(source, target)
-  return target
-}
-
 test('L1: appendL1 → l1.jsonl 出现产物', async () => {
+  // v0.27.0 R0：先清场再追加——l1.jsonl 为追加式文件，跨次运行残留会使计数断言翻倍
+  await rm(join(WS, '.arkwork', 'memory', TASK_ID), { recursive: true, force: true })
   await appendL1({ taskId: TASK_ID, role: 'system', kind: 'system_prompt', content: '你是 ArkWork 智能体。', enabled: true })
   await appendL1({ taskId: TASK_ID, role: 'user', kind: 'user_message', content: '帮我创建一个 Python 脚本，读取 CSV 并输出统计。', iteration: 0 })
   await appendL1({ taskId: TASK_ID, role: 'assistant', kind: 'plan', iteration: 0, content: '## 计划清单\n1. 分析需求\n2. 编写脚本' })
@@ -113,21 +105,4 @@ test('L3b: archiveTaskL1 → archive/items.jsonl + index.json 出现产物并可
   const hits = await searchArchive('csv 统计', 3)
   assert.ok(hits.length > 0, 'archiveSearch 应检索到归档内容')
   console.log(`   archiveSearch("csv 统计") → ${hits.length} 条命中: ${hits[0]?.taskTitle}`)
-})
-
-test('L4: synthesizeFromTaskL1 → profile.json 出现产物（真实 LLM 合成）', async () => {
-  const modelFile = await ensureModels()
-  console.log(`   models.json: ${modelFile}`)
-  if (modelFile === 'NO_SOURCE') {
-    console.log('   ⚠️ 未找到真实 models.json，跳过 L4 真实 LLM 合成')
-    return
-  }
-  const l1Items = await listL1(TASK_ID)
-  const result = await synthesizeFromTaskL1(TASK_ID, l1Items, 'deepseek-v4-flash')
-  const p = join(WS, '.arkwork', 'profile.json')
-  assert.equal(existsSync(p), true)
-  const profile = await getProfile()
-  console.log(`✅ L4 产物: ${p} (version=${profile.version}, observations=${profile.observations.length}, synthesis=${profile.synthesis.length} 字符)`)
-  assert.ok(result.newObservations > 0 || profile.version >= 1, 'L4 应至少产生一条观察或版本推进')
-  assert.equal(existsSync(dirname(p)), true)
 })
