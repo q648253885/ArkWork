@@ -1,8 +1,8 @@
 /* ============================================================
  * v0.17.5 E2E — 新任务流程端到端验证
  *
- * 复刻 engine.ts 中的关键纯函数（isPhaseHeader / todo_update 处理 / file-writer
- * 失败兜底 / 阶段门禁标 done），用与原版 1:1 等价的实现串成完整任务流程，
+ * 关键纯函数 isPhaseHeader 自 r10-F8a 起导入单源实现（@shared/utils/plan-parse）；
+ * todo_update 处理 / file-writer 失败兜底 / 阶段门禁标 done 维持本地内存复刻，
  * 验证三类修复在真实场景下的行为。
  *
  * 场景 A（计划生成）：LLM 返回 12 条 items（含"阶段 N：xxx"型标题 + 子项 + 含动作动词的子项）
@@ -17,10 +17,15 @@
  * 场景 D（阶段门禁）：模拟 react-core-skills 触发阶段门禁（PRD 阶段产出 01-prd.md）
  *   期望：findPlanItemForStage 找到对应项并标 done，下一项推进为 running
  *
- * 复刻函数与 engine.ts 等价（regex / 分支结构逐行对齐），但用本地内存数据结构避免引入 electron/ipc 依赖。
+ * 除 isPhaseHeader（r10-F8a 起导入单源）外，其余复刻函数与 engine 模块组逐行对齐，
+ * 用本地内存数据结构避免引入 electron/ipc 依赖。
  * ============================================================ */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+
+// v0.27.0 r10-F8a：isPhaseHeader 导入单源实现（@shared 无 electron/ipc 依赖，
+// 不违背本文件「本地内存结构」的设计初衷），原 v0.17.5 复刻副本已删
+import { isPhaseHeader } from '@shared/utils/plan-parse'
 
 // ============================================================
 // 与 engine.ts 等价的复刻函数
@@ -35,17 +40,6 @@ interface PlanItem {
   createdAt: number
   updatedAt: number
   completedAt?: number
-}
-
-function isPhaseHeader(text: string): boolean {
-  const t = text.trim()
-  const phasePrefix = /^(阶段|phase|step|step\s*\d+)\s*\d*\s*[:：、]?\s*/i
-  if (!phasePrefix.test(t)) return false
-  const afterPrefix = t.replace(phasePrefix, '').trim()
-  if (afterPrefix.length > 30) return false
-  const actionVerbs =
-    /调研|搜索|写|实现|开发|编码|测试|部署|打包|封装|接入|初始化|创建|搭建|执行|产出|读取|列出|修复|补|跑|运行|完成|确认|导出|下载|配置/i
-  return !actionVerbs.test(afterPrefix)
 }
 
 function filterPlanItems(rawItems: string[]): { kept: string[]; removed: string[] } {

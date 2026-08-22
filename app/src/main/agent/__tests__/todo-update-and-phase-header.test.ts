@@ -1,9 +1,9 @@
 /* ============================================================
  * v0.17.5 — todo_update 工具 + isPhaseHeader 过滤 + 工具失败自动标 failed
  *
- * 通过源码静态断言 + parsePlanItems 等价纯函数复刻，覆盖：
+ * 通过源码静态断言 + 单源导入的 isPhaseHeader（r10-F8a），覆盖：
  *  1. isPhaseHeader：纯阶段标题型条目被识别为 phase header（含子项保留）
- *  2. 计划生成时调用 isPhaseHeader 过滤（engine.ts 源码契约）
+ *  2. 计划生成时调用 isPhaseHeader 过滤（engine 模块组源码契约）
  *  3. todo-update / todo_update 两种 tool name 都被 executeAct 拦截
  *  4. 工具失败时自动把 running 项标 failed 并在 resultSummary 追加清单概览
  *  5. file-writer 错误信息对 LLM 友好的字段名提示（file-tools.test.ts 已覆盖）
@@ -12,6 +12,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+
+// v0.27.0 r10-F8a：isPhaseHeader 导入单源实现，删除原「并行副本」（其 actionVerbs
+// 白名单已与现行实现漂移：缺 定位/输出/联调/排查/修改 五个动词）
+import { isPhaseHeader } from '@shared/utils/plan-parse'
 
 // v0.27.0 R2：engine.ts 已拆分为 engine/ 目录，源码契约改为拼接全部模块后断言
 const ENGINE_DIR = fileURLToPath(new URL('../engine/', import.meta.url))
@@ -30,20 +34,7 @@ const planParseSrc = readFileSync(
   'utf-8',
 )
 
-/* ---------- 1. isPhaseHeader 纯函数行为（从源码复刻等价实现） ---------- */
-
-/** 与 engine.ts 中 isPhaseHeader 等价的并行副本，仅用于独立测试。
- *  不修改 engine.ts 源码。 */
-function isPhaseHeader(text: string): boolean {
-  const t = text.trim()
-  const phasePrefix = /^(?:阶段|phase|step(?:\s*\d+)?)\s*\d*\s*[:：、]?\s*/i
-  if (!phasePrefix.test(t)) return false
-  const afterPrefix = t.replace(phasePrefix, '').trim()
-  if (afterPrefix.length > 30) return false
-  const actionVerbs =
-    /调研|搜索|写|实现|开发|编码|测试|部署|打包|封装|接入|初始化|创建|搭建|执行|产出|读取|列出|修复|补|跑|运行|完成|确认|导出|下载|配置/i
-  return !actionVerbs.test(afterPrefix)
-}
+/* ---------- 1. isPhaseHeader 纯函数行为（r10-F8a：直接测单源实现） ---------- */
 
 test('isPhaseHeader: 纯阶段标题（无动作动词）→ 识别为 phase header', () => {
   assert.equal(isPhaseHeader('阶段 1：技术选型与架构设计'), true, '含"选型/设计"等抽象总结词，无白名单动作动词')
