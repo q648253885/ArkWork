@@ -10,6 +10,7 @@ import type {
   LlmCompleteRequest,
   LlmCompleteResponse,
   LlmMessage,
+  LlmStreamHandlers,
   LlmTool,
 } from './adapter.js'
 import { extractSayMarker } from './say-marker.js'
@@ -57,49 +58,89 @@ export class AnthropicAdapter implements LlmAdapter {
       { signal: req.signal },
     )
 
-    // 提取 text content block + tool_use block
-    let content = ''
-    let thought = ''
-    let action: ReActAction | null = null
-    let toolCallId: string | undefined
-    const actions: ReActAction[] = []
-    // polish4 §A1：收集全部 toolUse id，与 actions 一一对应
-    const toolCallIds: string[] = []
+    // v0.27.0 R1：响应解析收敛为共享函数（complete / completeStream 同源）
+    return parseAnthropicResponse(response)
+  }
 
-    // v0.15.x 防御：API 偶发返回非数组 content（字符串或异常 shape），避免
-    // `response.content is not iterable` 直接让任务失败。
-    const blocks = Array.isArray(response.content)
-      ? response.content
-      : typeof response.content === 'string'
-        ? [{ type: 'text', text: response.content }]
-        : []
-    for (const block of blocks) {
-      if (block.type === 'text') {
-        content += block.text
-        thought += block.text
-      } else if (block.type === 'tool_use') {
-        const toolBlock = block as { id: string; name: string; input: unknown }
-        toolCallIds.push(toolBlock.id)
-        actions.push({ tool: toolBlock.name, args: (toolBlock.input as Record<string, unknown>) ?? {} })
-      }
-    }
-    if (actions.length > 0) {
-      action = actions[0]
-      toolCallId = toolCallIds[0]
-    }
+  /**
+   * v0.27.0 R1：流式实现（SDK messages.stream）。
+   * - text 增量经 'text' 事件实时回调 handlers；thinking 增量经 streamEvent 的
+   *   thinking_delta 回调（extended thinking，SDK 类型未含该 delta，运行时透传有效）；
+   * - finalMessage() 聚合完整响应后复用与 complete 同一解析函数，返回值同构；
+   * - cache_control 断点布局与非流式完全一致（withCacheBreakpoints 单源）。
+   */
+  async completeStream(req: LlmCompleteRequest, handlers: LlmStreamHandlers): Promise<LlmCompleteResponse> {
+    const model = (req as LlmCompleteRequest & { modelId?: string }).modelId ?? this.defaultModel
+    const { system, tools, messages } = withCacheBreakpoints(req)
 
-    return {
-      content,
-      thought,
-      action,
-      actions: actions.length > 0 ? actions : undefined,
-      toolCallIds: toolCallIds.length > 0 ? toolCallIds : undefined,
-      toolCallId,
-      tokensIn: response.usage.input_tokens,
-      tokensOut: response.usage.output_tokens,
-      cache: extractCacheUsage(response.usage),
-      finishReason: mapFinishReason(response.stop_reason),
+    const stream = this.client.messages.stream(
+      {
+        model,
+        system,
+        messages,
+        tools,
+        max_tokens: req.maxTokens ?? 4096,
+        temperature: req.temperature ?? 0.5,
+      },
+      { signal: req.signal },
+    )
+
+    stream.on('text', (t) => handlers.onText(t))
+    stream.on('streamEvent', (event) => {
+      if (event.type !== 'content_block_delta') return
+      const delta = event.delta as unknown as { type?: string; thinking?: string }
+      if (delta.type === 'thinking_delta' && delta.thinking) handlers.onReasoning?.(delta.thinking)
+    })
+
+    const response = await stream.finalMessage()
+    return parseAnthropicResponse(response)
+  }
+}
+
+/** v0.27.0 R1：Anthropic Message → LlmCompleteResponse（complete / completeStream 共用单源） */
+function parseAnthropicResponse(response: Anthropic.Message): LlmCompleteResponse {
+  // 提取 text content block + tool_use block
+  let content = ''
+  let thought = ''
+  let action: ReActAction | null = null
+  let toolCallId: string | undefined
+  const actions: ReActAction[] = []
+  // polish4 §A1：收集全部 toolUse id，与 actions 一一对应
+  const toolCallIds: string[] = []
+
+  // v0.15.x 防御：API 偶发返回非数组 content（字符串或异常 shape），避免
+  // `response.content is not iterable` 直接让任务失败。
+  const blocks = Array.isArray(response.content)
+    ? response.content
+    : typeof response.content === 'string'
+      ? [{ type: 'text' as const, text: response.content }]
+      : []
+  for (const block of blocks) {
+    if (block.type === 'text') {
+      content += block.text
+      thought += block.text
+    } else if (block.type === 'tool_use') {
+      const toolBlock = block as { id: string; name: string; input: unknown }
+      toolCallIds.push(toolBlock.id)
+      actions.push({ tool: toolBlock.name, args: (toolBlock.input as Record<string, unknown>) ?? {} })
     }
+  }
+  if (actions.length > 0) {
+    action = actions[0]
+    toolCallId = toolCallIds[0]
+  }
+
+  return {
+    content,
+    thought,
+    action,
+    actions: actions.length > 0 ? actions : undefined,
+    toolCallIds: toolCallIds.length > 0 ? toolCallIds : undefined,
+    toolCallId,
+    tokensIn: response.usage.input_tokens,
+    tokensOut: response.usage.output_tokens,
+    cache: extractCacheUsage(response.usage),
+    finishReason: mapFinishReason(response.stop_reason),
   }
 }
 

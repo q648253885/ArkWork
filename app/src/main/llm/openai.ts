@@ -9,6 +9,7 @@ import type {
   LlmCompleteRequest,
   LlmCompleteResponse,
   LlmMessage,
+  LlmStreamHandlers,
   LlmTool,
 } from './adapter.js'
 import { extractSayMarker } from './say-marker.js'
@@ -73,26 +74,8 @@ export class OpenAIAdapter implements LlmAdapter {
     // v0.20.0：提取缓存命中统计（DeepSeek / MiniMax 等 OpenAI 兼容端点）
     const cache = extractCacheUsage(completion.usage)
 
-    let action: ReActAction | null = null
-    let toolCallId: string | undefined
-    const actions: ReActAction[] = []
-    // polish4 §A1：收集全部 toolCall id，与 actions 一一对应
-    const toolCallIds: string[] = []
-
-    for (const call of toolCalls) {
-      toolCallIds.push(call.id)
-      try {
-        const args = JSON.parse(call.function.arguments || '{}')
-        actions.push({ tool: call.function.name, args })
-      } catch {
-        actions.push({ tool: call.function.name, args: { _raw: call.function.arguments } })
-      }
-    }
-    if (actions.length > 0) {
-      const first = actions[0]
-      action = first
-      toolCallId = toolCallIds[0]
-    }
+    // v0.27.0 R1：tool_calls 解析收敛为共享函数（complete / completeStream 同源）
+    const parsed = parseOpenAIToolCalls(toolCalls)
 
     // v0.25.0 F4：从 content 抽取 SAY 标记块（剥离后 thought 不污染内部思考）
     const { thought: cleanThought, say } = extractSayMarker(content)
@@ -100,10 +83,7 @@ export class OpenAIAdapter implements LlmAdapter {
       content,
       thought: cleanThought,
       say,
-      action,
-      actions: actions.length > 0 ? actions : undefined,
-      toolCallIds: toolCallIds.length > 0 ? toolCallIds : undefined,
-      toolCallId,
+      ...parsed,
       tokensIn: completion.usage?.prompt_tokens ?? 0,
       tokensOut: completion.usage?.completion_tokens ?? 0,
       cache,
@@ -111,6 +91,116 @@ export class OpenAIAdapter implements LlmAdapter {
       reasoningContent,
     }
   }
+
+  /**
+   * v0.27.0 R1：流式实现（SDK stream + stream_options.include_usage）。
+   * - content / reasoning_content / tool_calls 增量实时回调 handlers（渲染加速）；
+   * - 返回值与 complete 同构（聚合 usage、tool_calls、say 后的完整响应）；
+   * - 部分旧兼容端点不认 stream_options 参数（400）：自动去掉重试一次，
+   *   此时该端点不回 usage → tokensIn/Out 为 0（可接受的降级，非流式路径不受影响）。
+   */
+  async completeStream(req: LlmCompleteRequest, handlers: LlmStreamHandlers): Promise<LlmCompleteResponse> {
+    const model = (req as LlmCompleteRequest & { modelId?: string }).modelId ?? this.defaultModel
+    const messages: Array<OpenAI.Chat.Completions.ChatCompletionMessageParam> = [
+      { role: 'system', content: req.system },
+      ...req.messages.map(toOpenAIMessage),
+    ]
+    const tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined = req.tools?.map(toOpenAITool)
+
+    const baseParams = {
+      model,
+      messages,
+      tools: tools as OpenAI.Chat.Completions.ChatCompletionTool[] | undefined,
+      tool_choice: tools ? ('auto' as const) : undefined,
+      temperature: req.temperature ?? 0.5,
+      max_tokens: req.maxTokens,
+    }
+
+    let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
+    try {
+      stream = await this.client.chat.completions.create(
+        { ...baseParams, stream: true, stream_options: { include_usage: true } },
+        { signal: req.signal },
+      )
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('stream_options')) {
+        stream = await this.client.chat.completions.create({ ...baseParams, stream: true }, { signal: req.signal })
+      } else {
+        throw err
+      }
+    }
+
+    let content = ''
+    let reasoning = ''
+    let finishReason: string | null | undefined
+    let usage: OpenAI.Completions.CompletionUsage | undefined
+    // 按 index 聚合分片到达的 tool_calls（name/arguments 可能拆成多段）
+    const rawCalls: Array<{ id: string; function: { name: string; arguments: string } }> = []
+
+    for await (const chunk of stream) {
+      if (chunk.usage) usage = chunk.usage
+      const choice = chunk.choices?.[0]
+      if (!choice) continue
+      const delta = choice.delta as ((typeof choice.delta) & { reasoning_content?: string }) | undefined
+      if (delta?.content) {
+        content += delta.content
+        handlers.onText(delta.content)
+      }
+      if (delta?.reasoning_content) {
+        reasoning += delta.reasoning_content
+        handlers.onReasoning?.(delta.reasoning_content)
+      }
+      for (const tc of delta?.tool_calls ?? []) {
+        while (rawCalls.length <= tc.index) rawCalls.push({ id: '', function: { name: '', arguments: '' } })
+        const slot = rawCalls[tc.index]
+        if (tc.id) slot.id = tc.id
+        if (tc.function?.name) slot.function.name += tc.function.name
+        if (tc.function?.arguments) slot.function.arguments += tc.function.arguments
+      }
+      if (choice.finish_reason) finishReason = choice.finish_reason
+    }
+
+    const parsed = parseOpenAIToolCalls(rawCalls)
+    const { thought: cleanThought, say } = extractSayMarker(content)
+    return {
+      content,
+      thought: cleanThought,
+      say,
+      ...parsed,
+      tokensIn: usage?.prompt_tokens ?? 0,
+      tokensOut: usage?.completion_tokens ?? 0,
+      cache: extractCacheUsage(usage),
+      finishReason: mapFinishReason(finishReason),
+      reasoningContent: reasoning || undefined,
+    }
+  }
+}
+
+/**
+ * v0.27.0 R1：OpenAI tool_calls → ReAct actions 解析（complete / completeStream 共用单源）。
+ * polish4 §A1：toolCallIds 与 actions 一一对应；arguments 非法 JSON 时降级 _raw。
+ */
+function parseOpenAIToolCalls(
+  calls: Array<{ id: string; function: { name: string; arguments: string } }>,
+): {
+  action: ReActAction | null
+  actions?: ReActAction[]
+  toolCallIds?: string[]
+  toolCallId?: string
+} {
+  const actions: ReActAction[] = []
+  const toolCallIds: string[] = []
+  for (const call of calls) {
+    toolCallIds.push(call.id)
+    try {
+      const args = JSON.parse(call.function.arguments || '{}')
+      actions.push({ tool: call.function.name, args })
+    } catch {
+      actions.push({ tool: call.function.name, args: { _raw: call.function.arguments } })
+    }
+  }
+  if (actions.length === 0) return { action: null }
+  return { action: actions[0], actions, toolCallIds, toolCallId: toolCallIds[0] }
 }
 
 /**

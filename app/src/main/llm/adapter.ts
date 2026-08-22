@@ -81,9 +81,24 @@ export interface LlmCompleteResponse {
   reasoningContent?: string
 }
 
+/** v0.27.0 R1：流式增量回调集合（渲染加速用；聚合结果仍以返回值为准） */
+export interface LlmStreamHandlers {
+  /** assistant 文本增量（content delta） */
+  onText: (delta: string) => void
+  /** 思考模型 reasoning 增量（可选；DeepSeek reasoning_content / Anthropic thinking） */
+  onReasoning?: (delta: string) => void
+}
+
 export interface LlmAdapter {
   readonly name: string
   readonly provider: 'openai' | 'anthropic' | 'ollama' | 'custom-openai'
   /** 单次完整响应（非流式） */
   complete(req: LlmCompleteRequest): Promise<LlmCompleteResponse>
+  /**
+   * v0.27.0 R1：可选流式接口。返回值与 complete 完全同构（聚合后的完整响应，
+   * 含 usage/tool_calls/say 解析），增量仅通过 handlers 回调加速渲染。
+   * 引擎侧 completeWithStream 在适配器未实现本方法时自动回退 complete
+   * （静默降级，见 docs/versions/v0.27.0/03-system-design.md §2.3）。
+   */
+  completeStream?(req: LlmCompleteRequest, handlers: LlmStreamHandlers): Promise<LlmCompleteResponse>
 }
