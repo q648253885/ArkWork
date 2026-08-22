@@ -7,9 +7,8 @@
  * 自动滚动：贴底时跟随；上翻超过一屏则暂停
  * ============================================================ */
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useStore, detectRenderer, derivePlanItems, derivePlanStates } from '../store'
+import { useStore, detectRenderer, derivePlanItems } from '../store'
 import type { Agent, ConversationItem } from '../types'
-import type { PlanItemState } from '@shared/types/conversation'
 import type { PlanItemStatus } from '@shared/types/task'
 import type { ReActStep } from '@shared/types/react'
 import { Icon } from '../icons'
@@ -429,7 +428,7 @@ function ConversationMessage({
     return <UserBubble text={item.text ?? ''} tsLabel={item.tsLabel ?? ''} />
   }
   // v0.14.0 Task 4：plan 类型改为 PlanMessage 卡片，在时间线中渲染；
-  // 与右侧 TodoPanel 共用 store 导出的 derivePlanItems / derivePlanStates 派生结果。
+  // 与右侧 TodoPanel 共用 store 导出的 derivePlanItems 派生结果。
   // 仅当存在真实 plan（item.plan.items 非空 或 steps 内 plan step items 非空）时渲染，
   // 否则返回 null 避免空卡片。
   if (item.type === 'plan') {
@@ -470,10 +469,9 @@ function PlanMessage({
   agent: Agent
 }) {
   const planStep = useStore((s) => s.steps.find((st) => st.type === 'plan' && !!st.plan))
-  // v0.14.x Task 1：fallback 派生与 conversation 主路径同样带上任务状态，
+  // v0.14.x Task 1：六态以任务持久化 planItems 为准（G3 单一真源），
   // 只有任务真正 done（或 task_complete 事件）才允许全部勾完，禁止两套逻辑
   const task = useStore((s) => s.tasks.find((t) => t.id === s.selectedTaskId))
-  const taskStatus = task?.status
   // v0.14.0 Task 8：PlanMessage 卡片支持展开/折叠（默认展开，保持 v0.13.x 可见基线）
   const [collapsed, setCollapsed] = useState(false)
   // v0.14.x Task 3：无 fallback 时返回空数组；ConversationFlow 渲染入口已据此短路
@@ -488,18 +486,15 @@ function PlanMessage({
   )
   const items = planItems
   // v0.14.0 Task 8：六态优先取任务持久化 planItems（与 Inspector / Sidebar 同源）；
-  // 缺失 / 长度不匹配时回退 v0.14.x Task 4 的步骤派生（四态），保持旧行为
+  // v0.27.0 F10：渲染层不再派生逐项状态，
+  // 缺失 / 长度不匹配时回退 Main 推送的 item.planStates，再退空数组
   const states: PlanItemStatus[] = useMemo(() => {
     const persisted = task?.planItems
     if (persisted && persisted.length === items.length) {
       return persisted.map((p) => p.status)
     }
-    const base: PlanItemState[] =
-      item.planStates && item.planStates.length > 0
-        ? item.planStates
-        : derivePlanStates(items, useStore.getState().steps, taskStatus)
-    return base
-  }, [task?.planItems, items, item.planStates, taskStatus])
+    return item.planStates && item.planStates.length > 0 ? item.planStates : []
+  }, [task?.planItems, items, item.planStates])
   const goal = item.plan?.goal ?? '任务计划'
   const tsLabel = item.tsLabel ?? ''
   const doneCount = states.filter((s) => s === 'done').length
@@ -633,7 +628,7 @@ function PlanMessage({
  * PlanChecklist — v0.14.0 Task 4 替换为 PlanMessage
  * PlanChecklist 过去在 ConversationFlow 中与 TaskHeader 下方 PlanBar 重复渲染；
  * 现 Task 4 统一由 ConversationFlow 内的 PlanMessage 卡片承担计划展示，
- * 派生源收敛至 store 导出的 derivePlanItems / derivePlanStates。
+ * 派生源收敛至 store 导出的 derivePlanItems。
  * ============================================================ */
 
 /* ============================================================

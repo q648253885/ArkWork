@@ -68,7 +68,7 @@ export function aggregatePlanStatus(
 }
 
 /**
- * 取第 index 个清单项对应的工具调用记录（按「工具切换分段」与 derivePlanStates 同规则分组），
+ * 取第 index 个清单项对应的工具调用记录（按「工具切换分段」规则分组），
  * 供 Inspector 清单行展开详情展示（工具调用 / 结果摘要 / 异常标记）。
  */
 export function planItemToolSteps(steps: ReActStep[], index: number): ReActStep[] {

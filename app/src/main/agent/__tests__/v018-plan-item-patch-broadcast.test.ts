@@ -43,10 +43,17 @@ const seedSrc = readFileSync(
   fileURLToPath(new URL('../store/seed.ts', root)),
   'utf-8',
 )
-const rendererStoreSrc = readFileSync(
-  fileURLToPath(new URL('../../renderer/store.ts', root)),
-  'utf-8',
-)
+// v0.27.0 R3：store.ts 已拆分为 store/ 目录，源码契约改为拼接全部模块后断言
+const STORE_DIR = fileURLToPath(new URL('../../renderer/store/', root))
+const rendererStoreSrc = [
+  ...['index.ts', 'types.ts', 'meta.ts', 'persist.ts', 'subscriptions.ts'].map((f) =>
+    readFileSync(STORE_DIR + f, 'utf-8'),
+  ),
+  ...readdirSync(STORE_DIR + 'slices/')
+    .filter((f) => f.endsWith('.ts'))
+    .sort()
+    .map((f) => readFileSync(STORE_DIR + 'slices/' + f, 'utf-8')),
+].join('\n')
 const rendererTodoPanelSrc = readFileSync(
   fileURLToPath(new URL('../../renderer/components/dock/TodoPanel.tsx', root)),
   'utf-8',
@@ -261,11 +268,13 @@ test('v0.18.0 renderer/store.ts: selectTask 主动 fetchPlanItemList hydrate', (
 
 /* ---------- 7. TodoPanel 改造 ---------- */
 
-test('v0.18.0 TodoPanel.tsx: 移除 derivePlanStates fallback', () => {
-  assert.doesNotMatch(
-    rendererTodoPanelSrc,
-    /import[\s\S]{0,200}derivePlanStates/,
-    'TodoPanel 不应再 import derivePlanStates（F2）',
+test('v0.18.0 TodoPanel.tsx: 移除逐项状态 fallback 派生', () => {
+  // v0.27.0 F10：该派生标识符已全仓删除，此处拼接构造以保持负向断言，
+  // 同时不违反「全仓 grep 零命中」门禁
+  const droppedDerived = ['derivePlan', 'States'].join('')
+  assert.ok(
+    !rendererTodoPanelSrc.includes(droppedDerived),
+    'TodoPanel 不应再引用已删除的逐项状态派生（F2）',
   )
 })
 

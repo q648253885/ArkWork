@@ -3,7 +3,7 @@
  * 中栏：路由 modulePage → 模块页，否则渲染任务对话
  * - v0.14.0 Task 4：移除 TaskHeader 下方常驻 PlanBar，
  *   计划项改为在 ConversationFlow 内 PlanMessage 卡片展示，与右侧 TodoPanel 共用
- *   store 导出的 derivePlanItems / derivePlanStates 派生结果。
+ *   store 导出的 derivePlanItems 派生结果。
  * - 任务模式下 Inspector 在右栏（由 App 控制）
  * - 无任务 + 无模块页 → ConversationGreeting
  *
@@ -251,7 +251,7 @@ function TaskHeader({
  * PlanBar — v0.14.0 Task 4 已下线
  * 原紧贴 TaskHeader 下方的常驻 PlanBar 已移除；计划展示改由
  * ConversationFlow 内的 PlanMessage 卡片承担，统一派生源见 store 的
- * derivePlanItems / derivePlanStates。
+ * derivePlanItems。
  * 旧 reconcilePlanStatesWithTask / scrollToPlanStep / PlanRowState 等
  * 内部函数一并清理，避免两份实现并存导致状态不同步。
  * ============================================================ */

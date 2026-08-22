@@ -1,7 +1,7 @@
 /* ============================================================
  * ArkWork — Dock/TodoPanel（v0.18.0 重构）
  * v0.14.0 Task 4 起为清单面板；v0.18.0 重写为"task.planItems 真值唯一源"：
- *  - 移除 derivePlanStates fallback（F2）
+ *  - 移除逐项状态 fallback 派生（F2）
  *  - 三视图（Sidebar / TodoPanel / PlanMessage）必须消费同一 task.planItems（G3）
  *  - 用户手动切状态走 Optimistic UI（markPlanItemOptimistic → IPC → reconcile）
  *  - 行尾新增"引擎"徽标（engine-decide / engine-fail 时显示）
@@ -75,8 +75,8 @@ export function TodoPanel() {
   // 按 id 对齐：persistedItems 是权威状态源；items 是文本来源
   const states: PlanItemStatus[] = useMemo(() => {
     if (!persistedItems || persistedItems.length === 0) {
-      // 推断占位卡分支：planItems 缺失但 steps 非空时，临时用 derivePlanStates 等价映射
-      // v0.18.0 F2：仍保留步骤派生，但只作为"推断"占位卡使用，**不**回退到默认渲染路径
+      // 推断占位卡分支：planItems 缺失但 steps 非空时，全部按 pending 占位
+      // v0.18.0 F2：只作为"推断"占位卡使用，**不**回退到默认渲染路径
       return items.map(() => 'pending')
     }
     return items.map((text, i) => {
@@ -186,13 +186,14 @@ export function TodoPanel() {
     steps.length > 0 &&
     task?.status !== 'done'
 
-  // 无真实计划时统一空态文案
+  // v0.27.0 F10：空态显式化 — 生成中/推断占位显示「计划生成中…」，否则「无清单」
   if (items.length === 0) {
+    const generating = isInferred || task?.status === 'running'
     return (
       <EmptyState
         icon={<Icon.Check width={22} height={22} />}
-        title="当前任务无需计划"
-        hint="当前任务无需计划 · 单步任务"
+        title={generating ? '计划生成中…' : '无清单'}
+        hint={generating ? 'AI 正在为本任务生成执行清单' : '当前任务无需计划 · 单步任务'}
       />
     )
   }
