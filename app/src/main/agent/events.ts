@@ -10,7 +10,7 @@ import { broadcast } from '../window.js'
 import { logger } from '../system/logger.js'
 import type { ReActStep, ReActEvent } from '@shared/types/react'
 import type { Task, PlanItem, PlanItemStatus, PlanItemSource } from '@shared/types/task'
-import type { PlanItemStatusChanged, PlanItemListSnapshotPayload } from '@shared/types/ipc'
+import type { PlanItemStatusChanged, PlanItemListSnapshotPayload, TaskTextDeltaPayload } from '@shared/types/ipc'
 
 const stepCollections = new Map<string, JsonlCollection<ReActStep>>()
 
@@ -57,6 +57,19 @@ export function broadcastReActEvent(event: ReActEvent): void {
   }
   if (event.type === 'log') {
     logger.info('Agent', `[${event.level}] ${event.source}: ${event.message}`)
+  }
+}
+
+/**
+ * v0.27.0 R1：流式文本增量广播（Main → Renderer，`task:text-delta` 通道）。
+ * 渲染加速通道、非数据源 —— session-log / steps.jsonl 仍只在拿到完整
+ * LlmCompleteResponse 后写入权威内容（append-only 真源不变）。
+ */
+export function broadcastTextDelta(payload: TaskTextDeltaPayload): void {
+  try {
+    broadcast('task:text-delta', payload)
+  } catch (err) {
+    logger.warn('Agent', `broadcastTextDelta failed (silent): ${(err as Error).message}`)
   }
 }
 

@@ -1484,6 +1484,32 @@ textarea {
 .say-block[data-active="true"] .say-block__content {
   position: relative;
 }
+
+/* ============================================================
+ * v0.27.0 R1 — 流式文本光标（02-interaction §0 token）
+ * 2px × 1em，业务蓝，1s steps(2) 闪烁；用于 Reason 流式预览尾部
+ * ============================================================ */
+:root {
+  --stream-caret-color: var(--business-primary);
+}
+.stream-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--stream-caret-color);
+  border-radius: 1px;
+  animation: stream-caret-blink 1s steps(2, start) infinite;
+}
+@keyframes stream-caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stream-caret { animation: none; opacity: 1; }
+}
+
 /* .react-observation 在 v0.24.x 已废弃：保留选择器以防旧类名残留造成空白。 */
 .react-observation { display: none; }
 

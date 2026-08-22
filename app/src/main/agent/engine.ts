@@ -59,8 +59,11 @@ import {
   clearToolProgress,
   broadcastPlanItemStatus,
   broadcastPlanListSnapshot,
+  broadcastTextDelta,
   type ToolProgress,
 } from './events.js'
+// v0.27.0 R1：流式管道（completeWithStream 静默降级 + text-delta 增量泵）
+import { completeWithStream, createTextDeltaPump, type TextDeltaPump } from './llm-stream.js'
 import { getWorkspaceDir } from '../store/db.js'
 import { saveCheckpoint, checkpointId } from '../checkpoint/store.js'
 // v0.8.0 记忆系统钩子
@@ -702,25 +705,41 @@ export async function runReActLoop(
         contextWindow: model?.contextWindow,
       })
       // polish4 §D1.3：LLM 调用错误分级重试包装（120s 超时 + 重试 + 中止短路）
-      let response: LlmCompleteResponse
-      try {
-        response = await callLlmWithRetry(
-          () =>
-            withLlmTimeout(
-              (sig) =>
-                adapter.complete({
-                  system: systemPrompt,
-                  messages,
-                  tools,
-                  temperature: task.config.temperature ?? agent.defaultConfig.temperature ?? 0.5,
-                  maxTokens: task.config.maxTokens,
-                  signal: sig,
-                }),
-              120_000,
-              signal,
-            ),
+      // v0.27.0 R1：统一走 completeWithStream —— 流式增量经 text-delta 泵广播给渲染层，
+      // 返回值仍为聚合后的完整响应；落盘纪律不变（delta 仅渲染加速，非数据源）。
+      const sendTextDelta = (p: Parameters<typeof broadcastTextDelta>[0]): void => broadcastTextDelta(p)
+      // 当前尝试的增量泵引用（abort 时读取已累计文本做部分落盘）。
+      // 用 holder 对象：闭包内赋值 TS 不追踪，直接用 let 变量会被窄化为 never。
+      const turnPumpRef: { current: TextDeltaPump | null } = { current: null }
+      const callTurnLlm = (maxTokensOverride?: number): Promise<LlmCompleteResponse> =>
+        withLlmTimeout(
+          (sig) => {
+            const pump = createTextDeltaPump(task.id, 'turn', sendTextDelta)
+            turnPumpRef.current = pump
+            return completeWithStream(
+              adapter,
+              {
+                system: systemPrompt,
+                messages,
+                tools,
+                temperature: task.config.temperature ?? agent.defaultConfig.temperature ?? 0.5,
+                maxTokens: maxTokensOverride ?? task.config.maxTokens,
+                signal: sig,
+              },
+              { onText: (d) => pump.push(d) },
+            ).then((resp) => {
+              // 完整响应到达前把残余攒批立即发出（权威 step 随后清空渲染缓冲）
+              pump.flush()
+              return resp
+            })
+          },
+          120_000,
           signal,
         )
+
+      let response: LlmCompleteResponse
+      try {
+        response = await callLlmWithRetry(() => callTurnLlm(), signal)
 
         // v0.15.0 Task 5：思考模型输出预算被思考耗尽（finish=length + content 空 + 无 tool action）
         // → 提高 maxTokens 到 8192 重试一次；仍空则注入占位答复，避免任务静默 done 且无内容。
@@ -740,19 +759,7 @@ export async function runReActLoop(
             memoryInjection,
             contextWindow: model?.contextWindow,
           })
-          const retryResp = await withLlmTimeout(
-            (sig) =>
-              adapter.complete({
-                system: systemPrompt,
-                messages,
-                tools,
-                temperature: task.config.temperature ?? agent.defaultConfig.temperature ?? 0.5,
-                maxTokens: 8192,
-                signal: sig,
-              }),
-            120_000,
-            signal,
-          )
+          const retryResp = await callTurnLlm(8192)
           if (retryResp.content || (retryResp.actions && retryResp.actions.length > 0)) {
             response = retryResp
           } else {
@@ -761,6 +768,13 @@ export async function runReActLoop(
           }
         }
       } catch (err) {
+        // v0.27.0 R1：用户中断 → 把已流出的部分文本作为本轮 reason 落盘
+        // （append-only 真源不变：写的是停止时刻已确认收到的内容），UI 呈现「已停止」态；
+        // 随后向上抛给外层 catch 走 handleAbort 的 paused/cancelled 收尾。
+        if (signal.aborted || (err as Error)?.name === 'AbortError') {
+          await persistAbortedReason(task.id, iteration, startedAt, turnPumpRef.current?.accumulated ?? '')
+          throw err
+        }
         // v0.15.0 Task 2 SubTask 2.5 Layer 3 Reactive Fallback：
         // context 超限类错误 → 激进压缩（保留更少轮次）后重试一次，避免任务直接失败
         if (isContextOverflowError(err)) {
@@ -796,19 +810,9 @@ export async function runReActLoop(
             contextWindow: model?.contextWindow,
           })
           // 压缩后重试一次（直接单次调用，不再走 callLlmWithRetry 的多轮重试）
-          response = await withLlmTimeout(
-            (sig) =>
-              adapter.complete({
-                system: systemPrompt,
-                messages,
-                tools,
-                temperature: task.config.temperature ?? agent.defaultConfig.temperature ?? 0.5,
-                maxTokens: task.config.maxTokens,
-                signal: sig,
-              }),
-            120_000,
-            signal,
-          )
+          // v0.27.0 R1：复用 callTurnLlm → 流式管道同样生效；seq 从 1 重启，
+          // Renderer 以 seq===1 截断上一轮残流。
+          response = await callTurnLlm()
         } else {
           // 非 context 超限错误 → 走原 catch (line 383)，转为 task_failed
           throw err
@@ -1486,6 +1490,44 @@ export async function runReActLoop(
     } catch (hookErr) {
       logger.warn('Memory', `runDoneMemoryHooks on failed path errored: ${(hookErr as Error).message}`, task.id)
     }
+  }
+}
+
+/**
+ * v0.27.0 R1：用户中断时，把本轮已流出的部分文本落盘。
+ * - append-only 真源不变：只写停止时刻 pump.accumulated 已确认收到的内容
+ * - 写一条 L1 reasoning + 一条 status='cancelled' 的 reason step（UI 呈现「已停止」态）
+ * - 内部失败静默：不掩盖原始 AbortError 向上抛出
+ */
+async function persistAbortedReason(
+  taskId: string,
+  iteration: number,
+  startedAt: number,
+  text: string,
+): Promise<void> {
+  const trimmed = text.trim()
+  if (!trimmed) return
+  try {
+    await appendL1({
+      taskId,
+      role: 'assistant',
+      kind: 'reasoning',
+      content: trimmed,
+      iteration,
+    })
+    broadcastStep({
+      id: genId('step'),
+      taskId,
+      iteration,
+      type: 'reason',
+      thought: trimmed,
+      startedAt,
+      durationMs: Date.now() - startedAt,
+      status: 'cancelled',
+      errorMessage: '用户中断——保留中断前已生成的内容',
+    })
+  } catch (err) {
+    logger.warn('Agent', `persistAbortedReason failed (silent): ${(err as Error).message}`, taskId)
   }
 }
 
@@ -3558,18 +3600,35 @@ export type ChatOrTask = 'chat' | 'task'
  */
 export async function runChatOnce(
   input: string,
-  opts: { modelId: string; agent?: Agent; signal?: AbortSignal },
+  opts: { modelId: string; agent?: Agent; signal?: AbortSignal; taskId?: string },
 ): Promise<string> {
   const adapter = await getAdapter(opts.modelId)
   const systemPrompt = opts.agent?.systemPrompt ?? ''
   const t0 = Date.now()
-  const response = await adapter.complete({
-    system: systemPrompt,
-    messages: [{ role: 'user', content: input }],
-    // chat 路径固定不挂工具；forceChat 流与现有 sendMessage 旧路径行为一致
-    tools: undefined,
-    signal: opts.signal,
-  })
+  // v0.27.0 R1：携带 taskId 时开启流式增量推送（scope='chat'，渲染加速通道）；
+  // 完整回复仍以本函数返回值为唯一数据源。
+  // holder 对象绕过 TS 闭包赋值窄化（let 变量会被收窄为 never）。
+  const pumpRef: { current: TextDeltaPump | null } = { current: null }
+  const response = await completeWithStream(
+    adapter,
+    {
+      system: systemPrompt,
+      messages: [{ role: 'user', content: input }],
+      // chat 路径固定不挂工具；forceChat 流与现有 sendMessage 旧路径行为一致
+      tools: undefined,
+      signal: opts.signal,
+    },
+    {
+      onText: (delta) => {
+        if (!opts.taskId) return
+        if (!pumpRef.current) {
+          pumpRef.current = createTextDeltaPump(opts.taskId, 'chat', broadcastTextDelta)
+        }
+        pumpRef.current.push(delta)
+      },
+    },
+  )
+  pumpRef.current?.flush()
   logger.info(
     'LLM',
     `chat once (${opts.modelId}) ← ${response.tokensIn}+${response.tokensOut} tokens ⏱ ${Date.now() - t0}ms`,
@@ -3667,6 +3726,8 @@ export async function dispatchChatOrTask(
       modelId: ctx.modelId,
       agent: ctx.agent,
       signal: ctx.signal,
+      // v0.27.0 R1：透传 taskId → chat 回复同样走流式增量渲染
+      taskId: ctx.taskId,
     })
     return { kind: 'chat', reply }
   }

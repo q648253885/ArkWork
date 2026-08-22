@@ -105,6 +105,14 @@ export function Composer() {
   const isRunning = task?.status === 'running'
   const isPaused = task?.status === 'paused'
   const isFailed = task?.status === 'failed'
+  // v0.27.0 R1：生成中判定扩展——存在活跃 streamBuffer（流式增量在途，含 status
+  // 尚未翻转的间隙 / chat 作用域）同样视为生成中，停止按钮与 Esc 保持可用
+  const hasLiveStream = useStore((s) => {
+    const tid = s.selectedTaskId
+    if (!tid) return false
+    return `${tid}:turn` in s.streamBuffers || `${tid}:chat` in s.streamBuffers
+  })
+  const isGenerating = isRunning || hasLiveStream
 
   // v0.8.0 F813：知识库 chip 状态（task 级开关）
   // Task 2：按需引用 — 不再有默认集合；N=task.kbIds 长度（未设置/空都视为 0）
@@ -435,7 +443,7 @@ export function Composer() {
   // ============ 发送 ============
   const handleSend = async () => {
     const text = input.trim()
-    if (!text || isRunning) return
+    if (!text || isGenerating) return
     lastInputRef.current = text
     // 把 file chips 以 [file: path] 附加到消息末尾（占位，真实路径作为上下文）
     const fileRefs = fileChips.map((c) => `@file:${c.path}`).join(' ')
@@ -453,7 +461,7 @@ export function Composer() {
       setMenu(null)
       return
     }
-    if (isRunning && selectedTaskId) {
+    if (isGenerating && selectedTaskId) {
       void cancelTask(selectedTaskId)
     }
   }
@@ -499,7 +507,7 @@ export function Composer() {
     // Enter 发送 / Shift+Enter 换行
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (!isRunning) void handleSend()
+      if (!isGenerating) void handleSend()
       return
     }
 
@@ -847,8 +855,9 @@ export function Composer() {
 
         {/* v0.21.0 — DSH 风格发送/停止：
             - 发送：业务蓝 (#3964FE) 圆角胶囊（DSH --dsw-alias-button-info-fill，34px 圆 icon 风格 + 文字）
-            - 停止：保持 danger 红色，去除冗余高度 */}
-        {isRunning ? (
+            - 停止：保持 danger 红色，去除冗余高度
+            - v0.27.0 R1：isGenerating（running 或活跃 streamBuffer）即显示停止 */}
+        {isGenerating ? (
           <Tooltip label="停止" kbd="Esc" desc="终止当前任务，已执行步骤保留" delay={150}>
             <button
               onClick={handleStopOrEsc}

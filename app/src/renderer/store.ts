@@ -38,7 +38,7 @@ import type {
   PlanItemState,
   Suggestion,
 } from '@shared/types/conversation'
-import type { ToolConfirmRequest, ToolProgressEvent, ToolProgressClearEvent, ConfirmRespondReason, PlanItemStatusChanged, BrowserLoadRequest } from '@shared/types/ipc'
+import type { ToolConfirmRequest, ToolProgressEvent, ToolProgressClearEvent, ConfirmRespondReason, PlanItemStatusChanged, BrowserLoadRequest, TaskTextDeltaPayload } from '@shared/types/ipc'
 import { shortTaskId, formatUpdatedAt } from './types'
 import { simplifyFirstLine } from './utils/title'
 
@@ -1096,6 +1096,14 @@ interface AppState {
   toggleStep: (id: string) => void
   appendStep: (step: ReActStep) => void
   updateStep: (step: ReActStep) => void
+
+  // ---- v0.27.0 R1：流式文本增量缓冲（渲染加速通道，非数据源） ----
+  /** key = `${taskId}:${scope}`；seq 为该流最新已收序号，text 为累计文本 */
+  streamBuffers: Record<string, { seq: number; text: string }>
+  /** 收到 task:text-delta 时调用；接受顺序续写（seq===cur+1）或重启（seq===1 截断），乱序丢弃 */
+  applyTextDelta: (payload: TaskTextDeltaPayload) => void
+  /** 权威内容落地后清除缓冲（scope 省略 = 清该 task 全部作用域） */
+  clearStreamBuffer: (taskId: string, scope?: 'turn' | 'chat') => void
 
   // ---- v0.14.0 Task 4：按工具维度的并行 Act 进度（per-requestId 聚合） ----
   /** 当前任务在飞行的工具进度（按 requestId 索引） */
@@ -2825,6 +2833,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   // ReAct Trace
   steps: [],
+  // v0.27.0 R1：流式增量缓冲（key=`${taskId}:${scope}`）
+  streamBuffers: {},
   // v0.14.0 Task 4：并行 Act 进度（per-requestId）
   toolProgress: {},
   activeProgressByTask: {},
@@ -2952,9 +2962,17 @@ export const useStore = create<AppState>((set, get) => ({
       const nextSteps = exists
         ? s.steps.map((p) => (p.id === step.id ? step : p))
         : [...s.steps, step]
+      // v0.27.0 R1：reason 步骤到达 → 权威内容已随 step 落地，清掉 turn 流式缓冲
+      // 避免「流式预览 + 权威渲染」双份展示（R-stream-3）。
+      let streamBuffers = s.streamBuffers
+      if (step.type === 'reason' && s.streamBuffers[`${step.taskId}:turn`]) {
+        streamBuffers = { ...s.streamBuffers }
+        delete streamBuffers[`${step.taskId}:turn`]
+      }
       return {
         steps: nextSteps,
         conversation: deriveConversation(s.selectedTask, nextSteps, s.memory),
+        streamBuffers,
       }
     }),
   updateStep: (step) =>
@@ -2964,6 +2982,27 @@ export const useStore = create<AppState>((set, get) => ({
         steps: nextSteps,
         conversation: deriveConversation(s.selectedTask, nextSteps, s.memory),
       }
+    }),
+
+  // v0.27.0 R1：流式增量缓冲维护
+  applyTextDelta: (payload) =>
+    set((s) => {
+      const key = `${payload.taskId}:${payload.scope}`
+      const cur = s.streamBuffers[key]
+      // seq 规则：顺序续写（seq===cur+1）或重启（seq===1 截断上一轮残流）；
+      // 其余乱序包直接丢弃（R-stream-2）。
+      if (cur && payload.seq !== cur.seq + 1 && payload.seq !== 1) return s
+      const text =
+        payload.seq === 1 || !cur ? payload.text : cur.text + payload.text
+      return { streamBuffers: { ...s.streamBuffers, [key]: { seq: payload.seq, text } } }
+    }),
+  clearStreamBuffer: (taskId, scope) =>
+    set((s) => {
+      const targets = scope ? [`${taskId}:${scope}`] : [`${taskId}:turn`, `${taskId}:chat`]
+      if (!targets.some((k) => k in s.streamBuffers)) return s
+      const next = { ...s.streamBuffers }
+      for (const k of targets) delete next[k]
+      return { streamBuffers: next }
     }),
 
   // 派生对话流
@@ -3143,9 +3182,21 @@ export const useStore = create<AppState>((set, get) => ({
       }),
     )
 
+    // v0.27.0 R1：流式文本增量（渲染加速通道）——仅缓存，UI 按需读取
+    unsubs.push(
+      ark.task.onTextDelta((payload) => {
+        get().applyTextDelta(payload)
+      }),
+    )
+
     // 任务状态变化
     unsubs.push(
       ark.task.onStatusChange((task) => {
+        // v0.27.0 R1：终态（含 paused/cancelled——中断时部分文本已随 cancelled reason step 落地）
+        // 清空该任务全部流式缓冲，避免残留预览。
+        const terminal =
+          task.status === 'failed' || task.status === 'cancelled' || task.status === 'done' || task.status === 'paused'
+        if (terminal) get().clearStreamBuffer(task.id)
         set((s) => ({
           tasks: s.tasks.map((t) => (t.id === task.id ? task : t)),
           selectedTask:

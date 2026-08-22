@@ -24,6 +24,12 @@ const ark: ArkApi = {
       ipcRenderer.on('task:step', handler)
       return () => ipcRenderer.removeListener('task:step', handler)
     },
+    /** v0.27.0 R1：流式文本增量订阅（渲染加速通道；完整响应仍以 task:step 为准） */
+    onTextDelta: (cb) => {
+      const handler = (_e: IpcRendererEvent, payload: Parameters<typeof cb>[0]) => cb(payload)
+      ipcRenderer.on('task:text-delta', handler)
+      return () => ipcRenderer.removeListener('task:text-delta', handler)
+    },
     /** v0.14.0 Task 4：按工具维度进度聚合（用于并行 Act 渲染） */
     onProgress: (cb) => {
       const handler = (_e: IpcRendererEvent, progress: Parameters<typeof cb>[0]) => cb(progress)

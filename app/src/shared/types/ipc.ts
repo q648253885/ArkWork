@@ -64,10 +64,22 @@ export const TaskChannel = {
   Resume: 'task:resume',
   Cancel: 'task:cancel',
   Step: 'task:step',           // Main → Renderer 推送 ReAct 步骤
+  // v0.27.0 R1：流式文本增量（Main → Renderer 推送；渲染加速通道，非数据源）
+  TextDelta: 'task:text-delta',
   // v0.14.0 Task 4：按工具维度的进度聚合（per-requestId）
   Progress: 'task:progress',
   ProgressClear: 'task:progress:clear',
 } as const
+
+/** v0.27.0 R1：流式文本增量负载（task:text-delta 通道；seq 单调递增，乱序由 Renderer 丢弃） */
+export interface TaskTextDeltaPayload {
+  taskId: string
+  /** turn = ReAct 主循环 Reason 阶段；chat = runChatOnce 快速回复 */
+  scope: 'turn' | 'chat'
+  seq: number
+  /** 相对上一批次的增量文本（非全量） */
+  text: string
+}
 
 /** v0.14.0 Task 4：单条工具调用进度（Main → Renderer 推送） */
 export interface ToolProgressEvent {
@@ -910,6 +922,8 @@ export interface ArkApi {
     appendMessage: (taskId: string, text: string) => Promise<Task | null>
     listSteps: (taskId: string) => Promise<ReActStep[]>
     onStep: (cb: (step: ReActStep) => void) => () => void
+    /** v0.27.0 R1：流式文本增量订阅（渲染加速通道；完整响应仍以 task:step 为准） */
+    onTextDelta: (cb: (payload: TaskTextDeltaPayload) => void) => () => void
     /** v0.14.0 Task 4：按工具维度的并行 Act 进度（per-requestId） */
     onProgress: (cb: (progress: ToolProgressEvent) => void) => () => void
     onProgressClear: (cb: (payload: ToolProgressClearEvent) => void) => () => void

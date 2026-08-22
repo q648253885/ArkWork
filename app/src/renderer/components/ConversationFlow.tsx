@@ -49,6 +49,11 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
     const ctxChips = useStore((s) => s.ctxChips)
     // Task 4：建议卡片数据（ask_user / task_complete 时由 store 写入）
     const suggestions = useStore((s) => s.suggestions)
+    // v0.27.0 R1：当前任务的 Reason 流式预览文本（渲染加速通道；权威内容以 task:step 为准）
+    const streamText = useStore((s) => {
+      const tid = s.selectedTaskId
+      return (tid ? s.streamBuffers[`${tid}:turn`]?.text : undefined) ?? ''
+    })
 
     const agent: Agent | undefined = useMemo(
       () => agents.find((a) => a.id === selectedAgentId) ?? agents[0],
@@ -102,13 +107,14 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
 
     // 贴底时跟随内容变化（新增消息 + 同一条消息内容增长）；上翻则暂停。
     // useLayoutEffect：渲染后立即校正，流式更新时无闪跳。
+    // v0.27.0 R1：streamText 纳入依赖 → 流式追加同样贴底跟随（R-stream-2）。
     useLayoutEffect(() => {
       const el = scrollRef.current
       if (!el) return
       if (atBottom) {
         el.scrollTop = el.scrollHeight
       }
-    }, [contentSignature, atBottom])
+    }, [contentSignature, atBottom, streamText])
 
     // v0.13.0：累计新消息计数（用户不在底部时显示「↓ N 条新消息」）
     useEffect(() => {
@@ -252,19 +258,34 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
             )
           })}
 
+          {/* v0.27.0 R1：Reason 流式预览（渲染加速通道）。
+              纯文本 + 闪烁光标（Markdown 对残缺语法会抖动）；reason step 落地后
+              buffer 被 store 清空 → 权威步骤流接管渲染（R-stream-3）。 */}
+          {isRunning && streamText && (
+            <div className="fade-in-up" aria-live="polite">
+              <div className="text-sm leading-6 text-text-secondary whitespace-pre-wrap break-words">
+                {streamText}
+                <span className="stream-caret" aria-hidden="true" />
+              </div>
+            </div>
+          )}
+
           {/* running 但还没有 assistant 消息：v0.23.0 TraeWork 风格活动指示器
                - 展示最近 1-2 步（reason/act）的意图与摘要
-               - 业务蓝 shimmer 渐变文本（DSH） */}
+               - 业务蓝 shimmer 渐变文本（DSH）
+               - v0.27.0 R1：流式预览存在时主行让位（避免双份进度感），仅保留副活动行 */}
           {isRunning && (items.length === 0 || items[items.length - 1].type !== 'assistant') && (
             <div className="fade-in-up space-y-1" aria-live="polite">
               {/* 主活动行：最近 reason / act 的详细描述（80 字内） */}
-              <div
-                className="flex items-center gap-2 text-sm font-medium turn-status"
-                style={{ lineHeight: '26px' }}
-              >
-                <span className="turn-status__text">{thinkingDescription}</span>
-                <span className="turn-status__clock" />
-              </div>
+              {!streamText && (
+                <div
+                  className="flex items-center gap-2 text-sm font-medium turn-status"
+                  style={{ lineHeight: '26px' }}
+                >
+                  <span className="turn-status__text">{thinkingDescription}</span>
+                  <span className="turn-status__clock" />
+                </div>
+              )}
               {/* 副活动行：最近 2 步的简短动作流（紧凑显示） */}
               <div className="flex items-center gap-1.5 text-2xs text-text-tertiary">
                 {[...steps].slice(-2).map((s, i) => {
