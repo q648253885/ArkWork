@@ -23,7 +23,7 @@
 import { getAgent } from '../../store/agents.js'
 import { createTask, getTask } from '../../store/tasks.js'
 import { listEnabledL1 } from '../../memory/l1-working.js'
-import { runReActLoop } from '../engine.js'
+import { runReActLoop } from '../engine/index.js'
 import { logger } from '../../system/logger.js'
 import type { SkillContext } from '../registry.js'
 

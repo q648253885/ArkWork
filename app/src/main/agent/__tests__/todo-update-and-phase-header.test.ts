@@ -10,15 +10,23 @@
  * ============================================================ */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-const engineSrc = readFileSync(
-  fileURLToPath(new URL('../engine.ts', import.meta.url)),
-  'utf-8',
-)
+// v0.27.0 R2：engine.ts 已拆分为 engine/ 目录，源码契约改为拼接全部模块后断言
+const ENGINE_DIR = fileURLToPath(new URL('../engine/', import.meta.url))
+const engineSrc = readdirSync(ENGINE_DIR)
+  .filter((f) => f.endsWith('.ts'))
+  .sort()
+  .map((f) => readFileSync(ENGINE_DIR + f, 'utf-8'))
+  .join('\n')
 const seedSrc = readFileSync(
   fileURLToPath(new URL('../../store/seed.ts', import.meta.url)),
+  'utf-8',
+)
+// v0.27.0 F8：isPhaseHeader 实现已单源化至 shared/utils/plan-parse.ts，实现类契约改读该文件
+const planParseSrc = readFileSync(
+  fileURLToPath(new URL('../../../shared/utils/plan-parse.ts', import.meta.url)),
   'utf-8',
 )
 
@@ -71,15 +79,15 @@ test('engine.ts: 计划生成时过滤 isPhaseHeader', () => {
     '应使用 isPhaseHeader 过滤纯阶段标题型条目',
   )
   assert.match(
-    engineSrc,
+    planParseSrc,
     /function\s+isPhaseHeader\(\s*text:\s*string\s*\)\s*:\s*boolean/,
     'isPhaseHeader 应定义为接受 string 返回 boolean 的函数',
   )
 })
 
 test('engine.ts: isPhaseHeader 含动作动词白名单', () => {
-  // 抽样校验：调研/写/实现/测试/打包 至少出现 5 个
-  const m = engineSrc.match(/const\s+actionVerbs\s*=\s*\n?\s*\/([\s\S]*?)\//)
+  // 抽样校验：调研/写/实现/测试/打包 至少出现 5 个（实现已单源化至 plan-parse.ts）
+  const m = planParseSrc.match(/const\s+actionVerbs\s*=\s*\n?\s*\/([\s\S]*?)\//)
   assert.ok(m, 'isPhaseHeader 应定义动作动词正则')
   const verbs = m![1]!
   for (const v of ['调研', '写', '实现', '测试', '打包', '初始化', '运行', '配置']) {
@@ -283,15 +291,16 @@ test('v0.17.6: MemoryKind 新增 plan_status', () => {
 /* ---------- 8. v0.19.1 清单缺陷修复（噪声过滤 / 中断丢弃 / 计划上下文隔离） ---------- */
 
 test('v0.19.1: parsePlanItems 调用 isNoisePlanItem 过滤噪声项', () => {
+  // v0.27.0 F8：parsePlanItems 实现已单源化至 shared/utils/plan-parse.ts
   assert.match(
-    engineSrc,
+    planParseSrc,
     /filter\(\(\s*x\s*\)\s*=>\s*!isNoisePlanItem\(\s*x\s*\)\)/,
     'parsePlanItems 应链式过滤 isNoisePlanItem 噪声项',
   )
   assert.match(
-    engineSrc,
-    /import\s*\{\s*isNoisePlanItem\s*\}\s*from\s*['"]@shared\/utils\/plan-noise['"]/,
-    'engine.ts 应从 @shared/utils/plan-noise 引入 isNoisePlanItem',
+    planParseSrc,
+    /import\s*\{\s*isNoisePlanItem\s*\}\s*from\s*['"](@shared\/utils\/plan-noise|\.\/plan-noise\.js)['"]/,
+    'plan-parse.ts 应从 plan-noise 模块引入 isNoisePlanItem',
   )
 })
 
@@ -382,19 +391,20 @@ test('v0.19.x: 类别预算触顶时中断 ask_user 询问是否继续（而非�
 })
 
 test('v0.19.x: 清单项规范化 —— 强制单行 + 40 字截断', () => {
+  // v0.27.0 F8：sanitizePlanItemText 实现已单源化至 shared/utils/plan-parse.ts
   assert.match(
-    engineSrc,
+    planParseSrc,
     /function\s+sanitizePlanItemText\(/,
     '应定义 sanitizePlanItemText 函数',
   )
   assert.match(
-    engineSrc,
+    planParseSrc,
     /oneLine\.length\s*>\s*40/,
     '超过 40 字应截断加省略号',
   )
   // parsePlanItems 应对每项调用 sanitizePlanItemText
   assert.match(
-    engineSrc,
+    planParseSrc,
     /\.map\(\s*\(x\)\s*=>\s*sanitizePlanItemText\(\s*x\s*\)\s*\)/,
     'parsePlanItems 应对每项做单行化',
   )

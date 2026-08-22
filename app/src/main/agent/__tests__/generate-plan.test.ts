@@ -2,12 +2,12 @@
  * v0.14.0 — generatePlan / parsePlanItems 自主分级行为单测
  *
  * 设计：
- *  engine.ts 的 generatePlan 高度依赖 llm/registry、memory、ipc 等模块
+ *  engine/plan.ts 的 generatePlan 高度依赖 llm/registry、memory、ipc 等模块
  *  （且需 electron-mock-loader 才能跑通），不便直接 mock adapter。
  *  本测试对「纯函数 + 字符串契约」做集成验证（task 描述中允许的方案）：
  *    1. parsePlanItems 行为：用源码内联提取的逻辑对典型输入做断言
  *       （不修改 engine.ts 实现，不读私有符号）
- *    2. PLAN_SYSTEM_PROMPT 字符串：readFileSync 读 engine.ts 源码做关键字断言
+ *    2. PLAN_SYSTEM_PROMPT 字符串：readFileSync 读 engine/ 各模块源码做关键字断言
  *    3. generatePlan → PlanContent 上限契约：源码 regex 断言 items.slice(0, 12)
  *    4. 「对话级/Plan 级/Spec 级」三类任务差异化覆盖：简单/中等/复杂
  *
@@ -18,58 +18,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { parsePlanItems } from '@shared/utils/plan-parse'
 
-/** 从源码中"复刻" parsePlanItems 的等价实现（仅用于独立测试纯函数行为）。
- *  这是对原实现的并行副本，不修改 engine.ts。 */
-function parsePlanItems(raw: string): string[] | null {
-  if (!raw) return null
-  const json = parsePlanItemsJson(raw)
-  if (json && json.length > 0) return json
-  const lines = parsePlanItemsLines(raw)
-  if (lines && lines.length > 0) return lines
-  const arrows = parsePlanItemsArrows(raw)
-  if (arrows && arrows.length > 0) return arrows
-  return null
-}
-
-function parsePlanItemsJson(raw: string): string[] | null {
-  let text = raw.replace(/```(?:json)?\s*/g, '').replace(/```/g, '').trim()
-  const start = text.indexOf('[')
-  const end = text.lastIndexOf(']')
-  if (start < 0 || end <= start) return null
-  try {
-    const arr = JSON.parse(text.slice(start, end + 1)) as unknown
-    if (!Array.isArray(arr)) return null
-    const items = arr
-      .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
-      .map((x) => x.trim())
-    return items.length > 0 ? items : null
-  } catch {
-    return null
-  }
-}
-
-function parsePlanItemsLines(raw: string): string[] | null {
-  const lines = raw.split(/\n+/).map((l) => l.trim()).filter(Boolean)
-  const items: string[] = []
-  for (const line of lines) {
-    const m = line.match(/^(?:\d+[.、)）:]|[一二三四五六七八九十]+[、.．]|[-*•·])\s*(.+?)[。；;]?\s*$/)
-    if (!m) continue
-    items.push(m[1].trim())
-  }
-  return items.length > 0 ? items : null
-}
-
-function parsePlanItemsArrows(raw: string): string[] | null {
-  const parts = raw.split(/\s*(?:→|->|=>|⇒|→)\s*/)
-  if (parts.length < 2) return null
-  const items = parts
-    .map((p) => p.replace(/^[\s\-*•·\d.、)）:：]+/, '').replace(/[。；;,.，]$/, '').trim())
-    .filter(Boolean)
-  return items.length >= 2 ? items.slice(0, 12) : null
-}
-
+/* v0.27.0 §3.2：parsePlanItems 已单源化至 @shared/utils/plan-parse，此处直接导入实测。 */
 /* ---------- 1. parsePlanItems 纯函数行为 ---------- */
+/* 注（v0.27.0 单源化实测）：v0.19.1 起解析器会过滤「无动作动词碎片/状态自报」噪声项，
+ * 因此测试输入必须是动作句（如「执行 X」「修复 X」），纯序号占位文本按契约被丢弃。 */
 
 test('parsePlanItems: 空字符串 → null（对话级任务场景）', () => {
   assert.equal(parsePlanItems(''), null)
@@ -120,19 +74,19 @@ test('parsePlanItems: 12 步复杂计划（Spec 级上限）→ 原样返回', (
 
 test('parsePlanItems: 13 步超长计划（generatePlan 应截到 12）→ 原样返回 13', () => {
   // parsePlanItems 自身不截，由 generatePlan 在 .slice(0, 12) 截断
-  // 这里只验证 parsePlanItems 不丢数据
-  const items = Array.from({ length: 13 }, (_, i) => `步骤 ${i + 1}`)
+  // 这里只验证 parsePlanItems 不丢数据（输入须为动作句，见节首噪声过滤注）
+  const items = Array.from({ length: 13 }, (_, i) => `执行子任务 ${i + 1}`)
   const out = parsePlanItems(JSON.stringify(items))
   assert.ok(out)
   assert.equal(out!.length, 13, 'parsePlanItems 不应主动截断，由 generatePlan 决定上限')
 })
 
 test('parsePlanItems: 数组中夹杂空串/非字符串 → 过滤掉', () => {
-  const raw = '["有效 1", "", "   ", 42, null, "有效 2"]'
+  const raw = '["修复登录页", "", "   ", 42, null, "验证支付流程"]'
   const out = parsePlanItems(raw)
   assert.ok(out)
   assert.equal(out!.length, 2)
-  assert.deepEqual(out, ['有效 1', '有效 2'])
+  assert.deepEqual(out, ['修复登录页', '验证支付流程'])
 })
 
 test('parsePlanItems: 损坏 JSON → null（不抛错）', () => {
@@ -141,7 +95,7 @@ test('parsePlanItems: 损坏 JSON → null（不抛错）', () => {
 })
 
 test('parsePlanItems: 含前后缀文本 + 数组 → 容忍', () => {
-  const raw = '好的，我整理了 3 步：\n["步骤 A", "步骤 B", "步骤 C"]\n请按顺序执行。'
+  const raw = '好的，我整理了 3 步：\n["梳理需求", "实现功能", "回归测试"]\n请按顺序执行。'
   const out = parsePlanItems(raw)
   assert.ok(out)
   assert.equal(out!.length, 3)
@@ -193,7 +147,7 @@ test('parsePlanItems: 编号列表混入说明性段落 → 只提取列表项',
 
 test('generatePlan 上限契约：源码使用 .slice(0, 12) 截断', () => {
   const src = readFileSync(
-    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    fileURLToPath(new URL('../engine/plan.ts', import.meta.url)),
     'utf8',
   )
   assert.match(
@@ -205,7 +159,7 @@ test('generatePlan 上限契约：源码使用 .slice(0, 12) 截断', () => {
 
 test('generatePlan 上限契约：空数组 / 解析失败 → return null', () => {
   const src = readFileSync(
-    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    fileURLToPath(new URL('../engine/plan.ts', import.meta.url)),
     'utf8',
   )
   // v0.9.x：if 块内先 logger.warn 再 return null（空 / 解析失败时降级重试或返回 null）
@@ -220,7 +174,7 @@ test('generatePlan 上限契约：空数组 / 解析失败 → return null', () 
 
 function extractPlanPrompt(): string {
   const src = readFileSync(
-    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    fileURLToPath(new URL('../engine/plan.ts', import.meta.url)),
     'utf8',
   )
   const m = src.match(/const\s+PLAN_SYSTEM_PROMPT\s*=\s*`([\s\S]*?)`/)
@@ -281,9 +235,9 @@ test('中等任务（Plan 级）：mock adapter 返回 4 步 → PlanContent.ite
 test('复杂任务（Spec 级）：mock adapter 返回 10+ 步分阶段 → PlanContent.items 长度 ≥ 8', () => {
   const raw = JSON.stringify([
     '阶段 1：调研', '梳理依赖', '输出 ADR',
-    '阶段 2：脚手架', '初始化', '接入依赖',
-    '阶段 3：实现 A', 'a1', 'a2',
-    '阶段 4：实现 B', 'b1', 'b2',
+    '阶段 2：搭建脚手架', '初始化目录', '接入依赖',
+    '阶段 3：实现 A', '实现模块 a1', '实现模块 a2',
+    '阶段 4：实现 B', '实现模块 b1', '实现模块 b2',
   ])
   const items = parsePlanItems(raw)
   assert.ok(items)
@@ -297,7 +251,7 @@ test('复杂任务（Spec 级）：mock adapter 返回 10+ 步分阶段 → Plan
 
 test('v0.9.1: generatePlan 首轮使用 maxTokens 1024（非 400）', () => {
   const src = readFileSync(
-    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    fileURLToPath(new URL('../engine/plan.ts', import.meta.url)),
     'utf8',
   )
   // v0.17.4：react-core-skills 启用时用 PLAN_SYSTEM_PROMPT_DOC_DRIVEN 替换 PLAN_SYSTEM_PROMPT，
@@ -313,7 +267,7 @@ test('v0.9.1: generatePlan 首轮使用 maxTokens 1024（非 400）', () => {
 
 test('v0.9.1: PLAN_SYSTEM_PROMPT_RETRY 常量存在且要求 3~5 步', () => {
   const src = readFileSync(
-    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    fileURLToPath(new URL('../engine/plan.ts', import.meta.url)),
     'utf8',
   )
   assert.match(
@@ -334,17 +288,18 @@ test('v0.9.1: parsePlanItems 对截断的 12 步 JSON（缺 ]）→ null', () =>
 })
 
 test('v0.9.1: parsePlanItems 对完整 12 步数组 → 12 项', () => {
-  const items = Array.from({ length: 12 }, (_, i) => `步骤 ${i + 1}`)
+  // 输入须为动作句（v0.19.1 噪声过滤契约，见节首注）
+  const items = Array.from({ length: 12 }, (_, i) => `执行子任务 ${i + 1}`)
   const out = parsePlanItems(JSON.stringify(items))
   assert.ok(out)
   assert.equal(out!.length, 12)
-  assert.equal(out![0], '步骤 1')
-  assert.equal(out![11], '步骤 12')
+  assert.equal(out![0], '执行子任务 1')
+  assert.equal(out![11], '执行子任务 12')
 })
 
 test('v0.9.1: READONLY_TOOLS 存在且含 file-reader', () => {
   const src = readFileSync(
-    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    fileURLToPath(new URL('../engine/loop.ts', import.meta.url)),
     'utf8',
   )
   assert.match(
@@ -376,7 +331,7 @@ test('v0.19.0: seed.ts 使用 syncBuiltinAgentsToLatest 统一同步内置 Agent
 
 test('v0.17.4: PLAN_SYSTEM_PROMPT_DOC_DRIVEN 包含全部 10 个阶段且顺序正确', () => {
   const src = readFileSync(
-    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    fileURLToPath(new URL('../engine/plan.ts', import.meta.url)),
     'utf8',
   )
   const m = src.match(/const\s+PLAN_SYSTEM_PROMPT_DOC_DRIVEN\s*=\s*`([\s\S]*?)`/)
@@ -411,7 +366,7 @@ test('v0.17.4: PLAN_SYSTEM_PROMPT_DOC_DRIVEN 包含全部 10 个阶段且顺序�
 
 test('v0.17.4: 文档驱动 prompt 明确 HTML 原型是设计文档不是编码', () => {
   const src = readFileSync(
-    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    fileURLToPath(new URL('../engine/plan.ts', import.meta.url)),
     'utf8',
   )
   const m = src.match(/const\s+PLAN_SYSTEM_PROMPT_DOC_DRIVEN\s*=\s*`([\s\S]*?)`/)
@@ -423,7 +378,7 @@ test('v0.17.4: 文档驱动 prompt 明确 HTML 原型是设计文档不是编码
 
 test('v0.17.4: 文档驱动 prompt 的产物路径与 STAGE_GATES 正则对齐', () => {
   const engineSrc = readFileSync(
-    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    fileURLToPath(new URL('../engine/plan.ts', import.meta.url)),
     'utf8',
   )
   const promptMatch = engineSrc.match(/const\s+PLAN_SYSTEM_PROMPT_DOC_DRIVEN\s*=\s*`([\s\S]*?)`/)
@@ -453,7 +408,7 @@ test('v0.17.4: 文档驱动 prompt 的产物路径与 STAGE_GATES 正则对齐',
 
 test('v0.17.4: generatePlan 在 react-core-skills 启用时选择文档驱动 prompt', () => {
   const src = readFileSync(
-    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    fileURLToPath(new URL('../engine/plan.ts', import.meta.url)),
     'utf8',
   )
   // v0.17.5：docDriven 由引擎层传入（getSkill 名称匹配），兜底 isCoreSkillsEnabled
@@ -466,7 +421,7 @@ test('v0.17.4: generatePlan 在 react-core-skills 启用时选择文档驱动 pr
 
 test('v0.17.5: findPlanItemForStage 按阶段匹配计划项', () => {
   const src = readFileSync(
-    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    fileURLToPath(new URL('../engine/plan-parser.ts', import.meta.url)),
     'utf8',
   )
   assert.match(src, /function\s+findPlanItemForStage/, '应定义 findPlanItemForStage 辅助函数')
@@ -479,19 +434,25 @@ test('v0.17.5: findPlanItemForStage 按阶段匹配计划项', () => {
 })
 
 test('v0.17.5: 计划项完成检测改为阶段门禁驱动（移除激进 auto-advance）', () => {
-  const src = readFileSync(
-    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+  const gatesSrc = readFileSync(
+    fileURLToPath(new URL('../engine/gates.ts', import.meta.url)),
+    'utf8',
+  )
+  // v0.27.0 R2：门禁命中后的完成标注调用点随拆分迁至主循环 loop.ts
+  const loopSrc = readFileSync(
+    fileURLToPath(new URL('../engine/loop.ts', import.meta.url)),
     'utf8',
   )
   // 不应再有「act 全部成功 → running 标 done」的激进逻辑
-  assert.doesNotMatch(src, /actResults\.every\(\(r\) => r\.ok\)/, '不应再有 actResults.every 自动标 done')
+  assert.doesNotMatch(gatesSrc, /actResults\.every\(\(r\) => r\.ok\)/, '不应再有 actResults.every 自动标 done')
+  assert.doesNotMatch(loopSrc, /actResults\.every\(\(r\) => r\.ok\)/, '不应再有 actResults.every 自动标 done')
   // 应改为阶段门禁驱动
-  assert.match(src, /findPlanItemForStage\(task\.planItems,\s*gate\.stage\)/, '阶段门禁触发时应用 findPlanItemForStage 标 done')
+  assert.match(loopSrc, /findPlanItemForStage\(task\.planItems,\s*gate\.stage\)/, '阶段门禁触发时应用 findPlanItemForStage 标 done')
 })
 
 test('v0.17.4: 清单与阶段关联 hint 明确原型非编码', () => {
   const src = readFileSync(
-    fileURLToPath(new URL('../engine.ts', import.meta.url)),
+    fileURLToPath(new URL('../engine/run-setup.ts', import.meta.url)),
     'utf8',
   )
   assert.match(src, /HTML 原型是设计文档的一部分.*不是编码步骤/, 'hint 应明确原型非编码')

@@ -13,7 +13,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { reconcileToolCalls } from '../engine.js'
+import { reconcileToolCalls } from '../engine/index.js'
 import type { LlmMessage } from '../../llm/adapter.js'
 
 function assistant(id: string | undefined, content = 'think'): LlmMessage {

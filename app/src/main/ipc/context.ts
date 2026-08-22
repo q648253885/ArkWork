@@ -9,7 +9,7 @@
  *  - context:clear-category：清空某类上下文（如清空所有文件引用）
  * ============================================================ */
 import { ipcMain } from 'electron'
-import { estimateTaskContext, getTaskContextBreakdown } from '../agent/engine.js'
+import { estimateTaskContext, getTaskContextBreakdown } from '../agent/engine/index.js'
 import {
   archiveL1,
   archiveMany,

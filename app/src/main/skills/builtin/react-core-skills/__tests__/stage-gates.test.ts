@@ -96,7 +96,8 @@ test('isCoreSkillsEnabled: 任务/Agent 含 react-core-skills 时返回 true', (
 
 test('engine.ts: 在 act 循环后插入 stage-gates 分支', () => {
   // 静态断言：保证本次修改不会被后续重构意外移除
-  const enginePath = fileURLToPath(new URL('../../../../agent/engine.ts', import.meta.url))
+  // v0.27.0 R2：stage-gates 集成断言仍锚定在主循环 loop.ts
+  const enginePath = fileURLToPath(new URL('../../../../agent/engine/loop.ts', import.meta.url))
   const engineSrc = readFileSync(enginePath, 'utf-8')
   // 必须 import stage-gates 模块
   assert.match(engineSrc, /from\s+['"`].*stage-gates\.js['"`]/)

@@ -28,7 +28,7 @@ export async function plan(args: PlanArgs, ctx: SkillContext): Promise<PlanResul
       task: `${PROMPT_PLAN}\n\n任务名称：${taskName}\n范围：${args.scope?.trim() || '未指定'}\n目标目录：${directory}`,
     }, ctx)
     if (result.status !== 'done') return { status: 'failed', error: result.summary }
-    const planItems = parsePlanItems(result.summary, taskName)
+    const planItems = parseSummaryToPlanItems(result.summary, taskName)
     logger.info('Tool', `plan: generated ${join(directory, 'plan.md')}`, ctx.taskId)
     return { planPath: join(directory, 'plan.md'), planItems }
   } catch (err) {
@@ -38,7 +38,7 @@ export async function plan(args: PlanArgs, ctx: SkillContext): Promise<PlanResul
   }
 }
 
-function parsePlanItems(summary: string, taskName: string): PlanItem[] {
+function parseSummaryToPlanItems(summary: string, taskName: string): PlanItem[] {
   const lines = summary.split(/\r?\n/).map((line) => line.trim())
     .filter((line) => /^(?:[-*]|\d+[.)])\s+/.test(line))
   const now = Date.now()

@@ -11,11 +11,17 @@
  * ============================================================ */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const root = new URL('../', import.meta.url)
-const engineSrc = readFileSync(fileURLToPath(new URL('./engine.ts', root)), 'utf-8')
+// v0.27.0 R2：engine.ts 已拆分为 engine/ 目录，源码契约改为拼接全部模块后断言
+const ENGINE_DIR = fileURLToPath(new URL('./engine/', root))
+const engineSrc = readdirSync(ENGINE_DIR)
+  .filter((f) => f.endsWith('.ts'))
+  .sort()
+  .map((f) => readFileSync(ENGINE_DIR + f, 'utf-8'))
+  .join('\n')
 const eventsSrc = readFileSync(fileURLToPath(new URL('./events.ts', root)), 'utf-8')
 const ipcIndexSrc = readFileSync(
   fileURLToPath(new URL('../ipc/index.ts', root)),

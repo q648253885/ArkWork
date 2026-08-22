@@ -10,7 +10,7 @@
 import { getTask, updateTask, listRunningTasks } from '../store/tasks.js'
 import { getAgent } from '../store/agents.js'
 import { getModel } from '../store/agents.js'
-import { runReActLoop } from './engine.js'
+import { runReActLoop } from './engine/index.js'
 import { broadcastTaskStatus } from './events.js'
 import { logger } from '../system/logger.js'
 import type { Task } from '@shared/types/task'
