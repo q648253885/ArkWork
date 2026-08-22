@@ -14,6 +14,7 @@ app/release/
 
 # Dev data & caches
 app/.dev-data/
+.dev-data/
 app/.arkwork/
 **/.DS_Store
 **/Cache/
@@ -68,6 +69,7 @@ app/index-*.js
 # Scratch / e2e / smoke test scripts
 app/_*.mjs
 app/_*.py
+app/scripts/_verify-*
 app/smoke_check.py
 app/fix_lone_surrogates.py
 

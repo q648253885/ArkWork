@@ -838,6 +838,63 @@ export interface BrowserTabMeta {
   agentDriven: boolean
 }
 
+/* ---- v0.26.0 P1：agent 浏览器交互原语（BrowserArgs action 全集，重设计文档 §3.1） ---- */
+export type BrowserAction =
+  | 'open'
+  | 'navigate'
+  | 'back'
+  | 'forward'
+  | 'reload'
+  | 'stop'
+  | 'snapshot'
+  | 'screenshot'
+  | 'console'
+  | 'click'
+  | 'type'
+  | 'press'
+  | 'scroll'
+  | 'select'
+  | 'wait'
+  | 'tabs'
+  | 'eval'
+  | 'close'
+
+/** browser 工具入参：定位优先级 ref > selector > text */
+export interface BrowserArgs {
+  action: BrowserAction
+  /** snapshot 产出的元素引用（如 e12），导航/reload 后失效 */
+  ref?: string
+  /** CSS 选择器定位 */
+  selector?: string
+  /** 可见文本定位（精确匹配优先，退化为包含匹配） */
+  text?: string
+  /** open/navigate/tabs new：URL 或本地路径（相对工作区） */
+  url?: string
+  path?: string
+  /** type/select：输入值或选项值/选项文本 */
+  value?: string
+  /** press：按键名（Enter/Tab/Escape/ArrowDown…，支持 ctrl+a 组合） */
+  key?: string
+  /** scroll：滚动方向 */
+  direction?: 'up' | 'down' | 'top' | 'bottom'
+  /** scroll：滚动量 px（默认 400） */
+  amount?: number
+  /** wait/navigate 等超时毫秒 */
+  timeoutMs?: number
+  /** screenshot：保存路径（省略存 .arkwork/browser-shots/） */
+  file?: string
+  /** screenshot：同时返回 base64 给多模态模型 */
+  returnImage?: boolean
+  /** tabs 子命令 */
+  subcommand?: 'list' | 'new' | 'select' | 'close'
+  /** tabs select/close：目标 Tab id */
+  tabId?: string
+  /** eval：要执行的 JS 表达式 / 语句 */
+  js?: string
+  /** console：最多返回条数 */
+  limit?: number
+}
+
 /* ---- 暴露给 Renderer 的 ark API 完整签名 ---- */
 export interface ArkApi {
   task: {

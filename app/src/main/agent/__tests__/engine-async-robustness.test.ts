@@ -39,32 +39,24 @@ test('engine: runReActLoop catch 分支 AbortError → handleAbort', () => {
 })
 
 test('engine: catch 分支写 failed + errorMessage', () => {
-  // 必须在 catch 分支调用 updateTask({ status: 'failed' })
+  // 必须在 catch 分支调用 emitEvent(task_failed) + updateTask({ status: 'failed' }) + broadcastTaskStatus
+  // 注：emitEvent 携带 task.id 首参（v0.8.x 后统一签名），test 断言跟随实际代码
   assert.match(
     engineSrc,
-    /catch\s*\(\s*err\s*\)\s*\{[\s\S]*?emitEvent\(\s*\{\s*type:\s*'task_failed'[\s\S]*?updateTask\(task\.id,\s*\{\s*status:\s*'failed'[\s\S]*?broadcastTaskStatus/,
+    /catch\s*\(\s*err\s*\)\s*\{[\s\S]*?emitEvent\(\s*task\.id,\s*\{\s*type:\s*'task_failed'[\s\S]*?updateTask\(task\.id,\s*\{\s*status:\s*'failed'[\s\S]*?broadcastTaskStatus/,
   )
 })
 
-test('engine: ask_user 校验 suggestions < 2 时拒绝并写 observation + act_end failed', () => {
-  // v0.16.x：硬约束 — ask_user.suggestions 必须 2~4 个有效项；不合规则引擎拒绝、
-  // 写 L1 observation 让 LLM 重试，不暂停任务。覆盖 issue "执行大项目时
-  // 没有让用户选择选项，只能手动输入"。
-  assert.match(
-    engineSrc,
-    /ask_user\.suggestions\s+必须是\s+2~4\s+个有效项/s,
-  )
-  // 必须含 invalidAskUser 分支判断
-  assert.match(engineSrc, /const\s+invalidAskUser\s*=/)
-  // 不合规时必须 emit act_end with ok=false
-  assert.match(
-    engineSrc,
-    /invalidAskUser[\s\S]*?ok:\s*false[\s\S]*?errorMessage:\s*reason/s,
-  )
-  // 不合规时必须 continue（不暂停任务，让下一轮 Reason 重试）
-  assert.match(engineSrc, /invalidAskUser[\s\S]*?continue/)
-  // 合规时仍走原有 ask_user 暂停分支（验证至少一处保留）
-  assert.match(engineSrc, /await\s+updateTask\(task\.id,\s*\{\s*status:\s*'paused'\s*\}/)
+test('engine: ask_user 校验 question 缺失/空时注入兜底（不再拒绝重试）', () => {
+  // v0.25.2：question 缺失/空 → 注入兜底问题后正常暂停，避免「拒绝重试 → 空转报错」。
+  // 必须含 hasQuestion 判定
+  assert.match(engineSrc, /hasQuestion\s*=\s*typeof\s+rawQuestion\s*===\s*['"]string['"]/)
+  // 缺问题走 buildFallbackAskUserQuestion 兜底（三目 false 分支 + 外层 guard）
+  assert.match(engineSrc, /buildFallbackAskUserQuestion\(\)/)
+  assert.match(engineSrc, /if\s*\(!\s*hasQuestion\s*\)/)
+  assert.match(engineSrc, /function\s+buildFallbackAskUserQuestion\(\)[\s\S]*?return\s*['"]/)
+  // 行为不再走 ok:false 拒绝，正常 pause
+  assert.match(engineSrc, /await\s+updateTask\(task\.id,\s*\{\s*status:\s*['"]paused['"]\s*\}/)
 })
 
 test('seed: ask_user 工具 description 强约束必须传 suggestions', () => {

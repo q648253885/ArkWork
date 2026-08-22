@@ -165,6 +165,12 @@ function getToolCallKey(tool: string, args: unknown): string {
   return createHash('md5').update(payload).digest('hex')
 }
 
+// v0.25.2：ask_user 的 question 缺失/为空时注入的兜底问题。
+// 与 suggestions 兜底同策略，保证门禁交互始终可用，避免「拒绝重试 → 空转报错」。
+function buildFallbackAskUserQuestion(): string {
+  return '需要你的确认才能继续当前任务，请选择希望我如何处理下一步？'
+}
+
 // v0.9.x：shell 写入命令特征（命中即视为产出性操作，清零只读停滞计数）
 const WRITE_COMMAND_RE = /mkdir|tee|\bcp\b|\bmv\b|\becho\b|cat\s*>|>|\$\s*\(/i
 
@@ -998,56 +1004,21 @@ export async function runReActLoop(
                 recommended: s.recommended === true,
               }))
           : []
-        const tcId = response.toolCallId ?? `call_${iteration}_0`
-        const invalidAskUser =
-          typeof rawQuestion !== 'string' ||
-          rawQuestion.trim().length === 0
-        if (invalidAskUser) {
-          const reason = 'ask_user.question 缺失或为空字符串'
-          logger.warn('Agent', `ask_user rejected: ${reason} — 重试`, task.id)
-          // 1) 写入 L1 observation，触发下一轮 Reason 重试（多 action 时其余写"跳过"）
-          await appendPairedControlObservations({
-            taskId: task.id,
-            iteration,
-            actions: pendingActions,
-            actionIds: pendingActionIds,
-            controlTool: 'ask_user',
-            controlContent: `[ask_user] failed: ${reason}。ask_user 必须给出非空 question。请立即重试调用 ask_user 并补全 question。`,
-            skipPrefix: `[skipped] ask_user 参数不合规，跳过：`,
-          })
-          // 2) 广播 act_end 失败事件，让 UI 看到错误（不影响 UI 主体渲染）
-          await emitEvent(task.id, {
-            type: 'act_end',
-            iteration,
-            result: { error: reason },
-            resultSummary: `ask_user 参数不合规：${reason}`,
-            durationMs: 0,
-            ok: false,
-            errorMessage: reason,
-          })
-          // 3) 写一条失败的 ReActStep（供 Steps UI 可见）
-          const failedStep: ReActStep = {
-            id: tcId,
-            taskId: task.id,
-            iteration,
-            type: 'act',
-            toolName: 'ask_user',
-            toolArgs: JSON.stringify(action.args ?? {}),
-            startedAt: Date.now(),
-            durationMs: 0,
-            status: 'failed',
-            resultSummary: `ask_user 参数不合规：${reason}`,
-            errorMessage: reason,
-            softFail: true,
-          }
-          await broadcastStep(failedStep)
-          // 不暂停任务，继续下一轮 Reason
-          continue
+        // v0.25.2 fix：question 缺失或为空 → 不再拒绝重试。此前走「拒绝 + continue」
+        // 会让 LLM 在参数解析持续失败里空转，门禁跳过、只会报错从不提问；
+        // 现在与 suggestions 兜底（v0.18.x / v0.25.0 context-aware）同策略——
+        // 注入上下文兜底问题后正常暂停，保证 ask_user 门禁始终可用。
+        const hasQuestion = typeof rawQuestion === 'string' && rawQuestion.trim().length > 0
+        const lowerQ = String(rawQuestion ?? '').toLowerCase()
+        const question: string = hasQuestion
+          ? (rawQuestion as string)
+          : buildFallbackAskUserQuestion()
+        if (!hasQuestion) {
+          logger.warn('Agent', `ask_user.question 缺失或为空，注入兜底问题：${question}`, task.id)
         }
         // v0.18.x：suggestions 不足 2 个时注入兜底选项，避免前端拿不到建议卡
         // v0.25.0 F2 P1：兜底改为 context-aware —— 根据 question 关键字生成更合理的选项。
         // 同时始终保留「继续」+「暂停补充信息」两项兜底（与 v0.18.x 契约一致；测试断言依赖）。
-        const lowerQ = String(rawQuestion ?? '').toLowerCase()
         const isFailureQ = /(失败|fail|错误|err|异常|exception|超时)/.test(lowerQ)
         const isContinueQ = /(继续|下一步|继续运行|下一步要做什么|怎么继续|该做什么|选择下一步|怎么办)/.test(lowerQ)
         const contextualSuggestions = isFailureQ
@@ -1091,7 +1062,7 @@ export async function runReActLoop(
         await emitEvent(task.id, {
           type: 'ask_user',
           iteration,
-          question: rawQuestion as string,
+          question,
           // 透传 Agent 附带的建议选项（不足时已兜底为 2 项）
           suggestions: finalSuggestions,
         })

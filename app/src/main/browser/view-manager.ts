@@ -12,12 +12,20 @@
  * 多 Tab 设计文档 §4.2 标记的扩展点都已实现：
  *  - attachTo / setBounds / activate / navigate / detach / attach
  *  - 主窗口关闭 → 全部 view 随窗口销毁（不主动管理生命周期）
+ *
+ * v0.26.0 P0（浮窗 UI 根治）：浮窗不再加载落盘的内联 HTML，改为加载
+ * renderer 构建产物 browser-toolbar.html（独立 Vite 入口 + BrowserChrome 组件）。
  * ============================================================ */
 import { BrowserWindow, WebContentsView } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { dirname, join } from 'node:path'
+import { existsSync } from 'node:fs'
 import { logger } from '../system/logger.js'
 import type { BrowserTabMeta } from '@shared/types/ipc'
+
+/** ESM 下无原生 __dirname（package.json "type":"module"），沿用 window.ts 惯例自建 */
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 /** Tab 完整状态（含 view，main 进程私有）。 */
 export interface BrowserTab {
@@ -112,10 +120,15 @@ export function createTab(opts?: { url?: string }): BrowserTab {
   return tab
 }
 
-/** 关闭并销毁 Tab。 */
+/** 关闭并销毁 Tab。v0.26.0 fix：宿主为浮窗时连带关闭该窗口（否则留下无内容僵尸工具栏）。 */
 export function closeTab(tabId: string): void {
   const tab = tabs.get(tabId) as (BrowserTab & { _attached?: boolean }) | undefined
   if (!tab) return
+  let floatWin: BrowserWindow | null = null
+  if (tab.host.kind === 'window') {
+    const w = (BrowserWindow as any).fromId(tab.host.windowId) as BrowserWindow | null
+    if (w && !w.isDestroyed()) floatWin = w
+  }
   try {
     const win = getOwnerWindow(tab.host)
     if (win && tab._attached) {
@@ -131,6 +144,14 @@ export function closeTab(tabId: string): void {
   }
   tabs.delete(tabId)
   if (activeDockTabId === tabId) activeDockTabId = null
+  // 先出注册表再关窗：closed 回调的 tabs.has 守卫会直接返回，不会误触发 attachTab
+  if (floatWin) {
+    try {
+      floatWin.close()
+    } catch (err) {
+      logger.warn('Tool', `view-manager: close owner floating window failed for ${tabId}: ${(err as Error).message}`)
+    }
+  }
   logger.info('Tool', `view-manager: closed tab ${tabId}`)
 }
 
@@ -251,6 +272,37 @@ export function getActiveDockTab(): BrowserTab | null {
   return tabs.get(activeDockTabId) ?? null
 }
 
+/**
+ * 取 agent 当前应操作的「目标 Tab」（不限 dock / window —— v0.25.2 修复 controller 与
+ * vm 割裂：agent 浏览器不再依赖 <webview>，而是直接操作 view-manager 的 Tab）。
+ * 优先级：
+ *   1) 标记为 agentDriven=true 的最近 Tab（含浮窗），保证 agent 持续操作同一会话；
+ *   2) 回退到当前 dock 激活 Tab；
+ *   3) 无则取最近创建的 dock Tab；
+ *   4) 都没有返回 null。
+ */
+export function getAgentActiveTab(): BrowserTab | null {
+  const all = Array.from(tabs.values())
+  if (all.length === 0) return null
+  const driven = all
+    .filter((t) => t.agentDriven)
+    .sort((a, b) => b.createdAt - a.createdAt)
+  if (driven.length > 0) return driven[0]
+  if (activeDockTabId) {
+    const active = tabs.get(activeDockTabId)
+    if (active) return active
+  }
+  const dock = all.filter((t) => t.host.kind === 'dock').sort((a, b) => b.createdAt - a.createdAt)
+  return dock[0] ?? all[all.length - 1]
+}
+
+/** 取 agent 目标 Tab 的 WebContents（供 controller 操作）。 */
+export function getAgentTargetWebContents(): import('electron').WebContents | null {
+  const tab = getAgentActiveTab()
+  if (!tab || tab.view.webContents.isDestroyed()) return null
+  return tab.view.webContents
+}
+
 /** 标记 agent 驱动状态（影响 UI 标签徽标）。 */
 export function setAgentDriven(tabId: string, agentDriven: boolean): void {
   const tab = tabs.get(tabId)
@@ -286,151 +338,38 @@ export function closeAllTabs(): void {
  * 完成切换（WebContentsView 的 webContents 是稳定的，跨窗口持有）。
  * ============================================================ */
 
-/** 创建独立浮窗（承载 BrowserTab 的 WebContentsView）。bounds 缺省按主窗口 60% 居中。 */
-/** v0.25.0 F2 P1：浮窗加载一个独立 HTML（不走完整 renderer —— 避免 React hash router 重叠）。
- * 内含：
- *  - 地址栏 / 前进后退 / 刷新 / 关闭 / 回 dock 按钮（与 BrowserPanel 一致）
- *  - 占位 div，由主进程 view-manager 通过 webContents.send('browser:floating:set-bounds') 同步
- *  - 工具栏动作通过 ark.browserTabs.* IPC 触发
- * 这样浮窗与 dock 共享同一 webContents（view-manager 持有），只是 UI 容器不同。
+/** 创建独立浮窗（承载 BrowserTab 的 WebContentsView）。bounds 缺省按主窗口 60% 居中。
+ *
+ * v0.26.0 P0（浮窗 UI 根治）：
+ *  - 浮窗不再加载落盘的内联 HTML（v0.25.3 方案），改为加载 renderer 构建产物
+ *    browser-toolbar.html（独立 Vite 入口，见 electron.vite.config renderer input），
+ *    与主窗口共享同一套 Tailwind token / React 体系；形态由 URL ?mode=float|dock 决定。
+ *  - dev：ELECTRON_RENDERER_URL 存在时拼接 /browser-toolbar.html（HMR 生效）；
+ *    prod：pathToFileURL(out/renderer/browser-toolbar.html)，启动前 existsSync 自检。
+ *  - 加载后 executeJavaScript 自检 [data-browser-chrome]，未接线则 reload 重试。
+ *  - WebContentsView 从 y = FLOATING_TOOLBAR_HEIGHT 起叠加，chrome 永远可见可点。
  */
-const FLOATING_HTML = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
-<html lang="zh">
-<head>
-<meta charset="utf-8">
-<title>ArkWork Browser</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-  body { display: flex; flex-direction: column; background: #fff; color: #111; font-size: 13px; }
-  @media (prefers-color-scheme: dark) { body { background: #16181d; color: #e6e8eb; } }
-  .toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid rgba(0,0,0,0.08); flex-shrink: 0; background: rgba(0,0,0,0.02); }
-  @media (prefers-color-scheme: dark) { .toolbar { border-bottom-color: rgba(255,255,255,0.08); background: rgba(255,255,255,0.02); } }
-  .toolbar button { width: 26px; height: 26px; border: none; background: transparent; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: inherit; }
-  .toolbar button:hover:not(:disabled) { background: rgba(0,0,0,0.06); }
-  @media (prefers-color-scheme: dark) { .toolbar button:hover:not(:disabled) { background: rgba(255,255,255,0.06); } }
-  .toolbar button:disabled { opacity: 0.3; cursor: not-allowed; }
-  .toolbar input { flex: 1; min-width: 0; height: 26px; padding: 0 8px; border: 1px solid rgba(0,0,0,0.1); border-radius: 4px; background: transparent; color: inherit; font-size: 12px; font-family: ui-monospace, monospace; }
-  @media (prefers-color-scheme: dark) { .toolbar input { border-color: rgba(255,255,255,0.1); } }
-  .toolbar input:focus { outline: none; border-color: #3976e6; }
-  .placeholder { flex: 1; position: relative; background: transparent; overflow: hidden; }
-  .placeholder .status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: rgba(0,0,0,0.4); font-size: 13px; }
-  .agent-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(57,118,230,0.15); color: #3976e6; flex-shrink: 0; }
-  .host-mode { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(0,0,0,0.06); color: rgba(0,0,0,0.5); flex-shrink: 0; cursor: pointer; }
-  @media (prefers-color-scheme: dark) { .host-mode { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5); } }
-</style>
-</head>
-<body>
-  <div class="toolbar">
-    <button id="back" title="后退">‹</button>
-    <button id="forward" title="前进">›</button>
-    <input id="addr" type="text" placeholder="输入 URL ⏎" />
-    <span id="agentBadge" class="agent-badge" style="display:none">agent 驱动</span>
-    <button id="go" title="前往" style="background:#3976e6;color:#fff">→</button>
-    <button id="refresh" title="刷新">↻</button>
-    <button id="new-tab" title="新建浏览器（about:blank，新 webContents）">＋</button>
-    <button id="clear" title="清空当前内容（导航到 about:blank，保留浏览器）">⌫</button>
-    <button id="close-tab" title="关闭浏览器" style="color:#d33">×</button>
-    <button id="back-to-dock" class="host-mode" title="收回侧栏">⤺ 收回侧栏</button>
-  </div>
-  <div id="placeholder" class="placeholder">
-    <div class="status" id="status">加载中…</div>
-  </div>
-<script>
-const { ark } = window;
-const $ = (id) => document.getElementById(id);
-const placeholder = $('placeholder');
-const status = $('status');
-const addr = $('addr');
-let tabId = null;
-let history = [];
-let historyIdx = -1;
+/** 浮窗顶部 chrome 高度（px）—— 与 BrowserChrome float 模式单行导航条 h-10 精确一致 */
+const FLOATING_TOOLBAR_HEIGHT = 40
 
-async function refreshMeta() {
-  if (!tabId) return;
-  const meta = (await ark.browserTabs.list()).find(t => t.tabId === tabId);
-  if (!meta) return;
-  $('agentBadge').style.display = meta.agentDriven ? '' : 'none';
-  if (!addr.value || addr.value === 'about:blank') addr.value = meta.url;
-}
-
-function setStatus(t) {
-  if (t) status.textContent = t;
-  else status.style.display = 'none';
-}
-
-$('back').onclick = () => { if (historyIdx > 0) { historyIdx--; addr.value = history[historyIdx]; go(addr.value); } };
-$('forward').onclick = () => { if (historyIdx < history.length - 1) { historyIdx++; addr.value = history[historyIdx]; go(addr.value); } };
-
-async function go(raw) {
-  if (!tabId) {
-    const r = await ark.browserTabs.create({ url: raw, newTab: true });
-    tabId = r.tabId;
-  } else {
-    await ark.browserTabs.navigate({ tabId, url: raw });
+let floatingToolbarUrl: string | null = null
+function resolveFloatingToolbarUrl(): string {
+  if (floatingToolbarUrl) return floatingToolbarUrl
+  const devUrl = process.env.ELECTRON_RENDERER_URL
+  if (devUrl) {
+    floatingToolbarUrl = `${devUrl.replace(/\/+$/, '')}/browser-toolbar.html`
+    return floatingToolbarUrl
   }
-  history = history.slice(0, historyIdx + 1).concat([raw]);
-  historyIdx = history.length - 1;
-  addr.value = raw;
-  setStatus('加载中…');
+  const file = join(__dirname, '../renderer/browser-toolbar.html')
+  if (!existsSync(file)) {
+    logger.warn(
+      'Tool',
+      `view-manager: browser-toolbar.html missing at ${file} — check electron.vite.config renderer input / build output`,
+    )
+  }
+  floatingToolbarUrl = pathToFileURL(file).href
+  return floatingToolbarUrl
 }
-
-$('addr').onkeydown = (e) => { if (e.key === 'Enter') go(addr.value); };
-$('go').onclick = () => go(addr.value);
-$('refresh').onclick = () => tabId && ark.browserTabs.navigate({ tabId, url: addr.value });
-$('close-tab').onclick = () => tabId && ark.browserTabs.close({ tabId });
-$('new-tab').onclick = async () => {
-  // v0.25.1：新建 Tab（约:blank，新 webContents），接管为新当前 Tab
-  const res = await ark.browserTabs.create({ newTab: true });
-  tabId = res.tabId;
-  history = []; historyIdx = -1; addr.value = '';
-  setStatus('');
-};
-$('clear').onclick = async () => {
-  // v0.25.1：清空当前内容（导航到 about:blank，保留 Tab 与 webContents）
-  if (!tabId) return;
-  await ark.browserTabs.navigate({ tabId, url: 'about:blank' });
-  history = []; historyIdx = -1; addr.value = '';
-  setStatus('');
-};
-$('back-to-dock').onclick = () => tabId && ark.browserTabs.attach({ tabId });
-
-ark.browser.onDidFinishLoad(({ url }) => {
-  setStatus('');
-  addr.value = url;
-  refreshMeta();
-});
-ark.browser.onDidFailLoad(({ code, desc }) => {
-  setStatus('加载失败: ' + code + ' ' + desc);
-});
-
-ark.browserTabs.onHostChanged(({ tabId: changedId, host }) => {
-  if (changedId !== tabId) return;
-  if (host === 'dock') {
-    // 已被收回 dock → 浮窗本身失去意义；提示用户后浮窗可关
-    setStatus('已收回侧栏浏览器，请关闭此窗口');
-  } else {
-    setStatus('');
-  }
-});
-
-(async () => {
-  // 找首个 dock → window 的 tab（自己接管）
-  const list = await ark.browserTabs.list();
-  const floating = list.find(t => t.host === 'window');
-  if (floating) {
-    tabId = floating.tabId;
-    history = [floating.url];
-    historyIdx = 0;
-    addr.value = floating.url;
-    setStatus('');
-  } else {
-    setStatus('等待浏览器加载…');
-  }
-})();
-</script>
-</body>
-</html>`)}`
 
 function createFloatingWindow(bounds?: { x: number; y: number; width: number; height: number }): BrowserWindow {
   const mainWin = BrowserWindow.getAllWindows()[0]
@@ -463,9 +402,28 @@ function createFloatingWindow(bounds?: { x: number; y: number; width: number; he
       preload: preloadPath,
     },
   })
-  void win.loadURL(FLOATING_HTML).catch((err) => {
-    logger.warn('Tool', `view-manager: floating HTML load failed: ${(err as Error).message}`)
-  })
+  // v0.26.0 P0：React 渲染完成后根节点带 data-browser-chrome；
+  // 未接线（脚本未执行 / 产物缺失）则 reload 重试。
+  const verifyToolbarWired = (): Promise<boolean> =>
+    win.webContents
+      .executeJavaScript("!!document.querySelector('[data-browser-chrome]')")
+      .then((ok) => ok === true)
+      .catch(() => false)
+
+  void win
+    .loadURL(resolveFloatingToolbarUrl())
+    .then(async () => {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (win.isDestroyed()) return
+        if (await verifyToolbarWired()) return
+        logger.warn('Tool', `view-manager: floating toolbar not wired (attempt ${attempt + 1}), reloading`)
+        win.webContents.reload()
+        await new Promise((r) => setTimeout(r, 400))
+      }
+    })
+    .catch((err) => {
+      logger.warn('Tool', `view-manager: floating toolbar load failed: ${(err as Error).message}`)
+    })
   return win
 }
 
@@ -490,11 +448,14 @@ export function detachTab(tabId: string, bounds?: { x: number; y: number; width:
   tab.host = { kind: 'window', windowId: win.id }
   win.contentView.addChildView(tab.view)
   tab._attached = true // window 上已挂载
+  // v0.25.2 fix：view 从工具栏下方开始，避免铺满全窗盖住浮窗工具栏按钮
+  // v0.25.3 fix：用 getContentSize()（不含标题栏）计算，避免内容区超出可视区
+  const size0 = win.getContentSize()
   tab.view.setBounds({
     x: 0,
-    y: 0,
-    width: Math.max(0, win.getBounds().width),
-    height: Math.max(0, win.getBounds().height),
+    y: FLOATING_TOOLBAR_HEIGHT,
+    width: Math.max(0, size0[0]),
+    height: Math.max(0, size0[1] - FLOATING_TOOLBAR_HEIGHT),
   })
   tab.view.setVisible(true)
   activeDockTabId = null
@@ -505,11 +466,12 @@ export function detachTab(tabId: string, bounds?: { x: number; y: number; width:
     if (tab.host.windowId !== win.id) return
     if (win.isDestroyed()) return
     try {
+      const size = win.getContentSize()
       tab.view.setBounds({
         x: 0,
-        y: 0,
-        width: Math.max(0, win.getBounds().width),
-        height: Math.max(0, win.getBounds().height),
+        y: FLOATING_TOOLBAR_HEIGHT,
+        width: Math.max(0, size[0]),
+        height: Math.max(0, size[1] - FLOATING_TOOLBAR_HEIGHT),
       })
     } catch (err) {
       logger.debug('Tool', `view-manager: window resize sync failed: ${(err as Error).message}`)
@@ -518,7 +480,30 @@ export function detachTab(tabId: string, bounds?: { x: number; y: number; width:
   win.on('resize', syncBounds)
   win.on('move', syncBounds)
 
-  // 浮窗关闭 → 自动 attach 回 dock（如 dock 仍存在）
+  // v0.26.x fix：浮窗「销毁前」（close 事件）先把 view 摘下迁回 dock。
+  // 原逻辑只挂 closed（窗口销毁后）→ 届时 webContents 可能已随窗口一起销毁，
+  // 或从已销毁窗口 reparent 失败，表现为"关浮窗后侧栏浏览器不恢复"。
+  // 此处 attachTab 内部会调 win.close()，但此时宿主已改为 dock，
+  // close/closed 二次进入均被守卫拦截，无递归风险。closed 回调保留作安全网。
+  win.on('close', () => {
+    const cur = tabs.get(tabId)
+    if (!cur || cur.host.kind !== 'window') return
+    if (cur.host.windowId !== win.id) return
+    try {
+      const mainWinNow = BrowserWindow.getAllWindows()[0]
+      if (mainWinNow && !mainWinNow.isDestroyed()) {
+        attachTab(tabId)
+      } else {
+        // 主窗口已关 → 销毁 view 兜底
+        closeTab(tabId)
+      }
+    } catch (err) {
+      logger.warn('Tool', `view-manager: window close attach failed: ${(err as Error).message}`)
+    }
+  })
+
+  // 浮窗关闭 → 自动 attach 回 dock（如 dock 仍存在）。v0.26.x 起为安全网：
+  // 正常路径已在上方 close 事件完成迁移（host 已是 dock，这里直接返回）
   win.on('closed', () => {
     if (!tabs.has(tabId)) return
     const cur = tabs.get(tabId)

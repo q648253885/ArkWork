@@ -44,7 +44,12 @@ export default defineConfig({
     build: {
       outDir: 'out/renderer',
       rollupOptions: {
-        input: resolve(__dirname, 'src/renderer/index.html'),
+        input: {
+          index: resolve(__dirname, 'src/renderer/index.html'),
+          // v0.26.0 P0：浮窗/迷你模式独立入口（BrowserChrome），主进程以
+          // pathToFileURL(out/renderer/browser-toolbar.html) 加载，杜绝内联 HTML
+          'browser-toolbar': resolve(__dirname, 'src/renderer/browser-toolbar.html'),
+        },
       },
     },
     server: {

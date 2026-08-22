@@ -235,20 +235,21 @@ test('v0.18.x fix: 内部机制/门禁拦截（softFail）用中性 guarded 样�
 
 /* ---------- 12. engine ask_user 校验放宽契约 ---------- */
 
-test('v0.18.x fix: ask_user 仅校验 question 非空，suggestions 不足注入兜底', () => {
-  // 校验只依赖 question 是否存在/非空，不再校验 suggestions 数量
-  const invalidAskUser = engineSrc.match(/invalidAskUser\s*=\s*([\s\S]*?)\n\s*if\s*\(invalidAskUser\)/)
-  assert.ok(invalidAskUser, '应存在 invalidAskUser 校验逻辑')
+test('v0.18.x + v0.25.2: ask_user 校验 question 非空，缺失注入兜底，suggestions 不足注入兜底', () => {
+  // 校验只依赖 question 是否存在/非空，缺失时注入兜底问题而非拒绝（v0.25.2）
+  assert.match(engineSrc, /hasQuestion\s*=\s*typeof\s+rawQuestion\s*===\s*['"]string['"]/, '应判定 question 是否为有效字符串')
   assert.match(
     engineSrc,
-    /invalidAskUser[\s\S]{0,200}rawQuestion\.trim\(\)\.length\s*===\s*0/,
-    'invalidAskUser 应只校验 question 缺失/空字符串',
+    /hasQuestion\s*=\s*typeof\s+rawQuestion\s*===\s*['"]string['"]\s*&&\s*rawQuestion\.trim\(\)\.length\s*>\s*0/,
+    'hasQuestion 应只判定 question 缺失/空字符串',
   )
   assert.doesNotMatch(
     engineSrc,
-    /invalidAskUser[\s\S]{0,300}suggestions\s*<\s*2/,
-    'invalidAskUser 不应再因 suggestions 不足而拒绝',
+    /hasQuestion[\s\S]{0,300}suggestions\s*<\s*2/,
+    '不应再因 suggestions 不足而拒绝',
   )
+  // 缺问题 → 注入兜底问题（v0.25.2）
+  assert.match(engineSrc, /buildFallbackAskUserQuestion/, '缺 question 时应走兜底问题')
   // suggestions 不足时注入兜底选项
   assert.match(engineSrc, /finalSuggestions/, '应计算 finalSuggestions')
   assert.match(engineSrc, /label:\s*['"]继续['"]/, '兜底应含「继续」选项')

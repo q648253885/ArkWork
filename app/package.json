@@ -1,6 +1,6 @@
 {
   "name": "arkwork",
-  "version": "0.25.1",
+  "version": "0.26.0",
   "description": "Local-first AI Agent workbench — ReAct loop visible, controllable, reusable.",
   "main": "out/main/index.js",
   "author": "ArkWork",
@@ -18,6 +18,7 @@
     "test:v0180": "tsx --test src/main/agent/__tests__/v018-plan-item-patch-broadcast.test.ts",
     "test:skills-zip": "tsx --experimental-loader ./src/main/store/__tests__/electron-mock-loader.mjs --test src/main/store/__tests__/skills-zip-export.test.ts",
     "test:step-list": "tsx --test src/renderer/components/right/__tests__/step-list.status.test.tsx",
+    "test:ime": "tsx --test src/shared/utils/__tests__/ime.test.ts",
     "test:reconcile": "tsx --experimental-loader ./src/main/fault-tolerance/__tests__/electron-mock-loader.mjs --test src/main/agent/__tests__/reconcile-tool-calls.test.ts",
     "test:generate-plan": "tsx --test src/main/agent/__tests__/generate-plan.test.ts",
     "test:cache": "tsx --test src/main/llm/__tests__/cache-usage.test.ts",
@@ -68,10 +69,6 @@
   "build": {
     "appId": "com.arkwork.app",
     "productName": "ArkWork",
-    "electronDownload": {
-      "cache": "./.electron-builder-cache"
-    },
-    "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "release",
       "buildResources": "build-resources"
@@ -135,7 +132,18 @@
           ]
         }
       ],
-      "artifactName": "ArkWork-Setup-${version}-${arch}.${ext}"
+      "artifactName": "ArkWork-Setup-${version}-${arch}.${ext}",
+      "files": [
+        "out/**/*",
+        "!out/**/*.{map,ts}",
+        "package.json",
+        "!**/node_modules/@napi-rs/canvas-android*/**",
+        "!**/node_modules/@napi-rs/canvas-darwin*/**",
+        "!**/node_modules/@napi-rs/canvas-freebsd*/**",
+        "!**/node_modules/@napi-rs/canvas-linux*/**",
+        "!**/node_modules/@esbuild/**",
+        "!**/node_modules/app-builder-bin/**"
+      ]
     },
     "nsis": {
       "oneClick": false,

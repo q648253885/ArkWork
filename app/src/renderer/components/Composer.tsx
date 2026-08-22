@@ -26,6 +26,7 @@ import { useStore, friendlyError, computeModelHealth } from '../store'
 // v0.24.x：标题生成（基于首条用户消息首行）改由 store.sendMessage 调用 simplifyFirstLine
 // import { simplifyFirstLine } from '../utils/title'
 import type { PermissionMode } from '@shared/types/permission'
+import { isImeComposing } from '@shared/utils/ime'
 import { Tooltip } from './ui'
 import { RunConsole } from './RunConsole'
 import { ModelSwitcher } from './ModelSwitcher'
@@ -459,6 +460,9 @@ export function Composer() {
 
   // ============ 键盘 ============
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // v0.26.x fix：IME 组合中的按键归输入法（确认上屏/候选翻页/取消组合），业务层不响应。
+    // 英文模式（非组合态）不受影响，单回车仍直接发送。
+    if (isImeComposing(e.nativeEvent)) return
     // 菜单打开时：↑ ↓ Enter Esc
     if (menu && menuItems.length > 0) {
       if (e.key === 'ArrowDown') {

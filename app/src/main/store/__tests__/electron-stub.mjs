@@ -22,6 +22,11 @@ export class BrowserWindow {
   }
 }
 
+/* v0.26.x：view-manager / skills-zip-export 等模块从 'electron' 具名导入
+ * WebContentsView，桩缺该导出会导致整条传递依赖链的测试加载即炸。
+ * 测试仅需模块可加载，这里提供空壳类即可（方法按需再补）。 */
+export class WebContentsView {}
+
 export const nativeTheme = {
   shouldUseDarkColors: false,
 }

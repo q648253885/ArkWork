@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https: http:; connect-src 'self' ws: wss: https: http://127.0.0.1:* http://localhost:*"
+    />
+    <title>ArkWork Browser</title>
+    <script>
+      // 无闪烁主题脚本（与 index.html 同款约定）：默认深色，读同一 localStorage key。
+      // 注意：此处严禁声明 const/let ark —— contextBridge 暴露的 window.ark 是
+      // 不可配置全局属性，顶层词法声明同名变量会直接 SyntaxError（v0.25.3 根因）。
+      (function () {
+        try {
+          var t = localStorage.getItem('arkwork:theme');
+          var resolved;
+          if (t === 'light') resolved = 'light';
+          else if (t === 'system') {
+            resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          } else {
+            resolved = 'dark';
+          }
+          if (resolved === 'dark') document.documentElement.classList.add('dark');
+        } catch (e) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg-base, #16181d);
+      }
+      #root {
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./browser-toolbar/main.tsx"></script>
+  </body>
+</html>

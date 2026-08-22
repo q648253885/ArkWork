@@ -20,6 +20,7 @@ import { Tooltip } from './ui'
 import { SuggestionCards } from './SuggestionCards'
 import { executionDescription, reasoningDescription } from '../constants'
 import { useStore } from '../store'
+import { isImeComposing } from '@shared/utils/ime'
 
 interface RunConsoleProps {
   status: 'running' | 'paused' | 'error' | 'cancelled'
@@ -115,6 +116,8 @@ export function RunConsole({
   }
 
   const handleAppendKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // v0.26.x fix：IME 组合中的回车归输入法（确认拼音），不触发提交/续跑
+    if (isImeComposing(e.nativeEvent)) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleAppendAndResume()
@@ -190,6 +193,8 @@ export function RunConsole({
                     value={askUserCustomText}
                     onChange={(e) => setAskUserCustomText(e.target.value)}
                     onKeyDown={(e) => {
+                      // v0.26.x fix：IME 组合中的回车归输入法，不触发提交
+                      if (isImeComposing(e.nativeEvent)) return
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault()
                         submitAskUserCustom()
