@@ -158,8 +158,9 @@ export default function App() {
       }
 
       // v0.13.0：⌥1~6 Inspector 直达 → fix-workspace-task-automation-memory Task 5：⌥1~5
+      // v0.27.0 r10-F14a：终端纳入 Inspector 后扩展 ⌥6
       // ⌥N 命中时同步展开内容面板（即使之前是折叠态）。
-      if (alt && !meta && /^[1-5]$/.test(e.key)) {
+      if (alt && !meta && /^[1-6]$/.test(e.key)) {
         e.preventDefault()
         const s = useStore.getState()
         const idx = Number(e.key) - 1

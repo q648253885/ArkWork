@@ -78,6 +78,7 @@ export function BrowserChrome({
   }, [current, onActiveTabChange])
 
   /* 导航：非直连 URL 先经主进程 resolve（本地路径 → file:// 等） */
+  const navSeqRef = useRef(0)
   const load = useCallback(
     async (raw: string, push = true) => {
       const input = raw.trim()
@@ -91,10 +92,19 @@ export function BrowserChrome({
           /* resolve 失败按原文尝试 */
         }
       }
-      let tabId = currentIdRef.current
-      if (tabId) {
-        const res = await browserTabs.navigate({ tabId, url: target })
-        if (!res.ok) tabId = null
+      const tabId = currentIdRef.current
+      const seq = ++navSeqRef.current
+      // v0.27.0 F12-B2：乐观发起导航，不等待主进程 loadURL 完成 —— loadURL 要等整页
+      // 加载且可能 reject（ERR_ABORTED / ERR_CONNECTION_*），阻塞会冻结 UI 状态；
+      // 连续两次导航时前者被打断后以 !ok 返回，旧逻辑会误入「新建 Tab」兜底凭空开页。
+      // 结算交由轮询的 pending 机制（提交即清 / 超时兜底并对齐地址栏真实 URL）。
+      pendingRef.current = { url: target, since: Date.now() }
+      lastMetaUrlRef.current = target
+      setLoading(true)
+      setStatusText(`正在加载 ${target}`)
+      applyAddress(target)
+      if (push) {
+        setHist((h) => ({ items: [...h.items.slice(0, h.idx + 1), target], idx: h.idx + 1 }))
       }
       if (!tabId) {
         // createTab 固定 host='dock'：float 模式下「无当前标签时导航」的语义 =
@@ -109,17 +119,23 @@ export function BrowserChrome({
           setStatusText('已在新窗口打开')
           return
         }
-        tabId = created.tabId
-        void browserTabs.activate({ tabId })
-        applyCurrentId(tabId)
+        void browserTabs.activate({ tabId: created.tabId })
+        applyCurrentId(created.tabId)
+        return
       }
-      pendingRef.current = { url: target, since: Date.now() }
-      lastMetaUrlRef.current = target
-      setLoading(true)
-      setStatusText(`正在加载 ${target}`)
-      applyAddress(target)
-      if (push) {
-        setHist((h) => ({ items: [...h.items.slice(0, h.idx + 1), target], idx: h.idx + 1 }))
+      try {
+        const res = await browserTabs.navigate({ tabId, url: target })
+        if (seq !== navSeqRef.current) return // 已被更新的导航取代，过期结果直接丢弃
+        if (!res.ok) {
+          pendingRef.current = null
+          setLoading(false)
+          setStatusText(`加载失败：${res.error ?? '未知错误'}`)
+        }
+      } catch (err) {
+        if (seq !== navSeqRef.current) return
+        pendingRef.current = null
+        setLoading(false)
+        setStatusText(`加载失败：${(err as Error).message}`)
       }
     },
     [mode, applyCurrentId, applyAddress],
@@ -256,10 +272,18 @@ export function BrowserChrome({
             pendingRef.current = null
             setLoading(false)
             setStatusText('')
+            // v0.27.0 F12-B1：结算兜底时地址栏对齐真实 URL —— 导航失败/超时（如重定向链）
+            // 提交的乐观地址已失真；成功提交时 cur.url 与乐观地址一致，此分支自然跳过
+            if (cur && !addrFocusedRef.current && cur.url !== lastMetaUrlRef.current) {
+              lastMetaUrlRef.current = cur.url
+              applyAddress(cur.url)
+            }
           }
         }
-        // 外部（agent/其他窗口）改了 URL 且输入框未聚焦 → 同步地址栏；聚焦时保护用户草稿
-        if (cur && !addrFocusedRef.current && cur.url !== lastMetaUrlRef.current) {
+        // 外部（agent/其他窗口）改了 URL 且输入框未聚焦 → 同步地址栏；聚焦时保护用户草稿。
+        // v0.27.0 F12-B1：导航进行中（pending 未结算）不得覆盖 —— 否则轮询采样到提交前的
+        // 旧 URL 会打回乐观地址，且新 URL 落地后因 lastMeta 预设相等而永不纠正（地址栏陈旧）
+        if (cur && !pendingRef.current && !addrFocusedRef.current && cur.url !== lastMetaUrlRef.current) {
           lastMetaUrlRef.current = cur.url
           applyAddress(cur.url)
         } else if (cur) {

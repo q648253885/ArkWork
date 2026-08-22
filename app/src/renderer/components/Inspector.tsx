@@ -1,13 +1,13 @@
 /* ============================================================
  * ArkWork — Inspector (fix-workspace-task-automation-memory Task 5 / IntelliJ-style tool window bar)
  * 右栏为最右侧垂直工具窗口栏：
- * - 标签固定 Todos / Context / Files / Logs / Browser 顺序（独立 tools 已并入 ContextPanel）
+ * - 标签固定 Todos / Context / Files / Logs / Browser / Terminal 顺序（独立 tools 已并入 ContextPanel）
  * - 标签栏始终贴在窗口最右边（即使内容折叠也常驻）
  * - 当前标签用左侧 accent 指示条 + 图标 + 文字表达选中态
  * - 内容面板在标签栏左侧展开，宽 280–480px 可拖
  * - 点击非激活标签 → 展开/切换；再次点击激活标签 → 仅折叠内容
  * - Browser 标签不可隐藏，保证可访问
- * - ⌥1~5 快捷键激活并展开对应标签（todos/context/files/logs/browser）
+ * - ⌥1~6 快捷键激活并展开对应标签（todos/context/files/logs/browser/terminal）
  * 设计文档：specs/fix-workspace-task-automation-memory §合并后的右侧工具窗口
  * ============================================================ */
 import { useCallback, useRef, useState } from 'react'
@@ -19,6 +19,8 @@ import { ContextPanel } from './dock/ContextPanel'
 import { BrowserPanel } from './dock/BrowserPanel'
 import { TodoPanel } from './dock/TodoPanel'
 import { LogsView } from './right/LogsView'
+// v0.27.0 r10-F14a：终端（输出查看器）纳入 Inspector —— 原 RightDock 宿主无挂载点
+import { TerminalPanel } from './dock/TerminalPanel'
 
 const TOOL_BAR_WIDTH = 44 // 垂直标签栏宽度（保持紧凑、足够容纳 16px 图标 + 文字）
 
@@ -199,6 +201,8 @@ export function Inspector() {
             {inspectorTab === 'context' && <ContextPanel />}
             {inspectorTab === 'files' && <FilesPanel />}
             {inspectorTab === 'logs' && <LogsView />}
+        {/* v0.27.0 r10-F14a：终端（输出查看器）—— F14 文案宿主，原 RightDock 无挂载点 */}
+        {inspectorTab === 'terminal' && <TerminalPanel />}
           </div>
         </div>
       </div>

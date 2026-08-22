@@ -73,8 +73,10 @@ export type SettingsTab = 'models' | 'workspace' | 'knowledge' | 'appearance' | 
 /** fix-workspace-task-automation-memory Task 5 — Inspector 五固定 Tab。
  * 顺序固定为：清单 / 上下文 / 文件 / 日志 / 浏览器。独立的「工具」Tab 已并入上下文面板。
  * 默认 Tab 为「清单」(todos) —— 最普适且与对话内 Plan 卡同源。
+ * v0.27.0 r10-F14a：补「终端」——TerminalPanel 原宿主 RightDock 自 v0.17 起无挂载点，
+ * 组件成孤儿；纳入 Inspector 第 6 Tab 使 F14 输出查看器定位对用户可达。
  */
-export type InspectorTabId = 'todos' | 'context' | 'files' | 'logs' | 'browser'
+export type InspectorTabId = 'todos' | 'context' | 'files' | 'logs' | 'browser' | 'terminal'
 
 export interface DockPrefs {
   tabs: DockTabId[]

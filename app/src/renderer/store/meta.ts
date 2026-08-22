@@ -63,10 +63,12 @@ export const INSPECTOR_TAB_META: Record<InspectorTabId, { label: string; icon: s
   files:   { label: '文件',   icon: 'Folder',  shortcut: '⌥3' },
   logs:    { label: '日志',   icon: 'List',    shortcut: '⌥4' },
   browser: { label: '浏览器', icon: 'Eye',     shortcut: '⌥5' },
+  // v0.27.0 r10-F14a：终端（输出查看器）纳入 Inspector，原 RightDock 宿主已无挂载点
+  terminal:{ label: '终端',   icon: 'Terminal', shortcut: '⌥6' },
 }
 
-/** Inspector 固定 Tab 顺序 — Task 5：清单 / 上下文 / 文件 / 日志 / 浏览器 */
-export const INSPECTOR_TAB_ORDER: InspectorTabId[] = ['todos', 'context', 'files', 'logs', 'browser']
+/** Inspector 固定 Tab 顺序 — Task 5：清单 / 上下文 / 文件 / 日志 / 浏览器；r10-F14a 追加终端 */
+export const INSPECTOR_TAB_ORDER: InspectorTabId[] = ['todos', 'context', 'files', 'logs', 'browser', 'terminal']
 
 /** Inspector 默认 Tab — 选 todos（最普适，Plan ↔ Todos 同步链路核心） */
 export const DEFAULT_INSPECTOR_TAB: InspectorTabId = 'todos'

@@ -99,6 +99,9 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
     (activeTab && rendererOverrides[activeTab.id]) ?? activeTab?.renderer ?? 'fallback'
   const viewMode =
     viewModes[activeTabId] ?? defaultViewMode(activeRenderer) ?? 'render'
+  // v0.27.0 r10-F13a：⌘E 占位入口会创建 path='' 的 file Tab；空路径视为「无内容」，
+  // 走产物预览空态（F13 文案），而非 fallback 渲染器的「无法读取文件元数据」报错视图
+  const isEmptyTab = !activeTab || (activeTab.target.kind === 'file' && !activeTab.target.path)
 
   /* ---- 文本类内容懒加载 ---- */
   const loadContent = useCallback(
@@ -334,7 +337,7 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
 
   /* ---- 渲染内容 ---- */
   const renderContent = () => {
-    if (!activeTab) {
+    if (isEmptyTab) {
       return (
         <div className="h-full flex flex-col items-center justify-center text-text-tertiary">
           <Icon.Eye width={22} height={22} />
@@ -395,6 +398,7 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
   /* ---- 状态栏信息 ---- */
   const tc = activeTab ? contents[activeTab.id] : undefined
   const statusInfo = useMemo(() => {
+    if (isEmptyTab) return { left: '产物预览', saved: '' }
     if (!activeTab) return { left: '无文件', saved: '' }
     if (activeTab.target.kind === 'url') {
       return { left: activeTab.target.url, saved: '已就绪' }
@@ -410,13 +414,13 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
     if (tc?.state === 'loading') return { left: `${extOf(path)} · ${typeLabel}`, saved: '加载中…' }
     if (tc?.state === 'error') return { left: `${extOf(path)} · ${typeLabel}`, saved: '加载失败' }
     return { left: `${extOf(path)} · ${typeLabel}`, saved: '已就绪' }
-  }, [activeTab, activeRenderer, tc])
+  }, [isEmptyTab, activeTab, activeRenderer, tc])
 
-  const title = activeTab
-    ? activeTab.target.kind === 'file'
+  const title = isEmptyTab
+    ? '产物预览'
+    : activeTab.target.kind === 'file'
       ? basename(activeTab.target.path)
       : activeTab.target.url
-    : '产物预览' // v0.27.0 F13：空态标题补产物预览语义
 
   const entry = RENDERER_REGISTRY[activeRenderer]
   const showTabBar = tabs.length >= 2
