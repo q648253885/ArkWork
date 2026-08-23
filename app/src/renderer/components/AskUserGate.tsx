@@ -34,6 +34,7 @@ export function AskUserGate({ question, suggestions, onAnswer, onStop }: AskUser
   const [selected, setSelected] = useState(recommendedIndex)
   const [customText, setCustomText] = useState('')
   const shellRef = useRef<HTMLDivElement>(null)
+  const textRef = useRef<HTMLTextAreaElement>(null)
 
   // 新一轮提问（suggestions 变化）时选中位回落到推荐项
   useEffect(() => {

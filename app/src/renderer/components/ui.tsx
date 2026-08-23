@@ -1,7 +1,7 @@
 import { useStore } from '../store'
 import { STATUS_CHAR, STATUS_COLOR } from '../constants'
 import type { TaskStatus } from '../types'
-import { useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 /* ============================================================
@@ -138,22 +138,37 @@ export function Tooltip({
   const tipRef = useRef<HTMLSpanElement>(null)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
 
-  const computePos = () => {
+  // v0.27.2：open 后在 paint 前用 useLayoutEffect 同步测量定位。
+  // 旧 rAF 方案可能先于 React commit 执行——tipRef 尚为 null 时 computePos
+  // 早退，pos 恒为 null，tooltip 却已按 measured=true 以 opacity:1 卡死在
+  // 视口左上角 (0,0)，直接盖住左上角真实按钮（工作区切换键中招）。
+  // layout effect 在 DOM 提交后、绘制前运行，refs 必然就绪，竞态根除。
+  useLayoutEffect(() => {
+    if (!open) return
     const wrap = wrapperRef.current
     const tip = tipRef.current
     if (!wrap || !tip) return
     const wr = wrap.getBoundingClientRect()
     const tr = tip.getBoundingClientRect()
     const gap = 8
+    const pad = 8
+    // v0.27.2：空间不足先翻转、后收边。旧逻辑对贴顶元素把负 top 直接
+    // Math.max(pad,…) 压回屏内，tooltip 恰好叠在触发按钮上导致无法点击
+    //（右上角设置键、顶栏工作区键均中招）。翻转后仅在对侧也放不下时才收边。
+    const fitsTop = wr.top - tr.height - gap >= pad
+    const fitsBottom = wr.bottom + gap + tr.height <= window.innerHeight - pad
+    let place = placement
+    if (place === 'top' && !fitsTop && fitsBottom) place = 'bottom'
+    else if (place === 'bottom' && !fitsBottom && fitsTop) place = 'top'
     let top = 0
     let left = 0
-    if (placement === 'top') {
+    if (place === 'top') {
       top = wr.top - tr.height - gap
       left = wr.left + wr.width / 2 - tr.width / 2
-    } else if (placement === 'bottom') {
+    } else if (place === 'bottom') {
       top = wr.bottom + gap
       left = wr.left + wr.width / 2 - tr.width / 2
-    } else if (placement === 'left') {
+    } else if (place === 'left') {
       top = wr.top + wr.height / 2 - tr.height / 2
       left = wr.left - tr.width - gap
     } else {
@@ -161,21 +176,17 @@ export function Tooltip({
       left = wr.right + gap
     }
     // 视口内收边，避免 tooltip 超出屏幕
-    const pad = 8
     top = Math.max(pad, Math.min(top, window.innerHeight - tr.height - pad))
     left = Math.max(pad, Math.min(left, window.innerWidth - tr.width - pad))
     setPos({ top, left })
-  }
+    setMeasured(true)
+  }, [open, placement])
 
-  // open 后先渲染再量尺寸定位（避免首次量到 0 尺寸）
+  // open 置位时先隐藏一帧，待 layout effect 量完尺寸再显示，避免旧坐标闪现
   const [measured, setMeasured] = useState(false)
   const handleOpen = () => {
     setOpen(true)
     setMeasured(false)
-    requestAnimationFrame(() => {
-      computePos()
-      setMeasured(true)
-    })
   }
 
   const hasRich = !!(kbd || desc || cap)
@@ -202,14 +213,16 @@ export function Tooltip({
             padding: hasRich ? '8px 11px' : '5px 9px',
             boxShadow: 'var(--shadow-md)',
             maxWidth: '340px',
-            whiteSpace: hasRich ? 'normal' : 'nowrap',
+            // v0.27.2：纯 label 长文案（如 ctx 圆环的用量明细）不再 nowrap——
+            // 旧写法文字会溢出气泡底色之外，视觉上如同被遮挡；统一折行显示
+            whiteSpace: 'normal',
             opacity: measured ? 1 : 0,
             transition: 'opacity 140ms ease',
             pointerEvents: measured ? 'auto' : 'none',
           }}
           aria-hidden={!measured}
         >
-          <span className="flex items-center gap-1.5 text-xs font-medium leading-relaxed whitespace-nowrap">
+          <span className="flex items-center gap-1.5 text-xs font-medium leading-relaxed">
             {label}
             {kbd && (
               <span
