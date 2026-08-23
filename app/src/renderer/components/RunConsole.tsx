@@ -7,6 +7,9 @@
  *   - 暂停态渲染迷你 textarea，支持「追加指令后点继续」
  *   - 错误态展示 errorMessage + 重试按钮
  *   - v0.8.0：cancelled（含启动时回收的意外中断任务）→ 重新执行按钮
+ *   - v0.27.1：ask_user 内嵌问答卡已移除——该场景由 Composer 槽位级的
+ *     AskUserGate 独占接管（键盘可选、与输入框互斥不冲突），本组件
+ *     只服务普通 running/paused/failed/cancelled 态。
  *
  * Task 2 — 文案已统一为「正在…」自然语言描述（executionDescription / reasoningDescription）；
  * 不再显示机械编号、步骤序号或每帧跳动的数字计时，避免抖动（不依赖 transition/transform）。
@@ -17,7 +20,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../icons'
 import { Tooltip } from './ui'
-import { SuggestionCards } from './SuggestionCards'
 import { executionDescription, reasoningDescription } from '../constants'
 import { useStore } from '../store'
 import { isImeComposing } from '@shared/utils/ime'
@@ -45,9 +47,6 @@ export function RunConsole({
 }: RunConsoleProps) {
   const [appendText, setAppendText] = useState('')
   const appendRef = useRef<HTMLTextAreaElement>(null)
-  // v0.16.x：ask_user 暂停态专属「自定义回答」输入（与底部 textarea 隔离，
-  // 各自持有独立的 value，避免相互串扰）。
-  const [askUserCustomText, setAskUserCustomText] = useState('')
 
   // 暂停态聚焦追加输入框
   useEffect(() => {
@@ -61,9 +60,6 @@ export function RunConsole({
   //   - paused/error/cancelled：复用最近一次 act step 的工具名 / 失败动作
   //   - 文案切换保持相同行高，不使用 transition，避免位置抖动
   const steps = useStore((s) => s.steps)
-  // ask_user 暂停态：Agent 提问全文（非 ask_user 暂停时为 null，不展示卡片）
-  const askUserQuestion = useStore((s) => s.askUserQuestion)
-  const suggestions = useStore((s) => s.suggestions)
   // v0.24.x：限制 description 最大 40 字（输入区"Agent 正在干嘛"短描述原则）
   // 此前 lastAct.intent 来自 LLM thought，可能一整段话直接铺在输入框顶端，UI
   // 出现"运行控制台里塞了一篇思考"体感——参考 Trae harness / DeepSeek Harness，
@@ -128,15 +124,6 @@ export function RunConsole({
     }
   }
 
-  // v0.16.x：ask_user 暂停态「自定义回答」提交 — 文本经 onAppendAndResume
-  // 走 appendMessage → runTask 通道，与点击建议卡片路径一致。提交后清空输入框。
-  const submitAskUserCustom = () => {
-    const text = askUserCustomText.trim()
-    if (!text || !onAppendAndResume) return
-    onAppendAndResume(text)
-    setAskUserCustomText('')
-  }
-
   return (
     <div className="relative border-t border-border-subtle bg-bg-base flex-shrink-0">
       <div className="px-3 pt-2 pb-3">
@@ -153,73 +140,6 @@ export function RunConsole({
           </div>
         )}
 
-        {/* ask_user 暂停态：明确展示 Agent 问题全文，用户无需翻阅思考块 */}
-        {status === 'paused' && askUserQuestion && (
-          <div className="rounded-lg bg-accent-soft/50 border border-accent/30 px-3 py-2 mb-2 text-sm text-text-primary whitespace-pre-wrap break-words">
-            需要你处理：{askUserQuestion}
-            {/* v0.16.7+：ask_user 暂停态同步渲染建议卡片（紧贴问题下方，不在
-                ConversationFlow 里），点击建议直接调 onAppendAndResume 触发续聊。
-                之前 Suggestions 只渲染在 ConversationFlow 末尾，用户需滚动到
-                历史消息区才能看到，体感像是"没出选项对话框"。 */}
-            {suggestions.length > 0 && onAppendAndResume && (
-              <div className="mt-2">
-                <SuggestionCards
-                  suggestions={suggestions}
-                  onSelect={(s) => {
-                    onAppendAndResume(s.label)
-                  }}
-                />
-              </div>
-            )}
-            {/* v0.25.0 F2 P1：选项卡 + 输入框并存（点击选项快速作答或输入自定义指令）。
-                旧 v0.23.1 注释说"有选项卡时不显示输入框"——但用户反馈"选项不正确+无输入框"，
-                实际场景经常需要"否，但请按 X 调整"这类自定义指令。两者并存更灵活。 */}
-            {onAppendAndResume && (
-              <div className="mt-2">
-                {suggestions.length > 0 && (
-                  <div className="flex items-center gap-1.5 mb-1.5 px-0.5 text-2xs text-text-tertiary">
-                    <Icon.Check width={12} height={12} className="flex-shrink-0" />
-                    <span>点击上方选项快速作答，或在下方输入自定义指令</span>
-                  </div>
-                )}
-                <div className="flex items-center gap-1.5 mb-1.5 px-0.5">
-                  <Icon.Edit width={12} height={12} className="text-text-tertiary flex-shrink-0" />
-                  <span className="text-2xs text-text-tertiary uppercase tracking-wider font-medium">
-                    输入你的回答
-                  </span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <textarea
-                    value={askUserCustomText}
-                    onChange={(e) => setAskUserCustomText(e.target.value)}
-                    onKeyDown={(e) => {
-                      // v0.26.x fix：IME 组合中的回车归输入法，不触发提交
-                      if (isImeComposing(e.nativeEvent)) return
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        submitAskUserCustom()
-                      }
-                    }}
-                    placeholder="输入你想补充的指令后回车提交…（Shift+Enter 换行）"
-                    rows={1}
-                    className="flex-1 resize-none text-sm text-text-primary placeholder-text-tertiary bg-bg-input border border-border-subtle rounded-md px-3 py-1.5 focus:border-accent outline-none"
-                    style={{ minHeight: '36px', maxHeight: '120px' }}
-                  />
-                  <button
-                    onClick={submitAskUserCustom}
-                    disabled={askUserCustomText.trim().length === 0}
-                    aria-label="提交自定义回答"
-                    className="inline-flex items-center gap-1 h-9 px-3 rounded-md bg-accent hover:bg-accent-hover disabled:bg-bg-hover disabled:text-text-tertiary text-text-inverse text-xs font-medium transition-colors focus-ring disabled:cursor-not-allowed"
-                  >
-                    <Icon.Send width={12} height={12} />
-                    提交
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* RunConsole 主体 */}
         <div className="run-console" data-state={status}>
           {/* 状态点 */}
@@ -232,9 +152,9 @@ export function RunConsole({
 
           <div className="flex-1" />
 
-          {/* 暂停态：追加指令输入框（v0.23.1：ask_user 暂停态隐藏——选项卡才是主交互，
-              输入框与选项卡重叠的问题由此消除；普通暂停仍可追加指令） */}
-          {status === 'paused' && !askUserQuestion && (
+          {/* 暂停态：追加指令输入框（v0.27.1 起 ask_user 场景由 AskUserGate 接管，
+              到达本组件的暂停均为普通手动暂停，恒可追加指令） */}
+          {status === 'paused' && (
             <div className="flex items-center gap-2 flex-1 max-w-[480px]">
               <textarea
                 ref={appendRef}

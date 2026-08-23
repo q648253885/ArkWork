@@ -175,7 +175,7 @@ export function RightDock() {
 
       {/* 智能体切换轻提示条 */}
       {dockNotice && (
-        <div className="flex items-center gap-2 px-3 py-1.5 text-2xs text-text-secondary bg-accent-soft/60 border-b border-border-subtle slide-in">
+        <div className="flex items-center gap-2 px-3 py-1.5 text-2xs text-text-secondary bg-accent-soft border-b border-border-subtle slide-in">
           <span className="flex-1 truncate">{dockNotice}</span>
           <button
             onClick={() => resetDockPrefs(selectedAgentId)}

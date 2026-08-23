@@ -58,7 +58,7 @@ export function AbilitiesPanel() {
               className={`flex items-center gap-1.5 px-2.5 h-7 text-xs transition-colors border-b-2 -mb-px rounded-t-md ${
                 active
                   ? 'border-accent text-text-primary bg-bg-surface'
-                  : 'border-transparent text-text-tertiary hover:text-text-secondary hover:bg-bg-hover/50'
+                  : 'border-transparent text-text-tertiary hover:text-text-secondary hover:bg-bg-hover'
               }`}
             >
               {meta.icon}

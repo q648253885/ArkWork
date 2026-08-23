@@ -99,7 +99,7 @@ export function StepList() {
 
       {/* Task 2：人类可读的当前动作（运行中时） */}
       {task?.status === 'running' && currentDescription && (
-        <div className="px-3 py-1.5 border-b border-border-subtle bg-bg-base/40 text-2xs text-text-secondary flex items-center gap-1.5">
+        <div className="px-3 py-1.5 border-b border-border-subtle bg-bg-surface text-2xs text-text-secondary flex items-center gap-1.5">
           <span className="w-1 h-1 rounded-full bg-accent pulse-dot flex-shrink-0" />
           <span className="truncate">{currentDescription}</span>
         </div>

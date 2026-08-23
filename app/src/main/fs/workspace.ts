@@ -15,7 +15,8 @@ export async function ensureWorkspace(): Promise<void> {
   if (!existsSync(ws)) await mkdir(ws, { recursive: true })
 
   await Promise.all([
-    mkdir(join(ws, 'tasks'), { recursive: true }),
+    // v0.27.1：任务工作目录收纳进 .arkwork/ 隐藏区（与 memory 同域，文件树不展示）
+    mkdir(join(ws, '.arkwork', 'tasks'), { recursive: true }),
     mkdir(join(ws, '.arkwork', 'memory'), { recursive: true }),
     mkdir(join(ws, 'shared', 'templates'), { recursive: true }),
   ])

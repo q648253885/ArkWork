@@ -402,7 +402,7 @@ function MenuItem({
       onClick={onClick}
       className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-xs transition-colors ${
         danger
-          ? 'text-danger hover:bg-danger/10'
+          ? 'text-danger hover:bg-danger-soft'
           : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
       }`}
     >

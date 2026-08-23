@@ -60,6 +60,26 @@ export default {
         'shell-bg': 'var(--shell-bg)',
         'shell-fg': 'var(--shell-fg)',
         'shell-stderr': 'var(--shell-stderr)',
+        // v0.27.1：锁深终端面板语义色——面板底色恒为深色，其上的文字/边框
+        // 必须用本组锁深 token，不能用随主题翻转的 text-*/success/danger 等
+        // （否则浅色主题下出现"深底黑字"不可读，缺陷：终端侧边栏浅色黑字）
+        'shell-muted': 'var(--shell-muted)',
+        'shell-ok': 'var(--shell-ok)',
+        'shell-ok-soft': 'var(--shell-ok-soft)',
+        'shell-run': 'var(--shell-run)',
+        'shell-run-soft': 'var(--shell-run-soft)',
+        'shell-run-border': 'var(--shell-run-border)',
+        'shell-err': 'var(--shell-err)',
+        'shell-err-soft': 'var(--shell-err-soft)',
+        'shell-err-border': 'var(--shell-err-border)',
+        'shell-line': 'var(--shell-line)',
+        // v0.27.1：业务主色工具族——Sidebar 等处自 v0.21.0 起使用了
+        // business-primary(-soft) 类名但从未注册（编译产物中无此类），
+        // 选中态样式整体失效；此处补注册 + business-ring 供 ring 使用
+        'business-primary': 'var(--business-primary)',
+        'business-primary-hover': 'var(--business-primary-hover)',
+        'business-primary-soft': 'var(--business-primary-soft)',
+        'business-ring': 'var(--business-primary-ring)',
       },
       fontFamily: {
         // v0.21.0：移除 Inter / JetBrains Mono 外链依赖，改用系统字体栈（与 globals.css --font-sans 一致）

@@ -23,7 +23,7 @@ export function BugfixResultCard({ result }: { result: BugfixResultSummary }) {
       <div className="flex items-center gap-2.5 px-3.5 py-2.5 border-b border-border-subtle">
         <span
           className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-2xs font-medium ${
-            achieved ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger'
+            achieved ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger'
           }`}
         >
           <StatusIcon width={13} height={13} />

@@ -212,7 +212,7 @@ export function subscribeAll(
             message: event.message,
           })
         } else if (event.type === 'ask_user') {
-          // ask_user 暂停态：记录 Agent 问题全文，供 RunConsole 展示
+          // ask_user 暂停态：记录 Agent 问题全文，供门禁组件展示
           // 事件通常直接携带 question；若运行时缺失，回退到最近 ask_user 步骤提取
           const lastAskStep = [...get().steps]
             .reverse()
@@ -220,16 +220,17 @@ export function subscribeAll(
             | { question?: string }
             | undefined
           set({ askUserQuestion: event.question ?? lastAskStep?.question ?? null })
-          // Task 4：若 Agent 附带了建议选项，渲染为建议卡片（带稳定 id）
-          if (event.suggestions && event.suggestions.length > 0) {
-            const suggestions: Suggestion[] = event.suggestions.map((s, i) => ({
-              id: `ask-${Date.now()}-${i}`,
-              label: s.label,
-              description: s.description,
-              recommended: s.recommended,
-            }))
-            set({ suggestions })
-          }
+          // v0.27.1：建议选项改覆盖式写入——无选项时显式置空。旧逻辑"仅非空才写"
+          // 会把上一轮建议卡片残留到下一轮提问，造成串题（缺陷 D1）
+          const suggestions: Suggestion[] = Array.isArray(event.suggestions)
+            ? event.suggestions.map((s, i) => ({
+                id: `ask-${Date.now()}-${i}`,
+                label: s.label,
+                description: s.description,
+                recommended: s.recommended,
+              }))
+            : []
+          set({ suggestions })
         } else if (event.type === 'reason_end') {
           get().appendLog({
             ts: Date.now(),

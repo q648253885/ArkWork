@@ -280,7 +280,7 @@ export function ProgressPanel() {
 
       {/* 下一步预览（高亮） */}
       {progress.nextStep && (
-        <div className="px-3 py-2 border-b border-border-subtle bg-accent-soft/30 flex-shrink-0">
+        <div className="px-3 py-2 border-b border-border-subtle bg-accent-soft flex-shrink-0">
           <div className="text-2xs text-text-tertiary mb-0.5">下一步</div>
           <div className="flex items-center gap-1.5 text-xs text-text-primary">
             <span className="w-1.5 h-1.5 rounded-full bg-accent pulse-dot flex-shrink-0" />

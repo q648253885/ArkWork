@@ -306,6 +306,8 @@ export interface AppState {
   setSuggestions: (suggestions: Suggestion[]) => void
   /** 清空建议列表 */
   clearSuggestions: () => void
+  /** v0.27.1：ask_user 门禁双清（问题全文 + 建议卡片一次性清空） */
+  clearAskUser: () => void
   selectTask: (id: string) => Promise<void>
   refreshTasks: () => Promise<void>
   createTask: (input: { title: string; text: string }) => Promise<Task | null>

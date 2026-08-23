@@ -311,7 +311,7 @@ export function ContextPanel() {
                           return (
                             <li
                               key={detailKey}
-                              className="flex items-start gap-2 border-b border-border-subtle/60 px-3 py-1.5 last:border-b-0"
+                              className="flex items-start gap-2 border-b border-border-subtle px-3 py-1.5 last:border-b-0"
                             >
                               <span
                                 className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full"

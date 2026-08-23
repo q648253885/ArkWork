@@ -60,11 +60,11 @@ export function BugfixIsland() {
   return (
     <div className="px-3 pt-2 flex-shrink-0">
       <div
-        className={`mx-auto max-w-[620px] rounded-xl border bg-bg-overlay/95 backdrop-blur px-3.5 py-2.5 transition-colors ${
+        className={`mx-auto max-w-[620px] rounded-xl border bg-bg-overlay backdrop-blur px-3.5 py-2.5 transition-colors ${
           terminal
             ? achieved
-              ? 'border-success/40 shadow-panel'
-              : 'border-danger/40 shadow-panel'
+              ? 'border-success shadow-panel'
+              : 'border-danger shadow-panel'
             : 'border-border-subtle shadow-panel'
         }`}
         role="status"
@@ -72,7 +72,7 @@ export function BugfixIsland() {
       >
         {/* 顶行：标题 + 阶段文案 + 轮次 */}
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-accent/15 text-accent flex-shrink-0">
+          <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-accent-soft text-accent flex-shrink-0">
             <Icon.Bolt width={13} height={13} />
           </span>
           <span className="text-xs font-medium text-text-primary">bugfix</span>
@@ -121,7 +121,7 @@ export function BugfixIsland() {
             <span
               key={stage.key}
               className={`text-2xs ${
-                i <= activeIndex || terminal ? 'text-text-secondary' : 'text-text-tertiary/60'
+                i <= activeIndex || terminal ? 'text-text-secondary' : 'text-text-tertiary'
               }`}
             >
               {i === STAGES.length - 1 && terminal

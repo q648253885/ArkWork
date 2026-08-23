@@ -10,8 +10,7 @@
  *   - 写操作（upsert/delete）后失效缓存
  *   - 迁移幂等，重复执行无副作用
  * ============================================================ */
-import { join } from 'node:path'
-import { getWorkspaceDir, JsonCollection, removeTaskDir } from './db.js'
+import { getTasksJsonPath, getWorkspaceDir, JsonCollection, removeTaskDir } from './db.js'
 import type { Task, TaskStatus } from '@shared/types/task'
 import { generateTaskId } from '@shared/types/task'
 import { broadcast } from '../window.js'
@@ -31,7 +30,8 @@ let migratedCacheWorkspace: string | null = null
 function getCollection(): JsonCollection<Task> {
   if (!collection) {
     // 跟随 workspaceDir —— 每个工作区独立 tasks.json，物理隔离避免错乱
-    collection = new JsonCollection<Task>(join(getWorkspaceDir(), 'tasks.json'), [])
+    // v0.27.1：路径改走 getTasksJsonPath()（.arkwork/ 隐藏区）
+    collection = new JsonCollection<Task>(getTasksJsonPath(), [])
   }
   return collection
 }

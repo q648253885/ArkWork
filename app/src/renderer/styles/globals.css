@@ -66,6 +66,8 @@
   --business-primary: #3964FE;
   --business-primary-hover: #5680FE;
   --business-primary-soft: rgba(57, 100, 254, 0.10);
+  /* v0.27.1：焦点光晕（Sidebar 选中 ring 等） */
+  --business-primary-ring: rgba(57, 100, 254, 0.35);
 
   --success: #16A34A;
   --success-soft: rgba(22, 197, 94, 0.10);
@@ -80,6 +82,18 @@
   --shell-bg: #121216;
   --shell-fg: #E2E2E6;
   --shell-stderr: #F87171;
+  /* v0.27.1：锁深面板语义色（两套主题取值一致——终端面板底色恒深，
+     其上的文字/边框不随主题翻转，修复浅色主题"深底黑字"） */
+  --shell-muted: #9DA3AF;
+  --shell-ok: #34D399;
+  --shell-ok-soft: rgba(52, 211, 153, 0.16);
+  --shell-run: #60A5FA;
+  --shell-run-soft: rgba(96, 165, 250, 0.16);
+  --shell-run-border: rgba(96, 165, 250, 0.45);
+  --shell-err: #F87171;
+  --shell-err-soft: rgba(248, 113, 113, 0.16);
+  --shell-err-border: rgba(248, 113, 113, 0.45);
+  --shell-line: rgba(255, 255, 255, 0.05);
 
   /* v0.21.0 阴影（DSH --dsw-shadow-lv1/lv2/lv3） */
   --shadow-sm: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
@@ -219,6 +233,7 @@
   --business-primary: #679EFE;
   --business-primary-hover: #5680FE;
   --business-primary-soft: rgba(103, 158, 254, 0.16);
+  --business-primary-ring: rgba(103, 158, 254, 0.40);
 
   --success: #34D399;
   --success-soft: rgba(52, 211, 153, 0.14);
@@ -233,6 +248,17 @@
   --shell-bg: #0F1115;
   --shell-fg: #D4D4DC;
   --shell-stderr: #F87171;
+  /* v0.27.1：锁深面板语义色（与 :root 同值，终端面板恒深） */
+  --shell-muted: #9DA3AF;
+  --shell-ok: #34D399;
+  --shell-ok-soft: rgba(52, 211, 153, 0.16);
+  --shell-run: #60A5FA;
+  --shell-run-soft: rgba(96, 165, 250, 0.16);
+  --shell-run-border: rgba(96, 165, 250, 0.45);
+  --shell-err: #F87171;
+  --shell-err-soft: rgba(248, 113, 113, 0.16);
+  --shell-err-border: rgba(248, 113, 113, 0.45);
+  --shell-line: rgba(255, 255, 255, 0.05);
 
   /* 深色阴影需要更重才有浮层感（DSH dark shadow 同 form，保持颜色一致） */
   --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.35);

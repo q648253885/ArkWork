@@ -204,9 +204,9 @@ const PERMISSION_OPTIONS: { id: PermissionMode; label: string; desc: string }[] 
 ]
 
 const RULE_GROUPS: { key: 'allow' | 'ask' | 'deny'; label: string; cls: string; dot: string }[] = [
-  { key: 'allow', label: '允许', cls: 'bg-success-soft text-success border-success/30', dot: 'bg-success' },
-  { key: 'ask', label: '询问', cls: 'bg-warning-soft text-warning border-warning/30', dot: 'bg-warning' },
-  { key: 'deny', label: '拒绝', cls: 'bg-danger-soft text-danger border-danger/30', dot: 'bg-danger' },
+  { key: 'allow', label: '允许', cls: 'bg-success-soft text-success border-success', dot: 'bg-success' },
+  { key: 'ask', label: '询问', cls: 'bg-warning-soft text-warning border-warning', dot: 'bg-warning' },
+  { key: 'deny', label: '拒绝', cls: 'bg-danger-soft text-danger border-danger', dot: 'bg-danger' },
 ]
 
 function PermissionSection() {
@@ -287,10 +287,10 @@ function PermissionSection() {
                     <div className="flex items-center gap-1.5 mb-1">
                       <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${g.dot}`} />
                       <span className="text-2xs text-text-tertiary">{g.label}</span>
-                      <span className="text-2xs text-text-tertiary/70">{items.length}</span>
+                      <span className="text-2xs text-text-tertiary">{items.length}</span>
                     </div>
                     {items.length === 0 ? (
-                      <div className="text-2xs text-text-tertiary/60 pl-3">无</div>
+                      <div className="text-2xs text-text-tertiary pl-3">无</div>
                     ) : (
                       <div className="flex flex-wrap gap-1.5">
                         {items.map((r, i) => (
@@ -461,7 +461,7 @@ function WorkspaceSection() {
             <div
               key={ws.id}
               className={`rounded-md border p-3 transition-colors ${
-                active ? 'border-accent bg-accent-soft/40' : 'border-border-subtle bg-bg-overlay'
+                active ? 'border-accent bg-accent-soft' : 'border-border-subtle bg-bg-overlay'
               }`}
             >
               <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
@@ -691,7 +691,7 @@ function ModelsSection({ models }: { models: LlmModel[] }) {
             {testResult[m.id] && (
               <div
                 className={`mt-2 px-2 py-1.5 rounded text-xs ${
-                  testResult[m.id].ok ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
+                  testResult[m.id].ok ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger'
                 }`}
               >
                 {testResult[m.id].ok ? '✓ ' : '✗ '}

@@ -12,11 +12,13 @@ import { formatTime } from '../../types'
 import { SectionLabel, EmptyState } from '../ui'
 import type { LogEntry } from '@shared/types/ipc'
 
+// v0.27.1：级别色改用主题 token 硬编码值移除——硬编码色在深浅皮肤下对比度不可控，
+// 且与 danger/warning 等 token 脱钩（走查项：日志过滤 chip 颜色）
 const LEVEL_COLOR: Record<string, string> = {
-  DEBUG: '#666B75',
-  INFO: '#A6ABB5',
-  WARN: '#FBBF24',
-  ERROR: '#F87171',
+  DEBUG: 'var(--text-tertiary)',
+  INFO: 'var(--text-secondary)',
+  WARN: 'var(--warning)',
+  ERROR: 'var(--danger)',
 }
 
 /** Task 8：状态徽章 — 成功(INFO)=绿 / 警告(WARN)=黄 / 失败(ERROR)=红 / 调试(DEBUG)=灰 */
@@ -344,7 +346,7 @@ export function LogsView() {
       )}
 
       {/* 底部统计 */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-t border-border-subtle bg-bg-surface/50">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-t border-border-subtle bg-bg-surface">
         <SectionLabel>{filtered.length} entries</SectionLabel>
         {levelFilter.size > 0 && (
           <button

@@ -137,7 +137,7 @@ export function OnboardingLayer() {
           >
             <div className="flex-shrink-0 mt-0.5">
               {step.done ? (
-                <span className="w-5 h-5 rounded-full bg-success/15 text-success flex items-center justify-center">
+                <span className="w-5 h-5 rounded-full bg-success-soft text-success flex items-center justify-center">
                   <Icon.Check width={16} height={16} />
                 </span>
               ) : (

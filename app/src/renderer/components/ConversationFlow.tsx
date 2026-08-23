@@ -48,6 +48,7 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
     const ctxChips = useStore((s) => s.ctxChips)
     // Task 4：建议卡片数据（ask_user / task_complete 时由 store 写入）
     const suggestions = useStore((s) => s.suggestions)
+    const askUserQuestion = useStore((s) => s.askUserQuestion)
     // v0.27.0 R1：当前任务的 Reason 流式预览文本（渲染加速通道；权威内容以 task:step 为准）
     const streamText = useStore((s) => {
       const tid = s.selectedTaskId
@@ -301,7 +302,7 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
                           style={{ background: s.status === 'running' ? 'var(--business-primary)' : s.status === 'failed' ? 'var(--danger)' : 'var(--success)' }}
                         />
                         <span>{verb.slice(0, 24)}</span>
-                        {i === 0 && <span className="text-text-tertiary/60">·</span>}
+                        {i === 0 && <span className="text-text-tertiary">·</span>}
                       </span>
                     )
                   }
@@ -311,9 +312,12 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
             </div>
           )}
 
-          {/* Task 4：建议卡片 — ask_user 暂停态 / task_complete 完成态时渲染。
-              运行中不显示（避免干扰）；用户点击建议 → 填入 Composer 输入框 */}
-          {!isRunning && suggestions.length > 0 && (
+          {/* Task 4：建议卡片 — task_complete 完成态时渲染。
+              v0.27.1：ask_user 暂停态不再在此渲染——此处的 SuggestionCards 无
+              onSelect，点击只派发死通道 composer:fill（Composer 已被 RunConsole/
+              AskUserGate 替换，填不进任何输入框），且与门禁交互冲突。由 Composer
+              的 AskUserGate 独占展示；此处仅在无提问残留时兜底显示完成态建议 */}
+          {!isRunning && !askUserQuestion && suggestions.length > 0 && (
             <SuggestionCards suggestions={suggestions} />
           )}
 

@@ -51,7 +51,7 @@ export function SuggestionCards({ suggestions, onSelect }: SuggestionCardsProps)
                 onClick={() => handleSelect(s)}
                 className={`group inline-flex items-center gap-1.5 px-2.5 h-8 rounded-lg border text-xs transition-all focus-ring ${
                   recommended
-                    ? 'bg-accent-soft border-accent/50 text-accent hover:border-accent hover:shadow-accent'
+                    ? 'bg-accent-soft border-accent text-accent hover:border-accent hover:shadow-accent'
                     : 'bg-bg-surface border-border-subtle text-text-secondary hover:border-border-default hover:text-text-primary hover:bg-bg-hover'
                 }`}
               >

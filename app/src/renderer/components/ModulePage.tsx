@@ -94,7 +94,7 @@ function ModuleHeader({
         <button
           onClick={onClose}
           aria-label={`关闭${title}页面，返回任务（Esc）`}
-          className="module-close-button inline-flex items-center justify-center w-11 h-11 flex-shrink-0 rounded-xl border border-accent/40 text-accent bg-accent-soft hover:bg-accent hover:border-accent hover:text-text-inverse hover:shadow-md transition-colors focus-ring"
+          className="module-close-button inline-flex items-center justify-center w-11 h-11 flex-shrink-0 rounded-xl border border-accent text-accent bg-accent-soft hover:bg-accent hover:border-accent hover:text-text-inverse hover:shadow-md transition-colors focus-ring"
         >
           <Icon.X width={18} height={18} aria-hidden="true" />
         </button>

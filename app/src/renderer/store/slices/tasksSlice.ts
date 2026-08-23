@@ -61,6 +61,7 @@ export const tasksSlice: StateCreator<
     | 'suggestions'
     | 'setSuggestions'
     | 'clearSuggestions'
+    | 'clearAskUser'
     | 'selectTask'
     | 'refreshTasks'
     | 'createTask'
@@ -174,6 +175,9 @@ export const tasksSlice: StateCreator<
   suggestions: [],
   setSuggestions: (suggestions) => setAll({ suggestions }),
   clearSuggestions: () => setAll({ suggestions: [] }),
+  // v0.27.1：ask_user 门禁双清——问题全文与建议卡片必须同时清空，
+  // 避免只清其一导致下一轮提问残留上一轮状态（缺陷 D1）
+  clearAskUser: () => setAll({ askUserQuestion: null, suggestions: [] }),
   selectTask: async (id) => {
     // Task 4：任务切换时清空建议卡片 + ask_user 暂停态
     setAll({ selectedTaskId: id, askUserQuestion: null, contextSize: null, suggestions: [], cacheUsage: null })
@@ -276,8 +280,8 @@ export const tasksSlice: StateCreator<
   },
   sendMessage: async (text) => {
     try {
-      // Task 4：发送新消息时清空建议卡片（用户已做出决策/输入）
-      setAll({ suggestions: [] })
+      // v0.27.1：发送新消息时双清 ask_user 状态（用户已做出决策/输入）
+      setAll({ askUserQuestion: null, suggestions: [] })
       const taskId = get().selectedTaskId
       const modelId = get().selectedModelId
       if (!modelId) {
@@ -357,6 +361,8 @@ export const tasksSlice: StateCreator<
   pauseTask: async (id) => {
     try {
       await ark.task.pause(id)
+      // v0.27.1：暂停成功后防御性双清（手动暂停不应残留任何 ask 状态）
+      setAll({ askUserQuestion: null, suggestions: [] })
     } catch (err) {
       get().pushToast({ type: 'danger', message: friendlyError(err), duration: 0 })
     }
@@ -376,8 +382,8 @@ export const tasksSlice: StateCreator<
   resumeTask: async (id) => {
     try {
       await ark.task.resume(id)
-      // 恢复成功后清空 ask_user 暂停态的问题卡片
-      setAll({ askUserQuestion: null })
+      // v0.27.1：恢复成功后双清问题卡片与建议卡片（原仅清问题、漏清建议 → 缺陷 D1）
+      setAll({ askUserQuestion: null, suggestions: [] })
     } catch (err) {
       get().pushToast({ type: 'danger', message: friendlyError(err), duration: 0 })
     }

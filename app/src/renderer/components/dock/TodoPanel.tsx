@@ -350,7 +350,7 @@ export function TodoPanel() {
                         </Tooltip>
                       )}
                       {isOptimisticFlight && (
-                        <span className="px-1 py-px rounded text-2xs leading-none bg-accent/20 text-accent tabular">
+                        <span className="px-1 py-px rounded text-2xs leading-none bg-accent-soft text-accent tabular">
                           ◐ 已提交
                         </span>
                       )}

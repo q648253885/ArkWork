@@ -72,7 +72,7 @@ export function BrowserPanel() {
           切走 Inspector 不卸载 → 原页面/agent CDP 句柄保留 */}
       <div ref={placeholderRef} className="flex-1 min-h-0 relative bg-white dark:bg-[#16181d]">
         {active?.host === 'window' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-bg-base/85 text-text-secondary gap-2">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-bg-base text-text-secondary gap-2">
             <Icon.ExternalLink width={28} height={28} className="text-accent" />
             <div className="text-xs">浏览器已在独立浮窗打开</div>
             <div className="text-2xs text-text-tertiary">关闭浮窗可自动回到此处；或在浮窗中点「收回侧栏」</div>

@@ -175,7 +175,7 @@ export function KbPanel() {
         </Tooltip>
         <button
           onClick={handleImport}
-          className="ml-auto flex items-center gap-1 px-2 py-0.5 text-xs text-accent hover:bg-accent/10 rounded transition-colors"
+          className="ml-auto flex items-center gap-1 px-2 py-0.5 text-xs text-accent hover:bg-accent-soft rounded transition-colors"
         >
           <Icon.Plus width={16} height={16} />
           导入文件

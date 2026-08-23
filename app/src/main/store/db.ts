@@ -5,7 +5,7 @@
  * ============================================================ */
 import { app } from 'electron'
 import { mkdir, readFile, writeFile, rm, copyFile, unlink, rename } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
@@ -32,9 +32,19 @@ export function setWorkspaceDir(path: string): void {
   workspaceDir = path
 }
 
-/** 任务工作目录：{workspaceDir}/tasks/{taskId}/ */
+/**
+ * 任务工作目录：{workspaceDir}/.arkwork/tasks/{taskId}/
+ * v0.27.1：迁入隐藏区——任务数据不再以明面 tasks/ 目录暴露在工作区根下，
+ * 统一收纳进 .arkwork/（与 memory/kb/checkpoints 同域），文件树 IPC 对
+ * .arkwork 整体忽略，对用户不可见。
+ */
 export function getTaskDir(taskId: string): string {
-  return join(getWorkspaceDir(), 'tasks', taskId)
+  return join(getWorkspaceDir(), '.arkwork', 'tasks', taskId)
+}
+
+/** 任务索引文件：{workspaceDir}/.arkwork/tasks.json（v0.27.1 起隐藏化） */
+export function getTasksJsonPath(): string {
+  return join(getWorkspaceDir(), '.arkwork', 'tasks.json')
 }
 
 /** 任务 L1 记忆目录：{workspaceDir}/.arkwork/memory/{taskId}/ */
@@ -205,11 +215,13 @@ export async function initStore(): Promise<void> {
   await ensureDir(getArkworkDir())
   await ensureDir(join(getArkworkDir(), 'config'))
   await ensureDir(getWorkspaceDir())
-  await ensureDir(join(getWorkspaceDir(), 'tasks'))
+  await ensureDir(join(getWorkspaceDir(), '.arkwork', 'tasks'))
   await ensureDir(join(getWorkspaceDir(), '.arkwork', 'memory'))
   await ensureDir(join(getWorkspaceDir(), 'shared'))
   // v0.4.0-rev2 迁移：把旧全局 tasks.json 搬到 default 工作区目录
   await migrateLegacyTasksJson()
+  // v0.27.1 迁移：把明面的 tasks.json / tasks/ 收进隐藏区 .arkwork/
+  await migrateTaskDataIntoHidden()
 }
 
 /**
@@ -230,6 +242,65 @@ async function migrateLegacyTasksJson(): Promise<void> {
     console.log('[store] migrated legacy tasks.json to default workspace')
   } catch (err) {
     console.error('[store] migrate tasks.json failed:', err)
+  }
+}
+
+/**
+ * v0.27.1 迁移：任务数据隐藏化——把工作区根下明面的 tasks.json 与 tasks/
+ * 目录搬进 .arkwork/ 隐藏区。幂等：目标已存在时以隐藏区版本为准并丢弃旧文件；
+ * 单项失败仅记录告警，不阻断启动（下次启动重试剩余项）。
+ */
+async function migrateTaskDataIntoHidden(): Promise<void> {
+  const legacyJson = join(getWorkspaceDir(), 'tasks.json')
+  const targetJson = getTasksJsonPath()
+  // 1) tasks.json：优先搬移；两份并存时隐藏区为准，删除旧文件
+  if (existsSync(legacyJson)) {
+    try {
+      if (!existsSync(targetJson)) {
+        await mkdir(dirname(targetJson), { recursive: true })
+        await rename(legacyJson, targetJson)
+        console.log('[store] moved tasks.json into .arkwork/')
+      } else {
+        await unlink(legacyJson)
+        console.log('[store] legacy visible tasks.json dropped (hidden copy exists)')
+      }
+    } catch (err) {
+      console.warn('[store] migrate visible tasks.json failed:', err)
+    }
+  }
+  // 2) tasks/{id}/ 子目录逐个搬入 .arkwork/tasks/
+  const legacyDir = join(getWorkspaceDir(), 'tasks')
+  if (!existsSync(legacyDir)) return
+  let children: string[] = []
+  try {
+    children = readdirSync(legacyDir)
+  } catch (err) {
+    console.warn('[store] read legacy tasks dir failed:', err)
+    return
+  }
+  for (const child of children) {
+    const from = join(legacyDir, child)
+    const to = getTaskDir(child)
+    try {
+      if (!existsSync(to)) {
+        await mkdir(dirname(to), { recursive: true })
+        await rename(from, to)
+      } else {
+        // 同名冲突：隐藏区已有该任务目录（更新版本语义），丢弃旧目录
+        await rm(from, { recursive: true, force: true })
+      }
+    } catch (err) {
+      console.warn(`[store] migrate task dir ${child} failed:`, err)
+    }
+  }
+  // 3) 清空后移除遗留的明面 tasks/ 目录
+  try {
+    if (existsSync(legacyDir) && readdirSync(legacyDir).length === 0) {
+      await rm(legacyDir, { recursive: true, force: true })
+      console.log('[store] removed empty visible tasks/ dir (moved into .arkwork/)')
+    }
+  } catch (err) {
+    console.warn('[store] cleanup visible tasks dir failed:', err)
   }
 }
 

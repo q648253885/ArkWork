@@ -97,10 +97,10 @@ export function TerminalPanel() {
                   data-state={e.status}
                   className={`rounded-md border transition-colors overflow-hidden ${
                     e.status === 'failed'
-                      ? 'border-danger/40'
+                      ? 'border-shell-err-border'
                       : e.status === 'running'
-                        ? 'border-accent/40'
-                        : 'border-border-subtle'
+                        ? 'border-shell-run-border'
+                        : 'border-shell-line'
                   }`}
                 >
                   <button
@@ -112,10 +112,10 @@ export function TerminalPanel() {
                     <span
                       className={`flex-shrink-0 text-2xs font-mono w-7 text-center rounded px-0.5 py-px ${
                         e.status === 'success'
-                          ? 'bg-success/15 text-success'
+                          ? 'bg-shell-ok-soft text-shell-ok'
                           : e.status === 'failed'
-                            ? 'bg-danger/15 text-danger'
-                            : 'bg-accent/15 text-accent'
+                            ? 'bg-shell-err-soft text-shell-err'
+                            : 'bg-shell-run-soft text-shell-run'
                       }`}
                     >
                       {e.status === 'success' ? '0' : e.status === 'failed' ? '✕' : '···'}
@@ -123,24 +123,24 @@ export function TerminalPanel() {
                     <span className="flex-1 min-w-0 truncate font-mono text-xs text-shell-fg">
                       $ {e.command}
                     </span>
-                    <span className="flex-shrink-0 text-2xs text-text-tertiary tabular">
+                    <span className="flex-shrink-0 text-2xs text-shell-muted tabular">
                       {e.durationMs > 0 ? `${(e.durationMs / 1000).toFixed(1)}s` : ''}
                     </span>
                     {expanded ? (
-                      <Icon.ChevronDown width={16} height={16} className="text-text-tertiary flex-shrink-0" />
+                      <Icon.ChevronDown width={16} height={16} className="text-shell-muted flex-shrink-0" />
                     ) : (
-                      <Icon.ChevronRight width={16} height={16} className="text-text-tertiary flex-shrink-0" />
+                      <Icon.ChevronRight width={16} height={16} className="text-shell-muted flex-shrink-0" />
                     )}
                   </button>
 
                   {expanded && (
                     <div className="px-2.5 pb-2 pt-0.5 space-y-1 bg-shell-bg">
                       {e.cwd && (
-                        <div className="text-2xs text-text-tertiary font-mono truncate" title={e.cwd}>
+                        <div className="text-2xs text-shell-muted font-mono truncate" title={e.cwd}>
                           目录：{e.cwd}
                         </div>
                       )}
-                      <pre className="text-xs text-shell-fg whitespace-pre-wrap break-all font-mono bg-bg-base/40 rounded px-2 py-1.5 max-h-48 overflow-y-auto">
+                      <pre className="text-xs text-shell-fg whitespace-pre-wrap break-all font-mono bg-shell-line rounded px-2 py-1.5 max-h-48 overflow-y-auto">
                         {e.summary || '(无输出摘要)'}
                       </pre>
                       {e.error && <div className="text-2xs text-shell-stderr">{e.error}</div>}

@@ -3,7 +3,8 @@
  * polish2-workspace-name-task-title-skills-warning §Task 3：两区组织
  *   - 「已有技能」：内置 / 市场导入 / 本地导入 三组子标区分
  *   - 「市场」：浏览 / 安装入口
- * 单一列表内部按 source 分组小标题，已安装市场技能不与市场页重复。
+ * 单一列表内部按 source 分组小标题。
+ * v0.27.1：市场 Tab 仅渲染可安装条目（installed 标记或与本地重名的一律过滤）。
  * v0.15.0：市场区升级为四标签页（发现 / 已安装 / 收藏 / 设置）+ 详情弹窗
  * ============================================================ */
 import { useState, useEffect, useMemo, useRef } from 'react'
@@ -12,6 +13,7 @@ import { useStore } from '../../store'
 import { Tooltip, EmptyState } from '../ui'
 import type { Skill } from '../../types'
 import type { MarketplaceSource } from '@shared/types/ipc'
+import { filterInstallableMarketItems } from '../../utils/market-filter'
 
 /** polish2 §Task 3.1：两区(已有技能 / 市场) */
 type SkillGroup = 'installed' | 'market'
@@ -90,9 +92,16 @@ export function SkillsPanel() {
     return acc
   }, [skills])
 
+  // v0.27.1：市场 Tab 计数只统计可安装条目（过滤 installed 标记 + 本地重名）
+  const localSkillNames = useMemo(() => new Set(skills.map((s) => s.name)), [skills])
+  const marketInstallable = useMemo(
+    () => filterInstallableMarketItems(marketSkills, localSkillNames),
+    [marketSkills, localSkillNames],
+  )
+
   const counts: Record<SkillGroup, number> = {
     installed: skills.length,
-    market: marketSkills.length,
+    market: marketInstallable.length,
   }
 
   const filterMatch = (s: Skill) =>
@@ -296,6 +305,12 @@ function DiscoverTab() {
   // 已安装技能名集合（叠加服务端 installed 标记）
   const installedNames = useMemo(() => new Set(skills.map((s) => s.name)), [skills])
 
+  // v0.27.1：市场 Tab 仅渲染可安装条目——服务端 installed 标记或与本地重名的一律隐藏
+  const installableItems = useMemo(
+    () => filterInstallableMarketItems(marketSkills, installedNames),
+    [marketSkills, installedNames],
+  )
+
   const totalPages = marketTotal > 0 ? Math.max(1, Math.ceil(marketTotal / marketPageSize)) : 1
   const canPrev = marketPage > 1
   const canNext = marketHasMore || marketPage < totalPages
@@ -347,13 +362,22 @@ function DiscoverTab() {
             title="暂无结果"
             hint={query.trim() ? `没有技能匹配「${query.trim()}」` : '市场暂无可用技能'}
           />
+        ) : installableItems.length === 0 ? (
+          <EmptyState
+            icon={<Icon.Check width={22} height={22} />}
+            title="没有可安装的新技能"
+            hint={
+              query.trim()
+                ? `「${query.trim()}」的结果均已在本地安装`
+                : '当前列表中的技能都已安装，试试换个关键词'
+            }
+          />
         ) : (
           <div className="space-y-2">
             {marketLoading && (
               <div className="text-center text-2xs text-text-tertiary py-1">加载中…</div>
             )}
-            {marketSkills.map((item) => {
-              const isInstalled = item.installed || installedNames.has(item.name)
+            {installableItems.map((item) => {
               return (
                 <div
                   key={item.id}
@@ -366,11 +390,6 @@ function DiscoverTab() {
                       <span className="text-sm text-text-primary truncate">
                         {item.metadata?.displayName || item.name}
                       </span>
-                      {isInstalled && (
-                        <span className="text-2xs px-1.5 py-0.5 rounded bg-success-soft text-success flex-shrink-0">
-                          已安装
-                        </span>
-                      )}
                     </div>
                     <div className="text-xs text-text-tertiary truncate">
                       {item.description || '（无描述）'}
@@ -382,25 +401,18 @@ function DiscoverTab() {
                       </div>
                     )}
                   </div>
-                  {isInstalled ? (
-                    <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-xs text-text-tertiary bg-bg-hover flex-shrink-0">
-                      <Icon.Check width={14} height={14} />
-                      已安装
-                    </span>
-                  ) : (
-                    <button
-                      data-testid="skills-market-install-btn"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        void handleInstall(item.id)
-                      }}
-                      disabled={!!installing[item.id]}
-                      className="flex items-center gap-1 h-7 px-2.5 rounded-md text-xs font-medium text-text-inverse bg-accent hover:bg-accent-hover disabled:opacity-60 transition-colors flex-shrink-0"
-                    >
-                      <Icon.Download width={14} height={14} />
-                      {installing[item.id] ? '安装中…' : '安装'}
-                    </button>
-                  )}
+                  <button
+                    data-testid="skills-market-install-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void handleInstall(item.id)
+                    }}
+                    disabled={!!installing[item.id]}
+                    className="flex items-center gap-1 h-7 px-2.5 rounded-md text-xs font-medium text-text-inverse bg-accent hover:bg-accent-hover disabled:opacity-60 transition-colors flex-shrink-0"
+                  >
+                    <Icon.Download width={14} height={14} />
+                    {installing[item.id] ? '安装中…' : '安装'}
+                  </button>
                 </div>
               )
             })}
@@ -884,7 +896,7 @@ function MarketDetailModal() {
         </div>
 
         {/* 底部操作 */}
-        <div className="flex items-center gap-2 px-5 py-3.5 border-t border-border-subtle bg-bg-surface/50 flex-shrink-0">
+        <div className="flex items-center gap-2 px-5 py-3.5 border-t border-border-subtle bg-bg-surface flex-shrink-0">
           {detail.installed ? (
             <button
               onClick={() => void handleUninstall()}

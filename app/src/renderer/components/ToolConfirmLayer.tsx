@@ -108,9 +108,9 @@ export function ToolConfirmLayer() {
             <div className="rounded-lg bg-bg-base border border-border-subtle overflow-hidden">
               <div className="flex items-center gap-1.5 px-3 h-7 border-b border-border-subtle">
                 <span className="flex gap-1">
-                  <span className="w-2 h-2 rounded-full bg-danger/60" />
-                  <span className="w-2 h-2 rounded-full bg-warning/60" />
-                  <span className="w-2 h-2 rounded-full bg-success/60" />
+                  <span className="w-2 h-2 rounded-full bg-danger" />
+                  <span className="w-2 h-2 rounded-full bg-warning" />
+                  <span className="w-2 h-2 rounded-full bg-success" />
                 </span>
                 <span className="text-2xs text-text-tertiary ml-1">shell</span>
                 <button
@@ -143,8 +143,8 @@ export function ToolConfirmLayer() {
                 key={i}
                 className={`flex items-start gap-2 px-2.5 py-1.5 rounded-md text-xs leading-relaxed ${
                   req.risk === 'high'
-                    ? 'bg-danger-soft/50 text-danger'
-                    : 'bg-warning-soft/40 text-warning'
+                    ? 'bg-danger-soft text-danger'
+                    : 'bg-warning-soft text-warning'
                 }`}
               >
                 <span className="mt-0.5 flex-shrink-0">
@@ -162,7 +162,7 @@ export function ToolConfirmLayer() {
         </div>
 
         {/* 底部：会话记忆 + 总是允许 + 操作 */}
-        <div className="flex items-center gap-3 px-5 py-3.5 border-t border-border-subtle bg-bg-surface/50">
+        <div className="flex items-center gap-3 px-5 py-3.5 border-t border-border-subtle bg-bg-surface">
           {isShell && (
             <div className="flex items-center gap-3">
               {req.command && (

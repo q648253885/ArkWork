@@ -164,7 +164,7 @@ export function ModelSwitcher({
   }
 
   // ============ chip 外观（health 警示态） ============
-  let chipCls = 'bg-accent-soft/80 hover:bg-accent-soft border-accent text-text-primary'
+  let chipCls = 'bg-accent-soft hover:bg-accent-soft border-accent text-text-primary'
   let chipLabel = model ? model.name || model.id : '选择模型'
   let chipTitle = model ? `${model.name || model.id} · ${model.kind}` : '选择模型'
   // v0.11.0 F1101：L3 能力卡（模型名称 + 上下文 + 能力角标）
@@ -177,7 +177,7 @@ export function ModelSwitcher({
   }
 
   if (health === 'unconfigured') {
-    chipCls = 'border-accent text-accent bg-accent-soft/60 animate-pulse'
+    chipCls = 'border-accent text-accent bg-accent-soft animate-pulse'
     chipLabel = '未配置模型'
     chipTitle = '未配置任何模型，点击前往设置'
   } else if (health === 'missing') {
@@ -185,7 +185,7 @@ export function ModelSwitcher({
     chipLabel = '模型已删除'
     chipTitle = '当前模型已从配置删除，请重新选择'
   } else if (health === 'disabled') {
-    chipCls = 'border-warning/50 text-warning bg-warning/10'
+    chipCls = 'border-warning text-warning bg-warning-soft'
     chipLabel = `${model?.name || model?.id || '模型'}`
     chipTitle = '当前模型已被禁用，点击重新选择'
   }

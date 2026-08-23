@@ -390,7 +390,7 @@ function ThreadRow({
               否则回退任务级状态（保持旧行为） */}
           <span
             aria-hidden="true"
-            className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${selected ? 'ring-2 ring-business-primary/30' : ''}`}
+            className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${selected ? 'ring-2 ring-business-ring' : ''}`}
             style={{ background: statusColor }}
           />
           {task.automationId ? (

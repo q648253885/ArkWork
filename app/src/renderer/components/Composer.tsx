@@ -27,8 +27,17 @@ import { useStore, friendlyError, computeModelHealth } from '../store'
 // import { simplifyFirstLine } from '../utils/title'
 import type { PermissionMode } from '@shared/types/permission'
 import { isImeComposing } from '@shared/utils/ime'
+// v0.27.1：记忆语义标题派生 + 引用标记展开（仅渲染层与新消息尾部使用，缓存红线合规）
+import {
+  deriveMemoryTitle,
+  expandMemoryQuotes,
+  stripMemoryTriggerParens,
+  firstMeaningfulLine,
+} from '@shared/utils/memory-title'
 import { Tooltip } from './ui'
 import { RunConsole } from './RunConsole'
+// v0.27.1：ask_user 门禁组件（暂停且有提问时独占输入槽位，替代 RunConsole）
+import { AskUserGate } from './AskUserGate'
 import { ModelSwitcher } from './ModelSwitcher'
 import { AgentChip } from './AgentChip'
 import type { FsNode } from '../types'
@@ -51,13 +60,13 @@ const PERMISSION_META: Record<
   acceptEdits: {
     label: '接受编辑',
     desc: '工作区内自动放行',
-    cls: 'bg-accent-soft text-accent border-accent/40 hover:opacity-90',
+    cls: 'bg-accent-soft text-accent border-accent hover:opacity-90',
     icon: <Icon.Edit width={12} height={12} />,
   },
   plan: {
     label: '只读权限',
     desc: '只读探索，写操作拒绝',
-    cls: 'bg-warning-soft text-warning border-warning/40 hover:opacity-90',
+    cls: 'bg-warning-soft text-warning border-warning hover:opacity-90',
     icon: <Icon.Eye width={12} height={12} />,
   },
 }
@@ -105,6 +114,9 @@ export function Composer() {
   const isRunning = task?.status === 'running'
   const isPaused = task?.status === 'paused'
   const isFailed = task?.status === 'failed'
+  // v0.27.1：ask_user 门禁态——暂停且携带 Agent 提问时由 AskUserGate 接管输入槽位
+  const askUserQuestion = useStore((s) => s.askUserQuestion)
+  const askSuggestions = useStore((s) => s.suggestions)
   // v0.27.0 R1：生成中判定扩展——存在活跃 streamBuffer（流式增量在途，含 status
   // 尚未翻转的间隙 / chat 作用域）同样视为生成中，停止按钮与 Esc 保持可用
   const hasLiveStream = useStore((s) => {
@@ -226,23 +238,22 @@ export function Composer() {
 
     // v0.7.0：Memory 段 — 已启用且未归档的 L1/L3 记忆条目
     // v0.8.1：过滤对话噪音（用户/模型对话），只保留资源条目（文件/技能/知识库等）
-    // v0.24.x：记忆条目显示「可读摘要 + 触发内容 + token」三行：
-    //   - 摘要：去掉 "(触发点：...) / 总项数=..." 这类内部状态格式噪音，仅取首行可读描述
-    //   - 触发内容：若 memory.kind === 'plan_status'，提取"当前运行第 N 项"作为触发描述
-    //   - token：保留量纲提示
+    // v0.27.1：条目标题改用 deriveMemoryTitle 按 kind 派生语义标题（确定性纯函数）：
+    //   plan→「计划清单 · N 项」；plan_status→「清单状态 · 触发描述」；
+    //   skill_instruction→「技能指令 · 技能名」；kb_hit→「知识库命中 · 库名 #seq」。
+    //   hint 首行改为去噪预览 + 层级 + token 量纲。仅渲染层展示，不改任何注入字节。
     const memoryItems = memory
       .filter((m) => m.enabled && !m.archivedAt && (m.layer === 'L1' || m.layer === 'L3'))
       .filter((m) => !CONTEXT_NOISE_KINDS.has(m.kind))
       .filter((m) => !q || (m.content || '').toLowerCase().includes(q))
       .slice(0, 15)
       .map((m) => {
-        const cleaned = cleanMemoryContent(m.content || '(空记忆)')
-        const trigger = extractMemoryTrigger(m)
+        const preview = firstMeaningfulLine(stripMemoryTriggerParens(m.content || ''), 32)
         return {
           kind: 'memory' as const,
           id: m.id,
-          label: cleaned.summary || '(空记忆)',
-          hint: trigger ? `${trigger} · ${m.layer} · ${m.tokens} tokens` : `${m.layer} · ${m.tokens} tokens`,
+          label: deriveMemoryTitle({ kind: m.kind, content: m.content || '', meta: m.meta }),
+          hint: `${preview || '(空记忆)'} · ${m.layer} · ${m.tokens} tokens`,
           color: '#9B6BFF',
           section: '记忆',
           active: false,
@@ -445,9 +456,27 @@ export function Composer() {
     const text = input.trim()
     if (!text || isGenerating) return
     lastInputRef.current = text
+    // v0.27.1：把 [memory:<id>] 伪引用标记展开为可读引用块（语义标题 + 原文），
+    // 使被引记忆真正进入本轮消息。展开只发生在用户新消息尾部——既有轮次与
+    // system prompt 的字节不变，缓存前缀稳定（v0.27.1 缓存红线合规）。
+    const memoryIndex = new Map(useStore.getState().memory.map((m) => [m.id, m]))
+    let expandedCount = 0
+    const expanded = expandMemoryQuotes(text, (id) => {
+      const m = memoryIndex.get(id)
+      if (!m) return undefined
+      expandedCount += 1
+      return { kind: m.kind, content: m.content || '', meta: m.meta ?? null }
+    })
+    if (expandedCount > 0) {
+      pushToast({
+        type: 'success',
+        message: `已注入 ${expandedCount} 条引用记忆原文`,
+        duration: 2000,
+      })
+    }
     // 把 file chips 以 [file: path] 附加到消息末尾（占位，真实路径作为上下文）
     const fileRefs = fileChips.map((c) => `@file:${c.path}`).join(' ')
-    const fullText = fileRefs ? `${text}\n\n附件: ${fileRefs}` : text
+    const fullText = fileRefs ? `${expanded}\n\n附件: ${fileRefs}` : expanded
     // v0.24.x：标题生成已迁移到 store.sendMessage（发送成功后基于首行生成）。
     // Composer 不再持有 timer / sentinel 状态；旧的清理分支直接移除。
     await sendMessage(fullText)
@@ -594,6 +623,23 @@ export function Composer() {
 
   const handleRetry = () => {
     if (selectedTaskId) void runTask(selectedTaskId)
+  }
+
+  // v0.27.1：ask_user 门禁——暂停且携带提问时，AskUserGate 整体替代 RunConsole
+  // 成为唯一交互面（选项点选 / 数字快选 / 自由输入三合一），答案经
+  // handleAppendAndResume 走 appendMessage 通道续跑；普通输入框此时不可见，
+  // 两者互斥不冲突（修复 B1 死 composer:fill 冲突本体 + C1 继续按钮绕过门禁）
+  if (task && isPaused && askUserQuestion) {
+    return (
+      <AskUserGate
+        question={askUserQuestion}
+        suggestions={askSuggestions}
+        onAnswer={(text) => {
+          void handleAppendAndResume(text)
+        }}
+        onStop={() => selectedTaskId && void cancelTask(selectedTaskId)}
+      />
+    )
   }
 
   // v0.8.0：中断/停止（cancelled）后恢复为普通输入框，用户可直接继续输入；
