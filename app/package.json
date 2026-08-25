@@ -3,7 +3,10 @@
   "version": "0.28.0",
   "description": "Local-first AI Agent workbench — ReAct loop visible, controllable, reusable.",
   "main": "out/main/index.js",
-  "author": "ArkWork",
+  "author": {
+    "name": "ArkWork",
+    "email": "4351590+q648253885@users.noreply.github.com"
+  },
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -180,7 +183,8 @@
       "category": "Utility"
     },
     "publish": {
-      "provider": "github"
+      "provider": "github",
+      "releaseType": "release"
     },
     "generateUpdatesFilesForAllChannels": false
   },
