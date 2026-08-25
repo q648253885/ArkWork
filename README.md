@@ -4,7 +4,7 @@
 
 > A local-first AI Agent workbench — making the ReAct reasoning loop **visible, controllable, and reusable**.
 
-![License](https://img.shields.io/badge/license-MIT-green) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen)
+![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen)
 
 ## Why ArkWork
 
@@ -121,4 +121,4 @@ npm run typecheck   # tsc for node & web configs
 
 ## License
 
-[MIT](./LICENSE)
+[Apache License 2.0](./LICENSE)

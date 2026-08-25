@@ -4,7 +4,7 @@
   "description": "Local-first AI Agent workbench — ReAct loop visible, controllable, reusable.",
   "main": "out/main/index.js",
   "author": "ArkWork",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
@@ -27,7 +27,8 @@
     "test:f3-forge": "tsx --experimental-loader ./src/test/electron-mock-loader.mjs --test src/main/memory/__tests__/skill-forge.test.ts",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:dir": "electron-vite build && electron-builder --mac --dir",
-    "build:win": "electron-vite build && electron-builder --win"
+    "build:win": "electron-vite build && electron-builder --win",
+    "build:linux": "electron-vite build && electron-builder --linux"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",
@@ -155,7 +156,28 @@
       "createStartMenuShortcut": true,
       "shortcutName": "ArkWork"
     },
-    "publish": null,
+    "linux": {
+      "icon": "build-resources/icon.png",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "ArkWork-${version}-${arch}.${ext}",
+      "category": "Utility"
+    },
+    "publish": {
+      "provider": "github"
+    },
     "generateUpdatesFilesForAllChannels": false
   },
   "optionalDependencies": {

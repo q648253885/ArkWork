@@ -4,7 +4,7 @@
 
 > 本地优先的 AI Agent 工作台 — 让 ReAct 推理循环**可见、可控、可复用**。
 
-![License](https://img.shields.io/badge/license-MIT-green) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen)
+![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen)
 
 ## 它解决什么问题
 
@@ -121,4 +121,4 @@ npm run typecheck   # tsc 校验 node & web 两套 tsconfig
 
 ## License
 
-[MIT](./LICENSE)
+[Apache License 2.0](./LICENSE)

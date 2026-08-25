@@ -1,10 +1,14 @@
 name: Release
 
-# 推送 v* 标签时自动打包并上传到 GitHub Releases
+# 推送 v* 标签时自动打包（macOS / Windows / Linux）并上传到 GitHub Releases
+#
 # 用法：
-#   1. 确认 app/package.json 的 version 与标签一致（如 v0.28.0 ↔ "0.28.0"）
-#   2. git tag v0.28.0 && git push origin v0.28.0
-#   3. 构建完成后在仓库 Releases 页面即可下载安装包
+#   1. 确保 app/package.json 的 version 与标签一致（如 v0.28.0 ↔ "0.28.0"）
+#   2. 打标签并推送：git tag v0.28.0 && git push origin v0.28.0
+#   3. 构建完成后，仓库 Releases 页面会自动出现可下载的安装包
+#
+# 注意：未配置代码签名证书时，macOS 安装包为未签名版本，
+#       首次打开需在「系统设置 → 隐私与安全性」中手动允许。
 
 on:
   push:
@@ -21,7 +25,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        include:
+          - os: macos-latest
+            command: build:mac
+          - os: windows-latest
+            command: build:win
+          - os: ubuntu-latest
+            command: build:linux
 
     steps:
       - name: Checkout
@@ -35,7 +45,6 @@ jobs:
           cache-dependency-path: app/package-lock.json
 
       - name: Verify tag matches package.json version
-        if: startsWith(github.ref, 'refs/tags/')
         working-directory: app
         shell: bash
         run: |
@@ -50,27 +59,25 @@ jobs:
         working-directory: app
         run: npm ci
 
-      - name: Build & package (macOS)
-        if: runner.os == 'macOS'
+      - name: Build & publish (${{ matrix.os }})
         working-directory: app
         env:
-          # 未配置签名证书时跳过代码签名检索
+          # 未配置签名证书时跳过代码签名检索，保证 CI 可构建
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm run build:mac
+          # electron-builder 用 GitHub 自动上传产物到当前 tag 的 Release
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run ${{ matrix.command }} -- --publish always
 
-      - name: Build & package (Windows)
-        if: runner.os == 'Windows'
-        working-directory: app
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm run build:win
-
-      - name: Upload artifacts to GitHub Release
+      # 保险兜底：若 electron-builder 上传异常，仍将产物挂到 Release
+      - name: Upload artifacts to GitHub Release (fallback)
+        if: failure()
         uses: softprops/action-gh-release@v2
         with:
           files: |
             app/release/*.dmg
             app/release/*.zip
             app/release/*.exe
+            app/release/*.AppImage
+            app/release/*.deb
             app/release/*.blockmap
           generate_release_notes: true
