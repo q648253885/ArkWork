@@ -1,0 +1,76 @@
+name: Release
+
+# 推送 v* 标签时自动打包并上传到 GitHub Releases
+# 用法：
+#   1. 确认 app/package.json 的 version 与标签一致（如 v0.28.0 ↔ "0.28.0"）
+#   2. git tag v0.28.0 && git push origin v0.28.0
+#   3. 构建完成后在仓库 Releases 页面即可下载安装包
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: app
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${PKG_VERSION}"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build & package (macOS)
+        if: runner.os == 'macOS'
+        working-directory: app
+        env:
+          # 未配置签名证书时跳过代码签名检索
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run build:mac
+
+      - name: Build & package (Windows)
+        if: runner.os == 'Windows'
+        working-directory: app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run build:win
+
+      - name: Upload artifacts to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            app/release/*.dmg
+            app/release/*.zip
+            app/release/*.exe
+            app/release/*.blockmap
+          generate_release_notes: true

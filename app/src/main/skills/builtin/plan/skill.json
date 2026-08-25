@@ -1,0 +1,21 @@
+{
+  "id": "plan",
+  "version": "0.14.0",
+  "inputSchema": {
+    "type": "object",
+    "required": ["taskName"],
+    "properties": {
+      "taskName": { "type": "string" },
+      "scope": { "type": "string" }
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": ["planPath", "planItems"],
+    "properties": {
+      "planPath": { "type": "string" },
+      "planItems": { "type": "array", "items": { "type": "object" } }
+    }
+  },
+  "requiredTools": ["file-reader", "delegate-agent"]
+}

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ArkWork — 原创应用图标源图 (v1.0)
+  概念：Ark Console — Agent 协作工作区 / 计划与执行 / 可观察工具链
+  元素语义：
+    1. Squircle 圆角方形 = Ark 工作区容器
+    2. 三条高低不同的竖条 = Plan / Execute / Observe（ReAct 阶段）
+    3. 顶部横梁上的三个圆点 = Agent / Tools / Memory 协作节点
+    4. 右上观测环 = 可观察工具链的"观测镜"
+  设计原则：纯几何、不含人形/机器人/字母字标，
+           在 16/32/128/1024 px 均清晰，深浅背景下对比充足。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="ArkWork 应用图标">
+  <title>ArkWork</title>
+  <defs>
+    <!-- 主体背景：靛紫蓝渐变，与 v0.13.0 accent 体系一致 -->
+    <linearGradient id="arkBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7C7EF7"/>
+      <stop offset="0.5" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#312E81"/>
+    </linearGradient>
+
+    <!-- 顶部柔光，模拟现代 macOS 应用图标轻微高光 -->
+    <linearGradient id="arkGloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- 主标记色：浅色淡白渐变，在深紫底色上保持高对比 -->
+    <linearGradient id="markLight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DDE3FF"/>
+    </linearGradient>
+
+    <!-- 现代 macOS squircle：以 rect 圆角近似实现（rx ≈ 22.5%） -->
+    <clipPath id="squircleClip">
+      <rect x="0" y="0" width="1024" height="1024" rx="230" ry="230"/>
+    </clipPath>
+  </defs>
+
+  <!-- 1. Squircle 背景 -->
+  <g clip-path="url(#squircleClip)">
+    <rect x="0" y="0" width="1024" height="1024" fill="url(#arkBg)"/>
+    <!-- 顶部柔光，强化立体感，但不依赖复杂渐变 -->
+    <rect x="0" y="0" width="1024" height="560" fill="url(#arkGloss)"/>
+  </g>
+
+  <!-- 2. 标记在 1024×1024 上的安全绘制区：x ∈ [160, 864], y ∈ [180, 844] -->
+
+  <!-- 2.1 顶部"工作台横梁"——细长胶囊，承载三个节点 -->
+  <rect x="172" y="320" width="680" height="10" rx="5" fill="url(#markLight)" opacity="0.55"/>
+
+  <!-- 2.2 三个协作节点（Agent / Tools / Memory）：等距、等大，节奏稳定 -->
+  <circle cx="280" cy="325" r="22" fill="url(#markLight)"/>
+  <circle cx="512" cy="325" r="22" fill="url(#markLight)"/>
+  <circle cx="744" cy="325" r="22" fill="url(#markLight)"/>
+
+  <!-- 2.3 三条高低不同的"阶段竖条"——Plan / Execute / Observe
+       注意节奏：短 → 高 → 中，对应"先列计划 → 大力执行 → 中等观察"的循环。
+       不使用细线，避免 16px 退化；使用大圆角矩形充当块状几何。 -->
+  <!-- Plan（短） -->
+  <rect x="250" y="612" width="60" height="148" rx="18" fill="url(#markLight)" opacity="0.78"/>
+  <!-- Execute（最高，中央） -->
+  <rect x="482" y="452" width="60" height="308" rx="18" fill="url(#markLight)"/>
+  <!-- Observe（中，右） -->
+  <rect x="714" y="540" width="60" height="220" rx="18" fill="url(#markLight)" opacity="0.9"/>
+
+  <!-- 2.4 工作台底梁——闭合容器感，强化"Ark"语义 -->
+  <rect x="172" y="780" width="680" height="10" rx="5" fill="url(#markLight)" opacity="0.55"/>
+
+  <!-- 2.5 右上"观测镜"——表达"可观察工具链"的纯几何元件：
+       外环 + 内实心点，无任何拟人/拟眼细节。 -->
+  <g transform="translate(800 240)">
+    <circle r="42" fill="none" stroke="url(#markLight)" stroke-width="12" opacity="0.85"/>
+    <circle r="14" fill="url(#markLight)"/>
+  </g>
+</svg>

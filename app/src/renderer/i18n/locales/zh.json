@@ -1,0 +1,2274 @@
+{
+  "common": {
+    "cancel": "取消",
+    "confirm": "确认",
+    "save": "保存",
+    "close": "关闭",
+    "delete": "删除",
+    "retry": "重试",
+    "loading": "加载中…"
+  },
+  "action": {
+    "shell": "执行命令",
+    "shellDetail": "执行命令：{value}",
+    "fileReader": "读取文件",
+    "fileReaderDetail": "读取文件：{value}",
+    "fileWriter": "写入文件",
+    "fileWriterDetail": "写入文件：{value}",
+    "fileEditor": "编辑文件",
+    "fileEditorDetail": "编辑文件：{value}",
+    "globSearch": "查找文件",
+    "globSearchDetail": "查找文件：{value}",
+    "grepSearch": "搜索代码",
+    "grepSearchDetail": "搜索代码：{value}",
+    "webSearch": "网页检索",
+    "webSearchDetail": "网页检索：{value}",
+    "fetchUrl": "抓取网页",
+    "fetchUrlDetail": "抓取网页：{value}",
+    "kbSearch": "查询知识库",
+    "kbSearchDetail": "查询知识库：{value}",
+    "sessionSearch": "检索历史",
+    "sessionSearchDetail": "检索历史：{value}",
+    "delegateAgent": "委派子任务",
+    "delegateAgentDetail": "委派子任务：{value}",
+    "taskComplete": "完成任务",
+    "taskCompleteDetail": "完成任务：{value}",
+    "askUser": "询问用户",
+    "askUserDetail": "询问用户：{value}",
+    "callTool": "调用工具：{tool}",
+    "todoUpdate": {
+      "done": "更新清单：第 {item} 项 → 完成",
+      "doneCmt": "更新清单：第 {item} 项 → 完成（{comment}）",
+      "running": "更新清单：第 {item} 项 → 进行中",
+      "runningCmt": "更新清单：第 {item} 项 → 进行中（{comment}）",
+      "pending": "更新清单：第 {item} 项 → 待办",
+      "pendingCmt": "更新清单：第 {item} 项 → 待办（{comment}）",
+      "skipped": "更新清单：第 {item} 项 → 跳过",
+      "skippedCmt": "更新清单：第 {item} 项 → 跳过（{comment}）",
+      "failed": "更新清单：第 {item} 项 → 失败",
+      "failedCmt": "更新清单：第 {item} 项 → 失败（{comment}）",
+      "cancelled": "更新清单：第 {item} 项 → 取消",
+      "cancelledCmt": "更新清单：第 {item} 项 → 取消（{comment}）",
+      "other": "更新清单：第 {item} 项 → {status}",
+      "otherCmt": "更新清单：第 {item} 项 → {status}（{comment}）"
+    }
+  },
+  "settings": {
+    "language": {
+      "label": "界面语言",
+      "desc": "切换后立即生效，无需重启",
+      "zh": "中文",
+      "en": "English",
+      "ja": "日本語",
+      "ko": "한국어"
+    },
+    "tabs": {
+      "barAriaLabel": "设置分区",
+      "models": "模型",
+      "modelsHint": "配置大模型 API",
+      "workspace": "工作区",
+      "workspaceHint": "工作区路径与隔离",
+      "knowledge": "知识库",
+      "knowledgeHint": "全局启用 / 关闭知识库注入",
+      "appearance": "外观",
+      "appearanceHint": "主题与预览",
+      "advanced": "高级",
+      "advancedHint": "压缩策略 / 开发者工具",
+      "footer": "所有修改即时生效 · 破坏性操作需二次确认"
+    },
+    "knowledge": {
+      "globalTitle": "全局知识库",
+      "effectiveImmediately": "设置后立即生效，无需重启",
+      "enableInjection": "启用知识库注入",
+      "injectBodyPrefix": "关闭后，Agent 调用 ",
+      "injectBodySuffix": " 时将返回引导提示而非检索结果，Composer 上下文面板显示「知识库：未启用」。",
+      "currentTitle": "当前知识库",
+      "openPanel": "打开知识库面板",
+      "indexedCount": "已索引条目",
+      "parseFailed": "解析失败",
+      "totalCount": "条目总数",
+      "sessionTitle": "会话级开关",
+      "sessionDesc": "会话级「知识库」开关位于 Inspector「上下文」面板顶部，切换任务互不影响，关闭后仅当前会话不再注入 KB。"
+    },
+    "permission": {
+      "title": "权限",
+      "fastSwitchHint": "Shift+Tab 快捷切换",
+      "sessionMode": "会话模式",
+      "ruleMerged": "合并规则",
+      "ruleCount": "{{count}} 条",
+      "noCustomRules": "暂无自定义规则",
+      "none": "无",
+      "customAllowRules": "自定义 allow 规则",
+      "addRulePlaceholder": "Bash(npm test) 或 Bash(git diff:*)",
+      "addAllowRule": "添加 allow 规则",
+      "bypassConfirmTitle": "启用「完全放开」模式？",
+      "confirmBody0": "该模式下 Agent 将跳过所有工具审批，包括此前必须人工确认的高危操作：",
+      "confirmBody1": "· 任意 shell 命令（含删除文件、安装依赖、网络请求）",
+      "confirmBody2": "· 工作区外的文件读写与受保护路径（.env、密钥等）",
+      "confirmBody3": "· 黑名单命令不再拦截",
+      "confirmBody5": "该模式不会持久化，重启应用后回到默认权限；任务结束后请立即切回其他模式。",
+      "bypassConfirmLabel": "我知道风险，启用",
+      "cancel": "取消",
+      "modeOptions": {
+        "default": {
+          "label": "默认权限",
+          "desc": "每次执行都需确认"
+        },
+        "autoApprove": {
+          "label": "自动放行",
+          "desc": "读写自动放行，高危命令仍确认"
+        },
+        "acceptEdits": {
+          "label": "接受编辑",
+          "desc": "工作区内自动放行"
+        },
+        "plan": {
+          "label": "只读权限",
+          "desc": "只读探索，写操作拒绝"
+        },
+        "bypassPermissions": {
+          "label": "完全放开",
+          "desc": "跳过全部审批（高危操作也放行），需二次确认，不持久化"
+        }
+      },
+      "ruleGroups": {
+        "allow": "允许",
+        "ask": "询问",
+        "deny": "拒绝"
+      }
+    },
+    "developer": {
+      "compressionTitle": "压缩与蒸馏策略",
+      "compressThresholdLabel": "L1 自动压缩触发阈值",
+      "compressStrategyLabel": "压缩策略",
+      "compressStrategyValue": "相似度 0.6 + 时间衰减 7 天",
+      "distillThresholdLabel": "蒸馏自动触发门槛",
+      "distillThresholdValue": "主题 10 条 / 复用 5 次 / L2 ≥ 50 条",
+      "tempEntryTtlLabel": "L1/L2 临时条目时限",
+      "tempEntryTtlValue": "7 天自动蒸馏清理",
+      "toolsTitle": "开发者工具",
+      "logsTab": "日志",
+      "graphTab": "图谱"
+    },
+    "workspace": {
+      "title": "工作区（任务与记忆按工作区隔离）",
+      "add": "添加工作区",
+      "empty": "暂无工作区，点击「添加工作区」创建",
+      "current": "当前",
+      "running": "运行中",
+      "openFolder": "打开文件夹",
+      "switch": "切换",
+      "remove": "移除",
+      "removeConfirmTitle": "移除工作区",
+      "removeConfirmBody": "确定移除工作区「{{name}}」吗？任务数据保留在磁盘，但不再显示在此列表中。",
+      "noFolderToast": "默认工作区无关联文件夹",
+      "openFolderFail": "打开文件夹失败：{{message}}"
+    },
+    "models": {
+      "title": "大模型配置",
+      "add": "添加",
+      "empty": "暂无模型配置，点击「添加」创建",
+      "testing": "测试中…",
+      "test": "测试",
+      "edit": "编辑",
+      "new": "新建",
+      "delete": "删除",
+      "deleteConfirmTitle": "删除模型",
+      "deleteConfirmBody": "确定删除模型「{{name}}」吗？此操作不可撤销。",
+      "defaultEndpoint": "默认（官方端点）",
+      "apiKeyConfigured": "已配置（{{key}}…）",
+      "apiKeyNotConfigured": "未配置",
+      "availableModels": "可用模型:",
+      "kindHints": {
+        "openai": "OpenAI 官方或兼容端点；baseURL 留空用官方默认",
+        "anthropic": "Claude 系列模型",
+        "ollama": "本地 Ollama 服务，默认 http://127.0.0.1:11434/v1",
+        "vllm": "本地 vLLM 推理服务，OpenAI 兼容接口"
+      },
+      "editor": {
+        "title": "{{action}}模型配置",
+        "idLabel": "Model ID（发送给 API 的值）",
+        "idPlaceholder": "如 gpt-4o-mini、llama3.1、claude-3-5-sonnet",
+        "idRequired": "请填写 Model ID",
+        "idExists": "该 ID 已存在，请更换",
+        "nameLabel": "显示名（可选）",
+        "namePlaceholder": "留空则用 model id",
+        "kindLabel": "协议类型",
+        "baseUrlPlaceholderOpenai": "留空使用 OpenAI 官方默认",
+        "baseUrlPlaceholderLocal": "如 http://127.0.0.1:8000/v1",
+        "apiKeyPlaceholderLocal": "本地服务可留空",
+        "apiKeyPlaceholderRequired": "必填",
+        "contextWindowLabel": "Context Window（可选）",
+        "contextWindowPlaceholder": "如 128000",
+        "enabled": "启用",
+        "cancel": "取消",
+        "save": "保存"
+      }
+    },
+    "appearance": {
+      "title": "外观",
+      "actualDark": "当前实际：深色",
+      "actualLight": "当前实际：浅色",
+      "light": "浅色",
+      "lightDesc": "明亮背景，适合白天与高亮环境",
+      "dark": "深色",
+      "darkDesc": "深色背景，护眼、降低反差",
+      "system": "跟随系统",
+      "systemDesc": "自动跟随操作系统的浅深设置",
+      "preview": "预览",
+      "previewBody": "这是一段正文文字，用于预览当前主题的对比度。",
+      "previewBodySecondary": "这是次级文字，用于辅助说明。",
+      "previewBodyMeta": "这是元信息文字（时间戳、徽章）。",
+      "previewPrimary": "主按钮",
+      "previewSecondary": "次按钮",
+      "previewSuccess": "成功",
+      "previewWarning": "警告",
+      "previewError": "错误"
+    }
+  },
+  "toast": {
+    "languagePersistFailed": "语言设置保存失败",
+    "languageNativeSyncFailed": "原生语言同步失败"
+  },
+  "app": {
+    "ready": "就绪",
+    "systemReady": "系统就绪",
+    "runningCount": "{{count}} 运行中",
+    "taskPrefix": "任务：",
+    "expandLeftPanel": "展开左栏",
+    "collapseLeftPanel": "折叠左栏",
+    "leftPanel": "左栏",
+    "expandRightPanel": "展开右栏",
+    "collapseRightPanel": "折叠右栏",
+    "rightPanel": "右栏",
+    "newTask": "新建任务",
+    "themeLabel": "浅色",
+    "themeDark": "深色",
+    "themeSystem": "跟随系统",
+    "themeSystemShort": "系统",
+    "themeCycleHint": "点击循环：浅 → 深 → 跟随系统",
+    "switchTheme": "切换主题",
+    "contextUsageTitle": "上下文用量（真实 payload 估算）",
+    "memoryBudgetSuffix": "预算 {{budget}} tokens ({{pct}}%) · 模型窗口 {{window}}",
+    "memoryLabel": "记忆",
+    "currentModel": "当前模型",
+    "quickActionPanel": "面板",
+    "permissionMode": {
+      "default": "权限模式：默认权限（每次确认）",
+      "autoApprove": "权限模式：自动放行（高危命令仍确认）",
+      "acceptEdits": "权限模式：接受编辑（工作区内自动放行）",
+      "plan": "权限模式：只读权限（只读探索，写操作拒绝）",
+      "bypass": "权限模式：完全放开"
+    },
+    "escPause": {
+      "running": "任务正在运行",
+      "body": "「{{title}}」正在运行，选择操作：",
+      "cancel": "取消",
+      "pause": "暂停任务",
+      "stop": "停止任务",
+      "closeHint": "需要关闭请选择上方按钮"
+    },
+    "collapsed": {
+      "expand": "展开左栏",
+      "newTask": "新建任务"
+    },
+    "status": {
+      "systemReady": "系统就绪",
+      "systemReadyDesc": "所有后台服务运行正常",
+      "ready": "就绪",
+      "running": "{{count}} 运行中",
+      "taskPrefix": "任务：{{title}}",
+      "memoryCtxLabel": "上下文用量（真实 payload 估算）",
+      "memoryCtxDesc": "{{used}} / 预算 {{budget}} tokens ({{pct}}%) · 模型窗口 {{window}}",
+      "memory": "记忆",
+      "currentModel": "当前模型",
+      "expandLeft": "展开左栏",
+      "collapseLeft": "折叠左栏",
+      "expandLeftAria": "展开左栏 ⌘B",
+      "collapseLeftAria": "折叠左栏 ⌘B",
+      "left": "左栏",
+      "expandRight": "展开右栏",
+      "collapseRight": "折叠右栏",
+      "expandRightAria": "展开右栏 ⌘J",
+      "collapseRightAria": "折叠右栏 ⌘J",
+      "right": "右栏",
+      "theme": {
+        "light": "浅色",
+        "dark": "深色",
+        "system": "跟随系统（{{resolved}}）",
+        "systemDark": "深",
+        "systemLight": "浅",
+        "aria": "切换主题",
+        "systemShort": "系统"
+      },
+      "themeDesc": "{{theme}} · 点击循环：浅 → 深 → 跟随系统",
+      "theme.aria": "切换主题",
+      "theme.light": "浅色",
+      "theme.dark": "深色",
+      "theme.system": "跟随系统（{{resolved}}）",
+      "theme.systemDark": "深",
+      "theme.systemLight": "浅",
+      "theme.systemShort": "系统",
+      "panel": "面板"
+    }
+  },
+  "palette": {
+    "prefixHint": {
+      "all": "搜索任务、Agent、命令、文件、Skill…",
+      "agent": "@ Agent",
+      "task": "# 任务",
+      "command": "/ 命令",
+      "file": "> 文件"
+    },
+    "chip": {
+      "all": "全部"
+    },
+    "section": {
+      "command": "命令",
+      "task": "任务",
+      "agent": "智能体",
+      "file": "文件",
+      "skill": "技能"
+    },
+    "command": {
+      "newTask": "新建任务",
+      "quickOpen": "文件快速打开",
+      "toggleLeftNav": "折叠/展开左栏",
+      "toggleRightDock": "折叠/展开右栏",
+      "openAutomations": "打开：自动化",
+      "openSkills": "打开：能力",
+      "openAgents": "打开：智能体",
+      "openKb": "打开：知识库",
+      "openMemory": "打开：记忆",
+      "backToTasks": "返回任务",
+      "openMemoryPanel": "打开记忆面板",
+      "openFilesPanel": "打开文件面板",
+      "openSkillsPanel": "打开能力面板",
+      "openTasksPanel": "打开任务面板",
+      "openAutomationsPanel": "打开自动化面板",
+      "exportConversation": "导出当前对话",
+      "openSettings": "打开设置",
+      "settingsModels": "设置 → 模型",
+      "settingsAdvanced": "设置 → 高级（压缩策略 / 开发者工具）",
+      "slashHint": "调用对应技能（跳过自动判定）",
+      "singleAttempt": "单 attempt 模式",
+      "singleAttemptHint": "占位：后续接入执行策略"
+    },
+    "empty": "无匹配项 — 试试前缀：{{agent}} / {{task}} / {{command}} / {{file}}",
+    "footer": {
+      "navigate": "导航",
+      "select": "选择",
+      "close": "关闭",
+      "itemCount": "{{count}} / {{total}} 项"
+    }
+  },
+  "composer": {
+    "permission": {
+      "default": {
+        "label": "默认",
+        "desc": "每次操作均需确认"
+      },
+      "autoApprove": {
+        "label": "自动放行",
+        "desc": "自动批准读写；高风险命令仍需确认"
+      },
+      "acceptEdits": {
+        "label": "接受编辑",
+        "desc": "工作区内自动批准"
+      },
+      "plan": {
+        "label": "只读",
+        "desc": "只读探索，禁止写操作"
+      },
+      "bypass": {
+        "label": "完全放权",
+        "desc": "跳过所有审批（含高风险），需二次确认"
+      },
+      "menuTitle": "权限模式",
+      "bypassConfirmTitle": "启用“完全放权”模式？"
+    },
+    "bypassConfirm": {
+      "body0": "此模式下 Agent 将跳过所有工具审批，包括此前需手动确认的高风险操作：",
+      "body1": "· 任意 Shell 命令（含删除文件、安装依赖、网络请求）",
+      "body2": "· 工作区外及受保护路径（.env、机密等）的读写",
+      "body3": "· 黑名单命令不再被拦截",
+      "body5": "此模式不会持久化，重启后恢复为默认权限。任务结束后请尽快切回其他模式。",
+      "label": "我了解风险，启用"
+    },
+    "cancel": "取消",
+    "section": {
+      "skill": "技能",
+      "file": "文件",
+      "memory": "记忆",
+      "command": "命令"
+    },
+    "emptyMemory": "无内容",
+    "slash": {
+      "specHint": "编写产品规格（PRD）",
+      "planHint": "制定实施计划",
+      "bugfixHint": "修复 Bug",
+      "clear": "清空记忆",
+      "clearHint": "清空当前任务的上下文记忆",
+      "compress": "压缩记忆",
+      "compressHint": "压缩上下文以释放 token",
+      "export": "导出对话",
+      "exportHint": "将对话导出为文件",
+      "new": "新建任务",
+      "newHint": "开始一个新任务"
+    },
+    "referencedMemory": "已引用记忆：{{label}}",
+    "compressDone": "压缩完成：{{before}} → {{after}} tokens",
+    "contextCompressed": "上下文已压缩：{{before}} → {{after}} tokens",
+    "compressFailed": "压缩失败",
+    "clearTitle": "清空当前任务记忆？",
+    "clearBody": "此操作将删除当前任务的全部上下文记忆，且无法撤销。",
+    "clearConfirm": "清空",
+    "cleared": "记忆已清空",
+    "clearFailed": "清空失败",
+    "injectedMemory": "已注入 {{count}} 条记忆",
+    "attachmentLabel": "附件",
+    "fileAdded": "已添加文件：{{name}}",
+    "appendFailed": "追加消息失败",
+    "switchAgent": "切换智能体",
+    "switchAgentDesc": "选择处理当前任务的智能体",
+    "agentNotSelected": "未选择智能体",
+    "reference": "引用",
+    "referenceTooltip": "@ 引用文件、技能或记忆",
+    "command": "命令",
+    "commandTooltip": "/ 快捷命令",
+    "kbTooltip": "知识库",
+    "knowledgeBase": "知识库 {{count}}",
+    "noAgents": "暂无智能体",
+    "current": "当前",
+    "switchPermissionAria": "切换权限模式",
+    "stop": "停止",
+    "stopTooltip": "停止当前运行",
+    "stopAria": "停止任务",
+    "send": "发送",
+    "sendTooltip": "发送消息",
+    "sendRequiresModel": "请先配置模型",
+    "sendAria": "发送消息",
+    "atMenuTitle": "引用",
+    "noAgentsSkills": "暂无智能体或技能",
+    "noMatch": "无匹配项",
+    "slashMenuTitle": "命令",
+    "noMatchCommand": "无匹配命令",
+    "selected": "已选择",
+    "kbEnabled": "已启用 {{count}} 个知识库",
+    "kbDisabled": "未启用知识库",
+    "kbNotImported": "尚未导入任何知识库",
+    "parseFailed": "解析失败",
+    "kbChunks": "{{count}} 分块",
+    "remove": "移除",
+    "cacheHit": "缓存命中 {{pct}}% · 命中 {{hit}} / 共 {{total}} tokens",
+    "ctxOverLimit": "上下文超出预算 {{pct}}%（{{cache}}）",
+    "ctxUsage": "已用 {{used}} / {{total}} tokens（{{pct}}%，上限 {{window}}）{{cache}}",
+    "cachePrefixHit": "缓存命中 {{pct}}% · {{hit}} / {{total}}",
+    "compressHintInline": "上下文超过上限，建议压缩",
+    "compressHint": "/压缩"
+  },
+  "editors": {
+    "close": "关闭",
+    "cancel": "取消",
+    "save": "保存",
+    "create": "创建",
+    "builtinSuffix": "（内置）",
+    "nameLabel": "名称",
+    "descriptionLabel": "描述",
+    "avatarColorLabel": "头像颜色",
+    "colorAria": "选择颜色 {{color}}",
+    "namespaceLabel": "命名空间",
+    "transportLabel": "传输方式",
+    "commandLabel": "命令",
+    "urlLabel": "URL",
+    "temperatureLabel": "温度：{{value}}",
+    "timeoutLabel": "超时（秒）",
+    "agent": {
+      "nameRequired": "请输入智能体名称",
+      "editTitle": "编辑智能体{{builtin}}",
+      "newTitle": "新建智能体",
+      "namePlaceholder": "输入智能体名称",
+      "nameBuiltinHint": "内置智能体名称不可修改",
+      "descriptionPlaceholder": "简要描述这个智能体的用途",
+      "roleLabel": "角色",
+      "rolePlaceholder": "定义智能体的角色定位",
+      "goalLabel": "目标",
+      "goalPlaceholder": "定义智能体需要达成的目标",
+      "maxIterationsLabel": "最大迭代次数",
+      "backstoryLabel": "背景设定",
+      "backstoryPlaceholder": "为智能体编写背景故事",
+      "systemPromptLabel": "系统提示词",
+      "systemPromptPlaceholder": "编写系统提示词",
+      "personaBuiltinHint": "内置智能体的人格字段不可修改",
+      "defaultSkillsLabel": "默认技能（已选 {{selected}} / {{total}}）",
+      "noSkills": "暂无可用技能"
+    },
+    "skill": {
+      "nameRequired": "请输入技能名称",
+      "invalidSchema": "输入结构 JSON Schema 格式无效",
+      "editTitle": "编辑技能{{builtin}}",
+      "newTitle": "新建技能",
+      "namePlaceholder": "输入技能名称",
+      "namespacePlaceholder": "例如 myorg.my-skill",
+      "descriptionLabel": "描述",
+      "descriptionPlaceholder": "简要描述这个技能的用途",
+      "builtinHandlerLabel": "内置处理器",
+      "noBuiltinHandler": "无（不使用内置处理器）",
+      "needsConfirmationLabel": "执行前需要确认",
+      "confirmBeforeExec": "执行此技能前让用户确认",
+      "tagsLabel": "标签",
+      "tagsPlaceholder": "逗号分隔，例如 markdown, analysis",
+      "inputSchemaLabel": "输入结构（JSON Schema）",
+      "inputSchemaHint": "定义技能接收的参数格式",
+      "instructionLabel": "指令",
+      "instructionPlaceholder": "编写触发此技能时执行的指令",
+      "instructionHint": "以 Markdown 编写，支持参数引用"
+    },
+    "mcp": {
+      "nameRequired": "请输入 MCP 服务器名称",
+      "stdioCommandRequired": "请输入 stdio 启动命令",
+      "sseUrlRequired": "请输入 SSE 端点 URL",
+      "editTitle": "编辑 MCP 服务器",
+      "newTitle": "新建 MCP 服务器",
+      "namePlaceholder": "输入服务器名称",
+      "stdioOption": "stdio",
+      "sseOption": "SSE",
+      "commandPlaceholder": "例如 npx @anthropic-ai/claude-code",
+      "argsLabel": "参数",
+      "argsPlaceholder": "每行一个参数",
+      "urlPlaceholder": "wss:// 或 https:// 端点",
+      "envLabel": "环境变量",
+      "envHint": "KEY=VALUE 每行一个",
+      "enableLabel": "启用此 MCP 服务器",
+      "reloadHint": "修改后需重载会话生效"
+    }
+  },
+  "panel": {
+    "memory": {
+      "tab_l1": "工作记忆",
+      "tab_l2": "压缩记忆",
+      "tab_l3": "知识记忆",
+      "tab_l4": "经验记忆",
+      "title": "记忆中心",
+      "count": "{{count}} 条",
+      "l1_empty_title": "暂无工作记忆",
+      "l1_empty_hint": "对话过程中产生的上下文资源会显示在这里",
+      "l1_empty": "暂无可显示的上下文资源",
+      "cat": {
+        "system": "系统",
+        "user": "用户",
+        "conversation": "对话",
+        "file": "文件",
+        "skill": "技能",
+        "kb": "知识库",
+        "l2": "压缩",
+        "other": "其他"
+      },
+      "ctx": "上下文",
+      "budget": "/ {{value}}",
+      "compress": "压缩",
+      "compress_desc_selected": "对当前任务上下文进行压缩以精简冗余内容",
+      "compress_desc_none": "请先选择一个任务后再压缩",
+      "compress_done": "压缩完成：{{before}} → {{after}} tokens",
+      "compress_chip": "压缩 {{before}} → {{after}}",
+      "category_tooltip": "{{label}}：{{tokens}} tokens（{{pct}}%）",
+      "no_ctx_data": "暂无上下文数据",
+      "distill_tooltip": "已蒸馏为 {{target}}",
+      "distill_desc": "点击查看蒸馏目标详情",
+      "load_failed": "加载失败：{{msg}}",
+      "deleted": "已删除",
+      "delete_failed": "删除失败：{{msg}}",
+      "merged": "已合并 {{count}} 条记忆",
+      "merge_failed": "合并失败：{{msg}}",
+      "exported": "已导出 {{count}} 条",
+      "export_failed": "导出失败：{{msg}}",
+      "l2_empty_title": "暂无压缩记忆",
+      "l2_empty_hint": "上下文压缩产生的摘要会保存在这里",
+      "l2_count": "共 {{count}} 条 · 压缩 {{tokens}} tokens",
+      "l2_search_placeholder": "搜索摘要 / 实体 / 意图…",
+      "all_intents": "全部意图",
+      "export_all": "导出全部",
+      "selected": "已选 {{count}} 项",
+      "merge_selected": "合并所选",
+      "export_selected": "导出所选",
+      "cancel": "取消",
+      "no_match": "没有匹配的结果",
+      "collapse": "收起详情",
+      "view_detail": "查看详情",
+      "delete": "删除",
+      "entity": "实体",
+      "none": "无",
+      "compressed_content": "压缩内容",
+      "references": "引用",
+      "raw_content": "原始内容",
+      "truncated_suffix": "…（已截断）",
+      "loading": "加载中…",
+      "pending": "待生效 {{count}} 条",
+      "merge_all": "合并全部",
+      "no_pending": "暂无待生效条目",
+      "discard": "丢弃",
+      "archive_search": "档案搜索",
+      "archive_placeholder": "搜索历史记忆…",
+      "copy_snippet": "复制片段",
+      "no_hit": "没有找到相关档案",
+      "edit": "编辑",
+      "saving": "保存中…",
+      "save_immediate": "立即保存",
+      "empty": "（暂无内容）",
+      "rolled_back": "已回滚到 v{{version}}",
+      "rollback_failed": "回滚失败：{{msg}}",
+      "observations": "观察 {{count}} 条",
+      "no_observations": "暂无观察记录",
+      "history": "历史版本 {{count}} 个",
+      "rollback_tooltip": "回滚到此版本",
+      "rollback": "回滚",
+      "user_profile": "用户画像",
+      "no_synthesis": "暂无画像内容",
+      "save": "保存",
+      "pending_merged": "已合并 {{count}} 条待生效{{suffix}}",
+      "pending_merged_suffix": "（含 LLM 归并）",
+      "curated_snapshot": "策展快照"
+    },
+    "automations": {
+      "weekday": {
+        "mon": "周一",
+        "tue": "周二",
+        "wed": "周三",
+        "thu": "周四",
+        "fri": "周五",
+        "sat": "周六",
+        "sun": "周日"
+      },
+      "presets": {
+        "daily9": "每天 9:00",
+        "weekdays9": "工作日 9:00",
+        "monday9": "每周一 9:00",
+        "hourly": "每小时",
+        "midnight": "每天 0:00"
+      },
+      "summary": {
+        "once": "只运行一次，{{time}}",
+        "daily": "每天 {{time}}",
+        "weekdays": "每个工作日 {{time}}",
+        "weekends": "每个周末 {{time}}",
+        "weekly_unknown": "每周 {{time}}（未选工作日）",
+        "weekly": "每周 {{names}} {{time}}",
+        "monthly": "每月 {{day}} 日 {{time}}",
+        "custom": "自定义：{{expr}}"
+      },
+      "title": "自动化任务",
+      "new_tooltip": "新建自动化",
+      "new_desc": "创建自动化任务以定时或手动执行 Agent",
+      "edit_title": "编辑自动化",
+      "new_title": "新建自动化",
+      "name": "名称",
+      "name_placeholder": "输入任务名称",
+      "prompt": "提示词",
+      "prompt_placeholder": "输入要执行的任务描述",
+      "agent": "Agent",
+      "model": "大模型",
+      "follow_agent": "跟随 Agent 默认",
+      "no_models": "暂无可用的模型",
+      "trigger": "触发方式",
+      "manual_trigger": "手动",
+      "cron_trigger": "定时",
+      "schedule": "定时计划",
+      "freq": {
+        "once": "只跑一次",
+        "daily": "每天",
+        "weekdays": "工作日",
+        "weekends": "周末",
+        "weekly": "每周",
+        "monthly": "每月",
+        "custom": "自定义 cron"
+      },
+      "hour": "小时",
+      "minute": "分钟",
+      "month_day": "每月日期",
+      "day": "{{day}} 日",
+      "presets_label": "常用预设",
+      "cron_placeholder": "分 时 日 月 周，如 0 9 * * 1-5",
+      "cron_hint": "示例：0 9 * * 1-5 表示工作日每天 9:00",
+      "cron_invalid": "cron 表达式无效，请检查格式",
+      "cron_display_label": "cron 表达式",
+      "need_weekday": "每周模式至少选择一个工作日",
+      "need_time": "请输入定时时间",
+      "invalid_time": "cron 表达式无效：{{expr}}",
+      "cancel": "取消",
+      "create": "创建",
+      "empty_title": "还没有自动化任务",
+      "empty_hint": "创建自动化任务，让 Agent 定时或按需自动执行",
+      "create_btn": "新建自动化",
+      "running": "运行中",
+      "paused": "已暂停",
+      "schedule_line_cron": "定时：{{expr}} · Agent：{{agent}}",
+      "schedule_line_manual": "手动触发 · Agent：{{agent}}",
+      "last_run": "上次运行 {{time}}",
+      "not_run": "尚未运行",
+      "next": "· 下次 {{time}}",
+      "run_now": "运行",
+      "pause": "暂停",
+      "enable": "启用",
+      "edit": "编辑",
+      "delete_tooltip": "删除",
+      "delete_desc": "删除此自动化任务，该操作不可撤销"
+    },
+    "abilities": {
+      "tab": {
+        "skills": "技能",
+        "plugins": "插件"
+      },
+      "hint": {
+        "skills": "ArkWork 自有 / 市场导入的工具能力（SKILL.md）",
+        "plugins": "MCP Server 接入的外部工具能力（stdio / sse）"
+      }
+    },
+    "agents": {
+      "newAgent": "新建智能体",
+      "empty": {
+        "title": "暂无智能体",
+        "hint": "创建一个智能体来承载技能、角色与自动化流程"
+      },
+      "title": "智能体（{{count}}）",
+      "new": "新建",
+      "startTaskTitle": "启动 {{name}}",
+      "builtinTooltip": "内置智能体",
+      "noDescription": "暂无描述",
+      "successRate": "成功率 {{rate}}%",
+      "skillsCount": "技能 {{count}}",
+      "startTask": "启动任务",
+      "edit": "编辑"
+    },
+    "kb": {
+      "title": "知识库",
+      "count": "{{count}}",
+      "globalHint": "知识库全局开关，点击前往设置",
+      "enabled": "已启用",
+      "disabled": "已停用",
+      "import": "导入",
+      "parseFailed": "解析失败",
+      "importDone": "导入完成：成功 {{imported}}，失败 {{failed}}",
+      "importFailed": "导入失败：{{message}}",
+      "renamePrompt": "请输入新的文件名：",
+      "renamed": "已重命名",
+      "renameFailed": "重命名失败：{{message}}",
+      "reimportTitle": "重新导入",
+      "reimportBody": "确定要重新导入「{{name}}」吗？",
+      "reimport": "重新导入",
+      "reimportTooltip": "重新导入",
+      "parsing": "解析中",
+      "indexing": "索引中",
+      "chunks": "{{chunks}} 个片段",
+      "failed": "失败",
+      "emptyTitle": "暂无知识库文档",
+      "emptyHint": "点击右上角「导入」添加文档，构建本地知识库",
+      "documents": "文档（{{count}}）",
+      "searchPlaceholder": "试搜文档内容…",
+      "noHits": "没有匹配的片段",
+      "statusParsing": "解析中",
+      "statusIndexing": "索引中",
+      "indexed": "已索引",
+      "retry": "重试",
+      "rename": "重命名",
+      "delete": "删除",
+      "reimportDone": "重新导入完成：{{chunks}} 块",
+      "reimportFailed": "重新导入失败：{{message}}",
+      "deleteTitle": "删除知识库",
+      "deleteBody": "删除「{{name}}」？原文与切块将被清除，不可恢复。",
+      "deleted": "已删除",
+      "deleteFailed": "删除失败：{{message}}"
+    },
+    "plugins": {
+      "status": {
+        "connected": "已连接",
+        "connecting": "连接中",
+        "disconnected": "未连接",
+        "error": "错误"
+      },
+      "new": "新建",
+      "refreshTooltip": "刷新",
+      "refresh": "刷新",
+      "count": "共 {{count}} 个",
+      "searchPlaceholder": "搜索插件…",
+      "desc": "通过 MCP Server 接入外部工具能力",
+      "empty": {
+        "title": "暂无插件",
+        "hint": "点击「新建」添加一个 MCP Server"
+      },
+      "noMatch": {
+        "title": "未找到插件",
+        "hint": "没有与「{{query}}」匹配的结果"
+      },
+      "disabled": "已禁用",
+      "toolsCount": "{{count}} 个工具",
+      "disconnect": "断开连接",
+      "disconnecting": "断开中",
+      "connecting": "连接中",
+      "connect": "连接",
+      "disabledConnect": "已禁用",
+      "edit": "编辑",
+      "delete": "删除",
+      "discoveredTools": "已发现工具",
+      "envCount": "{{count}} 个变量"
+    },
+    "files": {
+      "title": "文件",
+      "stats": "{{files}} 个文件 · {{folders}} 个文件夹",
+      "refreshTooltip": "刷新",
+      "searchPlaceholder": "搜索文件…",
+      "empty": {
+        "title": "暂无文件",
+        "hint": "打开一个文件夹即可在此查看其内容"
+      },
+      "noMatch": {
+        "title": "未找到文件",
+        "hint": "没有与「{{query}}」匹配的结果"
+      },
+      "renamed": "已重命名为 {{name}}",
+      "renameFailed": "重命名失败：{{message}}",
+      "deleteTitle": "移入废纸篓",
+      "deleteBody": "确定要移入废纸篓吗？此操作将删除「{{name}}」。",
+      "moveToTrash": "移入废纸篓",
+      "movedToTrash": "已将 {{name}} 移入废纸篓",
+      "deleteFailed": "删除失败：{{message}}",
+      "copyPath": "复制路径",
+      "copyPathDesc": "复制文件的完整路径到剪贴板",
+      "pathCopied": "路径已复制",
+      "copyFailed": "复制失败",
+      "revealInFolder": "在文件夹中显示",
+      "revealInFolderDesc": "在系统中定位该文件",
+      "rename": "重命名",
+      "delete": "删除",
+      "insertAsContext": "插入为上下文"
+    },
+    "tasks": {
+      "title": "任务",
+      "searchPlaceholder": "搜索任务…",
+      "filterAll": "全部",
+      "empty": {
+        "title": "暂无任务",
+        "hint": "开始一个新任务，Agent 会在这里运行"
+      },
+      "noMatch": {
+        "title": "未找到任务",
+        "byStatus": "当前没有「{{status}}」状态的任务",
+        "byQuery": "没有与「{{query}}」匹配的任务"
+      },
+      "planProgress": "计划 {{done}}/{{total}}",
+      "moreActions": "更多操作",
+      "unstar": "取消收藏",
+      "star": "收藏",
+      "rename": "重命名",
+      "rerun": "重新运行",
+      "pause": "暂停",
+      "resume": "继续",
+      "stop": "停止",
+      "deleteTitle": "删除任务",
+      "deleteBody": "确定要删除「{{title}}」吗？此操作不可撤销。",
+      "deleteConfirm": "删除",
+      "group": {
+        "today": "今天",
+        "earlier": "更早"
+      }
+    },
+    "market": {
+      "title": "技能市场",
+      "searchPlaceholder": "搜索技能…",
+      "searching": "搜索中",
+      "cliTitle": "ArkWork CLI",
+      "cliHint": "未检测到 ArkWork CLI，安装后可通过命令行调用技能",
+      "installing": "安装中",
+      "cliInstall": "安装 CLI",
+      "loading": "加载中",
+      "loadingHint": "正在从市场拉取技能列表…",
+      "noResultsTitle": "未找到技能",
+      "noResultsQuery": "没有与「{{query}}」匹配的技能",
+      "noResultsEmpty": "尝试其他关键词，或浏览全部技能",
+      "total": "共 {{count}} 个技能",
+      "prevTooltip": "上一页",
+      "nextTooltip": "下一页",
+      "noDescription": "暂无描述",
+      "installed": "已安装",
+      "install": "安装"
+    },
+    "skills": {
+      "cancelling": "取消中…",
+      "cli": {
+        "installButton": "一键安装 skillhub CLI",
+        "installHint": "安装 skillhub 命令行工具以浏览和安装市场技能",
+        "installed": "已安装",
+        "notDetected": "未检测到 SkillHub CLI",
+        "version": "版本 {{version}}",
+        "versionFallback": "用于浏览与安装市场技能"
+      },
+      "close": "关闭",
+      "count": "共 {{count}}",
+      "delete": "删除",
+      "deleteBuiltin": "内置技能不可删除",
+      "detail": {
+        "author": "作者：{{name}}",
+        "compatAll": "全部",
+        "compatDeps": "依赖",
+        "compatNoDeps": "无依赖",
+        "compatOs": "系统",
+        "compatTitle": "兼容性",
+        "contextTitle": "Context cost 估算",
+        "costActive": "激活后",
+        "costBaseline": "基线",
+        "costPerTurn": "每轮预估",
+        "license": "许可：{{license}}",
+        "tokens": "tokens",
+        "updated": "更新：{{date}}"
+      },
+      "disabled": "已禁用",
+      "downloads": "{{count}} 下载",
+      "edit": "编辑",
+      "empty": {
+        "hint": "点击「导入」或从市场安装",
+        "title": "暂无技能"
+      },
+      "enabled": "已启用",
+      "export": "导出",
+      "favorite": "收藏",
+      "group": {
+        "installed": "已有技能",
+        "installedHint": "当前已安装的全部技能（含内置 / 市场导入 / 本地导入）",
+        "market": "市场",
+        "marketHint": "浏览 / 安装 SkillHub 上的技能"
+      },
+      "hint": {
+        "builtin": "ArkWork 自带技能，不可编辑/删除",
+        "localImported": "本地文件 / ZIP / Markdown 导入或外部 MCP 接入",
+        "marketImported": "从 SkillHub 安装的技能，可更新或移除"
+      },
+      "import": "导入",
+      "importTooltip": "从目录 / Markdown / ZIP 文件导入",
+      "install": "安装",
+      "installed": "已安装",
+      "installing": "安装中…",
+      "loading": "加载中…",
+      "market": {
+        "favorites": {
+          "empty": {
+            "hint": "在技能详情中点击「收藏」添加",
+            "title": "暂无收藏"
+          }
+        },
+        "installed": {
+          "empty": {
+            "hint": "去「发现」页浏览并安装",
+            "title": "暂无已安装的市场技能"
+          }
+        },
+        "loadingHint": "正在从市场获取技能列表",
+        "noInstallable": {
+          "hint": "「{{query}}」的结果均已在本地安装",
+          "hintEmpty": "当前列表中的技能都已安装，试试换个关键词",
+          "title": "没有可安装的新技能"
+        },
+        "noResults": {
+          "hint": "没有技能匹配「{{query}}」",
+          "hintEmpty": "市场暂无可用技能",
+          "title": "暂无结果"
+        },
+        "searchPlaceholder": "搜索市场技能…",
+        "sources": {
+          "empty": {
+            "hint": "当前没有配置任何市场源",
+            "title": "暂无市场源"
+          }
+        },
+        "sourcesCount": "市场源 · {{count}}",
+        "tab": {
+          "discover": "发现",
+          "favorites": "收藏",
+          "installed": "已安装",
+          "settings": "设置"
+        },
+        "total": "共 {{count}} 项"
+      },
+      "needsConfirmation": "需确认",
+      "newSkill": "新建技能",
+      "nextPage": "下一页",
+      "noDescription": "（无描述）",
+      "noInstruction": "该技能无 SKILL.md 指令内容",
+      "noRating": "暂无评分",
+      "notEnabled": "未启用",
+      "prevPage": "上一页",
+      "processing": "处理中…",
+      "ratingCount": "（{{count}} 评分）",
+      "searchPlaceholder": "搜索技能…",
+      "searching": "搜索中…",
+      "source": {
+        "builtin": "内置",
+        "localImported": "本地导入",
+        "market": "市场",
+        "marketImported": "市场导入",
+        "local": "本地",
+        "skillhub": "SkillHub",
+        "github": "GitHub",
+        "url": "URL"
+      },
+      "sourceDetail": "来源：{{source}}",
+      "statusDisable": "禁用",
+      "statusEnable": "启用",
+      "switchOff": "已禁用，点击启用",
+      "switchOn": "已启用，点击禁用",
+      "unfavorite": "取消收藏",
+      "uninstall": "卸载",
+      "uninstalling": "卸载中…",
+      "category": {
+        "coding": "编码",
+        "document": "文档",
+        "data": "数据",
+        "automation": "自动化",
+        "integration": "集成",
+        "other": "其他"
+      }
+    }
+  },
+  "sidebar": {
+    "resizeHandle": {
+      "label": "拖拽调整宽度",
+      "desc": "64–320px 之间自由拖动",
+      "aria": "侧栏宽度调整手柄"
+    },
+    "newTask": {
+      "title": "新建任务",
+      "desc": "创建新任务并进入对话"
+    },
+    "search": {
+      "aria": "搜索任务线程",
+      "placeholder": "搜索 threads…"
+    },
+    "threads": {
+      "empty": "暂无任务",
+      "group": {
+        "pinned": "Pinned",
+        "today": "Today",
+        "week": "This week",
+        "earlier": "Earlier"
+      }
+    },
+    "threadRow": {
+      "failedBadge": "清单中存在失败步骤"
+    },
+    "menu": {
+      "moreActions": "任务 {{title}} 更多操作",
+      "menuLabel": "任务 {{title}} 操作菜单",
+      "unstar": "取消收藏",
+      "star": "收藏",
+      "rename": "重命名",
+      "run": "运行",
+      "rerun": "重新运行",
+      "pause": "暂停任务",
+      "resume": "恢复任务",
+      "stop": "停止",
+      "delete": "删除"
+    },
+    "confirmDelete": {
+      "title": "删除任务",
+      "body": "确定删除任务「{{title}}」吗？此操作不可撤销。",
+      "confirm": "删除"
+    },
+    "capability": {
+      "agents": "智能体",
+      "skills": "能力",
+      "kb": "知识",
+      "memory": "记忆",
+      "automations": "自动化",
+      "settings": "设置",
+      "desc": "单击打开{{label}}页面"
+    },
+    "help": {
+      "title": "帮助",
+      "desc": "打开帮助与快捷键参考",
+      "aria": "打开帮助"
+    }
+  },
+  "leftnav": {
+    "modules": {
+      "automations": "自动化",
+      "skills": "能力",
+      "agents": "智能体",
+      "kb": "知识库",
+      "memory": "记忆"
+    },
+    "global": "全局",
+    "collapse": {
+      "title": "折叠左栏"
+    },
+    "newTask": {
+      "title": "新建任务",
+      "desc": "创建新任务并进入对话"
+    },
+    "expand": {
+      "title": "展开左栏"
+    },
+    "taskList": {
+      "title": "任务列表"
+    },
+    "descriptions": {
+      "automations": "定时任务 / 触发器配置",
+      "skills": "技能 + 插件（MCP），统一管理",
+      "agents": "智能体 CRUD，含系统提示词",
+      "kb": "本地文件切块索引 + 全文检索",
+      "memory": "L1/L2/L3/L4 四层记忆查看",
+      "settings": "模型 / 工作区 / 外观 / 快捷键 / 高级"
+    }
+  },
+  "dock": {
+    "context": {
+      "title": "上下文",
+      "empty_select_title": "选择任务查看上下文占比",
+      "empty_select_hint": "任务内可逐项下钻与清理",
+      "loading": "正在计算上下文占比…",
+      "load_failed": "暂时无法获取上下文数据",
+      "workspace_overall": "Workspace 整体上下文",
+      "remaining": "剩余 {{pct}}%",
+      "used": "已用 {{count}}",
+      "budget": "预算 {{count}}",
+      "category_aria": "{{label}} 占比 {{pct}}%，点击下钻",
+      "count_items": "{{count}} 项",
+      "clearing": "清理中",
+      "clear": "清空",
+      "category_empty": "该分类暂无内容",
+      "remove_tooltip": "从上下文中移除此项",
+      "remove": "移除",
+      "memory_tier": "记忆层级",
+      "memory_center": "记忆中心",
+      "l1_working_memory": "L1 工作记忆",
+      "l1_desc": "— 当前任务的 L1 条目（文件 / 对话等）",
+      "l2_compressed_memory": "L2 压缩记忆",
+      "l2_desc": "— Task 7 压缩后的历史摘要（待接入）",
+      "detail": {
+        "system_prompt": "系统提示词",
+        "system_section": "系统段",
+        "file": "文件",
+        "tool": "工具",
+        "sub_agent": "子智能体",
+        "skill_instruction": "技能指令",
+        "message": "消息",
+        "memory_injection": "记忆注入",
+        "mcp": "MCP"
+      }
+    },
+    "progress": {
+      "no_task": "当前无任务",
+      "no_task_hint": "选择任务后展示进度摘要",
+      "next_step": "下一步",
+      "completed_steps": "已完成步骤 · {{count}}",
+      "collapse": "收起",
+      "expand": "展开",
+      "no_completed_steps": "暂无已完成步骤",
+      "milestones": "里程碑 · {{reached}}/{{total}}",
+      "stage_tooltip": "阶段 {{index}}：{{label}}",
+      "milestone_label_open": "{{label}} · 点击打开产物",
+      "milestone_label_not_reached": "{{label}} · 未到达",
+      "stage_research": "开源调研",
+      "stage_prd": "PRD 编写",
+      "stage_interaction": "交互文档",
+      "stage_prototype": "HTML 原型",
+      "stage_system_design": "系统设计",
+      "stage_code": "编码",
+      "stage_test": "功能测试",
+      "stage_delivery": "部署交付",
+      "stage_ops": "运维沉淀",
+      "milestone_prd": "PRD 已确认冻结",
+      "milestone_prototype": "HTML 原型已确认",
+      "milestone_design": "系统设计已确认",
+      "milestone_code": "编码完成",
+      "milestone_test": "测试全绿"
+    },
+    "todo": {
+      "no_plan_yet": "尚未生成计划",
+      "ipc_call_failed": "IPC 调用失败",
+      "generating": "计划生成中…",
+      "no_list": "无清单",
+      "generating_hint": "AI 正在为本任务生成执行清单",
+      "no_list_hint": "当前任务无需计划 · 单步任务",
+      "locate_card_tooltip": "定位到对话流中的计划卡片",
+      "locate": "定位",
+      "filter_all": "全部",
+      "filter_empty": "当前筛选下没有任务",
+      "engine_tooltip": "引擎基于 act 结果自动设定该状态",
+      "engine": "引擎",
+      "submitted": "◐ 已提交",
+      "more_actions": "更多操作",
+      "mark_done": "标记为已完成",
+      "retry": "重试该项",
+      "cancel": "取消该项",
+      "locate_step": "定位到执行步骤",
+      "no_artifact": "暂无产物记录",
+      "infer_title": "引擎从执行步骤推断明细",
+      "infer_desc": "尚未拿到完整的 planItems；将根据 act 步骤回填。下列条目为临时推断，行尾带「推断」徽标。",
+      "inferred": "推断"
+    },
+    "bugfix": {
+      "stage_goal_defined": "目标定义",
+      "stage_fixing": "修复中",
+      "stage_verifying": "验证中",
+      "stage_achieved": "完成",
+      "phase_goal_defined": "目标定义中",
+      "phase_fixing": "修复中",
+      "phase_verifying": "验证中",
+      "phase_achieved": "已达成",
+      "phase_not_achieved": "未达成",
+      "aria_progress": "bugfix 进度：{{phase}}"
+    },
+    "terminal": {
+      "failed": "失败：{{msg}}",
+      "title": "终端",
+      "output_viewer": "输出查看器",
+      "command_count": "{{count}} 条命令",
+      "running": "{{count}} 执行中",
+      "viewer_tooltip_label": "只读输出视图，不可输入命令",
+      "viewer_tooltip_desc": "真交互终端在后续版本评估（P2）",
+      "empty_title": "暂无终端记录",
+      "empty_hint": "Agent 执行命令的输出在此展示。此处不可输入——命令由 Agent 在受控权限下执行。",
+      "command_aria": "命令：{{command}}",
+      "dir": "目录：{{dir}}",
+      "no_output_summary": "(无输出摘要)",
+      "copy_output": "复制输出"
+    },
+    "browser": {
+      "open_in_window": "浏览器已在独立浮窗打开",
+      "return_hint": "关闭浮窗可自动回到此处；或在浮窗中点「收回侧栏」",
+      "title": "内嵌浏览器",
+      "empty_hint": "输入网址核实搜索结果，或打开任务产物 HTML 对照着聊；agent 也可自主在此测试网页"
+    }
+  },
+  "preview": {
+    "window": {
+      "empty": {
+        "title": "产物预览",
+        "desc": "从文件树或聊天中的任务产物打开 HTML / 图片 / 文本文件；网址请在内置浏览器中打开"
+      },
+      "loading": "加载中…",
+      "error": {
+        "title": "加载失败",
+        "retry": "重试"
+      },
+      "status": {
+        "noFile": "无文件",
+        "ready": "已就绪",
+        "loaded": "已加载",
+        "error": "加载失败",
+        "lines": "{{count}} 行"
+      },
+      "titleBtn": {
+        "newTab": "新标签页（复制当前）",
+        "minimize": "最小化",
+        "restore": "还原",
+        "maximize": "最大化",
+        "close": "关闭 (Esc)"
+      },
+      "tabBar": {
+        "tip": "点击激活，双击固定/取消固定",
+        "closeTab": "关闭标签",
+        "closeTabDesc": "关闭当前预览标签"
+      },
+      "toolbar": {
+        "copy": "复制",
+        "export": "导出",
+        "reveal": "在文件夹中显示",
+        "refresh": "刷新"
+      },
+      "capsule": {
+        "restore": "复：{{title}}",
+        "restoreTip": "点击恢复最小化的预览窗口",
+        "close": "关闭",
+        "closeTip": "恢复后立即关闭"
+      },
+      "toast": {
+        "copied": "已复制",
+        "copyFailed": "复制失败",
+        "openFromFileTree": "请从文件树打开文件以新建标签页"
+      }
+    },
+    "registry": {
+      "markdown": "Markdown",
+      "code": "代码",
+      "image": "图片",
+      "svg": "SVG",
+      "table": "表格",
+      "browser": "浏览器",
+      "fallback": "文件",
+      "mode": {
+        "render": "渲染",
+        "source": "源码",
+        "split": "分屏",
+        "desktop": "桌面",
+        "tablet": "平板",
+        "mobile": "手机"
+      }
+    },
+    "fallback": {
+      "metaError": "无法读取文件元数据",
+      "unsupported": "不支持的预览类型",
+      "meta": {
+        "type": "类型",
+        "size": "大小",
+        "lines": "行数",
+        "encoding": "编码",
+        "language": "语言",
+        "modified": "修改时间"
+      },
+      "lines": "{{count}} 行",
+      "notAvailable": "不可用",
+      "reveal": "在文件夹中显示",
+      "copyPath": "复制路径",
+      "toast": {
+        "copiedPath": "已复制路径",
+        "copyFailed": "复制失败"
+      }
+    },
+    "image": {
+      "fit": "适应窗口",
+      "actual": "实际尺寸",
+      "fitShort": "适应",
+      "copyPath": "复制路径",
+      "loading": "加载中…",
+      "error": "加载失败：{{err}}",
+      "alt": "图片预览",
+      "toast": {
+        "copiedPath": "已复制图片路径",
+        "copyFailed": "复制失败"
+      }
+    },
+    "table": {
+      "empty": "表格为空",
+      "colsRows": "{{cols}} 列 · {{rows}} 行",
+      "copyRaw": "复制原文",
+      "sortHint": "点击排序：{{column}}",
+      "columnIndex": "列 {{n}}",
+      "prevPage": "上一页",
+      "nextPage": "下一页",
+      "cellHint": "点击单元格复制",
+      "toast": {
+        "copiedCell": "已复制单元格",
+        "copiedRaw": "已复制原始内容",
+        "copyFailed": "复制失败"
+      }
+    },
+    "browser": {
+      "emptyAddress": "（空地址）",
+      "mode": {
+        "desktop": "桌面",
+        "tablet": "平板",
+        "mobile": "手机"
+      },
+      "error": "加载失败：{{err}}",
+      "title": "浏览器预览"
+    },
+    "code": {
+      "lines": "{{count}} 行",
+      "wrap": "自动换行",
+      "noWrap": "不换行",
+      "copy": "复制"
+    }
+  },
+  "topbar": {
+    "search": {
+      "desc": "搜索任务、文件、Agent、命令、设置项",
+      "aria": "打开 Quick Action 搜索 ⌘K",
+      "hint": "搜索任务、文件、Agent、命令"
+    },
+    "settings": {
+      "label": "设置",
+      "desc": "模型、工作区、外观、快捷键、高级——全部配置只在这里",
+      "aria": "设置 ⌘,"
+    },
+    "workspace": {
+      "switchCap": "{{path}} ｜ 切换工作区",
+      "switch": "切换工作区",
+      "desc": "在哪干活：切换工作区，任务与记忆随之隔离",
+      "aria": "切换工作区 ⌘⇧W",
+      "wsLabel": "Agent 工作区",
+      "select": "选择工作区",
+      "listTitle": "工作区",
+      "remove": "移除工作区",
+      "removeDesc": "从列表移除（任务数据保留在磁盘）",
+      "removeAria": "移除工作区 {{name}}",
+      "removeConfirmBody": "确定移除工作区「{{name}}」吗？任务数据保留在磁盘，但不再显示在此列表中。",
+      "removeConfirm": "移除",
+      "noFolderToast": "默认工作区无关联文件夹",
+      "openFail": "打开文件夹失败：{{message}}",
+      "showInFolder": "在文件夹中显示",
+      "add": "添加工作区（关联文件夹）"
+    }
+  },
+  "centerstage": {
+    "header": {
+      "renameTooltip": "双击重命名",
+      "renameTooltipDesc": "双击此处重命名任务",
+      "more": "更多操作",
+      "moreDesc": "重命名 / 复制 / 导出 / 删除",
+      "star": "收藏",
+      "unstar": "取消收藏",
+      "rename": "重命名",
+      "export": "导出对话",
+      "pause": "暂停任务",
+      "resume": "恢复任务",
+      "stop": "停止运行",
+      "delete": "删除任务",
+      "deleteBody": "确定删除任务「{{title}}」吗？此操作不可撤销。",
+      "deleteConfirm": "删除"
+    },
+    "greeting": {
+      "workspace": "工作区：{{name}}",
+      "workspaceOnly": "工作区",
+      "hint": "选择已有任务或新建任务开始"
+    }
+  },
+  "runconsole": {
+    "description": {
+      "runError": "工具调用失败，正在处理…",
+      "pausedResume": "{{desc}}（已暂停）",
+      "pausedWait": "已暂停 · 等待你的指令…",
+      "error": "运行出错 · 请查看上方错误信息",
+      "cancelled": "已中断 · 可点击右侧重新执行"
+    },
+    "pause": "暂停",
+    "pauseTooltipDesc": "暂停当前任务，可编辑输入追加指令",
+    "pauseAria": "暂停运行",
+    "resume": "继续",
+    "resumeTooltip": "继续运行",
+    "resumeTooltipDesc": "从检查点恢复执行",
+    "resumeAria": "继续运行",
+    "retry": "重试",
+    "retryTooltipDesc": "以相同输入重跑本轮",
+    "rerun": "重新执行",
+    "rerunTask": "重新执行该任务",
+    "rerunTooltipDesc": "以相同输入重跑",
+    "stop": "停止",
+    "stopTooltipDesc": "终止当前任务，已执行步骤保留",
+    "stopAria": "停止运行",
+    "placeholder": "追加指令后点继续…（留空直接继续）",
+    "rerunAria": "重新执行该任务"
+  },
+  "thought": {
+    "failed": "执行失败",
+    "summary": {
+      "thoughtTime": "已思考 {{time}}s",
+      "toolCall": "调用 {{count}} 个工具（{{tools}}）"
+    },
+    "status": {
+      "running": "思考中…",
+      "failed": "思考失败",
+      "done": "已完成思考"
+    },
+    "copy": "复制",
+    "hover": {
+      "intent": "意图：{{intent}}",
+      "result": "结果：{{result}}",
+      "duration": "耗时：{{duration}}s · {{time}}"
+    },
+    "guardedTitle": "Agent 拦截（门禁/预算，非错误）",
+    "action": {
+      "collapse": "收起",
+      "detail": "详情",
+      "copyResult": "复制结果",
+      "retry": "重试",
+      "viewFull": "查看完整输出 →"
+    },
+    "contentChars": "（{{count}} 字符）",
+    "progress": {
+      "title": "并行执行 {{count}} 个工具",
+      "running": "执行中…"
+    }
+  },
+  "modelswitcher": {
+    "selectModel": "选择模型",
+    "context": "上下文 {{ctx}}K",
+    "supportThinking": "支持思考",
+    "supportTools": "支持工具调用",
+    "model": "模型",
+    "health": {
+      "unconfigured": "未配置模型",
+      "unconfiguredTitle": "未配置任何模型，点击前往设置",
+      "missing": "模型已删除",
+      "missingTitle": "当前模型已从配置删除，请重新选择",
+      "disabledTitle": "当前模型已被禁用，点击重新选择"
+    },
+    "kind": {
+      "openai": "OpenAI 兼容",
+      "anthropic": "Anthropic",
+      "ollama": "Ollama 本地",
+      "vllm": "vLLM"
+    },
+    "onboarding": {
+      "title": "模型搬到这里了——点这里随时切换",
+      "dismiss": "知道了"
+    },
+    "chipDesc": "选择本轮对话使用的模型",
+    "chipSwitchAria": "切换模型：{{label}}",
+    "agentDefaultTip": "@{{agent}} 默认用 {{model}}，点击切回",
+    "searchPlaceholder": "搜索模型…",
+    "noMatch": "无匹配模型，请先配置",
+    "recommended": "推荐",
+    "providerHeader": "{{label}}（{{count}}）",
+    "manageConfig": "管理模型配置…",
+    "agentDefault": "当前智能体默认模型",
+    "thinkModeTooltip": "支持思考模式",
+    "thinkBadge": "思考",
+    "toolModeTooltip": "支持工具调用",
+    "toolBadge": "工具"
+  },
+  "quickaction": {
+    "commands": {
+      "newTask": "新建任务",
+      "quickOpen": "文件快速打开",
+      "toggleLeft": "折叠或展开左栏",
+      "toggleRight": "折叠或展开右栏",
+      "openSettings": "打开设置",
+      "export": "导出当前对话",
+      "returnTask": "返回任务"
+    },
+    "placeholder": {
+      "all": "Type a command, file, skill, or agent…",
+      "command": "/ 输入命令…",
+      "file": "> 输入文件名…",
+      "skill": "@ 输入技能名…",
+      "agent": "# 输入智能体名…"
+    },
+    "inputAriaLabel": "搜索命令、文件、技能或智能体",
+    "prefix": {
+      "all": "全部",
+      "command": "/ 命令",
+      "file": "> 文件",
+      "skill": "@ 技能",
+      "agent": "# 智能体"
+    },
+    "resultsAriaLabel": "Quick Action 结果",
+    "source": {
+      "command": "命令",
+      "file": "文件",
+      "skill": "技能",
+      "agent": "智能体"
+    },
+    "noMatches": "No matches for '{{query}}'",
+    "footer": {
+      "navigate": "导航",
+      "select": "选择",
+      "close": "关闭",
+      "count": "{{count}} 项"
+    }
+  },
+  "modulepage": {
+    "automations": {
+      "title": "自动化",
+      "subtitle": "定时或手动触发的 Agent 任务"
+    },
+    "skills": {
+      "title": "能力",
+      "subtitle": "技能 · 插件（MCP Server）统一管理"
+    },
+    "agents": {
+      "title": "智能体",
+      "subtitle": "Agent 角色 · 人格 · 默认模型"
+    },
+    "kb": {
+      "title": "知识库",
+      "subtitle": "文档解析 · 检索注入"
+    },
+    "memory": {
+      "title": "记忆",
+      "subtitle": "L1–L4 四层记忆视图"
+    },
+    "settings": {
+      "title": "设置",
+      "subtitle": "模型 / 工作区 / 外观 / 快捷键 / 高级"
+    },
+    "close": {
+      "tooltip": "关闭并返回任务",
+      "aria": "关闭{{title}}页面，返回任务（Esc）"
+    }
+  },
+  "conversationflow": {
+    "loadingAgent": "正在加载 Agent…",
+    "executing": "执行中…",
+    "newMessagesAria": "{{count}} 条新消息，点击跳到底部",
+    "plan": "任务计划",
+    "goal": "目标",
+    "completed": "{{done}}/{{total}} 完成",
+    "planStepAria": "计划步骤 {{index}}：{{text}}（状态：{{status}}）",
+    "steps": "步骤流"
+  },
+  "browserchrome": {
+    "nav": {
+      "cycleTabs": "切换标签（共 {{count}} 个）",
+      "back": "后退",
+      "forward": "前进",
+      "reloading": "加载中…",
+      "refresh": "刷新",
+      "addressPlaceholder": "输入网址或路径，⏎ 打开",
+      "agentOperating": "agent 正在操作此页面",
+      "newTab": "新建标签",
+      "closeTab": "关闭标签"
+    },
+    "tabs": {
+      "newTabPage": "新标签页",
+      "close": "关闭标签",
+      "new": "新建标签"
+    },
+    "status": {
+      "loading": "正在加载 {{url}}",
+      "openedNewWindow": "已在新窗口打开",
+      "loadFailed": "加载失败：{{error}}",
+      "unknownError": "未知错误",
+      "browserClosedFloat": "浏览器已关闭，可关闭此窗口",
+      "restoredToDock": "已收回侧栏浏览器，可关闭此窗口",
+      "poppedOut": "已弹出为独立窗口",
+      "loadingIdle": "加载中…",
+      "agentOperating": "agent 正在操作"
+    },
+    "host": {
+      "attach": "收回侧栏浏览器",
+      "detach": "弹出为独立窗口"
+    },
+    "float": {
+      "waitingLoad": "等待浏览器加载…"
+    }
+  },
+  "rightdock": {
+    "adjusted": "已为 @{{name}} 调整工作台 · {{tab}}已置顶",
+    "tooltipResize": "拖拽调整宽度",
+    "tooltipResizeDesc": "300–520px 之间自由拖动",
+    "tabCustomize": "右键可自定义此 Tab",
+    "tabAria": "{{label}} {{kbd}}（右键自定义）",
+    "resetLayout": "还原默认布局",
+    "resetLayoutDesc": "撤销对该智能体的面板顺序自定义",
+    "restore": "还原",
+    "customize": "自定义…",
+    "menuTitle": "{{label}} Tab",
+    "hideTab": "隐藏此 Tab",
+    "pinned": "（固定）",
+    "openPanel": "打开面板",
+    "notice": {
+      "adjusted": "已为 @{{name}} 调整工作台 · {{tab}}已置顶"
+    }
+  },
+  "inspector": {
+    "toolWindowBar": "右侧工具窗口栏",
+    "resize": "拖拽调整宽度",
+    "resizeDesc": "280–480px 之间自由拖动",
+    "resizeHandleAria": "工具窗口宽度调整手柄",
+    "tabAria": "{{label}} {{kbd}}（可拖动重排，拖出工具栏可隐藏）",
+    "hiddenLabel": "已隐藏的标签",
+    "restoreTab": "恢复「{{label}}」",
+    "restoreTabAria": "恢复标签：{{label}}",
+    "expand": "展开右栏",
+    "collapse": "折叠右栏",
+    "tabBar": "工具窗口标签栏"
+  },
+  "onboarding": {
+    "stepModelsTitle": "配置 AI 模型",
+    "stepModelsDesc": "添加一个模型服务，智能体才能开始工作",
+    "stepModelsAction": "去配置模型",
+    "stepWorkspaceTitle": "添加工作区",
+    "stepWorkspaceDesc": "关联一个文件夹，创建你的第一个工作区",
+    "stepWorkspaceAction": "添加文件夹",
+    "stepTaskTitle": "创建任务",
+    "stepTaskDesc": "开始一段对话，向智能体提出你的需求",
+    "stepTaskActionNew": "创建任务",
+    "stepTaskActionView": "查看任务",
+    "aria": "首次使用引导",
+    "welcome": "欢迎使用 ArkWork",
+    "headerSkipAria": "跳过引导",
+    "complete": "已完成 {{done}}/{{total}} 步",
+    "skip": "跳过"
+  },
+  "messageactions": {
+    "copied": "已复制",
+    "copyFailed": "复制失败",
+    "copyLabel": "复制消息",
+    "copyDesc": "将消息复制到剪贴板",
+    "copyAria": "复制消息",
+    "regenerateLabel": "重新生成",
+    "regenerateDesc": "让智能体重新生成这条回复",
+    "regenerateAria": "重新生成",
+    "exportLabel": "导出对话",
+    "exportDesc": "将对话导出为文件",
+    "exportAria": "导出对话"
+  },
+  "sidelist": {
+    "checklist": "清单",
+    "context": "上下文",
+    "files": "文件",
+    "browser": "浏览器",
+    "terminal": "终端",
+    "progress": "进度",
+    "memory": "记忆",
+    "logs": "日志",
+    "preview": "预览"
+  },
+  "logsview": {
+    "badgeDebug": "调试",
+    "badgeInfo": "信息",
+    "badgeWarn": "警告",
+    "badgeError": "错误",
+    "copyLineAria": "复制该条日志",
+    "copyLineTitle": "复制该条",
+    "collapseError": "收起错误",
+    "collapse": "收起",
+    "expandError": "展开错误",
+    "expand": "展开",
+    "copiedLine": "已复制",
+    "copyErrorLine": "复制错误",
+    "copyLine": "复制",
+    "noCopiable": "没有可复制的日志",
+    "copyFailedManual": "复制失败，请手动选择",
+    "entriesUnit": "条",
+    "filterPlaceholder": "过滤日志…",
+    "copyFilteredLabel": "已复制筛选后日志",
+    "copyFilteredAria": "复制筛选后日志",
+    "copyFilteredTitle": "复制筛选后的日志到剪贴板",
+    "copyFilteredBtn": "复制",
+    "emptyTitle": "暂无日志",
+    "noMatchTitle": "没有匹配的日志",
+    "emptyHint": "运行任务后日志会在此显示",
+    "copiedOneEntry": "已复制 1 条日志",
+    "ctxCopyLine": "复制该条",
+    "ctxCopyFilteredAll": "复制筛选后全部（{{count}}）",
+    "ctxCopyAll": "复制全部（{{count}}）",
+    "copyAllLabel": "已复制全部日志",
+    "clearFilter": "清除筛选"
+  },
+  "artifactcard": {
+    "kindMarkdown": "文档",
+    "kindBrowser": "网页",
+    "kindImage": "图片",
+    "kindSvg": "图形",
+    "kindTable": "表格",
+    "kindCode": "代码",
+    "kindFallback": "文件",
+    "copiedPath": "已复制路径",
+    "copyFailed": "复制失败",
+    "addedToContext": "已将 {{name}} 加入上下文",
+    "previewAction": "预览",
+    "preview": "预览",
+    "copyPath": "复制路径",
+    "insertContext": "加入上下文"
+  },
+  "bugfixresult": {
+    "statusAchieved": "已达成",
+    "statusExhausted": "已用尽尝试",
+    "statusFailed": "失败",
+    "attemptCount": "尝试 {{count}} 次",
+    "diffSummary": "变更摘要",
+    "noChanges": "无代码变更",
+    "testOutput": "测试输出",
+    "noTestOutput": "无测试输出",
+    "goal": "目标"
+  },
+  "askuser": {
+    "suggestionAria": "建议选项",
+    "recommended": "推荐",
+    "customPlaceholder": "或输入自定义回答…",
+    "answerPlaceholder": "输入你的回答…",
+    "customAria": "自定义回答",
+    "submitAria": "提交",
+    "submit": "提交",
+    "navHint": "↑↓ 选择，↵ 确认",
+    "enterHint": "↵ 发送",
+    "stop": "停止"
+  },
+  "quickopen": {
+    "placeholder": "搜索文件…",
+    "noFiles": "暂无文件",
+    "noMatch": "没有匹配的文件",
+    "navigate": "导航",
+    "openInWindow": "在新窗口打开",
+    "close": "关闭",
+    "fileCount": "显示 {{shown}}/{{total}} 个文件"
+  },
+  "toolconfirm": {
+    "riskLow": "低风险",
+    "riskMedium": "中风险",
+    "riskHigh": "高风险",
+    "addedAllowRule": "已添加允许规则",
+    "addAllowRuleFailed": "添加允许规则失败",
+    "requestShell": "智能体请求执行终端命令",
+    "requestSkill": "智能体请求调用「{{skill}}」技能",
+    "toolOf": "「{{skill}}」技能",
+    "needConfirm": "需要您的确认",
+    "shell": "SHELL",
+    "copy": "复制",
+    "execDir": "执行目录：{{dir}}",
+    "impacts": "影响范围",
+    "alwaysAllow": "总是允许",
+    "noAskSession": "本次会话内不再询问",
+    "deny": "拒绝",
+    "allow": "允许",
+    "closeHint": "Esc 关闭"
+  },
+  "markdown": {
+    "copied": "已复制",
+    "copy": "复制",
+    "jsonInvalid": "JSON 无效",
+    "chart": "图表",
+    "copiedAction": "已复制",
+    "copyAction": "复制"
+  },
+  "toastlayer": {
+    "close": "关闭"
+  },
+  "confirmdialog": {
+    "closeHint": "Esc 关闭"
+  },
+  "suggestion": {
+    "nextStep": "下一步",
+    "recommended": "推荐"
+  },
+  "agentchip": {
+    "aria": "智能体 {{name}}"
+  },
+  "steplist": {
+    "toolFailed": "工具执行失败",
+    "cacheHitTitle": "缓存命中",
+    "locateTodo": "定位到清单项"
+  },
+  "meta": {
+    "error": {
+      "errAgentNotFound": "Agent 不存在或已被删除，请到智能体页面恢复后重试",
+      "errModelUnconfigured": "模型未配置或不可用，请在设置中选择可用模型后再运行",
+      "errModelInvalid": "所选模型已被删除或禁用，请在设置中重新选择模型",
+      "errTaskNotFound": "找不到该任务，可能已被删除，请刷新任务列表",
+      "errToolNotRegistered": "工具未注册，请检查 Agent 的技能配置",
+      "errModelDisabled": "模型未配置或已禁用，请在设置中检查",
+      "errConnRefused": "无法连接到模型服务，请确认服务已启动且地址正确",
+      "errNetwork": "网络请求失败，请检查网络或服务是否可达",
+      "errUnauthorized": "认证失败，请检查 API Key 是否正确",
+      "errRateLimit": "请求过于频繁，请稍后重试",
+      "errFileNotFound": "文件不存在或路径无效",
+      "errPermission": "工作区目录不可写（系统权限限制）。若应用是从终端启动，请改用 \"open\" 命令或双击应用图标启动",
+      "errInsufficientBalance": "模型账户余额不足，请到对应平台充值后重试"
+    },
+    "inspector": {
+      "todos": "清单",
+      "context": "上下文",
+      "files": "文件",
+      "logs": "日志",
+      "browser": "浏览器",
+      "terminal": "终端"
+    },
+    "dock": {
+      "files": "文件",
+      "context": "上下文",
+      "terminal": "终端",
+      "browser": "浏览器",
+      "todos": "任务清单",
+      "progress": "进度"
+    },
+    "llm": {
+      "balance": "LLM 账户余额不足。请到对应服务商充值，或在设置中切换其他可用模型。",
+      "auth": "API Key 无效或权限不足。请在设置中检查模型凭据，或联系服务商确认账号状态。",
+      "rateLimit": "请求频率超限（限流）。请稍后重试，或在设置中降低并发 / 切换其他模型。",
+      "serverError": "LLM 服务端异常（5xx）。请稍后重试；持续失败可在设置中切换其他模型。",
+      "contextOverflow": "上下文超过模型上限。请清理会话历史 / 减少当前任务文档长度，或切换上下文窗口更大的模型。",
+      "network": "网络异常，请检查代理 / 网络连通性后重试。"
+    }
+  },
+  "slice": {
+    "init": {
+      "themeInitFailed": "主题初始化失败"
+    },
+    "persist": {
+      "defaultWorkspace": "默认工作区"
+    },
+    "ui": {
+      "languageSaveFailed": "语言设置保存失败",
+      "preview": "预览",
+      "themePersistFailed": "主题持久化失败",
+      "themeSyncFailed": "原生主题同步失败"
+    },
+    "feedback": {
+      "confirm": "确认",
+      "cancel": "取消"
+    },
+    "catalog": {
+      "createdAgent": "已创建 Agent：@{{name}}",
+      "agentUpdated": "Agent 已更新",
+      "deleteAgentTitle": "删除 Agent",
+      "deleteAgentBody": "确定要删除 Agent「{{name}}」吗？此操作不可撤销。",
+      "delete": "删除",
+      "agentDeleted": "Agent 已删除",
+      "createdSkill": "已创建 Skill：{{name}}",
+      "skillUpdated": "Skill 已更新",
+      "deleteSkillTitle": "删除 Skill",
+      "deleteSkillBody": "确定要删除 Skill「{{name}}」吗？此操作不可撤销。",
+      "skillDeleted": "Skill 已删除",
+      "importedSkill": "已导入 Skill：{{name}}",
+      "exportedZip": "已导出为 ZIP（{{count}} 个文件）：{{path}}",
+      "exportedDir": "已导出到目录（{{count}} 个文件）：{{path}}",
+      "mcpAdded": "已添加 MCP：{{name}}",
+      "mcpUpdated": "MCP 已更新",
+      "deleteMcpTitle": "删除 MCP Server",
+      "deleteMcpBody": "确定要删除 MCP「{{name}}」吗？若已连接将先断开。",
+      "mcpDeleted": "MCP 已删除",
+      "mcpConnected": "MCP 已连接",
+      "mcpConnectFailed": "MCP 连接失败",
+      "modelSwitched": "已切换至 {{model}} · 上下文保留"
+    },
+    "kbMemory": {
+      "automationCreated": "已创建自动化：{{name}}",
+      "automationUpdated": "已更新自动化",
+      "automationDeleted": "已删除自动化",
+      "automationStarted": "自动化已启动，正在执行",
+      "kbAdded": "已添加到知识库：{{name}}",
+      "kbRemoved": "已从知识库移除",
+      "memoryEnabled": "上下文已更新 · +1 条记忆生效 · 下一轮起用",
+      "memoryDisabled": "上下文已更新 · -1 条记忆停用 · 下一轮起用"
+    },
+    "market": {
+      "cliInstalled": "skillhub CLI 已安装{{version}}",
+      "skillInstalled": "已安装 Skill：{{name}}",
+      "skillAlreadyInstalled": "该 Skill 已安装",
+      "favoritedSkill": "已收藏技能",
+      "skillUninstalled": "已卸载该 Skill"
+    },
+    "tasks": {
+      "requestTimeout": "请求超时（2s 未收到回执），已回滚",
+      "planRejected": "清单操作被拒绝：{{reason}}",
+      "selectModelFirst": "请先在设置中配置并选择一个模型",
+      "taskCreateFailed": "任务创建失败，请检查模型配置",
+      "kbSaveFailed": "保存全局 KB 开关失败",
+      "unnamedWorkspace": "未命名工作区",
+      "createWorkspaceFailed": "创建工作区失败：{{error}}",
+      "workspaceSwitched": "已切换工作区 · 记忆已随任务隔离（{{name}}）",
+      "switchWorkspaceFailed": "切换工作区失败：{{error}}",
+      "exportStepStream": "步骤流"
+    },
+    "subscriptions": {
+      "taskFailedHint": "任务失败：{{error}}\n\n💡 {{hint}}",
+      "taskFailed": "任务失败：{{error}}",
+      "viewLogs": "请查看日志了解详情",
+      "contextCompressed": "上下文已压缩 · {{before}} → {{after}} tokens",
+      "contextCompressedLayer": "上下文已压缩（L{{layer}} · {{before}} → {{after}} tokens）",
+      "profileUpdated": "用户画像已更新 · v{{version}}（+{{count}} 条观察）",
+      "memoryMerged": "已将记忆合并到知识库"
+    }
+  },
+  "plantatus": {
+    "waiting": "等待",
+    "running": "执行中",
+    "done": "已完成",
+    "failed": "失败",
+    "cancelled": "已取消",
+    "skipped": "已跳过"
+  },
+  "help": {
+    "title": "ArkWork 帮助中心",
+    "subtitle": "覆盖全部主要功能 · ⌘? 打开 / 关闭",
+    "closeLabel": "关闭帮助",
+    "tryNow": "现在去试试",
+    "privacyFooter": "隐私 · ArkWork 默认本地优先。对话、记忆、知识库索引落本地 SQLite 与文件系统，模型调用由你在设置中显式配置的 API Key 发起。",
+    "dir": {
+      "title": "目录",
+      "ref": "参考",
+      "shortcuts": "快捷键",
+      "navAria": "帮助目录"
+    },
+    "shortcuts": {
+      "title": "快捷键总表",
+      "subtitle": "全局快捷键参考",
+      "desc": {
+        "quickAction": "Quick Action（搜索 / 命令 / @ 提及 / # 话题）",
+        "quickOpen": "QuickOpen：按名字跳转到任务、文件、技能",
+        "newTask": "新建任务并聚焦到 Composer",
+        "sidebar": "折叠 / 展开左侧 Sidebar",
+        "inspector": "折叠 / 展开右侧 Inspector",
+        "preview": "开关 PreviewWindow 浮窗",
+        "settings": "打开设置（页面化）",
+        "help": "打开 / 关闭 HelpCenter（本页）",
+        "helpAlt": "打开 / 关闭 HelpCenter（备选快捷键）",
+        "workspace": "打开工作区切换器",
+        "agents": "智能体（Agents）",
+        "skills": "技能（Skills）",
+        "kb": "知识库（KB）",
+        "memory": "记忆（Memory）",
+        "automations": "自动化（Automations）",
+        "settingsModule": "设置（Settings）",
+        "inspTodos": "Inspector：清单（Todos）",
+        "inspContext": "Inspector：上下文（Context）",
+        "inspFiles": "Inspector：文件（Files）",
+        "inspLogs": "Inspector：日志（Logs）",
+        "inspBrowser": "Inspector：浏览器（Browser）",
+        "esc": "按优先级关闭浮层 / ModulePage / Inspector"
+      }
+    },
+    "sections": {
+      "workspace": {
+        "title": "工作区",
+        "summary": "左侧栏显示当前工作区、任务线程、能力入口与搜索；折叠态保留 64px 图标栏。",
+        "bullets": {
+          "0": "顶部主按钮\"新建任务\"直达对话。",
+          "1": "Threads 默认按 Pinned / Today / This week / Earlier 分组，全部折叠以减少视觉噪声。",
+          "2": "能力入口（智能体 / 技能 / 知识 / 记忆 / 自动化 / 设置）单击直达 ModulePage，重复点击保持打开。",
+          "3": "侧栏宽度 64–320px 之间可拖。"
+        },
+        "actions": {
+          "0": "打开工作区切换器",
+          "1": "打开设置页（外观 / 工作区）",
+          "2": "新建任务"
+        }
+      },
+      "tasks": {
+        "title": "任务",
+        "summary": "任务是 ArkWork 的最小协作单元：一个任务 = 一段对话 + 计划 + 文件上下文 + 历史步骤。",
+        "bullets": {
+          "0": "新建任务后 Composer 自动聚焦；输入回车即开始第一轮执行，标题自动取首条消息简化生成。",
+          "1": "Threads 行 ⋯ 菜单支持重命名、运行 / 停止、收藏、删除。",
+          "2": "失败 / 取消的步骤可单独\"重新运行\"；历史消息与文件保留。",
+          "3": "任务级知识库开关：每个任务可独立启用 KB 检索（不依赖全局）。"
+        },
+        "actions": {
+          "0": "新建一个任务试试",
+          "1": "聚焦 Composer"
+        }
+      },
+      "parallel": {
+        "title": "并行执行",
+        "summary": "无依赖的多次工具调用会被自动并行发起，进度按工具维度独立展示，不会互相覆盖。",
+        "bullets": {
+          "0": "同一 Agent 一次推理中可触发多个工具调用，引擎并发执行。",
+          "1": "前后依赖（写入后再读取）仍按串行语料执行，避免竞态。",
+          "2": "计划卡 / 右侧清单共享同一份 planItems 数据源，杜绝\"提前勾完\"。"
+        },
+        "actions": {
+          "0": "打开 Inspector · 清单",
+          "1": "打开 Inspector · 日志"
+        }
+      },
+      "conversation": {
+        "title": "对话流",
+        "summary": "对话流承载用户消息、计划、工具调用结果与 Agent 回复；可滚动、可锁定焦点。",
+        "bullets": {
+          "0": "用户消息与 Agent 回复的文本块默认按时间倒序堆叠；工具调用以\"折叠卡片\"展示。",
+          "1": "当 Agent 正在执行时，对话顶部出现\"正在运行命令…\"等人类可读描述（按工具类型映射）。",
+          "2": "Composer 支持多行输入；长任务可暂停 / 继续 / 取消。"
+        },
+        "actions": {
+          "0": "聚焦 Composer",
+          "1": "新建任务开始一段对话"
+        }
+      },
+      "agents": {
+        "title": "智能体",
+        "summary": "智能体（Agent）= 人格 + 默认模型 + 启用技能 + Dock 偏好。可创建、编辑、复制。",
+        "bullets": {
+          "0": "智能体页展示所有 Agent，每条带：图标、人格摘要、模型、已启用技能数、Dock 预设。",
+          "1": "新建 / 编辑打开 AgentEditor 表单：人格提示词、默认模型、可用技能、Dock 布局。",
+          "2": "切换 Agent 会自动应用其 Dock 偏好；状态栏短暂显示一次提示条。"
+        },
+        "actions": {
+          "0": "打开智能体页面"
+        }
+      },
+      "skills": {
+        "title": "技能（内置 / 市场 / 已导入）",
+        "summary": "技能按来源分类为三组，每组有独立徽标与数量角标；导入来源可追溯。",
+        "bullets": {
+          "0": "内置：ArkWork 自带技能，不可删除；用于 shell / 文件读取 / KB 查询等基础能力。",
+          "1": "市场：从 SkillHub 安装的技能，可更新 / 移除；已安装项展示在「市场 Tab」已安装区。",
+          "2": "已导入：本地文件导入或外部 MCP 接入技能，含来源字段。",
+          "3": "从 zip 导入时整个 zip 内容（所有 .md / 子目录文件）都会被解压到 Skill 文件夹。"
+        },
+        "actions": {
+          "0": "打开能力中心"
+        }
+      },
+      "kb": {
+        "title": "知识库",
+        "summary": "把 PDF / TXT / Markdown / DOCX 解析为可检索文本（SQLite FTS5），kb_query 工具调用命中片段。",
+        "bullets": {
+          "0": "支持文档解析中 / 已索引 / 失败三态；失败可在 KB 页面一键重试。",
+          "1": "提供\"会话级 + 全局级\"双层 KB 开关：关闭后 kb-search 不注入上下文，无需重启。",
+          "2": "命中片段可在 Inspector · 上下文面板与文件面板查看。"
+        },
+        "actions": {
+          "0": "打开知识库页面",
+          "1": "关闭全局 KB（演示开关）",
+          "2": "重新启用全局 KB"
+        }
+      },
+      "memory": {
+        "title": "记忆 L1 – L4",
+        "summary": "ArkWork 维护四层记忆，自动蒸馏晋升，原始层会自动清理。",
+        "bullets": {
+          "0": "L1 工作记忆：当轮对话上下文内的临时条目。",
+          "1": "L2 文件记忆：会话内抽取的事实、引用、命令记录。",
+          "2": "L3 策展记忆：跨会话的主题 / 复用片段，可被搜索并注入。",
+          "3": "L4 画像记忆：长期用户偏好与角色画像，慢变量更新。",
+          "4": "满足门槛（主题计数 / 复用次数 / L2 体积）会自动蒸馏；UI 中\"手动转知识库\"已下线。"
+        },
+        "actions": {
+          "0": "打开记忆页面"
+        }
+      },
+      "automations": {
+        "title": "自动化",
+        "summary": "定时或手动触发的 Agent 任务；支持闹钟式频率选择 + 自定义 cron。",
+        "bullets": {
+          "0": "在自动化页面创建 / 编辑 / 删除；命中触发时间后会进入任务队列。",
+          "1": "执行结果会回写到对应任务的对话流，便于回看。",
+          "2": "自动化执行期间的状态可在状态栏右下角\"运行中\"指示器实时反映。"
+        },
+        "actions": {
+          "0": "打开自动化页面"
+        }
+      },
+      "inspector": {
+        "title": "Inspector",
+        "summary": "右侧五固定 Tab：清单 / 上下文 / 文件 / 日志 / 浏览器。",
+        "bullets": {
+          "0": "当前激活标签再点击可折叠；折叠后任意标签再次点击能重新展开（不再\"卡住\"）。",
+          "1": "清单：实时同步 planItems，状态源唯一。",
+          "2": "上下文：只读展示当前任务注入的 KB / 记忆片段与 token 预算；L2 起可在记忆中心编辑。",
+          "3": "文件：工作区文件浏览（不再保留假\"收藏\"按钮）。",
+          "4": "日志：工具调用 / 权限 / 错误流水；可一键复制。",
+          "5": "浏览器：内嵌 BrowserPanel 与 PreviewWindow 联动。"
+        },
+        "actions": {
+          "0": "打开清单",
+          "1": "打开上下文",
+          "2": "打开文件",
+          "3": "打开日志",
+          "4": "打开浏览器"
+        }
+      },
+      "models": {
+        "title": "模型 / 设置",
+        "summary": "设置页五分区：模型 / 工作区 / 外观 / 快捷键 / 高级。",
+        "bullets": {
+          "0": "模型：选择默认 / 备用模型，配置 API Key；支持 OpenAI、Anthropic、本地 Ollama。",
+          "1": "工作区：选择工作区根目录、默认 KB、文件忽略规则。",
+          "2": "外观：主题（浅 / 深 / 跟随系统）+ 字体密度。",
+          "3": "快捷键：当前所有快捷键只读总表（与 HelpCenter 同步）。",
+          "4": "高级：实验性开关、日志级别、自动更新通道。",
+          "5": "当前模型仅在 Composer 唯一展示，其他位置（TopBar / StatusBar / 任务头）已收敛。"
+        },
+        "actions": {
+          "0": "打开设置"
+        }
+      },
+      "privacy": {
+        "title": "隐私 / 本地存储",
+        "summary": "ArkWork 默认本地优先：任务 / 对话 / 记忆落本地 JSON，知识库索引落本地 SQLite（FTS5）与文件系统。",
+        "bullets": {
+          "0": "数据目录：开发态 userData 重定向到 app/.dev-data；打包态在系统 userData（macOS：~/Library/Application Support/ArkWork）。",
+          "1": "应用数据根目录为 {userData}/arkwork-data：任务 / 智能体 / 技能 / 模型 / 记忆均以 JSON 持久化于此。",
+          "2": "当前工作区：{userData}/arkwork-data/workspace/default（可在设置 · 工作区切换）；任务记忆位于 {workspaceDir}/.arkwork/memory/{taskId}。",
+          "3": "模型调用由用户显式配置的 API Key 发起；ArkWork 不上传你的对话内容。",
+          "4": "一键导出 / 清空工作区数据；所有变更可在设置 → 高级找到入口。"
+        },
+        "actions": {
+          "0": "打开设置 · 高级"
+        }
+      }
+    }
+  },
+  "const": {
+    "status": {
+      "pending": "等待中",
+      "running": "运行中",
+      "paused": "已暂停",
+      "done": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消"
+    },
+    "todo": {
+      "itemProgress": "第 {{index}} 项 → {{status}}"
+    },
+    "tool": {
+      "fileReader": "读取文件",
+      "fileWriter": "写入文件",
+      "fileEditor": "编辑文件",
+      "globSearch": "查找文件",
+      "grepSearch": "搜索内容",
+      "webSearch": "搜索网页",
+      "fetchUrl": "访问页面",
+      "shell": "运行命令",
+      "delegateAgent": "委派给",
+      "sessionSearch": "检索历史",
+      "taskComplete": "完成任务",
+      "askUser": "询问用户",
+      "todoUpdate": "更新清单"
+    },
+    "argKey": {
+      "path": "路径",
+      "query": "查询",
+      "url": "网址",
+      "command": "命令",
+      "question": "问题",
+      "agentId": "智能体",
+      "text": "内容",
+      "prompt": "提示词",
+      "context": "上下文",
+      "cwd": "目录",
+      "regex": "正则",
+      "replace": "替换",
+      "glob": "匹配模式"
+    },
+    "memory": {
+      "l1": "工作记忆",
+      "l2": "产物记忆",
+      "l3": "知识记忆",
+      "l4": "经验记忆"
+    },
+    "exec": {
+      "thinking": "正在思考",
+      "shell": "正在执行命令",
+      "fileReader": "正在读取文件",
+      "fileWriter": "正在写入文件",
+      "fileEditor": "正在编辑文件",
+      "webSearch": "正在搜索网页",
+      "fetchUrl": "正在访问页面",
+      "sessionSearch": "正在检索历史会话",
+      "delegateAgent": "正在委派子任务",
+      "kbQuery": "正在查询知识库",
+      "kbIndex": "正在索引知识库",
+      "askUser": "等待用户输入",
+      "finalizing": "正在整理结果",
+      "external": "正在外部工具中执行"
+    }
+  },
+  "agentEditor": {
+    "nameRequired": "请填写智能体名称",
+    "titleEdit": "编辑智能体",
+    "titleNew": "新建智能体",
+    "builtinNotice": "内置智能体：可编辑人格与新增固有能力，但名称不可改、固有技能不可移除、不可删除。",
+    "avatarColor": "头像颜色",
+    "colorAria": "颜色 {{color}}",
+    "nameLabel": "名称 *",
+    "namePlaceholder": "如：代码审查员",
+    "defaultModel": "默认模型",
+    "selectModelPlaceholder": "选择模型…",
+    "noModelsEnabled": "暂无已启用的模型，请先在设置中配置。",
+    "description": "描述",
+    "descriptionPlaceholder": "一句话介绍这个智能体的能力",
+    "role": "角色",
+    "rolePlaceholder": "代码审查员",
+    "goal": "目标",
+    "goalPlaceholder": "审查代码质量与安全",
+    "backstory": "背景",
+    "backstoryPlaceholder": "资深安全审计工程师",
+    "styleGuide": "风格",
+    "styleGuidePlaceholder": "要点式，先结论，代码注释英文",
+    "systemPromptPlaceholder": "你是 ArkWork 智能体…（ReAct 工作模式 / 终止条件 / 限制等）",
+    "skillsLabel": "固有能力（{{enabled}}/{{total}}）",
+    "noSkills": "暂无已安装技能",
+    "intrinsicTag": "固有",
+    "disabledTag": "未启用",
+    "sidebarWidgetsLabel": "侧边栏组件（{{enabled}}/{{total}}）",
+    "extensionPointTag": "扩展点",
+    "dockTabDesc": "右侧 Dock Tab",
+    "extensionPointDesc": "已注册，当前在模块页/Inspector/浮窗消费",
+    "memoryScope": "记忆域",
+    "memoryProfile": "用户画像",
+    "memoryProfileDesc": "注入用户偏好与长期画像",
+    "memorySkill": "蒸馏技能",
+    "memorySkillDesc": "读取自身沉淀的技能记忆"
+  }
+}

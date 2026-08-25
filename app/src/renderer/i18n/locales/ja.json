@@ -1,0 +1,2274 @@
+{
+  "common": {
+    "cancel": "キャンセル",
+    "confirm": "確認",
+    "save": "保存",
+    "close": "閉じる",
+    "delete": "削除",
+    "retry": "再試行",
+    "loading": "読み込み中…"
+  },
+  "action": {
+    "shell": "コマンド実行",
+    "shellDetail": "コマンド実行：{value}",
+    "fileReader": "ファイル読み取り",
+    "fileReaderDetail": "ファイル読み取り：{value}",
+    "fileWriter": "ファイル書き込み",
+    "fileWriterDetail": "ファイル書き込み：{value}",
+    "fileEditor": "ファイル編集",
+    "fileEditorDetail": "ファイル編集：{value}",
+    "globSearch": "ファイル検索",
+    "globSearchDetail": "ファイル検索：{value}",
+    "grepSearch": "コード検索",
+    "grepSearchDetail": "コード検索：{value}",
+    "webSearch": "ウェブ検索",
+    "webSearchDetail": "ウェブ検索：{value}",
+    "fetchUrl": "ページ取得",
+    "fetchUrlDetail": "ページ取得：{value}",
+    "kbSearch": "ナレッジベース検索",
+    "kbSearchDetail": "ナレッジベース検索：{value}",
+    "sessionSearch": "履歴検索",
+    "sessionSearchDetail": "履歴検索：{value}",
+    "delegateAgent": "サブタスク委任",
+    "delegateAgentDetail": "サブタスク委任：{value}",
+    "taskComplete": "タスク完了",
+    "taskCompleteDetail": "タスク完了：{value}",
+    "askUser": "ユーザーに確認",
+    "askUserDetail": "ユーザーに確認：{value}",
+    "callTool": "ツール呼び出し：{tool}",
+    "todoUpdate": {
+      "done": "リスト更新：項目 {item} → 完了",
+      "doneCmt": "リスト更新：項目 {item} → 完了（{comment}）",
+      "running": "リスト更新：項目 {item} → 進行中",
+      "runningCmt": "リスト更新：項目 {item} → 進行中（{comment}）",
+      "pending": "リスト更新：項目 {item} → 未着手",
+      "pendingCmt": "リスト更新：項目 {item} → 未着手（{comment}）",
+      "skipped": "リスト更新：項目 {item} → スキップ",
+      "skippedCmt": "リスト更新：項目 {item} → スキップ（{comment}）",
+      "failed": "リスト更新：項目 {item} → 失敗",
+      "failedCmt": "リスト更新：項目 {item} → 失敗（{comment}）",
+      "cancelled": "リスト更新：項目 {item} → 取消済み",
+      "cancelledCmt": "リスト更新：項目 {item} → 取消済み（{comment}）",
+      "other": "リスト更新：項目 {item} → {status}",
+      "otherCmt": "リスト更新：項目 {item} → {status}（{comment}）"
+    }
+  },
+  "settings": {
+    "language": {
+      "label": "表示言語",
+      "desc": "すぐに反映され、再起動は不要です",
+      "zh": "中文",
+      "en": "English",
+      "ja": "日本語",
+      "ko": "한국어"
+    },
+    "tabs": {
+      "barAriaLabel": "設定セクション",
+      "models": "モデル",
+      "modelsHint": "大規模言語モデル API の設定",
+      "workspace": "ワークスペース",
+      "workspaceHint": "ワークスペースのパスと分離",
+      "knowledge": "ナレッジベース",
+      "knowledgeHint": "知識ベース注入の全体有効／無効",
+      "appearance": "外観",
+      "appearanceHint": "テーマとプレビュー",
+      "advanced": "詳細設定",
+      "advancedHint": "圧縮戦略／開発者ツール",
+      "footer": "すべての変更は即時反映され、破壊的操作は再確認が必要です"
+    },
+    "knowledge": {
+      "globalTitle": "グローバルナレッジベース",
+      "effectiveImmediately": "設定後すぐに有効になり、再起動は不要です",
+      "enableInjection": "知識ベース注入を有効にする",
+      "injectBodyPrefix": "無効にすると、Agent が ",
+      "injectBodySuffix": " を呼び出しても検索結果ではなく案内メッセージを返し、Composer のコンテキストパネルには「知識ベース：無効」と表示されます。",
+      "currentTitle": "現在のナレッジベース",
+      "openPanel": "ナレッジパネルを開く",
+      "indexedCount": "インデックス済みエントリ",
+      "parseFailed": "解析失敗",
+      "totalCount": "エントリ合計",
+      "sessionTitle": "セッション単位のスイッチ",
+      "sessionDesc": "セッション単位の「ナレッジベース」スイッチは、Inspector の「コンテキスト」パネル上部にあります。タスクを切り替えても影響はありませんが、無効にすると現在のセッションでのみ KB 注入が行われなくなります。"
+    },
+    "permission": {
+      "title": "権限",
+      "fastSwitchHint": "Shift+Tab で素早く切り替え",
+      "sessionMode": "セッションモード",
+      "ruleMerged": "マージ済みルール",
+      "ruleCount": "{{count}} 件",
+      "noCustomRules": "カスタムルールはありません",
+      "none": "なし",
+      "customAllowRules": "カスタム allow ルール",
+      "addRulePlaceholder": "Bash(npm test) または Bash(git diff:*)",
+      "addAllowRule": "allow ルールを追加",
+      "bypassConfirmTitle": "「完全解放」モードを有効にしますか？",
+      "confirmBody0": "このモードでは、Agent がすべてのツール承認をスキップします（従来は手動確認が必要だった高リスク操作を含みます）：",
+      "confirmBody1": "・任意の Shell コマンド（ファイル削除、依存関係のインストール、ネットワーク要求を含む）",
+      "confirmBody2": "・ワークスペース外のファイル読み書きと保護されたパス（.env、シークレットなど）",
+      "confirmBody3": "・ブラックリストのコマンドはブロックされなくなります",
+      "confirmBody5": "このモードは永続化されず、アプリを再起動すると既定の権限に戻ります。タスク終了後はすぐに他のモードへ切り替えてください。",
+      "bypassConfirmLabel": "リスクを理解した上で有効にする",
+      "cancel": "キャンセル",
+      "modeOptions": {
+        "default": {
+          "label": "既定",
+          "desc": "毎回実行を確認"
+        },
+        "autoApprove": {
+          "label": "自動承認",
+          "desc": "読み書きは自動承認、高リスクコマンドは確認"
+        },
+        "acceptEdits": {
+          "label": "編集を受け入れる",
+          "desc": "ワークスペース内は自動承認"
+        },
+        "plan": {
+          "label": "読み取り専用",
+          "desc": "読み取り専用の探索で、書き込みは拒否"
+        },
+        "bypassPermissions": {
+          "label": "完全解放",
+          "desc": "すべての承認をスキップ（高リスク操作も許可）、再確認が必要、永続化されない"
+        }
+      },
+      "ruleGroups": {
+        "allow": "許可",
+        "ask": "確認",
+        "deny": "拒否"
+      }
+    },
+    "developer": {
+      "compressionTitle": "圧縮と蒸留の戦略",
+      "compressThresholdLabel": "L1 自動圧縮トリガーしきい値",
+      "compressStrategyLabel": "圧縮戦略",
+      "compressStrategyValue": "類似度 0.6 + 時間減衰 7 日間",
+      "distillThresholdLabel": "蒸留の自動トリガー基準",
+      "distillThresholdValue": "トピック 10 件 / 再利用 5 回 / L2 ≧ 50 件",
+      "tempEntryTtlLabel": "L1/L2 一時エントリの有効期限",
+      "tempEntryTtlValue": "7 日間で自動的に蒸留・整理",
+      "toolsTitle": "開発者ツール",
+      "logsTab": "ログ",
+      "graphTab": "グラフ"
+    },
+    "workspace": {
+      "title": "ワークスペース（タスクと記憶は各ワークスペースで分離）",
+      "add": "ワークスペースを追加",
+      "empty": "ワークスペースはありません。「ワークスペースを追加」をクリックして作成してください",
+      "current": "現在",
+      "running": "実行中",
+      "openFolder": "フォルダを開く",
+      "switch": "切り替え",
+      "remove": "削除",
+      "removeConfirmTitle": "ワークスペースを削除",
+      "removeConfirmBody": "ワークスペース「{{name}}」を削除しますか？タスクデータはディスクに残りますが、このリストには表示されなくなります。",
+      "noFolderToast": "既定のワークスペースには関連するフォルダがありません",
+      "openFolderFail": "フォルダを開けませんでした：{{message}}"
+    },
+    "models": {
+      "title": "大規模言語モデル設定",
+      "add": "追加",
+      "empty": "モデル設定はありません。「追加」をクリックして作成してください",
+      "testing": "テスト中…",
+      "test": "テスト",
+      "edit": "編集",
+      "new": "新規",
+      "delete": "削除",
+      "deleteConfirmTitle": "モデルを削除",
+      "deleteConfirmBody": "モデル「{{name}}」を削除しますか？この操作は元に戻せません。",
+      "defaultEndpoint": "既定（公式エンドポイント）",
+      "apiKeyConfigured": "設定済み（{{key}}…）",
+      "apiKeyNotConfigured": "未設定",
+      "availableModels": "利用可能なモデル:",
+      "kindHints": {
+        "openai": "OpenAI 公式または互換エンドポイント。baseURL を空にすると公式の既定値を使用します",
+        "anthropic": "Claude シリーズのモデル",
+        "ollama": "ローカル Ollama サービス（既定 http://127.0.0.1:11434/v1）",
+        "vllm": "ローカル vLLM 推論サービス（OpenAI 互換 API）"
+      },
+      "editor": {
+        "title": "{{action}}モデル設定",
+        "idLabel": "Model ID（API に送信される値）",
+        "idPlaceholder": "例：gpt-4o-mini、llama3.1、claude-3-5-sonnet",
+        "idRequired": "Model ID を入力してください",
+        "idExists": "この ID は既に存在します。別の ID を使用してください",
+        "nameLabel": "表示名（任意）",
+        "namePlaceholder": "空の場合は model id を使用します",
+        "kindLabel": "プロトコル種類",
+        "baseUrlPlaceholderOpenai": "空の場合は OpenAI 公式の既定値を使用",
+        "baseUrlPlaceholderLocal": "例：http://127.0.0.1:8000/v1",
+        "apiKeyPlaceholderLocal": "ローカルサービスでは空にできます",
+        "apiKeyPlaceholderRequired": "必須",
+        "contextWindowLabel": "Context Window（任意）",
+        "contextWindowPlaceholder": "例：128000",
+        "enabled": "有効",
+        "cancel": "キャンセル",
+        "save": "保存"
+      }
+    },
+    "appearance": {
+      "title": "外観",
+      "actualDark": "現在: ダーク",
+      "actualLight": "現在: ライト",
+      "light": "ライト",
+      "lightDesc": "明るい背景。日中や明るい環境に最適です",
+      "dark": "ダーク",
+      "darkDesc": "暗い背景。目にやさしく、コントラストを低減します",
+      "system": "システムに従う",
+      "systemDesc": "OS のライト／ダーク設定に自動で追従します",
+      "preview": "プレビュー",
+      "previewBody": "現在のテーマのコントラストをプレビューするための本文サンプルです。",
+      "previewBodySecondary": "補助的な説明に使うサブテキストです。",
+      "previewBodyMeta": "メタ情報のテキスト（タイムスタンプ、バッジ）です。",
+      "previewPrimary": "主ボタン",
+      "previewSecondary": "副ボタン",
+      "previewSuccess": "成功",
+      "previewWarning": "警告",
+      "previewError": "エラー"
+    }
+  },
+  "toast": {
+    "languagePersistFailed": "言語設定の保存に失敗しました",
+    "languageNativeSyncFailed": "ネイティブ言語の同期に失敗しました"
+  },
+  "app": {
+    "ready": "準備完了",
+    "systemReady": "システム準備完了",
+    "runningCount": "{{count}}件 実行中",
+    "taskPrefix": "タスク: ",
+    "expandLeftPanel": "サイドバーを展開",
+    "collapseLeftPanel": "サイドバーを折りたたむ",
+    "leftPanel": "サイドバー",
+    "expandRightPanel": "インスペクターを展開",
+    "collapseRightPanel": "インスペクターを折りたたむ",
+    "rightPanel": "インスペクター",
+    "newTask": "新規タスク",
+    "themeLabel": "ライト",
+    "themeDark": "ダーク",
+    "themeSystem": "システムに従う",
+    "themeSystemShort": "システム",
+    "themeCycleHint": "クリックで切替：ライト → ダーク → システム",
+    "switchTheme": "テーマ切替",
+    "contextUsageTitle": "コンテキスト使用量（実 payload 推定）",
+    "memoryBudgetSuffix": "予算 {{budget}} tokens ({{pct}}%) · モデルウィンドウ {{window}}",
+    "memoryLabel": "メモリ",
+    "currentModel": "現在のモデル",
+    "quickActionPanel": "パネル",
+    "permissionMode": {
+      "default": "権限モード：デフォルト（毎回確認）",
+      "autoApprove": "権限モード：自動承認（高リスクコマンドは確認）",
+      "acceptEdits": "権限モード：編集を許可（ワークスペース内で自動承認）",
+      "plan": "権限モード：読み取り専用（読み取りのみ、書き込み拒否）",
+      "bypass": "権限モード：すべて許可"
+    },
+    "escPause": {
+      "running": "タスクが実行中です",
+      "body": "「{{title}}」が実行中です。操作を選択してください：",
+      "cancel": "キャンセル",
+      "pause": "タスクを一時停止",
+      "stop": "タスクを停止",
+      "closeHint": "閉じるには上のボタンを選択してください"
+    },
+    "collapsed": {
+      "expand": "左パネルを展開",
+      "newTask": "新規タスク"
+    },
+    "status": {
+      "systemReady": "システム準備完了",
+      "systemReadyDesc": "すべてのバックグラウンドサービスは正常に動作しています",
+      "ready": "準備完了",
+      "running": "{{count}} 実行中",
+      "taskPrefix": "タスク：{{title}}",
+      "memoryCtxLabel": "コンテキスト使用量（実ペイロードの推定）",
+      "memoryCtxDesc": "{{used}} / 予算 {{budget}} tokens ({{pct}}%)・モデルウィンドウ {{window}}",
+      "memory": "メモリ",
+      "currentModel": "現在のモデル",
+      "expandLeft": "左パネルを展開",
+      "collapseLeft": "左パネルを折りたたむ",
+      "expandLeftAria": "左パネルを展開 ⌘B",
+      "collapseLeftAria": "左パネルを折りたたむ ⌘B",
+      "left": "左",
+      "expandRight": "右パネルを展開",
+      "collapseRight": "右パネルを折りたたむ",
+      "expandRightAria": "右パネルを展開 ⌘J",
+      "collapseRightAria": "右パネルを折りたたむ ⌘J",
+      "right": "右",
+      "theme": {
+        "light": "ライト",
+        "dark": "ダーク",
+        "system": "システムに従う（{{resolved}}）",
+        "systemDark": "ダーク",
+        "systemLight": "ライト",
+        "aria": "テーマを切り替え",
+        "systemShort": "システム"
+      },
+      "themeDesc": "{{theme}}・クリックで切替：ライト → ダーク → システムに従う",
+      "theme.aria": "テーマを切り替え",
+      "theme.light": "ライト",
+      "theme.dark": "ダーク",
+      "theme.system": "システムに従う（{{resolved}}）",
+      "theme.systemDark": "ダーク",
+      "theme.systemLight": "ライト",
+      "theme.systemShort": "システム",
+      "panel": "パネル"
+    }
+  },
+  "palette": {
+    "prefixHint": {
+      "all": "タスク、Agent、コマンド、ファイル、Skillを検索…",
+      "agent": "@ Agent",
+      "task": "# タスク",
+      "command": "/ コマンド",
+      "file": "> ファイル"
+    },
+    "chip": {
+      "all": "すべて"
+    },
+    "section": {
+      "command": "コマンド",
+      "task": "タスク",
+      "agent": "エージェント",
+      "file": "ファイル",
+      "skill": "スキル"
+    },
+    "command": {
+      "newTask": "新規タスク",
+      "quickOpen": "ファイルをクイックオープン",
+      "toggleLeftNav": "左ペインの折りたたみ・展開",
+      "toggleRightDock": "右ペインの折りたたみ・展開",
+      "openAutomations": "開く：オートメーション",
+      "openSkills": "開く：スキル",
+      "openAgents": "開く：エージェント",
+      "openKb": "開く：ナレッジベース",
+      "openMemory": "開く：メモリ",
+      "backToTasks": "タスクに戻る",
+      "openMemoryPanel": "メモリパネルを開く",
+      "openFilesPanel": "ファイルパネルを開く",
+      "openSkillsPanel": "スキルパネルを開く",
+      "openTasksPanel": "タスクパネルを開く",
+      "openAutomationsPanel": "オートメーションパネルを開く",
+      "exportConversation": "現在の会話をエクスポート",
+      "openSettings": "設定を開く",
+      "settingsModels": "設定 → モデル",
+      "settingsAdvanced": "設定 → 詳細設定（圧縮ポリシー / 開発者ツール）",
+      "slashHint": "対応するスキルを呼び出す（自動判定をスキップ）",
+      "singleAttempt": "シングル attempt モード",
+      "singleAttemptHint": "プレースホルダ：後で実行ポリシーに接続予定"
+    },
+    "empty": "一致する項目がありません — プレフィックスを試してください：{{agent}} / {{task}} / {{command}} / {{file}}",
+    "footer": {
+      "navigate": "ナビゲート",
+      "select": "選択",
+      "close": "閉じる",
+      "itemCount": "{{count}} / {{total}} 件"
+    }
+  },
+  "composer": {
+    "permission": {
+      "default": {
+        "label": "デフォルト",
+        "desc": "すべての操作を都度確認"
+      },
+      "autoApprove": {
+        "label": "自動承認",
+        "desc": "読み書きを自動承認。高リスクコマンドは確認あり"
+      },
+      "acceptEdits": {
+        "label": "編集を許可",
+        "desc": "ワークスペース内は自動承認"
+      },
+      "plan": {
+        "label": "読み取り専用",
+        "desc": "読み取り専用で探索。書き込みは拒否"
+      },
+      "bypass": {
+        "label": "全権限",
+        "desc": "すべての承認をスキップ（高リスク含む）。再確認が必要"
+      },
+      "menuTitle": "権限モード",
+      "bypassConfirmTitle": "「全権限」モードを有効にしますか？"
+    },
+    "bypassConfirm": {
+      "body0": "このモードでは Agent がすべてのツール承認をスキップします。これまで手動確認が必要だった高リスク操作も含まれます：",
+      "body1": "・任意のシェルコマンド（ファイル削除、依存関係のインストール、ネットワークリクエストを含む）",
+      "body2": "・ワークスペース外および保護パス（.env、シークレットなど）の読み書き",
+      "body3": "・ブラックリストのコマンドもブロックされません",
+      "body5": "このモードは永続化されません。再起動するとデフォルト権限に戻ります。タスク完了後はすみやかに他のモードへ戻してください。",
+      "label": "リスクを理解しました。有効化"
+    },
+    "cancel": "キャンセル",
+    "section": {
+      "skill": "スキル",
+      "file": "ファイル",
+      "memory": "記憶",
+      "command": "コマンド"
+    },
+    "emptyMemory": "コンテンツなし",
+    "slash": {
+      "specHint": "製品仕様（PRD）を書く",
+      "planHint": "実装計画を立てる",
+      "bugfixHint": "バグを修正",
+      "clear": "記憶をクリア",
+      "clearHint": "現在のタスクのコンテキスト記憶をクリア",
+      "compress": "記憶を圧縮",
+      "compressHint": "コンテキストを圧縮してトークンを解放",
+      "export": "会話をエクスポート",
+      "exportHint": "会話をファイルに書き出す",
+      "new": "新規タスク",
+      "newHint": "新しいタスクを開始"
+    },
+    "referencedMemory": "記憶を参照しました：{{label}}",
+    "compressDone": "圧縮完了：{{before}} → {{after}} tokens",
+    "contextCompressed": "コンテキストを圧縮しました：{{before}} → {{after}} tokens",
+    "compressFailed": "圧縮に失敗しました",
+    "clearTitle": "現在のタスクの記憶をクリアしますか？",
+    "clearBody": "現在のタスクの全コンテキスト記憶が削除され、元に戻せません。",
+    "clearConfirm": "クリア",
+    "cleared": "記憶をクリアしました",
+    "clearFailed": "記憶のクリアに失敗しました",
+    "injectedMemory": "記憶を {{count}} 件注入しました",
+    "attachmentLabel": "添付",
+    "fileAdded": "ファイルを追加しました：{{name}}",
+    "appendFailed": "メッセージの追加に失敗しました",
+    "switchAgent": "エージェントを切り替え",
+    "switchAgentDesc": "現在のタスクを処理するエージェントを選択",
+    "agentNotSelected": "エージェント未選択",
+    "reference": "参照",
+    "referenceTooltip": "@ でファイル・スキル・記憶を参照",
+    "command": "コマンド",
+    "commandTooltip": "/ のクイックコマンド",
+    "kbTooltip": "ナレッジベース",
+    "knowledgeBase": "KB {{count}}",
+    "noAgents": "エージェントがありません",
+    "current": "現在",
+    "switchPermissionAria": "権限モードを切り替え",
+    "stop": "停止",
+    "stopTooltip": "現在の実行を停止",
+    "stopAria": "タスクを停止",
+    "send": "送信",
+    "sendTooltip": "メッセージを送信",
+    "sendRequiresModel": "先にモデルを設定してください",
+    "sendAria": "メッセージを送信",
+    "atMenuTitle": "参照",
+    "noAgentsSkills": "エージェントまたはスキルがありません",
+    "noMatch": "一致なし",
+    "slashMenuTitle": "コマンド",
+    "noMatchCommand": "一致するコマンドがありません",
+    "selected": "選択済み",
+    "kbEnabled": "ナレッジベース {{count}} 件有効",
+    "kbDisabled": "ナレッジベースが無効",
+    "kbNotImported": "ナレッジベースがまだインポートされていません",
+    "parseFailed": "解析失敗",
+    "kbChunks": "{{count}} チャンク",
+    "remove": "削除",
+    "cacheHit": "キャッシュヒット {{pct}}%（{{hit}} / {{total}} tokens）",
+    "ctxOverLimit": "予算超過 {{pct}}%（{{cache}}）",
+    "ctxUsage": "{{used}} / {{total}} tokens（{{pct}}%、上限 {{window}}）{{cache}}",
+    "cachePrefixHit": "キャッシュ {{pct}}%・{{hit}} / {{total}}",
+    "compressHintInline": "コンテキストが上限を超えています。圧縮をおすすめします",
+    "compressHint": "/圧縮"
+  },
+  "editors": {
+    "close": "閉じる",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "create": "作成",
+    "builtinSuffix": "（組み込み）",
+    "nameLabel": "名前",
+    "descriptionLabel": "説明",
+    "avatarColorLabel": "アイコン色",
+    "colorAria": "色 {{color}} を選択",
+    "namespaceLabel": "名前空間",
+    "transportLabel": "トランスポート",
+    "commandLabel": "コマンド",
+    "urlLabel": "URL",
+    "temperatureLabel": "温度：{{value}}",
+    "timeoutLabel": "タイムアウト（秒）",
+    "agent": {
+      "nameRequired": "エージェント名を入力してください",
+      "editTitle": "エージェントを編集{{builtin}}",
+      "newTitle": "新規エージェント",
+      "namePlaceholder": "エージェント名を入力",
+      "nameBuiltinHint": "組み込みエージェントの名前は変更できません",
+      "descriptionPlaceholder": "このエージェントの用途を簡単に説明",
+      "roleLabel": "役割",
+      "rolePlaceholder": "エージェントの役割を定義",
+      "goalLabel": "目標",
+      "goalPlaceholder": "エージェントが達成すべき目標を定義",
+      "maxIterationsLabel": "最大反復回数",
+      "backstoryLabel": "背景設定",
+      "backstoryPlaceholder": "エージェントの背景ストーリーを書く",
+      "systemPromptLabel": "システムプロンプト",
+      "systemPromptPlaceholder": "システムプロンプトを書く",
+      "personaBuiltinHint": "組み込みエージェントのパーソナリティは変更できません",
+      "defaultSkillsLabel": "デフォルトスキル（{{selected}} / {{total}} 件選択）",
+      "noSkills": "利用可能なスキルがありません"
+    },
+    "skill": {
+      "nameRequired": "スキル名を入力してください",
+      "invalidSchema": "入力構造の JSON Schema が無効です",
+      "editTitle": "スキルを編集{{builtin}}",
+      "newTitle": "新規スキル",
+      "namePlaceholder": "スキル名を入力",
+      "namespacePlaceholder": "例：myorg.my-skill",
+      "descriptionLabel": "説明",
+      "descriptionPlaceholder": "このスキルの用途を簡単に説明",
+      "builtinHandlerLabel": "組み込みハンドラ",
+      "noBuiltinHandler": "なし（組み込みハンドラを使用しない）",
+      "needsConfirmationLabel": "実行前に確認を求める",
+      "confirmBeforeExec": "実行前にユーザーに確認する",
+      "tagsLabel": "タグ",
+      "tagsPlaceholder": "カンマ区切り、例：markdown, analysis",
+      "inputSchemaLabel": "入力構造（JSON Schema）",
+      "inputSchemaHint": "このスキルが受け付けるパラメータ形式を定義",
+      "instructionLabel": "指示",
+      "instructionPlaceholder": "このスキルが起動されたときに実行する指示を書く",
+      "instructionHint": "Markdown で記述。パラメータ参照をサポート"
+    },
+    "mcp": {
+      "nameRequired": "MCP サーバー名を入力してください",
+      "stdioCommandRequired": "stdio 起動コマンドを入力してください",
+      "sseUrlRequired": "SSE エンドポイント URL を入力してください",
+      "editTitle": "MCP サーバーを編集",
+      "newTitle": "新規 MCP サーバー",
+      "namePlaceholder": "サーバー名を入力",
+      "stdioOption": "stdio",
+      "sseOption": "SSE",
+      "commandPlaceholder": "例：npx @anthropic-ai/claude-code",
+      "argsLabel": "引数",
+      "argsPlaceholder": "1行に1つ引数を指定",
+      "urlPlaceholder": "wss:// または https:// のエンドポイント",
+      "envLabel": "環境変数",
+      "envHint": "1行に1つ KEY=VALUE",
+      "enableLabel": "この MCP サーバーを有効にする",
+      "reloadHint": "変更後はセッションを再読み込みしてください"
+    }
+  },
+  "panel": {
+    "memory": {
+      "tab_l1": "作業メモリ",
+      "tab_l2": "圧縮メモリ",
+      "tab_l3": "知識メモリ",
+      "tab_l4": "経験メモリ",
+      "title": "メモリセンター",
+      "count": "{{count}} 件",
+      "l1_empty_title": "作業メモリがありません",
+      "l1_empty_hint": "会話中に生成されたコンテキスト資源がここに表示されます",
+      "l1_empty": "表示できるコンテキスト資源がありません",
+      "cat": {
+        "system": "システム",
+        "user": "ユーザー",
+        "conversation": "会話",
+        "file": "ファイル",
+        "skill": "スキル",
+        "kb": "ナレッジベース",
+        "l2": "圧縮",
+        "other": "その他"
+      },
+      "ctx": "コンテキスト",
+      "budget": "/ {{value}}",
+      "compress": "圧縮",
+      "compress_desc_selected": "現在のタスクのコンテキストを圧縮して冗長な内容を整理します",
+      "compress_desc_none": "圧縮するには先にタスクを選択してください",
+      "compress_done": "圧縮完了：{{before}} → {{after}} tokens",
+      "compress_chip": "{{before}} → {{after}} に圧縮",
+      "category_tooltip": "{{label}}：{{tokens}} tokens（{{pct}}%）",
+      "no_ctx_data": "コンテキストデータがありません",
+      "distill_tooltip": "{{target}} に蒸留済み",
+      "distill_desc": "クリックして蒸留先の詳細を表示",
+      "load_failed": "読み込みに失敗：{{msg}}",
+      "deleted": "削除しました",
+      "delete_failed": "削除に失敗：{{msg}}",
+      "merged": "{{count}} 件のメモリを統合しました",
+      "merge_failed": "統合に失敗：{{msg}}",
+      "exported": "{{count}} 件をエクスポートしました",
+      "export_failed": "エクスポートに失敗：{{msg}}",
+      "l2_empty_title": "圧縮メモリがありません",
+      "l2_empty_hint": "コンテキスト圧縮で生成された要約がここに保存されます",
+      "l2_count": "計 {{count}} 件 · 圧縮 {{tokens}} tokens",
+      "l2_search_placeholder": "要約 / エンティティ / 意図を検索…",
+      "all_intents": "すべての意図",
+      "export_all": "すべてエクスポート",
+      "selected": "{{count}} 件選択中",
+      "merge_selected": "選択を統合",
+      "export_selected": "選択をエクスポート",
+      "cancel": "キャンセル",
+      "no_match": "一致する結果がありません",
+      "collapse": "詳細を折りたたむ",
+      "view_detail": "詳細を表示",
+      "delete": "削除",
+      "entity": "エンティティ",
+      "none": "なし",
+      "compressed_content": "圧縮内容",
+      "references": "参照",
+      "raw_content": "元の内容",
+      "truncated_suffix": "…（省略）",
+      "loading": "読み込み中…",
+      "pending": "反映待ち {{count}} 件",
+      "merge_all": "すべて統合",
+      "no_pending": "反映待ちの項目がありません",
+      "discard": "破棄",
+      "archive_search": "アーカイブ検索",
+      "archive_placeholder": "過去のメモリを検索…",
+      "copy_snippet": "スニペットをコピー",
+      "no_hit": "該当するアーカイブが見つかりません",
+      "edit": "編集",
+      "saving": "保存中…",
+      "save_immediate": "今すぐ保存",
+      "empty": "（内容なし）",
+      "rolled_back": "v{{version}} にロールバックしました",
+      "rollback_failed": "ロールバックに失敗：{{msg}}",
+      "observations": "観察 {{count}} 件",
+      "no_observations": "観察記録はありません",
+      "history": "履歴バージョン {{count}} 件",
+      "rollback_tooltip": "このバージョンにロールバック",
+      "rollback": "ロールバック",
+      "user_profile": "ユーザープロフィール",
+      "no_synthesis": "プロフィール内容がまだありません",
+      "save": "保存",
+      "pending_merged": "保留中の {{count}} 件をマージしました{{suffix}}",
+      "pending_merged_suffix": "（LLM マージを含む）",
+      "curated_snapshot": "キュレーションスナップショット"
+    },
+    "automations": {
+      "weekday": {
+        "mon": "月",
+        "tue": "火",
+        "wed": "水",
+        "thu": "木",
+        "fri": "金",
+        "sat": "土",
+        "sun": "日"
+      },
+      "presets": {
+        "daily9": "毎日 9:00",
+        "weekdays9": "平日 9:00",
+        "monday9": "毎週月曜 9:00",
+        "hourly": "毎時間",
+        "midnight": "毎日 0:00"
+      },
+      "summary": {
+        "once": "{{time}} に一度だけ実行",
+        "daily": "毎日 {{time}}",
+        "weekdays": "毎平日 {{time}}",
+        "weekends": "毎週末 {{time}}",
+        "weekly_unknown": "毎週 {{time}}（曜日未選択）",
+        "weekly": "毎週 {{names}} {{time}}",
+        "monthly": "毎月 {{day}} 日 {{time}}",
+        "custom": "カスタム：{{expr}}"
+      },
+      "title": "自動化タスク",
+      "new_tooltip": "新規の自動化",
+      "new_desc": "Agent を定時または手動で実行する自動化タスクを作成します",
+      "edit_title": "自動化を編集",
+      "new_title": "新しい自動化",
+      "name": "名前",
+      "name_placeholder": "タスク名を入力",
+      "prompt": "プロンプト",
+      "prompt_placeholder": "実行するタスクの内容を入力",
+      "agent": "Agent",
+      "model": "モデル",
+      "follow_agent": "Agent の既定に従う",
+      "no_models": "利用可能なモデルがありません",
+      "trigger": "トリガー",
+      "manual_trigger": "手動",
+      "cron_trigger": "定時",
+      "schedule": "スケジュール",
+      "freq": {
+        "once": "一度だけ",
+        "daily": "毎日",
+        "weekdays": "平日",
+        "weekends": "週末",
+        "weekly": "毎週",
+        "monthly": "毎月",
+        "custom": "カスタム cron"
+      },
+      "hour": "時間",
+      "minute": "分",
+      "month_day": "毎月の日付",
+      "day": "{{day}} 日",
+      "presets_label": "よく使うプリセット",
+      "cron_placeholder": "分 時間 日 月 曜日（例：0 9 * * 1-5）",
+      "cron_hint": "例：0 9 * * 1-5 は平日の 9:00 を表します",
+      "cron_invalid": "cron 式が無効です。形式をご確認ください",
+      "cron_display_label": "cron 式",
+      "need_weekday": "毎週モードでは少なくとも 1 つの曜日を選択してください",
+      "need_time": "定時時刻を入力してください",
+      "invalid_time": "cron 式が無効です：{{expr}}",
+      "cancel": "キャンセル",
+      "create": "作成",
+      "empty_title": "自動化タスクはまだありません",
+      "empty_hint": "自動化タスクを作成して、Agent を定時または必要に応じて実行します",
+      "create_btn": "新しい自動化",
+      "running": "実行中",
+      "paused": "一時停止",
+      "schedule_line_cron": "定時：{{expr}} · Agent：{{agent}}",
+      "schedule_line_manual": "手動トリガー · Agent：{{agent}}",
+      "last_run": "前回実行 {{time}}",
+      "not_run": "未実行",
+      "next": "· 次回 {{time}}",
+      "run_now": "実行",
+      "pause": "一時停止",
+      "enable": "有効化",
+      "edit": "編集",
+      "delete_tooltip": "削除",
+      "delete_desc": "この自動化タスクを削除します。この操作は取り消せません"
+    },
+    "abilities": {
+      "tab": {
+        "skills": "スキル",
+        "plugins": "プラグイン"
+      },
+      "hint": {
+        "skills": "ArkWork 独自・マーケットから導入したツール機能（SKILL.md）",
+        "plugins": "MCP Server 経由で接続した外部ツール機能（stdio / sse）"
+      }
+    },
+    "agents": {
+      "newAgent": "新規エージェント",
+      "empty": {
+        "title": "エージェントがありません",
+        "hint": "スキル・役割・自動化フローを担うエージェントを作成します"
+      },
+      "title": "エージェント（{{count}}）",
+      "new": "新規作成",
+      "startTaskTitle": "{{name}} を起動",
+      "builtinTooltip": "組み込みエージェント",
+      "noDescription": "説明なし",
+      "successRate": "成功率 {{rate}}%",
+      "skillsCount": "スキル {{count}}",
+      "startTask": "タスクを開始",
+      "edit": "編集"
+    },
+    "kb": {
+      "title": "ナレッジベース",
+      "count": "{{count}}",
+      "globalHint": "ナレッジベースの全体スイッチ。クリックで設定を開きます",
+      "enabled": "有効",
+      "disabled": "無効",
+      "import": "インポート",
+      "parseFailed": "解析に失敗",
+      "importDone": "インポート完了：成功 {{imported}}、失敗 {{failed}}",
+      "importFailed": "インポートに失敗：{{message}}",
+      "renamePrompt": "新しいファイル名を入力してください：",
+      "renamed": "名前を変更しました",
+      "renameFailed": "名前の変更に失敗：{{message}}",
+      "reimportTitle": "再インポート",
+      "reimportBody": "「{{name}}」を再インポートしますか？",
+      "reimport": "再インポート",
+      "reimportTooltip": "再インポート",
+      "parsing": "解析中",
+      "indexing": "索引作成中",
+      "chunks": "{{chunks}} チャンク",
+      "failed": "失敗",
+      "emptyTitle": "ナレッジ文書がありません",
+      "emptyHint": "右上の「インポート」から文書を追加してローカルのナレッジベースを構築します",
+      "documents": "文書（{{count}}）",
+      "searchPlaceholder": "文書の内容を検索してみましょう…",
+      "noHits": "一致するチャンクがありません",
+      "statusParsing": "解析中",
+      "statusIndexing": "索引作成中",
+      "indexed": "索引済み",
+      "retry": "再試行",
+      "rename": "名前を変更",
+      "delete": "削除",
+      "reimportDone": "再インポート完了：{{chunks}} チャンク",
+      "reimportFailed": "再インポートに失敗しました：{{message}}",
+      "deleteTitle": "ナレッジベースを削除",
+      "deleteBody": "「{{name}}」を削除しますか？原文とチャンクは削除され、元に戻せません。",
+      "deleted": "削除しました",
+      "deleteFailed": "削除に失敗しました：{{message}}"
+    },
+    "plugins": {
+      "status": {
+        "connected": "接続済み",
+        "connecting": "接続中",
+        "disconnected": "未接続",
+        "error": "エラー"
+      },
+      "new": "新規作成",
+      "refreshTooltip": "更新",
+      "refresh": "更新",
+      "count": "合計 {{count}}",
+      "searchPlaceholder": "プラグインを検索…",
+      "desc": "MCP Server 経由で外部ツール機能に接続",
+      "empty": {
+        "title": "プラグインがありません",
+        "hint": "「新規作成」から MCP Server を追加します"
+      },
+      "noMatch": {
+        "title": "プラグインが見つかりません",
+        "hint": "「{{query}}」に一致する結果はありません"
+      },
+      "disabled": "無効",
+      "toolsCount": "ツール {{count}}",
+      "disconnect": "切断",
+      "disconnecting": "切断中",
+      "connecting": "接続中",
+      "connect": "接続",
+      "disabledConnect": "無効",
+      "edit": "編集",
+      "delete": "削除",
+      "discoveredTools": "検出されたツール",
+      "envCount": "変数 {{count}}"
+    },
+    "files": {
+      "title": "ファイル",
+      "stats": "ファイル {{files}} · フォルダ {{folders}}",
+      "refreshTooltip": "更新",
+      "searchPlaceholder": "ファイルを検索…",
+      "empty": {
+        "title": "ファイルがありません",
+        "hint": "フォルダを開くとここに内容が表示されます"
+      },
+      "noMatch": {
+        "title": "ファイルが見つかりません",
+        "hint": "「{{query}}」に一致する結果はありません"
+      },
+      "renamed": "{{name}} に名前を変更しました",
+      "renameFailed": "名前の変更に失敗：{{message}}",
+      "deleteTitle": "ゴミ箱に移動",
+      "deleteBody": "「{{name}}」をゴミ箱に移動しますか？削除されます。",
+      "moveToTrash": "ゴミ箱に移動",
+      "movedToTrash": "{{name}} をゴミ箱に移動しました",
+      "deleteFailed": "削除に失敗：{{message}}",
+      "copyPath": "パスをコピー",
+      "copyPathDesc": "ファイルの完全なパスをクリップボードにコピーします",
+      "pathCopied": "パスをコピーしました",
+      "copyFailed": "コピーに失敗",
+      "revealInFolder": "フォルダ内に表示",
+      "revealInFolderDesc": "システム上でファイルを探します",
+      "rename": "名前を変更",
+      "delete": "削除",
+      "insertAsContext": "コンテキストとして挿入"
+    },
+    "tasks": {
+      "title": "タスク",
+      "searchPlaceholder": "タスクを検索…",
+      "filterAll": "すべて",
+      "empty": {
+        "title": "タスクがありません",
+        "hint": "新しいタスクを開始すると、ここでエージェントが実行されます"
+      },
+      "noMatch": {
+        "title": "タスクが見つかりません",
+        "byStatus": "「{{status}}」状態のタスクはありません",
+        "byQuery": "「{{query}}」に一致するタスクはありません"
+      },
+      "planProgress": "計画 {{done}}/{{total}}",
+      "moreActions": "その他の操作",
+      "unstar": "スターを外す",
+      "star": "スター",
+      "rename": "名前を変更",
+      "rerun": "再実行",
+      "pause": "一時停止",
+      "resume": "再開",
+      "stop": "停止",
+      "deleteTitle": "タスクを削除",
+      "deleteBody": "「{{title}}」を削除しますか？この操作は元に戻せません。",
+      "deleteConfirm": "削除",
+      "group": {
+        "today": "今日",
+        "earlier": "以前"
+      }
+    },
+    "market": {
+      "title": "スキルマーケット",
+      "searchPlaceholder": "スキルを検索…",
+      "searching": "検索中",
+      "cliTitle": "ArkWork CLI",
+      "cliHint": "ArkWork CLI が検出されませんでした。インストールするとコマンドラインからスキルを呼び出せます。",
+      "installing": "インストール中",
+      "cliInstall": "CLI をインストール",
+      "loading": "読み込み中",
+      "loadingHint": "マーケットからスキル一覧を取得しています…",
+      "noResultsTitle": "スキルが見つかりません",
+      "noResultsQuery": "「{{query}}」に一致するスキルはありません",
+      "noResultsEmpty": "別のキーワードを試すか、すべてのスキルを閲覧してください",
+      "total": "合計 {{count}} スキル",
+      "prevTooltip": "前のページ",
+      "nextTooltip": "次のページ",
+      "noDescription": "説明なし",
+      "installed": "インストール済み",
+      "install": "インストール"
+    },
+    "skills": {
+      "cancelling": "取り消し中…",
+      "cli": {
+        "installButton": "skillhub CLI をインストール",
+        "installHint": "skillhub コマンドラインツールをインストールすると、マーケットスキルの閲覧とインストールができます",
+        "installed": "インストール済み",
+        "notDetected": "SkillHub CLI が見つかりません",
+        "version": "バージョン {{version}}",
+        "versionFallback": "マーケットスキルの閲覧およびインストールに使用します"
+      },
+      "close": "閉じる",
+      "count": "合計 {{count}}",
+      "delete": "削除",
+      "deleteBuiltin": "組み込みスキルは削除できません",
+      "detail": {
+        "author": "作者：{{name}}",
+        "compatAll": "すべて",
+        "compatDeps": "依存関係",
+        "compatNoDeps": "依存なし",
+        "compatOs": "OS",
+        "compatTitle": "互換性",
+        "contextTitle": "Context cost 見積もり",
+        "costActive": "有効時",
+        "costBaseline": "ベースライン",
+        "costPerTurn": "ターンあたり推計",
+        "license": "ライセンス：{{license}}",
+        "tokens": "tokens",
+        "updated": "更新：{{date}}"
+      },
+      "disabled": "無効",
+      "downloads": "{{count}} ダウンロード",
+      "edit": "編集",
+      "empty": {
+        "hint": "「インポート」をクリックするか、マーケットからインストールしてください",
+        "title": "スキルがまだありません"
+      },
+      "enabled": "有効",
+      "export": "エクスポート",
+      "favorite": "お気に入り",
+      "group": {
+        "installed": "インストール済み",
+        "installedHint": "現在インストールされているすべてのスキル（組み込み / マーケット導入 / ローカル導入）",
+        "market": "マーケット",
+        "marketHint": "SkillHub のスキルを閲覧 / インストール"
+      },
+      "hint": {
+        "builtin": "ArkWork 標準搭載のスキルです。編集・削除はできません",
+        "localImported": "ローカルファイル / ZIP / Markdown からインポート、または外部 MCP で接続したスキルです",
+        "marketImported": "SkillHub からインストールしたスキルです。更新・削除ができます"
+      },
+      "import": "インポート",
+      "importTooltip": "フォルダー / Markdown / ZIP ファイルからインポート",
+      "install": "インストール",
+      "installed": "インストール済み",
+      "installing": "インストール中…",
+      "loading": "読み込み中…",
+      "market": {
+        "favorites": {
+          "empty": {
+            "hint": "スキル詳細で「お気に入り」をクリックして追加できます",
+            "title": "お気に入りはまだありません"
+          }
+        },
+        "installed": {
+          "empty": {
+            "hint": "「発見」タブで閲覧・インストールしてください",
+            "title": "インストール済みのマーケットスキルはありません"
+          }
+        },
+        "loadingHint": "マーケットからスキル一覧を取得しています",
+        "noInstallable": {
+          "hint": "「{{query}}」の結果はすべてローカルにインストール済みです",
+          "hintEmpty": "リストのスキルはすべてインストール済みです。別のキーワードをお試しください",
+          "title": "インストールできる新しいスキルはありません"
+        },
+        "noResults": {
+          "hint": "「{{query}}」に一致するスキルはありません",
+          "hintEmpty": "マーケットに利用可能なスキルはありません",
+          "title": "結果がありません"
+        },
+        "searchPlaceholder": "マーケットのスキルを検索…",
+        "sources": {
+          "empty": {
+            "hint": "マーケットソースはまだ設定されていません",
+            "title": "マーケットソースがありません"
+          }
+        },
+        "sourcesCount": "マーケットソース · {{count}}",
+        "tab": {
+          "discover": "発見",
+          "favorites": "お気に入り",
+          "installed": "インストール済み",
+          "settings": "設定"
+        },
+        "total": "全 {{count}} 項目"
+      },
+      "needsConfirmation": "確認が必要",
+      "newSkill": "新しいスキル",
+      "nextPage": "次へ",
+      "noDescription": "（説明なし）",
+      "noInstruction": "このスキルには SKILL.md の指示内容がありません",
+      "noRating": "評価なし",
+      "notEnabled": "無効",
+      "prevPage": "前へ",
+      "processing": "処理中…",
+      "ratingCount": "（評価 {{count}}）",
+      "searchPlaceholder": "スキルを検索…",
+      "searching": "検索中…",
+      "source": {
+        "builtin": "組み込み",
+        "localImported": "ローカル導入",
+        "market": "マーケット",
+        "marketImported": "マーケット導入",
+        "local": "ローカル",
+        "skillhub": "SkillHub",
+        "github": "GitHub",
+        "url": "URL"
+      },
+      "sourceDetail": "ソース：{{source}}",
+      "statusDisable": "無効",
+      "statusEnable": "有効",
+      "switchOff": "無効です。クリックで有効化",
+      "switchOn": "有効です。クリックで無効化",
+      "unfavorite": "お気に入り解除",
+      "uninstall": "アンインストール",
+      "uninstalling": "アンインストール中…",
+      "category": {
+        "coding": "コーディング",
+        "document": "ドキュメント",
+        "data": "データ",
+        "automation": "自動化",
+        "integration": "統合",
+        "other": "その他"
+      }
+    }
+  },
+  "sidebar": {
+    "resizeHandle": {
+      "label": "ドラッグで幅を調整",
+      "desc": "64〜320px の間で自由に調整",
+      "aria": "サイドバーの幅調整ハンドル"
+    },
+    "newTask": {
+      "title": "新規タスク",
+      "desc": "新しいタスクを作成して会話を開始"
+    },
+    "search": {
+      "aria": "タスクスレッドを検索",
+      "placeholder": "スレッドを検索…"
+    },
+    "threads": {
+      "empty": "タスクはまだありません",
+      "group": {
+        "pinned": "ピン留め",
+        "today": "今日",
+        "week": "今週",
+        "earlier": "以前"
+      }
+    },
+    "threadRow": {
+      "failedBadge": "プランに失敗したステップがあります"
+    },
+    "menu": {
+      "moreActions": "タスク「{{title}}」のその他の操作",
+      "menuLabel": "タスク「{{title}}」の操作メニュー",
+      "unstar": "ピン留めを解除",
+      "star": "ピン留め",
+      "rename": "名前を変更",
+      "run": "実行",
+      "rerun": "再実行",
+      "pause": "タスクを一時停止",
+      "resume": "タスクを再開",
+      "stop": "停止",
+      "delete": "削除"
+    },
+    "confirmDelete": {
+      "title": "タスクを削除",
+      "body": "タスク「{{title}}」を削除しますか？この操作は元に戻せません。",
+      "confirm": "削除"
+    },
+    "capability": {
+      "agents": "エージェント",
+      "skills": "スキル",
+      "kb": "知識",
+      "memory": "メモリ",
+      "automations": "自動化",
+      "settings": "設定",
+      "desc": "クリックで{{label}}ページを開きます"
+    },
+    "help": {
+      "title": "ヘルプ",
+      "desc": "ヘルプとキーボードショートカットを開く",
+      "aria": "ヘルプを開く"
+    }
+  },
+  "leftnav": {
+    "modules": {
+      "automations": "自動化",
+      "skills": "スキル",
+      "agents": "エージェント",
+      "kb": "ナレッジベース",
+      "memory": "メモリ"
+    },
+    "global": "グローバル",
+    "collapse": {
+      "title": "左バーを折りたたみ"
+    },
+    "newTask": {
+      "title": "新規タスク",
+      "desc": "新しいタスクを作成して会話を開始"
+    },
+    "expand": {
+      "title": "左バーを展開"
+    },
+    "taskList": {
+      "title": "タスク一覧"
+    },
+    "descriptions": {
+      "automations": "スケジュールタスク / トリガー設定",
+      "skills": "スキル + プラグイン（MCP）を一元管理",
+      "agents": "エージェントの CRUD（システムプロンプト含む）",
+      "kb": "ローカルファイルのチャンク索引 + 全文検索",
+      "memory": "L1/L2/L3/L4 の 4 層メモリ表示",
+      "settings": "モデル / ワークスペース / 外観 / ショートカット / 詳細設定"
+    }
+  },
+  "dock": {
+    "context": {
+      "title": "コンテキスト",
+      "empty_select_title": "タスクを選択してコンテキスト使用率を確認",
+      "empty_select_hint": "タスク内で項目ごとに掘り下げてクリアできます",
+      "loading": "コンテキスト使用率を計算中…",
+      "load_failed": "コンテキストデータを取得できません",
+      "workspace_overall": "ワークスペース全体のコンテキスト",
+      "remaining": "残り {{pct}}%",
+      "used": "使用中 {{count}}",
+      "budget": "予算 {{count}}",
+      "category_aria": "{{label}} の使用率 {{pct}}%。クリックで展開",
+      "count_items": "{{count}} 項目",
+      "clearing": "クリア中",
+      "clear": "クリア",
+      "category_empty": "このカテゴリにはコンテンツがありません",
+      "remove_tooltip": "この項目をコンテキストから削除",
+      "remove": "削除",
+      "memory_tier": "メモリ層",
+      "memory_center": "メモリセンター",
+      "l1_working_memory": "L1 作業メモリ",
+      "l1_desc": "— 現在のタスクのL1項目（ファイル / 会話など）",
+      "l2_compressed_memory": "L2 圧縮メモリ",
+      "l2_desc": "— 圧縮後の履歴サマリー（近日実装予定）",
+      "detail": {
+        "system_prompt": "システムプロンプト",
+        "system_section": "システムセクション",
+        "file": "ファイル",
+        "tool": "ツール",
+        "sub_agent": "サブエージェント",
+        "skill_instruction": "スキル指示",
+        "message": "メッセージ",
+        "memory_injection": "メモリ注入",
+        "mcp": "MCP"
+      }
+    },
+    "progress": {
+      "no_task": "現在タスクがありません",
+      "no_task_hint": "タスクを選択すると進捗サマリーを表示します",
+      "next_step": "次のステップ",
+      "completed_steps": "完了したステップ · {{count}}",
+      "collapse": "折りたたむ",
+      "expand": "すべて表示",
+      "no_completed_steps": "完了したステップはまだありません",
+      "milestones": "マイルストーン · {{reached}}/{{total}}",
+      "stage_tooltip": "ステージ {{index}}：{{label}}",
+      "milestone_label_open": "{{label}} · クリックで成果物を開く",
+      "milestone_label_not_reached": "{{label}} · 未到達",
+      "stage_research": "オープンソース調査",
+      "stage_prd": "PRD作成",
+      "stage_interaction": "インタラクション文書",
+      "stage_prototype": "HTMLプロトタイプ",
+      "stage_system_design": "システム設計",
+      "stage_code": "実装",
+      "stage_test": "機能テスト",
+      "stage_delivery": "デプロイ・納品",
+      "stage_ops": "運用・蓄積",
+      "milestone_prd": "PRD 凍結済み",
+      "milestone_prototype": "HTMLプロトタイプ承認済み",
+      "milestone_design": "システム設計承認済み",
+      "milestone_code": "実装完了",
+      "milestone_test": "全テスト成功"
+    },
+    "todo": {
+      "no_plan_yet": "まだプランが生成されていません",
+      "ipc_call_failed": "IPC 呼び出しに失敗しました",
+      "generating": "プランを生成中…",
+      "no_list": "チェックリストなし",
+      "generating_hint": "AI がこのタスクの実行チェックリストを生成しています",
+      "no_list_hint": "このタスクにはプラン不要 · 単一ステップのタスク",
+      "locate_card_tooltip": "会話フロー内のプランカードに移動",
+      "locate": "移動",
+      "filter_all": "すべて",
+      "filter_empty": "現在のフィルターでは項目がありません",
+      "engine_tooltip": "エンジンが act 結果に基づいてこの状態を自動設定しました",
+      "engine": "エンジン",
+      "submitted": "◐ 送信済み",
+      "more_actions": "その他の操作",
+      "mark_done": "完了としてマーク",
+      "retry": "この項目を再試行",
+      "cancel": "この項目をキャンセル",
+      "locate_step": "実行ステップに移動",
+      "no_artifact": "成果物の記録はありません",
+      "infer_title": "エンジンが実行ステップから詳細を推測中",
+      "infer_desc": "完全な planItems を取得していません。act ステップからデータを補填します。以下の項目は一時的な推測で、行末に「推測」バッジが付きます。",
+      "inferred": "推測"
+    },
+    "bugfix": {
+      "stage_goal_defined": "目標定義",
+      "stage_fixing": "修正中",
+      "stage_verifying": "検証中",
+      "stage_achieved": "完了",
+      "phase_goal_defined": "目標定義中",
+      "phase_fixing": "修正中",
+      "phase_verifying": "検証中",
+      "phase_achieved": "達成",
+      "phase_not_achieved": "未達成",
+      "aria_progress": "bugfix 進捗：{{phase}}"
+    },
+    "terminal": {
+      "failed": "失敗：{{msg}}",
+      "title": "ターミナル",
+      "output_viewer": "出力ビューア",
+      "command_count": "{{count}} 件のコマンド",
+      "running": "{{count}} 件実行中",
+      "viewer_tooltip_label": "読み取り専用の出力ビュー。コマンド入力は不可",
+      "viewer_tooltip_desc": "対話型ターミナルは今後のバージョンで検討予定（P2）",
+      "empty_title": "ターミナル記録はありません",
+      "empty_hint": "Agent が実行したコマンドの出力がここに表示されます。入力はできません——コマンドは Agent が制御された権限で実行します。",
+      "command_aria": "コマンド：{{command}}",
+      "dir": "ディレクトリ：{{dir}}",
+      "no_output_summary": "（出力サマリーなし）",
+      "copy_output": "出力をコピー"
+    },
+    "browser": {
+      "open_in_window": "ブラウザが別ウィンドウで開かれています",
+      "return_hint": "ウィンドウを閉じるとここに戻れます。またはウィンドウ内の「サイドバーに戻す」をクリック",
+      "title": "内蔵ブラウザ",
+      "empty_hint": "URL を入力して検索結果を確認するか、成果物の HTML を開いて照らし合わせながら会話できます。エージェントもここで自主的に Web ページをテストできます。"
+    }
+  },
+  "preview": {
+    "window": {
+      "empty": {
+        "title": "成果物プレビュー",
+        "desc": "ファイルツリーまたはチャットの成果物から HTML / 画像 / テキスト ファイルを開きます。URL は内蔵ブラウザで開いてください"
+      },
+      "loading": "読み込み中…",
+      "error": {
+        "title": "読み込みに失敗",
+        "retry": "再試行"
+      },
+      "status": {
+        "noFile": "ファイルなし",
+        "ready": "準備完了",
+        "loaded": "読み込み済み",
+        "error": "読み込みに失敗",
+        "lines": "{{count}} 行"
+      },
+      "titleBtn": {
+        "newTab": "新しいタブ（現在を複製）",
+        "minimize": "最小化",
+        "restore": "元に戻す",
+        "maximize": "最大化",
+        "close": "閉じる (Esc)"
+      },
+      "tabBar": {
+        "tip": "クリックでアクティブ化、ダブルクリックで固定/解除",
+        "closeTab": "タブを閉じる",
+        "closeTabDesc": "現在のプレビュータブを閉じる"
+      },
+      "toolbar": {
+        "copy": "コピー",
+        "export": "エクスポート",
+        "reveal": "フォルダに表示",
+        "refresh": "更新"
+      },
+      "capsule": {
+        "restore": "復元: {{title}}",
+        "restoreTip": "クリックで最小化したプレビューウィンドウを復元",
+        "close": "閉じる",
+        "closeTip": "復元後すぐに閉じる"
+      },
+      "toast": {
+        "copied": "コピーしました",
+        "copyFailed": "コピーに失敗",
+        "openFromFileTree": "ファイルツリーからファイルを開いてタブを新規作成してください"
+      }
+    },
+    "registry": {
+      "markdown": "Markdown",
+      "code": "コード",
+      "image": "画像",
+      "svg": "SVG",
+      "table": "表",
+      "browser": "ブラウザ",
+      "fallback": "ファイル",
+      "mode": {
+        "render": "レンダー",
+        "source": "ソース",
+        "split": "分割",
+        "desktop": "デスクトップ",
+        "tablet": "タブレット",
+        "mobile": "モバイル"
+      }
+    },
+    "fallback": {
+      "metaError": "ファイルのメタデータを読み込めません",
+      "unsupported": "サポートされていないプレビュー形式",
+      "meta": {
+        "type": "種類",
+        "size": "サイズ",
+        "lines": "行数",
+        "encoding": "エンコーディング",
+        "language": "言語",
+        "modified": "変更日時"
+      },
+      "lines": "{{count}} 行",
+      "notAvailable": "利用不可",
+      "reveal": "フォルダに表示",
+      "copyPath": "パスをコピー",
+      "toast": {
+        "copiedPath": "パスをコピーしました",
+        "copyFailed": "コピーに失敗"
+      }
+    },
+    "image": {
+      "fit": "ウィンドウに合わせる",
+      "actual": "実際のサイズ",
+      "fitShort": "フィット",
+      "copyPath": "パスをコピー",
+      "loading": "読み込み中…",
+      "error": "読み込みに失敗: {{err}}",
+      "alt": "画像プレビュー",
+      "toast": {
+        "copiedPath": "画像パスをコピーしました",
+        "copyFailed": "コピーに失敗"
+      }
+    },
+    "table": {
+      "empty": "表は空です",
+      "colsRows": "{{cols}} 列 · {{rows}} 行",
+      "copyRaw": "原文をコピー",
+      "sortHint": "クリックで並べ替え: {{column}}",
+      "columnIndex": "列 {{n}}",
+      "prevPage": "前へ",
+      "nextPage": "次へ",
+      "cellHint": "セルをクリックしてコピー",
+      "toast": {
+        "copiedCell": "セルをコピーしました",
+        "copiedRaw": "原文をコピーしました",
+        "copyFailed": "コピーに失敗"
+      }
+    },
+    "browser": {
+      "emptyAddress": "（アドレスなし）",
+      "mode": {
+        "desktop": "デスクトップ",
+        "tablet": "タブレット",
+        "mobile": "モバイル"
+      },
+      "error": "読み込みに失敗: {{err}}",
+      "title": "ブラウザプレビュー"
+    },
+    "code": {
+      "lines": "{{count}} 行",
+      "wrap": "折り返し",
+      "noWrap": "折り返しなし",
+      "copy": "コピー"
+    }
+  },
+  "topbar": {
+    "search": {
+      "desc": "タスク、ファイル、エージェント、コマンド、設定を検索",
+      "aria": "Quick Action 検索を開く ⌘K",
+      "hint": "タスク、ファイル、エージェント、コマンドを検索"
+    },
+    "settings": {
+      "label": "設定",
+      "desc": "モデル、ワークスペース、外観、ショートカット、詳細——すべての設定はここに",
+      "aria": "設定 ⌘,"
+    },
+    "workspace": {
+      "switchCap": "{{path}} ｜ ワークスペースを切替",
+      "switch": "ワークスペースを切替",
+      "desc": "作業場所：ワークスペースを切り替えると、タスクとメモリが分離されます",
+      "aria": "ワークスペースを切替 ⌘⇧W",
+      "wsLabel": "Agent ワークスペース",
+      "select": "ワークスペースを選択",
+      "listTitle": "ワークスペース",
+      "remove": "ワークスペースを削除",
+      "removeDesc": "リストから削除（タスクデータはディスクに保持されます）",
+      "removeAria": "ワークスペース {{name}} を削除",
+      "removeConfirmBody": "ワークスペース「{{name}}」を削除しますか？タスクデータはディスクに残りますが、このリストには表示されなくなります。",
+      "removeConfirm": "削除",
+      "noFolderToast": "デフォルトのワークスペースには関連フォルダがありません",
+      "openFail": "フォルダを開けませんでした：{{message}}",
+      "showInFolder": "フォルダ内で表示",
+      "add": "ワークスペースを追加（フォルダを関連付け）"
+    }
+  },
+  "centerstage": {
+    "header": {
+      "renameTooltip": "ダブルクリックで名前を変更",
+      "renameTooltipDesc": "ここをダブルクリックしてタスク名を変更",
+      "more": "その他の操作",
+      "moreDesc": "名前を変更 / 複製 / エクスポート / 削除",
+      "star": "お気に入り",
+      "unstar": "お気に入り解除",
+      "rename": "名前を変更",
+      "export": "会話をエクスポート",
+      "pause": "タスクを一時停止",
+      "resume": "タスクを再開",
+      "stop": "実行を停止",
+      "delete": "タスクを削除",
+      "deleteBody": "タスク「{{title}}」を削除しますか？この操作は取り消せません。",
+      "deleteConfirm": "削除"
+    },
+    "greeting": {
+      "workspace": "ワークスペース：{{name}}",
+      "workspaceOnly": "ワークスペース",
+      "hint": "既存のタスクを選択するか、新しいタスクを作成して開始してください"
+    }
+  },
+  "runconsole": {
+    "description": {
+      "runError": "ツール呼び出しに失敗しました。処理中…",
+      "pausedResume": "{{desc}}（一時停止中）",
+      "pausedWait": "一時停止中 · 指示をお待ちください…",
+      "error": "実行エラー · 上部のエラー情報を確認してください",
+      "cancelled": "中断しました · 右側の再実行をクリックしてください"
+    },
+    "pause": "一時停止",
+    "pauseTooltipDesc": "現在のタスクを一時停止します。追記して指示を追加できます",
+    "pauseAria": "実行を一時停止",
+    "resume": "再開",
+    "resumeTooltip": "実行を再開",
+    "resumeTooltipDesc": "チェックポイントから再開します",
+    "resumeAria": "実行を再開",
+    "retry": "再試行",
+    "retryTooltipDesc": "同じ入力でこのラウンドを実行し直します",
+    "rerun": "再実行",
+    "rerunTask": "このタスクを再実行",
+    "rerunTooltipDesc": "同じ入力で再実行します",
+    "stop": "停止",
+    "stopTooltipDesc": "現在のタスクを終了します。実行済みのステップは保持されます",
+    "stopAria": "実行を停止",
+    "placeholder": "指示を追記して続行…（空のまま続行）",
+    "rerunAria": "このタスクを再実行"
+  },
+  "thought": {
+    "failed": "実行失敗",
+    "summary": {
+      "thoughtTime": "考え中 {{time}}s",
+      "toolCall": "{{count}} 個のツールを呼び出しました（{{tools}}）"
+    },
+    "status": {
+      "running": "考え中…",
+      "failed": "思考に失敗",
+      "done": "思考完了"
+    },
+    "copy": "コピー",
+    "hover": {
+      "intent": "意図：{{intent}}",
+      "result": "結果：{{result}}",
+      "duration": "所要 {{duration}}s · {{time}}"
+    },
+    "guardedTitle": "エージェントによるブロック（ガードレール/予算によるもので、エラーではありません）",
+    "action": {
+      "collapse": "閉じる",
+      "detail": "詳細",
+      "copyResult": "結果をコピー",
+      "retry": "再試行",
+      "viewFull": "完全な出力を表示 →"
+    },
+    "contentChars": "（{{count}} 文字）",
+    "progress": {
+      "title": "{{count}} 個のツールを並行実行中",
+      "running": "実行中…"
+    }
+  },
+  "modelswitcher": {
+    "selectModel": "モデルを選択",
+    "context": "コンテキスト {{ctx}}K",
+    "supportThinking": "思考に対応",
+    "supportTools": "ツール呼び出しに対応",
+    "model": "モデル",
+    "health": {
+      "unconfigured": "モデル未設定",
+      "unconfiguredTitle": "モデルが設定されていません。クリックして設定へ",
+      "missing": "モデルが削除されました",
+      "missingTitle": "現在のモデルは設定から削除されています。選択し直してください",
+      "disabledTitle": "現在のモデルは無効です。クリックして選択し直してください"
+    },
+    "kind": {
+      "openai": "OpenAI 互換",
+      "anthropic": "Anthropic",
+      "ollama": "Ollama ローカル",
+      "vllm": "vLLM"
+    },
+    "onboarding": {
+      "title": "モデルはここに移動しました——クリックしていつでも切り替え",
+      "dismiss": "OK"
+    },
+    "chipDesc": "この会話で使用するモデルを選択します",
+    "chipSwitchAria": "モデルを切り替え：{{label}}",
+    "agentDefaultTip": "@{{agent}} のデフォルトは {{model}} です。クリックして切り替え",
+    "searchPlaceholder": "モデルを検索…",
+    "noMatch": "一致するモデルがありません。先に設定してください",
+    "recommended": "おすすめ",
+    "providerHeader": "{{label}}（{{count}}）",
+    "manageConfig": "モデル設定を管理…",
+    "agentDefault": "現在のエージェントのデフォルトモデル",
+    "thinkModeTooltip": "思考モードに対応",
+    "thinkBadge": "思考",
+    "toolModeTooltip": "ツール呼び出しに対応",
+    "toolBadge": "ツール"
+  },
+  "quickaction": {
+    "commands": {
+      "newTask": "新規タスク",
+      "quickOpen": "ファイルをクイックオープン",
+      "toggleLeft": "左パネルを折りたたむ／展開する",
+      "toggleRight": "右パネルを折りたたむ／展開する",
+      "openSettings": "設定を開く",
+      "export": "現在の会話をエクスポート",
+      "returnTask": "タスクに戻る"
+    },
+    "placeholder": {
+      "all": "コマンド・ファイル・スキル・エージェントを入力…",
+      "command": "/ コマンドを入力…",
+      "file": "> ファイル名を入力…",
+      "skill": "@ スキル名を入力…",
+      "agent": "# エージェント名を入力…"
+    },
+    "inputAriaLabel": "コマンド・ファイル・スキル・エージェントを検索",
+    "prefix": {
+      "all": "すべて",
+      "command": "/ コマンド",
+      "file": "> ファイル",
+      "skill": "@ スキル",
+      "agent": "# エージェント"
+    },
+    "resultsAriaLabel": "クイックアクションの結果",
+    "source": {
+      "command": "コマンド",
+      "file": "ファイル",
+      "skill": "スキル",
+      "agent": "エージェント"
+    },
+    "noMatches": "「{{query}}」に一致する項目はありません",
+    "footer": {
+      "navigate": "移動",
+      "select": "選択",
+      "close": "閉じる",
+      "count": "{{count}} 件"
+    }
+  },
+  "modulepage": {
+    "automations": {
+      "title": "自動化",
+      "subtitle": "定期または手動でトリガーされるエージェントタスク"
+    },
+    "skills": {
+      "title": "能力",
+      "subtitle": "スキル・プラグイン（MCP Server）の一括管理"
+    },
+    "agents": {
+      "title": "エージェント",
+      "subtitle": "エージェントの役割・人格・既定モデル"
+    },
+    "kb": {
+      "title": "ナレッジベース",
+      "subtitle": "ドキュメント解析・検索注入"
+    },
+    "memory": {
+      "title": "メモリ",
+      "subtitle": "L1–L4 の4層メモリビュー"
+    },
+    "settings": {
+      "title": "設定",
+      "subtitle": "モデル / ワークスペース / 外観 / ショートカット / 詳細"
+    },
+    "close": {
+      "tooltip": "閉じてタスクに戻る",
+      "aria": "{{title}}ページを閉じてタスクに戻る（Esc）"
+    }
+  },
+  "conversationflow": {
+    "loadingAgent": "Agentを読み込み中…",
+    "executing": "実行中…",
+    "newMessagesAria": "新しいメッセージが{{count}}件あります。クリックで最下部へ移動",
+    "plan": "タスク計画",
+    "goal": "目標",
+    "completed": "{{done}}/{{total}} 完了",
+    "planStepAria": "計画ステップ {{index}}：{{text}}（状態：{{status}}）",
+    "steps": "ステップフロー"
+  },
+  "browserchrome": {
+    "nav": {
+      "cycleTabs": "タブを切り替え（計 {{count}} 個）",
+      "back": "戻る",
+      "forward": "進む",
+      "reloading": "読み込み中…",
+      "refresh": "更新",
+      "addressPlaceholder": "URL またはパスを入力、⏎ で開く",
+      "agentOperating": "エージェントがこのページを操作しています",
+      "newTab": "新しいタブ",
+      "closeTab": "タブを閉じる"
+    },
+    "tabs": {
+      "newTabPage": "新しいタブ",
+      "close": "タブを閉じる",
+      "new": "新しいタブ"
+    },
+    "status": {
+      "loading": "{{url}} を読み込み中",
+      "openedNewWindow": "新しいウィンドウで開きました",
+      "loadFailed": "読み込みに失敗：{{error}}",
+      "unknownError": "不明なエラー",
+      "browserClosedFloat": "ブラウザを閉じました。このウィンドウは閉じてしまって構いません",
+      "restoredToDock": "サイドバーのブラウザに戻りました。このウィンドウは閉じてしまって構いません",
+      "poppedOut": "独立したウィンドウとして開きました",
+      "loadingIdle": "読み込み中…",
+      "agentOperating": "エージェントが操作中"
+    },
+    "host": {
+      "attach": "サイドバーのブラウザに戻す",
+      "detach": "独立したウィンドウとして開く"
+    },
+    "float": {
+      "waitingLoad": "ブラウザの読み込みを待っています…"
+    }
+  },
+  "rightdock": {
+    "adjusted": "@{{name}} に合わせてワークスペースを調整しました・{{tab}} を先頭に固定",
+    "tooltipResize": "ドラッグで幅を変更",
+    "tooltipResizeDesc": "300–520px の間で自由にドラッグ",
+    "tabCustomize": "右クリックでこのタブをカスタマイズ",
+    "tabAria": "{{label}} {{kbd}}（右クリックでカスタマイズ）",
+    "resetLayout": "デフォルトレイアウトに戻す",
+    "resetLayoutDesc": "このエージェントのパネル順のカスタマイズを元に戻す",
+    "restore": "戻す",
+    "customize": "カスタマイズ…",
+    "menuTitle": "{{label}} タブ",
+    "hideTab": "このタブを非表示",
+    "pinned": "（固定）",
+    "openPanel": "パネルを開く",
+    "notice": {
+      "adjusted": "@{{name}} 用にワークスペースを調整 ・ {{tab}} を固定しました"
+    }
+  },
+  "inspector": {
+    "toolWindowBar": "右側のツールウィンドウバー",
+    "resize": "ドラッグで幅を変更",
+    "resizeDesc": "280–480px の間で自由にドラッグ",
+    "resizeHandleAria": "ツールウィンドウ幅のリサイズハンドル",
+    "tabAria": "{{label}} {{kbd}}（ドラッグで並べ替え、バーの外に出すと非表示）",
+    "hiddenLabel": "非表示のタブ",
+    "restoreTab": "「{{label}}」を復元",
+    "restoreTabAria": "タブを復元：{{label}}",
+    "expand": "右パネルを展開",
+    "collapse": "右パネルを折りたたむ",
+    "tabBar": "ツールウィンドウタブバー"
+  },
+  "onboarding": {
+    "stepModelsTitle": "AIモデルを設定",
+    "stepModelsDesc": "モデルプロバイダーを追加すると、エージェントが作業を始められます",
+    "stepModelsAction": "モデルを設定する",
+    "stepWorkspaceTitle": "ワークスペースを追加",
+    "stepWorkspaceDesc": "フォルダーを関連付けて、最初のワークスペースを作成します",
+    "stepWorkspaceAction": "フォルダーを追加",
+    "stepTaskTitle": "タスクを作成",
+    "stepTaskDesc": "会話を開始して、エージェントに必要なことを伝えてください",
+    "stepTaskActionNew": "タスクを作成",
+    "stepTaskActionView": "タスクを表示",
+    "aria": "初期設定ガイド",
+    "welcome": "ArkWork へようこそ",
+    "headerSkipAria": "ガイドをスキップ",
+    "complete": "{{done}}/{{total}} ステップ完了",
+    "skip": "スキップ"
+  },
+  "messageactions": {
+    "copied": "コピーしました",
+    "copyFailed": "コピーに失敗しました",
+    "copyLabel": "メッセージをコピー",
+    "copyDesc": "メッセージをクリップボードにコピーします",
+    "copyAria": "メッセージをコピー",
+    "regenerateLabel": "再生成",
+    "regenerateDesc": "エージェントにこの返信を再生成させます",
+    "regenerateAria": "再生成",
+    "exportLabel": "会話をエクスポート",
+    "exportDesc": "会話をファイルにエクスポートします",
+    "exportAria": "会話をエクスポート"
+  },
+  "sidelist": {
+    "checklist": "チェックリスト",
+    "context": "コンテキスト",
+    "files": "ファイル",
+    "browser": "ブラウザ",
+    "terminal": "ターミナル",
+    "progress": "進捗",
+    "memory": "メモリ",
+    "logs": "ログ",
+    "preview": "プレビュー"
+  },
+  "logsview": {
+    "badgeDebug": "デバッグ",
+    "badgeInfo": "情報",
+    "badgeWarn": "警告",
+    "badgeError": "エラー",
+    "copyLineAria": "このログをコピー",
+    "copyLineTitle": "この行をコピー",
+    "collapseError": "エラーを折りたたむ",
+    "collapse": "折りたたむ",
+    "expandError": "エラーを展開",
+    "expand": "展開",
+    "copiedLine": "コピーしました",
+    "copyErrorLine": "エラーをコピー",
+    "copyLine": "コピー",
+    "noCopiable": "コピーできるログがありません",
+    "copyFailedManual": "コピーに失敗しました。手動で選択してください",
+    "entriesUnit": "件",
+    "filterPlaceholder": "ログを絞り込む…",
+    "copyFilteredLabel": "フィルター後のログをコピーしました",
+    "copyFilteredAria": "フィルター後のログをコピー",
+    "copyFilteredTitle": "フィルター後のログをクリップボードにコピーします",
+    "copyFilteredBtn": "コピー",
+    "emptyTitle": "ログはまだありません",
+    "noMatchTitle": "一致するログがありません",
+    "emptyHint": "タスクを実行するとログがここに表示されます",
+    "copiedOneEntry": "1 件のログをコピーしました",
+    "ctxCopyLine": "この行をコピー",
+    "ctxCopyFilteredAll": "フィルター後のすべてをコピー（{{count}}）",
+    "ctxCopyAll": "すべてをコピー（{{count}}）",
+    "copyAllLabel": "すべてのログをコピーしました",
+    "clearFilter": "フィルターをクリア"
+  },
+  "artifactcard": {
+    "kindMarkdown": "ドキュメント",
+    "kindBrowser": "ウェブページ",
+    "kindImage": "画像",
+    "kindSvg": "グラフィック",
+    "kindTable": "表",
+    "kindCode": "コード",
+    "kindFallback": "ファイル",
+    "copiedPath": "パスをコピーしました",
+    "copyFailed": "コピーに失敗しました",
+    "addedToContext": "{{name}} をコンテキストに追加しました",
+    "previewAction": "プレビュー",
+    "preview": "プレビュー",
+    "copyPath": "パスをコピー",
+    "insertContext": "コンテキストに追加"
+  },
+  "bugfixresult": {
+    "statusAchieved": "達成済み",
+    "statusExhausted": "試行を使い切りました",
+    "statusFailed": "失敗",
+    "attemptCount": "{{count}} 回試行",
+    "diffSummary": "差分サマリー",
+    "noChanges": "コード変更なし",
+    "testOutput": "テスト出力",
+    "noTestOutput": "テスト出力なし",
+    "goal": "目標"
+  },
+  "askuser": {
+    "suggestionAria": "提案オプション",
+    "recommended": "おすすめ",
+    "customPlaceholder": "またはカスタム回答を入力…",
+    "answerPlaceholder": "回答を入力…",
+    "customAria": "カスタム回答",
+    "submitAria": "送信",
+    "submit": "送信",
+    "navHint": "↑↓ で選択、↵ で決定",
+    "enterHint": "↵ で送信",
+    "stop": "停止"
+  },
+  "quickopen": {
+    "placeholder": "ファイルを検索…",
+    "noFiles": "ファイルがありません",
+    "noMatch": "一致するファイルがありません",
+    "navigate": "移動",
+    "openInWindow": "新しいウィンドウで開く",
+    "close": "閉じる",
+    "fileCount": "{{total}} 件中 {{shown}} 件を表示"
+  },
+  "toolconfirm": {
+    "riskLow": "低リスク",
+    "riskMedium": "中リスク",
+    "riskHigh": "高リスク",
+    "addedAllowRule": "許可ルールを追加しました",
+    "addAllowRuleFailed": "許可ルールの追加に失敗しました",
+    "requestShell": "エージェントがシェルコマンドの実行を要求しています",
+    "requestSkill": "エージェントが「{{skill}}」スキルの使用を要求しています",
+    "toolOf": "「{{skill}}」スキル",
+    "needConfirm": "確認が必要です",
+    "shell": "SHELL",
+    "copy": "コピー",
+    "execDir": "実行ディレクトリ：{{dir}}",
+    "impacts": "影響範囲",
+    "alwaysAllow": "常に許可",
+    "noAskSession": "このセッション内では再度確認しない",
+    "deny": "拒否",
+    "allow": "許可",
+    "closeHint": "Esc で閉じる"
+  },
+  "markdown": {
+    "copied": "コピーしました",
+    "copy": "コピー",
+    "jsonInvalid": "不正な JSON",
+    "chart": "チャート",
+    "copiedAction": "コピーしました",
+    "copyAction": "コピー"
+  },
+  "toastlayer": {
+    "close": "閉じる"
+  },
+  "confirmdialog": {
+    "closeHint": "Esc で閉じる"
+  },
+  "suggestion": {
+    "nextStep": "次のステップ",
+    "recommended": "おすすめ"
+  },
+  "agentchip": {
+    "aria": "エージェント {{name}}"
+  },
+  "steplist": {
+    "toolFailed": "ツールの実行に失敗しました",
+    "cacheHitTitle": "キャッシュヒット",
+    "locateTodo": "チェックリスト内で位置を確認"
+  },
+  "meta": {
+    "error": {
+      "errAgentNotFound": "Agent が存在しないか削除されています。Agent ページから復元して再試行してください。",
+      "errModelUnconfigured": "モデルが未設定または利用できません。設定で利用可能なモデルを選択して再実行してください。",
+      "errModelInvalid": "選択したモデルは削除または無効化されています。設定でモデルを選択し直してください。",
+      "errTaskNotFound": "タスクが見つかりません。削除された可能性があります。タスク一覧を更新してください。",
+      "errToolNotRegistered": "ツールが登録されていません。Agent のスキル設定を確認してください。",
+      "errModelDisabled": "モデルが未設定または無効化されています。設定で確認してください。",
+      "errConnRefused": "モデルサービスに接続できません。サービスが起動していることとアドレスが正しいことを確認してください。",
+      "errNetwork": "ネットワークリクエストに失敗しました。ネットワークまたはサービスの到達性を確認してください。",
+      "errUnauthorized": "認証に失敗しました。API Key が正しいか確認してください。",
+      "errRateLimit": "リクエストが多すぎます。しばらくしてから再試行してください。",
+      "errFileNotFound": "ファイルが存在しないか、パスが無効です。",
+      "errPermission": "ワークスペースディレクトリに書き込めません（システム権限の制限）。ターミナルから起動した場合は、\"open\" コマンドを使用するか、アプリアイコンをダブルクリックして起動してください。",
+      "errInsufficientBalance": "モデルアカウントの残高が不足しています。対応するプラットフォームでチャージして再試行してください。"
+    },
+    "inspector": {
+      "todos": "チェックリスト",
+      "context": "コンテキスト",
+      "files": "ファイル",
+      "logs": "ログ",
+      "browser": "ブラウザ",
+      "terminal": "ターミナル"
+    },
+    "dock": {
+      "files": "ファイル",
+      "context": "コンテキスト",
+      "terminal": "ターミナル",
+      "browser": "ブラウザ",
+      "todos": "タスク一覧",
+      "progress": "進捗"
+    },
+    "llm": {
+      "balance": "LLM アカウントの残高が不足しています。プロバイダーでチャージするか、設定で他の利用可能なモデルに切り替えてください。",
+      "auth": "API Key が無効か、権限が不足しています。設定でモデル認証情報を確認するか、プロバイダーにアカウント状態を確認してください。",
+      "rateLimit": "リクエスト頻度が上限を超えました（レート制限）。しばらくしてから再試行するか、設定で並行数を減らす / 別のモデルに切り替えてください。",
+      "serverError": "LLM サーバーエラー（5xx）。しばらくしてから再試行してください。失敗が続く場合は設定で別のモデルに切り替えてください。",
+      "contextOverflow": "コンテキストがモデルの上限を超えています。会話履歴をクリアする / 現在のタスクのドキュメントを短くするか、より大きなコンテキストウィンドウのモデルに切り替えてください。",
+      "network": "ネットワークエラー。プロキシ / ネットワーク接続を確認して再試行してください。"
+    }
+  },
+  "slice": {
+    "init": {
+      "themeInitFailed": "テーマの初期化に失敗しました"
+    },
+    "persist": {
+      "defaultWorkspace": "デフォルトワークスペース"
+    },
+    "ui": {
+      "languageSaveFailed": "言語設定の保存に失敗しました",
+      "preview": "プレビュー",
+      "themePersistFailed": "テーマの保存に失敗しました",
+      "themeSyncFailed": "ネイティブテーマの同期に失敗しました"
+    },
+    "feedback": {
+      "confirm": "確認",
+      "cancel": "キャンセル"
+    },
+    "catalog": {
+      "createdAgent": "Agent を作成しました：@{{name}}",
+      "agentUpdated": "Agent を更新しました",
+      "deleteAgentTitle": "Agent を削除",
+      "deleteAgentBody": "Agent「{{name}}」を削除しますか？この操作は取り消せません。",
+      "delete": "削除",
+      "agentDeleted": "Agent を削除しました",
+      "createdSkill": "Skill を作成しました：{{name}}",
+      "skillUpdated": "Skill を更新しました",
+      "deleteSkillTitle": "Skill を削除",
+      "deleteSkillBody": "Skill「{{name}}」を削除しますか？この操作は取り消せません。",
+      "skillDeleted": "Skill を削除しました",
+      "importedSkill": "Skill をインポートしました：{{name}}",
+      "exportedZip": "ZIP としてエクスポートしました（{{count}} ファイル）：{{path}}",
+      "exportedDir": "ディレクトリにエクスポートしました（{{count}} ファイル）：{{path}}",
+      "mcpAdded": "MCP を追加しました：{{name}}",
+      "mcpUpdated": "MCP を更新しました",
+      "deleteMcpTitle": "MCP Server を削除",
+      "deleteMcpBody": "MCP「{{name}}」を削除しますか？接続中の場合は先に切断されます。",
+      "mcpDeleted": "MCP を削除しました",
+      "mcpConnected": "MCP に接続しました",
+      "mcpConnectFailed": "MCP への接続に失敗しました",
+      "modelSwitched": "{{model}} に切り替えました ・ コンテキストは保持されます"
+    },
+    "kbMemory": {
+      "automationCreated": "自動化を作成しました：{{name}}",
+      "automationUpdated": "自動化を更新しました",
+      "automationDeleted": "自動化を削除しました",
+      "automationStarted": "自動化を開始しました。実行中です",
+      "kbAdded": "ナレッジベースに追加しました：{{name}}",
+      "kbRemoved": "ナレッジベースから削除しました",
+      "memoryEnabled": "コンテキストを更新しました ・ +1 件の記憶が有効 ・ 次のターンから適用",
+      "memoryDisabled": "コンテキストを更新しました ・ -1 件の記憶が無効 ・ 次のターンから適用"
+    },
+    "market": {
+      "cliInstalled": "skillhub CLI をインストールしました{{version}}",
+      "skillInstalled": "Skill をインストールしました：{{name}}",
+      "skillAlreadyInstalled": "この Skill はインストール済みです",
+      "favoritedSkill": "お気に入りのスキル",
+      "skillUninstalled": "Skill をアンインストールしました"
+    },
+    "tasks": {
+      "requestTimeout": "リクエストがタイムアウトしました（2秒以内に応答なし）、ロールバックしました",
+      "planRejected": "リスト操作は拒否されました：{{reason}}",
+      "selectModelFirst": "先に設定でモデルを構成して選択してください",
+      "taskCreateFailed": "タスクの作成に失敗しました。モデル設定を確認してください",
+      "kbSaveFailed": "グローバル KB スイッチの保存に失敗しました",
+      "unnamedWorkspace": "無題のワークスペース",
+      "createWorkspaceFailed": "ワークスペースの作成に失敗しました：{{error}}",
+      "workspaceSwitched": "ワークスペースを切り替えました ・ 記憶はタスクごとに分離されます（{{name}}）",
+      "switchWorkspaceFailed": "ワークスペースの切り替えに失敗しました：{{error}}",
+      "exportStepStream": "ステップフロー"
+    },
+    "subscriptions": {
+      "taskFailedHint": "タスクが失敗しました：{{error}}\n\n💡 {{hint}}",
+      "taskFailed": "タスクが失敗しました：{{error}}",
+      "viewLogs": "詳細はログを確認してください",
+      "contextCompressed": "コンテキストを圧縮しました ・ {{before}} → {{after}} tokens",
+      "contextCompressedLayer": "コンテキストを圧縮しました（L{{layer}} ・ {{before}} → {{after}} tokens）",
+      "profileUpdated": "ユーザープロファイルを更新しました ・ v{{version}}（+{{count}} 件の観察）",
+      "memoryMerged": "記憶をナレッジベースに統合しました"
+    }
+  },
+  "plantatus": {
+    "waiting": "待機",
+    "running": "実行中",
+    "done": "完了",
+    "failed": "失敗",
+    "cancelled": "キャンセル済み",
+    "skipped": "スキップ済み"
+  },
+  "help": {
+    "title": "ArkWork ヘルプセンター",
+    "subtitle": "主要機能をすべて網羅 · ⌘? で開閉",
+    "closeLabel": "ヘルプを閉じる",
+    "tryNow": "今すぐ試す",
+    "privacyFooter": "プライバシー · ArkWork はデフォルトでローカル優先です。会話・メモリ・ナレッジベースのインデックスはローカルの SQLite とファイルシステムに保存され、モデル呼び出しは設定で明示的に構成した API キーで行われます。",
+    "dir": {
+      "title": "目次",
+      "ref": "参考",
+      "shortcuts": "ショートカット",
+      "navAria": "ヘルプ目次"
+    },
+    "shortcuts": {
+      "title": "ショートカット総覧",
+      "subtitle": "グローバルショートカットの参考",
+      "desc": {
+        "quickAction": "Quick Action（検索 / コマンド / @メンション / #トピック）",
+        "quickOpen": "QuickOpen：名前でタスク・ファイル・スキルへ移動",
+        "newTask": "新規タスクを作成して Composer にフォーカス",
+        "sidebar": "左のサイドバーを折りたたみ / 展開",
+        "inspector": "右の Inspector を折りたたみ / 展開",
+        "preview": "PreviewWindow フロートの表示 / 非表示",
+        "settings": "設定を開く（ページ）",
+        "help": "HelpCenter を開く / 閉じる（このページ）",
+        "helpAlt": "HelpCenter を開く / 閉じる（代替ショートカット）",
+        "workspace": "ワークスペース切替えを開く",
+        "agents": "エージェント（Agents）",
+        "skills": "スキル（Skills）",
+        "kb": "ナレッジベース（KB）",
+        "memory": "メモリ（Memory）",
+        "automations": "自動化（Automations）",
+        "settingsModule": "設定（Settings）",
+        "inspTodos": "Inspector：リスト（Todos）",
+        "inspContext": "Inspector：コンテキスト（Context）",
+        "inspFiles": "Inspector：ファイル（Files）",
+        "inspLogs": "Inspector：ログ（Logs）",
+        "inspBrowser": "Inspector：ブラウザ（Browser）",
+        "esc": "優先順位に応じてオーバーレイ / ModulePage / Inspector を閉じる"
+      }
+    },
+    "sections": {
+      "workspace": {
+        "title": "ワークスペース",
+        "summary": "サイドバーには現在のワークスペース、タスクスレッド、機能エントリ、検索が表示されます。折りたたみ時は 64px のアイコンレールを維持します。",
+        "bullets": {
+          "0": "先頭のメインボタン「新規タスク」から会話を直接開始できます。",
+          "1": "Threads はデフォルトで Pinned / Today / This week / Earlier にグループ分けされ、視覚的なノイズを減らすためすべて折りたたまれています。",
+          "2": "機能エントリ（エージェント / スキル / ナレッジ / メモリ / 自動化 / 設定）をクリックすると ModulePage が開きます。再度クリックすると開いたまま維持されます。",
+          "3": "サイドバーの幅は 64〜320px の間でドラッグで調整できます。"
+        },
+        "actions": {
+          "0": "ワークスペース切替えを開く",
+          "1": "設定ページを開く（外観 / ワークスペース）",
+          "2": "新規タスクを作成"
+        }
+      },
+      "tasks": {
+        "title": "タスク",
+        "summary": "タスクは ArkWork における最小の協働単位です。1 タスク = 会話 + プラン + ファイルコンテキスト + 履歴ステップ。",
+        "bullets": {
+          "0": "タスク作成後は Composer に自動フォーカスし、Enter で最初の実行が始まります。タイトルは先頭メッセージから自動生成されます。",
+          "1": "Threads の各列の ⋯ メニューで、名前変更、実行 / 停止、お気に入り、削除ができます。",
+          "2": "失敗 / キャンセルしたステップは個別に「再実行」できます。メッセージとファイルの履歴は保持されます。",
+          "3": "タスクごとのナレッジベーススイッチ：各タスクで KB 検索を個別に有効化できます（グローバル設定に依存しません）。"
+        },
+        "actions": {
+          "0": "タスクを作成してみる",
+          "1": "Composer にフォーカス"
+        }
+      },
+      "parallel": {
+        "title": "並列実行",
+        "summary": "依存関係のない複数のツール呼び出しは自動的に並列実行され、進行状況はツール単位で独立して表示され、互いに上書きしません。",
+        "bullets": {
+          "0": "1 回の推論で複数のツール呼び出しをトリガーでき、エンジンが並行して実行します。",
+          "1": "順序依存のある処理（書き込み後の読み取り）は競合状態を避けるため、引き続き直列で実行されます。",
+          "2": "プランカード / 右側のリストは同じ planItems データソースを共有し、「前倒しでチェックを付ける」ことを防ぎます。"
+        },
+        "actions": {
+          "0": "Inspector · リストを開く",
+          "1": "Inspector · ログを開く"
+        }
+      },
+      "conversation": {
+        "title": "対話フロー",
+        "summary": "対話フローにはユーザーメッセージ、プラン、ツール呼び出し結果、エージェントの返信が表示されます。スクロールでき、フォーカスを固定できます。",
+        "bullets": {
+          "0": "ユーザーメッセージとエージェントの返信は時系列の逆順に積み重ねられます。ツール呼び出しは「折りたたみカード」で表示されます。",
+          "1": "エージェント実行中は、会話の上部に「コマンド実行中…」などの人間に読みやすい説明が表示されます（ツール種別に応じてマッピング）。",
+          "2": "Composer は複数行入力をサポートします。長いタスクは一時停止 / 再開 / キャンセルができます。"
+        },
+        "actions": {
+          "0": "Composer にフォーカス",
+          "1": "タスクを作成して対話を開始"
+        }
+      },
+      "agents": {
+        "title": "エージェント",
+        "summary": "エージェント = 人格 + デフォルトモデル + 有効化スキル + Dock 設定です。作成・編集・複製ができます。",
+        "bullets": {
+          "0": "エージェントページにはすべてのエージェントが表示され、それぞれアイコン、人格の要約、モデル、有効化したスキル数、Dock プリセットがあります。",
+          "1": "新規作成 / 編集では AgentEditor フォームが開きます：人格プロンプト、デフォルトモデル、利用可能なスキル、Dock レイアウト。",
+          "2": "エージェントを切り替えると Dock 設定が自動で適用され、ステータスバーにヒントが一時的に表示されます。"
+        },
+        "actions": {
+          "0": "エージェントページを開く"
+        }
+      },
+      "skills": {
+        "title": "スキル（内蔵 / マーケット / インポート済み）",
+        "summary": "スキルはソース別に 3 つのグループに分類され、各グループに固有のバッジと件数バッジがあります。インポート元は追跡できます。",
+        "bullets": {
+          "0": "内蔵：ArkWork 付属のスキルで削除不可。shell / ファイル読み取り / KB クエリなどの基本機能に使用。",
+          "1": "マーケット：SkillHub からインストールしたスキルで、更新 / 削除が可能。インストール済み項目は「マーケット Tab」のインストール済み領域に表示されます。",
+          "2": "インポート済み：ローカルファイルからのインポートや外部 MCP 連携によるスキルで、ソースフィールドがあります。",
+          "3": "zip からインポートする場合、zip の内容全体（すべての .md / サブディレクトリのファイル）が Skill フォルダに展開されます。"
+        },
+        "actions": {
+          "0": "機能センターを開く"
+        }
+      },
+      "kb": {
+        "title": "ナレッジベース",
+        "summary": "PDF / TXT / Markdown / DOCX を検索可能なテキスト（SQLite FTS5）に解析します。kb_query ツールが一致した断片を返します。",
+        "bullets": {
+          "0": "解析中 / インデックス済み / 失敗の 3 状態をサポート。失敗したものは KB ページでワンクリック再試行できます。",
+          "1": "「セッション単位 + グローバル」の 2 層 KB スイッチを提供。オフにすると kb-search はコンテキストに注入されず、再起動も不要です。",
+          "2": "一致した断片は Inspector のコンテキストパネルとファイルパネルで確認できます。"
+        },
+        "actions": {
+          "0": "ナレッジベースページを開く",
+          "1": "グローバル KB をオフ（デモ用スイッチ）",
+          "2": "グローバル KB を再び有効化"
+        }
+      },
+      "memory": {
+        "title": "メモリ L1 – L4",
+        "summary": "ArkWork は 4 層のメモリを維持し、自動的に蒸留・昇格します。元の層は自動的に整理されます。",
+        "bullets": {
+          "0": "L1 ワーキングメモリ：現在の対話コンテキスト内の一時的なエントリ。",
+          "1": "L2 ファイルメモリ：セッション内で抽出された事実、引用、コマンド記録。",
+          "2": "L3 キュレーションメモリ：セッションをまたぐトピック / 再利用する断片。検索して注入できます。",
+          "3": "L4 パーソナライズメモリ：長期的なユーザー設定とパーソナリティ。ゆっくり更新されます。",
+          "4": "閾値（トピック数 / 再利用回数 / L2 のサイズ）を超えると自動的に蒸留されます。UI の「手動でナレッジベースへ」は廃止されました。"
+        },
+        "actions": {
+          "0": "メモリページを開く"
+        }
+      },
+      "automations": {
+        "title": "自動化",
+        "summary": "スケジュールまたは手動でトリガーされるエージェントタスク。アラーム式の頻度選択 + カスタム cron に対応。",
+        "bullets": {
+          "0": "自動化ページで作成 / 編集 / 削除。トリガー時間になるとタスクキューに入ります。",
+          "1": "実行結果は対応するタスクの対話フローに書き戻され、後から確認しやすくなります。",
+          "2": "自動化の実行状態は、ステータスバー右下の「実行中」インジケーターにリアルタイムで反映されます。"
+        },
+        "actions": {
+          "0": "自動化ページを開く"
+        }
+      },
+      "inspector": {
+        "title": "Inspector",
+        "summary": "右側の固定 5 タブ：リスト / コンテキスト / ファイル / ログ / ブラウザ。",
+        "bullets": {
+          "0": "現在アクティブなタブをもう一度クリックすると折りたたまれ、折りたたみ後はどのタブでも再度クリックで再展開できます（「固まった」状態はなくなりました）。",
+          "1": "リスト：planItems をリアルタイムに同期。状態の唯一のソースです。",
+          "2": "コンテキスト：現在のタスクへ注入された KB / メモリ断片とトークン予算を読み取り専用で表示。L2 以降はメモリセンターで編集できます。",
+          "3": "ファイル：ワークスペースのファイルブラウザ（偽の「お気に入り」ボタンは廃止）。",
+          "4": "ログ：ツール呼び出し / 権限 / エラーのストリーム。ワンクリックでコピーできます。",
+          "5": "ブラウザ：内蔵 BrowserPanel が PreviewWindow と連動します。"
+        },
+        "actions": {
+          "0": "リストを開く",
+          "1": "コンテキストを開く",
+          "2": "ファイルを開く",
+          "3": "ログを開く",
+          "4": "ブラウザを開く"
+        }
+      },
+      "models": {
+        "title": "モデル / 設定",
+        "summary": "設定ページは 5 つのセクション：モデル / ワークスペース / 外観 / ショートカット / 詳細。",
+        "bullets": {
+          "0": "モデル：デフォルト / 予備モデルを選択し、API キーを設定。OpenAI、Anthropic、ローカル Ollama に対応。",
+          "1": "ワークスペース：ワークスペースのルート、デフォルトの KB、ファイル無視ルールを選択。",
+          "2": "外観：テーマ（ライト / ダーク / システムに従う）+ フォント密度。",
+          "3": "ショートカット：現在のすべてのショートカットの読み取り専用総覧（HelpCenter と同期）。",
+          "4": "詳細：実験的スイッチ、ログレベル、自動更新チャンネル。",
+          "5": "現在のモデルは Composer でのみ表示されます。他の場所（TopBar / StatusBar / タスクヘッダー）は整理されました。"
+        },
+        "actions": {
+          "0": "設定を開く"
+        }
+      },
+      "privacy": {
+        "title": "プライバシー / ローカルストレージ",
+        "summary": "ArkWork はデフォルトでローカル優先です。タスク / 対話 / メモリはローカル JSON、ナレッジベースのインデックスはローカル SQLite（FTS5）とファイルシステムに保存されます。",
+        "bullets": {
+          "0": "データディレクトリ：開発時は userData が app/.dev-data にリダイレクトされ、パッケージ版ではシステムの userData（macOS：~/Library/Application Support/ArkWork）に配置されます。",
+          "1": "アプリデータのルートは {userData}/arkwork-data です。タスク / エージェント / スキル / モデル / メモリはすべてここに JSON で保存されます。",
+          "2": "現在のワークスペース：{userData}/arkwork-data/workspace/default（設定・ワークスペースで切替可能）。タスクメモリは {workspaceDir}/.arkwork/memory/{taskId} にあります。",
+          "3": "モデル呼び出しはユーザーが明示的に設定した API キーで行われます。ArkWork が会話内容をアップロードすることはありません。",
+          "4": "ワークスペースデータをワンクリックでエクスポート / クリアできます。すべての変更は設定 → 詳細にあります。"
+        },
+        "actions": {
+          "0": "設定・詳細を開く"
+        }
+      }
+    }
+  },
+  "const": {
+    "status": {
+      "pending": "待機中",
+      "running": "実行中",
+      "paused": "一時停止",
+      "done": "完了",
+      "failed": "失敗",
+      "cancelled": "キャンセル済み"
+    },
+    "todo": {
+      "itemProgress": "項目 {{index}} → {{status}}"
+    },
+    "tool": {
+      "fileReader": "ファイル読み込み",
+      "fileWriter": "ファイル書き込み",
+      "fileEditor": "ファイル編集",
+      "globSearch": "ファイルを検索",
+      "grepSearch": "内容を検索",
+      "webSearch": "ウェブを検索",
+      "fetchUrl": "ページにアクセス",
+      "shell": "コマンドを実行",
+      "delegateAgent": "委譲先",
+      "sessionSearch": "履歴を検索",
+      "taskComplete": "タスク完了",
+      "askUser": "ユーザーに質問",
+      "todoUpdate": "チェックリストを更新"
+    },
+    "argKey": {
+      "path": "パス",
+      "query": "クエリ",
+      "url": "URL",
+      "command": "コマンド",
+      "question": "質問",
+      "agentId": "エージェント",
+      "text": "テキスト",
+      "prompt": "プロンプト",
+      "context": "コンテキスト",
+      "cwd": "ディレクトリ",
+      "regex": "正規表現",
+      "replace": "置換",
+      "glob": "パターン"
+    },
+    "memory": {
+      "l1": "ワーキングメモリ",
+      "l2": "アーティファクトメモリ",
+      "l3": "知識メモリ",
+      "l4": "経験メモリ"
+    },
+    "exec": {
+      "thinking": "思考中…",
+      "shell": "コマンドを実行中",
+      "fileReader": "ファイルを読み込み中",
+      "fileWriter": "ファイルを書き込み中",
+      "fileEditor": "ファイルを編集中",
+      "webSearch": "ウェブを検索中",
+      "fetchUrl": "ページを取得中",
+      "sessionSearch": "履歴を検索中",
+      "delegateAgent": "サブタスクを委任中",
+      "kbQuery": "ナレッジベースを照会中",
+      "kbIndex": "ナレッジベースを索引中",
+      "askUser": "ユーザー入力を待機中",
+      "finalizing": "結果をまとめ中",
+      "external": "外部ツールで実行中"
+    }
+  },
+  "agentEditor": {
+    "nameRequired": "エージェント名を入力してください",
+    "titleEdit": "エージェントを編集",
+    "titleNew": "エージェントを新規作成",
+    "builtinNotice": "組み込みエージェント：ペルソナの編集とスキルの追加は可能ですが、名前の変更・固有スキルの削除・エージェントの削除はできません。",
+    "avatarColor": "アバターの色",
+    "colorAria": "色 {{color}}",
+    "nameLabel": "名前 *",
+    "namePlaceholder": "例：コードレビュアー",
+    "defaultModel": "デフォルトモデル",
+    "selectModelPlaceholder": "モデルを選択…",
+    "noModelsEnabled": "有効なモデルがありません。先に設定で構成してください。",
+    "description": "説明",
+    "descriptionPlaceholder": "このエージェントの能力を一言で",
+    "role": "役割",
+    "rolePlaceholder": "コードレビュアー",
+    "goal": "目標",
+    "goalPlaceholder": "コードの品質とセキュリティをレビュー",
+    "backstory": "経歴",
+    "backstoryPlaceholder": "シニアセキュリティ監査人",
+    "styleGuide": "スタイル",
+    "styleGuidePlaceholder": "箇条書き・結論ファースト・コメントは英語",
+    "systemPromptPlaceholder": "あなたはArkWorkエージェントです…（ReActモード／終了条件／制約など）",
+    "skillsLabel": "スキル（{{enabled}}/{{total}}）",
+    "noSkills": "インストール済みのスキルはありません",
+    "intrinsicTag": "固有",
+    "disabledTag": "無効",
+    "sidebarWidgetsLabel": "サイドバーウィジェット（{{enabled}}/{{total}}）",
+    "extensionPointTag": "拡張ポイント",
+    "dockTabDesc": "右側ドックタブ",
+    "extensionPointDesc": "登録済み。モジュールページ／Inspector／フローティングで使用中",
+    "memoryScope": "メモリスコープ",
+    "memoryProfile": "ユーザープロファイル",
+    "memoryProfileDesc": "ユーザーの設定や長期プロファイルを注入",
+    "memorySkill": "蒸留スキル",
+    "memorySkillDesc": "自身が蓄積したスキル記憶を読み出す"
+  }
+}

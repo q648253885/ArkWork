@@ -1,0 +1,84 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+app/out/
+app/dist/
+app/dist-electron/
+app/release/
+*.app
+*.dmg
+*.exe
+*.AppImage
+
+# Dev data & caches
+app/.dev-data/
+.dev-data/
+app/.arkwork/
+**/.DS_Store
+**/Cache/
+**/Code Cache/
+**/GPUCache/
+**/Service Worker/
+**/blob_storage/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# OS
+Thumbs.db
+desktop.ini
+
+# Trae / AI tooling local data
+.workbuddy/
+.trae/
+
+# Internal / iteration docs stay local — only user-facing guides under docs/ are published
+docs/versions/
+docs/react-core-skills/
+docs/ux-redesign-v3/
+docs/browser-redesign-prd.md
+docs/browser-redesign-system-design.md
+reports/
+overview.md
+
+# Dev tooling / automation / test scaffolding
+.cdp-tools/
+.agent-browser/
+**/.smoke-verify/
+bin/
+screenshots/
+shots/
+products/
+
+# Stray build artifacts & install packages
+app/index-*.js
+*.blockmap
+*.zip
+
+# Scratch / e2e / smoke test scripts
+app/_*.mjs
+app/_*.py
+app/scripts/_verify-*
+app/smoke_check.py
+app/fix_lone_surrogates.py
+
+# Runtime audit / eval data
+app/src/main/audit/*.jsonl
+index-*.js

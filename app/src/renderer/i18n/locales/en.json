@@ -1,0 +1,2274 @@
+{
+  "common": {
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "close": "Close",
+    "delete": "Delete",
+    "retry": "Retry",
+    "loading": "Loading…"
+  },
+  "action": {
+    "shell": "Run command",
+    "shellDetail": "Run command: {value}",
+    "fileReader": "Read file",
+    "fileReaderDetail": "Read file: {value}",
+    "fileWriter": "Write file",
+    "fileWriterDetail": "Write file: {value}",
+    "fileEditor": "Edit file",
+    "fileEditorDetail": "Edit file: {value}",
+    "globSearch": "Find files",
+    "globSearchDetail": "Find files: {value}",
+    "grepSearch": "Search code",
+    "grepSearchDetail": "Search code: {value}",
+    "webSearch": "Web search",
+    "webSearchDetail": "Web search: {value}",
+    "fetchUrl": "Fetch page",
+    "fetchUrlDetail": "Fetch page: {value}",
+    "kbSearch": "Search knowledge base",
+    "kbSearchDetail": "Search knowledge base: {value}",
+    "sessionSearch": "Search history",
+    "sessionSearchDetail": "Search history: {value}",
+    "delegateAgent": "Delegate subtask",
+    "delegateAgentDetail": "Delegate subtask: {value}",
+    "taskComplete": "Complete task",
+    "taskCompleteDetail": "Complete task: {value}",
+    "askUser": "Ask user",
+    "askUserDetail": "Ask user: {value}",
+    "callTool": "Call tool: {tool}",
+    "todoUpdate": {
+      "done": "Update todos: item {item} → done",
+      "doneCmt": "Update todos: item {item} → done ({comment})",
+      "running": "Update todos: item {item} → in progress",
+      "runningCmt": "Update todos: item {item} → in progress ({comment})",
+      "pending": "Update todos: item {item} → pending",
+      "pendingCmt": "Update todos: item {item} → pending ({comment})",
+      "skipped": "Update todos: item {item} → skipped",
+      "skippedCmt": "Update todos: item {item} → skipped ({comment})",
+      "failed": "Update todos: item {item} → failed",
+      "failedCmt": "Update todos: item {item} → failed ({comment})",
+      "cancelled": "Update todos: item {item} → cancelled",
+      "cancelledCmt": "Update todos: item {item} → cancelled ({comment})",
+      "other": "Update todos: item {item} → {status}",
+      "otherCmt": "Update todos: item {item} → {status} ({comment})"
+    }
+  },
+  "settings": {
+    "language": {
+      "label": "Language",
+      "desc": "Applies immediately, no restart required",
+      "zh": "中文",
+      "en": "English",
+      "ja": "日本語",
+      "ko": "한국어"
+    },
+    "tabs": {
+      "barAriaLabel": "Settings sections",
+      "models": "Models",
+      "modelsHint": "Configure LLM APIs",
+      "workspace": "Workspace",
+      "workspaceHint": "Workspace paths and isolation",
+      "knowledge": "Knowledge",
+      "knowledgeHint": "Enable/disable global knowledge injection",
+      "appearance": "Appearance",
+      "appearanceHint": "Theme & preview",
+      "advanced": "Advanced",
+      "advancedHint": "Compression & dev tools",
+      "footer": "All changes apply instantly · destructive actions require confirmation"
+    },
+    "knowledge": {
+      "globalTitle": "Global knowledge base",
+      "effectiveImmediately": "Applies immediately, no restart required",
+      "enableInjection": "Enable knowledge injection",
+      "injectBodyPrefix": "When disabled, calls to ",
+      "injectBodySuffix": " return a guidance hint instead of search results, and the Composer context panel shows \"Knowledge: disabled\".",
+      "currentTitle": "Current knowledge base",
+      "openPanel": "Open knowledge panel",
+      "indexedCount": "Indexed entries",
+      "parseFailed": "Parse failures",
+      "totalCount": "Total entries",
+      "sessionTitle": "Per-session toggle",
+      "sessionDesc": "The per-session \"Knowledge\" toggle sits at the top of Inspector's \"Context\" panel. Switching tasks is unaffected; disabling it only stops KB injection for the current session."
+    },
+    "permission": {
+      "title": "Permissions",
+      "fastSwitchHint": "Shift+Tab to switch quickly",
+      "sessionMode": "Session mode",
+      "ruleMerged": "Merged rules",
+      "ruleCount": "{{count}} items",
+      "noCustomRules": "No custom rules yet",
+      "none": "None",
+      "customAllowRules": "Custom allow rules",
+      "addRulePlaceholder": "Bash(npm test) or Bash(git diff:*)",
+      "addAllowRule": "Add allow rule",
+      "bypassConfirmTitle": "Enable \"Full access\" mode?",
+      "confirmBody0": "In this mode the Agent skips all tool approvals, including high-risk actions that previously required manual confirmation:",
+      "confirmBody1": "· Any shell command (incl. deleting files, installing dependencies, network requests)",
+      "confirmBody2": "· File reads/writes outside the workspace and protected paths (.env, secrets, etc.)",
+      "confirmBody3": "· Blacklisted commands are no longer blocked",
+      "confirmBody5": "This mode does not persist; it reverts to default permissions on restart. Switch back to another mode as soon as a task finishes.",
+      "bypassConfirmLabel": "I understand the risk, enable",
+      "cancel": "Cancel",
+      "modeOptions": {
+        "default": {
+          "label": "Default",
+          "desc": "Confirm every action"
+        },
+        "autoApprove": {
+          "label": "Auto-approve",
+          "desc": "Auto-approve reads & writes; high-risk commands still confirmed"
+        },
+        "acceptEdits": {
+          "label": "Accept edits",
+          "desc": "Auto-approve within the workspace"
+        },
+        "plan": {
+          "label": "Read-only",
+          "desc": "Read-only exploration; write actions denied"
+        },
+        "bypassPermissions": {
+          "label": "Full access",
+          "desc": "Skip all approvals (incl. high-risk); requires a second confirmation, not persisted"
+        }
+      },
+      "ruleGroups": {
+        "allow": "Allow",
+        "ask": "Ask",
+        "deny": "Deny"
+      }
+    },
+    "developer": {
+      "compressionTitle": "Compression & distillation",
+      "compressThresholdLabel": "L1 auto-compression threshold",
+      "compressStrategyLabel": "Compression strategy",
+      "compressStrategyValue": "Similarity 0.6 + time decay 7 days",
+      "distillThresholdLabel": "Distillation threshold",
+      "distillThresholdValue": "10 topics / 5 reuses / L2 ≥ 50 items",
+      "tempEntryTtlLabel": "L1/L2 temp entry TTL",
+      "tempEntryTtlValue": "7-day auto distillation",
+      "toolsTitle": "Developer tools",
+      "logsTab": "Logs",
+      "graphTab": "Graph"
+    },
+    "workspace": {
+      "title": "Workspaces (tasks & memory isolated per workspace)",
+      "add": "Add workspace",
+      "empty": "No workspaces yet; click \"Add workspace\" to create one",
+      "current": "Current",
+      "running": "Running",
+      "openFolder": "Open folder",
+      "switch": "Switch",
+      "remove": "Remove",
+      "removeConfirmTitle": "Remove workspace",
+      "removeConfirmBody": "Remove workspace \"{{name}}\"? Task data stays on disk but will no longer appear in this list.",
+      "noFolderToast": "The default workspace has no associated folder",
+      "openFolderFail": "Failed to open folder: {{message}}"
+    },
+    "models": {
+      "title": "LLM configuration",
+      "add": "Add",
+      "empty": "No model configured; click \"Add\" to create one",
+      "testing": "Testing…",
+      "test": "Test",
+      "edit": "Edit",
+      "new": "New",
+      "delete": "Delete",
+      "deleteConfirmTitle": "Delete model",
+      "deleteConfirmBody": "Delete model \"{{name}}\"? This cannot be undone.",
+      "defaultEndpoint": "Default (official endpoint)",
+      "apiKeyConfigured": "Configured ({{key}}…)",
+      "apiKeyNotConfigured": "Not configured",
+      "availableModels": "Available models:",
+      "kindHints": {
+        "openai": "OpenAI official or compatible endpoint; leave baseURL empty to use the official default",
+        "anthropic": "Claude-family models",
+        "ollama": "Local Ollama service, default http://127.0.0.1:11434/v1",
+        "vllm": "Local vLLM inference service, OpenAI-compatible API"
+      },
+      "editor": {
+        "title": "{{action}} model configuration",
+        "idLabel": "Model ID (value sent to the API)",
+        "idPlaceholder": "e.g. gpt-4o-mini, llama3.1, claude-3-5-sonnet",
+        "idRequired": "Please enter a Model ID",
+        "idExists": "This ID already exists; please use another",
+        "nameLabel": "Display name (optional)",
+        "namePlaceholder": "Leave empty to use the model id",
+        "kindLabel": "Provider kind",
+        "baseUrlPlaceholderOpenai": "Leave empty to use the OpenAI official default",
+        "baseUrlPlaceholderLocal": "e.g. http://127.0.0.1:8000/v1",
+        "apiKeyPlaceholderLocal": "Leave empty for local services",
+        "apiKeyPlaceholderRequired": "Required",
+        "contextWindowLabel": "Context Window (optional)",
+        "contextWindowPlaceholder": "e.g. 128000",
+        "enabled": "Enable",
+        "cancel": "Cancel",
+        "save": "Save"
+      }
+    },
+    "appearance": {
+      "title": "Appearance",
+      "actualDark": "Currently: Dark",
+      "actualLight": "Currently: Light",
+      "light": "Light",
+      "lightDesc": "Bright background, ideal for daytime and well-lit environments",
+      "dark": "Dark",
+      "darkDesc": "Dark background, easier on the eyes and lower contrast",
+      "system": "System",
+      "systemDesc": "Automatically follow the operating system's light/dark setting",
+      "preview": "Preview",
+      "previewBody": "This is a body text sample for previewing the current theme's contrast.",
+      "previewBodySecondary": "This is secondary text used for supplementary explanation.",
+      "previewBodyMeta": "This is meta text (timestamps, badges).",
+      "previewPrimary": "Primary button",
+      "previewSecondary": "Secondary button",
+      "previewSuccess": "Success",
+      "previewWarning": "Warning",
+      "previewError": "Error"
+    }
+  },
+  "toast": {
+    "languagePersistFailed": "Failed to save language preference",
+    "languageNativeSyncFailed": "Native language sync failed"
+  },
+  "app": {
+    "ready": "Ready",
+    "systemReady": "System ready",
+    "runningCount": "{{count}} running",
+    "taskPrefix": "Task: ",
+    "expandLeftPanel": "Expand sidebar",
+    "collapseLeftPanel": "Collapse sidebar",
+    "leftPanel": "Sidebar",
+    "expandRightPanel": "Expand inspector",
+    "collapseRightPanel": "Collapse inspector",
+    "rightPanel": "Inspector",
+    "newTask": "New task",
+    "themeLabel": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "System",
+    "themeSystemShort": "System",
+    "themeCycleHint": "Click to cycle: Light → Dark → System",
+    "switchTheme": "Switch theme",
+    "contextUsageTitle": "Context usage (real payload estimate)",
+    "memoryBudgetSuffix": "Budget {{budget}} tokens ({{pct}}%) · Model window {{window}}",
+    "memoryLabel": "Memory",
+    "currentModel": "Current model",
+    "quickActionPanel": "panel",
+    "permissionMode": {
+      "default": "Permission mode: default (confirm each time)",
+      "autoApprove": "Permission mode: auto-approve (high-risk commands still require confirmation)",
+      "acceptEdits": "Permission mode: accept edits (auto-approve within workspace)",
+      "plan": "Permission mode: read-only (read-only exploration, write operations rejected)",
+      "bypass": "Permission mode: full access"
+    },
+    "escPause": {
+      "running": "Task is running",
+      "body": "“{{title}}” is running. Choose an action:",
+      "cancel": "Cancel",
+      "pause": "Pause task",
+      "stop": "Stop task",
+      "closeHint": "To close, select a button above"
+    },
+    "collapsed": {
+      "expand": "Expand left panel",
+      "newTask": "New task"
+    },
+    "status": {
+      "systemReady": "System ready",
+      "systemReadyDesc": "All background services are running normally",
+      "ready": "Ready",
+      "running": "{{count}} running",
+      "taskPrefix": "Task: {{title}}",
+      "memoryCtxLabel": "Context usage (estimated from real payload)",
+      "memoryCtxDesc": "{{used}} / budget {{budget}} tokens ({{pct}}%) · model window {{window}}",
+      "memory": "Memory",
+      "currentModel": "Current model",
+      "expandLeft": "Expand left panel",
+      "collapseLeft": "Collapse left panel",
+      "expandLeftAria": "Expand left panel ⌘B",
+      "collapseLeftAria": "Collapse left panel ⌘B",
+      "left": "Left",
+      "expandRight": "Expand right panel",
+      "collapseRight": "Collapse right panel",
+      "expandRightAria": "Expand right panel ⌘J",
+      "collapseRightAria": "Collapse right panel ⌘J",
+      "right": "Right",
+      "theme": {
+        "light": "Light",
+        "dark": "Dark",
+        "system": "Follow system ({{resolved}})",
+        "systemDark": "dark",
+        "systemLight": "light",
+        "aria": "Switch theme",
+        "systemShort": "System"
+      },
+      "themeDesc": "{{theme}} · Click to cycle: light → dark → follow system",
+      "theme.aria": "Switch theme",
+      "theme.light": "Light",
+      "theme.dark": "Dark",
+      "theme.system": "Follow system ({{resolved}})",
+      "theme.systemDark": "dark",
+      "theme.systemLight": "light",
+      "theme.systemShort": "System",
+      "panel": "panel"
+    }
+  },
+  "palette": {
+    "prefixHint": {
+      "all": "Search tasks, agents, commands, files, skills…",
+      "agent": "@ Agent",
+      "task": "# Task",
+      "command": "/ Command",
+      "file": "> File"
+    },
+    "chip": {
+      "all": "All"
+    },
+    "section": {
+      "command": "Commands",
+      "task": "Tasks",
+      "agent": "Agents",
+      "file": "Files",
+      "skill": "Skills"
+    },
+    "command": {
+      "newTask": "New Task",
+      "quickOpen": "Quick Open File",
+      "toggleLeftNav": "Toggle Left Panel",
+      "toggleRightDock": "Toggle Right Panel",
+      "openAutomations": "Open: Automations",
+      "openSkills": "Open: Skills",
+      "openAgents": "Open: Agents",
+      "openKb": "Open: Knowledge Base",
+      "openMemory": "Open: Memory",
+      "backToTasks": "Back to Tasks",
+      "openMemoryPanel": "Open Memory Panel",
+      "openFilesPanel": "Open Files Panel",
+      "openSkillsPanel": "Open Skills Panel",
+      "openTasksPanel": "Open Tasks Panel",
+      "openAutomationsPanel": "Open Automations Panel",
+      "exportConversation": "Export Current Conversation",
+      "openSettings": "Open Settings",
+      "settingsModels": "Settings → Models",
+      "settingsAdvanced": "Settings → Advanced (Compaction / Dev Tools)",
+      "slashHint": "Invoke the matching skill (skip auto-detection)",
+      "singleAttempt": "Single attempt mode",
+      "singleAttemptHint": "Placeholder: wired to an execution policy later"
+    },
+    "empty": "No matches — try a prefix: {{agent}} / {{task}} / {{command}} / {{file}}",
+    "footer": {
+      "navigate": "Navigate",
+      "select": "Select",
+      "close": "Close",
+      "itemCount": "{{count}} / {{total}} items"
+    }
+  },
+  "composer": {
+    "permission": {
+      "default": {
+        "label": "Default",
+        "desc": "Confirm every action"
+      },
+      "autoApprove": {
+        "label": "Auto-approve",
+        "desc": "Auto-approve reads & writes; high-risk commands still confirmed"
+      },
+      "acceptEdits": {
+        "label": "Accept edits",
+        "desc": "Auto-approve within the workspace"
+      },
+      "plan": {
+        "label": "Read-only",
+        "desc": "Read-only exploration; write actions denied"
+      },
+      "bypass": {
+        "label": "Full access",
+        "desc": "Skip all approvals (incl. high-risk); requires a second confirmation"
+      },
+      "menuTitle": "Permission mode",
+      "bypassConfirmTitle": "Enable “Full access” mode?"
+    },
+    "bypassConfirm": {
+      "body0": "In this mode the Agent skips all tool approvals, including high-risk actions that previously required manual confirmation:",
+      "body1": "· Any shell command (incl. deleting files, installing dependencies, network requests)",
+      "body2": "· File reads/writes outside the workspace and protected paths (.env, secrets, etc.)",
+      "body3": "· Blacklisted commands are no longer blocked",
+      "body5": "This mode does not persist; it reverts to default permissions on restart. Switch back to another mode as soon as a task finishes.",
+      "label": "I understand the risk, enable"
+    },
+    "cancel": "Cancel",
+    "section": {
+      "skill": "Skill",
+      "file": "File",
+      "memory": "Memory",
+      "command": "Command"
+    },
+    "emptyMemory": "No content",
+    "slash": {
+      "specHint": "Write a product spec (PRD)",
+      "planHint": "Draft an implementation plan",
+      "bugfixHint": "Fix a bug",
+      "clear": "Clear memory",
+      "clearHint": "Clear the current task's context memory",
+      "compress": "Compress memory",
+      "compressHint": "Compress context to free up tokens",
+      "export": "Export conversation",
+      "exportHint": "Export the conversation to a file",
+      "new": "New task",
+      "newHint": "Start a new task"
+    },
+    "referencedMemory": "Referenced memory: {{label}}",
+    "compressDone": "Compressed: {{before}} → {{after}} tokens",
+    "contextCompressed": "Context compressed: {{before}} → {{after}} tokens",
+    "compressFailed": "Compression failed",
+    "clearTitle": "Clear the current task's memory?",
+    "clearBody": "This deletes all context memory for the current task and cannot be undone.",
+    "clearConfirm": "Clear",
+    "cleared": "Memory cleared",
+    "clearFailed": "Failed to clear memory",
+    "injectedMemory": "Injected {{count}} memories",
+    "attachmentLabel": "Attachments",
+    "fileAdded": "File added: {{name}}",
+    "appendFailed": "Failed to append message",
+    "switchAgent": "Switch agent",
+    "switchAgentDesc": "Choose the agent for the current task",
+    "agentNotSelected": "No agent selected",
+    "reference": "Reference",
+    "referenceTooltip": "@ to reference a file, skill or memory",
+    "command": "Command",
+    "commandTooltip": "/ quick commands",
+    "kbTooltip": "Knowledge base",
+    "knowledgeBase": "KB {{count}}",
+    "noAgents": "No agents yet",
+    "current": "Current",
+    "switchPermissionAria": "Switch permission mode",
+    "stop": "Stop",
+    "stopTooltip": "Stop the current run",
+    "stopAria": "Stop task",
+    "send": "Send",
+    "sendTooltip": "Send message",
+    "sendRequiresModel": "Please configure a model first",
+    "sendAria": "Send message",
+    "atMenuTitle": "Reference",
+    "noAgentsSkills": "No agents or skills yet",
+    "noMatch": "No matches",
+    "slashMenuTitle": "Commands",
+    "noMatchCommand": "No matching command",
+    "selected": "Selected",
+    "kbEnabled": "{{count}} knowledge bases enabled",
+    "kbDisabled": "No knowledge base enabled",
+    "kbNotImported": "No knowledge base imported yet",
+    "parseFailed": "Parse failed",
+    "kbChunks": "{{count}} chunks",
+    "remove": "Remove",
+    "cacheHit": "Cache hit {{pct}}% · {{hit}} / {{total}} tokens",
+    "ctxOverLimit": "Over budget {{pct}}% ({{cache}})",
+    "ctxUsage": "{{used}} / {{total}} tokens ({{pct}}%, cap {{window}}) {{cache}}",
+    "cachePrefixHit": "Cache {{pct}}% · {{hit}} / {{total}}",
+    "compressHintInline": "Context over limit, compress recommended",
+    "compressHint": "/compress"
+  },
+  "editors": {
+    "close": "Close",
+    "cancel": "Cancel",
+    "save": "Save",
+    "create": "Create",
+    "builtinSuffix": " (built-in)",
+    "nameLabel": "Name",
+    "descriptionLabel": "Description",
+    "avatarColorLabel": "Avatar color",
+    "colorAria": "Select color {{color}}",
+    "namespaceLabel": "Namespace",
+    "transportLabel": "Transport",
+    "commandLabel": "Command",
+    "urlLabel": "URL",
+    "temperatureLabel": "Temperature: {{value}}",
+    "timeoutLabel": "Timeout (seconds)",
+    "agent": {
+      "nameRequired": "Please enter an agent name",
+      "editTitle": "Edit agent{{builtin}}",
+      "newTitle": "New agent",
+      "namePlaceholder": "Enter agent name",
+      "nameBuiltinHint": "Built-in agent names cannot be changed",
+      "descriptionPlaceholder": "Briefly describe this agent",
+      "roleLabel": "Role",
+      "rolePlaceholder": "Define the agent's role",
+      "goalLabel": "Goal",
+      "goalPlaceholder": "Define the goal the agent should achieve",
+      "maxIterationsLabel": "Max iterations",
+      "backstoryLabel": "Backstory",
+      "backstoryPlaceholder": "Write a backstory for the agent",
+      "systemPromptLabel": "System prompt",
+      "systemPromptPlaceholder": "Write the system prompt",
+      "personaBuiltinHint": "Persona fields of built-in agents cannot be changed",
+      "defaultSkillsLabel": "Default skills ({{selected}}/{{total}} selected)",
+      "noSkills": "No skills available"
+    },
+    "skill": {
+      "nameRequired": "Please enter a skill name",
+      "invalidSchema": "The input schema JSON is not valid",
+      "editTitle": "Edit skill{{builtin}}",
+      "newTitle": "New skill",
+      "namePlaceholder": "Enter skill name",
+      "namespacePlaceholder": "e.g. myorg.my-skill",
+      "descriptionLabel": "Description",
+      "descriptionPlaceholder": "Briefly describe this skill",
+      "builtinHandlerLabel": "Built-in handler",
+      "noBuiltinHandler": "None (do not use a built-in handler)",
+      "needsConfirmationLabel": "Require confirmation before execution",
+      "confirmBeforeExec": "Ask the user to confirm before running this skill",
+      "tagsLabel": "Tags",
+      "tagsPlaceholder": "Comma separated, e.g. markdown, analysis",
+      "inputSchemaLabel": "Input schema (JSON Schema)",
+      "inputSchemaHint": "Defines the parameter format this skill accepts",
+      "instructionLabel": "Instruction",
+      "instructionPlaceholder": "Write the instruction executed when this skill is triggered",
+      "instructionHint": "Write in Markdown; supports parameter references"
+    },
+    "mcp": {
+      "nameRequired": "Please enter an MCP server name",
+      "stdioCommandRequired": "Please enter the stdio launch command",
+      "sseUrlRequired": "Please enter the SSE endpoint URL",
+      "editTitle": "Edit MCP server",
+      "newTitle": "New MCP server",
+      "namePlaceholder": "Enter server name",
+      "stdioOption": "stdio",
+      "sseOption": "SSE",
+      "commandPlaceholder": "e.g. npx @anthropic-ai/claude-code",
+      "argsLabel": "Arguments",
+      "argsPlaceholder": "One argument per line",
+      "urlPlaceholder": "wss:// or https:// endpoint",
+      "envLabel": "Environment variables",
+      "envHint": "One KEY=VALUE per line",
+      "enableLabel": "Enable this MCP server",
+      "reloadHint": "Restart sessions after changes"
+    }
+  },
+  "panel": {
+    "memory": {
+      "tab_l1": "Working Memory",
+      "tab_l2": "Compressed Memory",
+      "tab_l3": "Knowledge Memory",
+      "tab_l4": "Experience Memory",
+      "title": "Memory Center",
+      "count": "{{count}} items",
+      "l1_empty_title": "No working memory",
+      "l1_empty_hint": "Context resources produced during the conversation appear here",
+      "l1_empty": "No context resources to display",
+      "cat": {
+        "system": "System",
+        "user": "User",
+        "conversation": "Conversation",
+        "file": "File",
+        "skill": "Skill",
+        "kb": "Knowledge Base",
+        "l2": "Compressed",
+        "other": "Other"
+      },
+      "ctx": "Context",
+      "budget": "/ {{value}}",
+      "compress": "Compress",
+      "compress_desc_selected": "Compress the current task's context to reduce redundant content",
+      "compress_desc_none": "Select a task before compressing",
+      "compress_done": "Compressed: {{before}} → {{after}} tokens",
+      "compress_chip": "Compressed {{before}} → {{after}}",
+      "category_tooltip": "{{label}}: {{tokens}} tokens ({{pct}}%)",
+      "no_ctx_data": "No context data",
+      "distill_tooltip": "Distilled into {{target}}",
+      "distill_desc": "Click to view the distillation target details",
+      "load_failed": "Failed to load: {{msg}}",
+      "deleted": "Deleted",
+      "delete_failed": "Failed to delete: {{msg}}",
+      "merged": "Merged {{count}} memory items",
+      "merge_failed": "Failed to merge: {{msg}}",
+      "exported": "Exported {{count}} items",
+      "export_failed": "Failed to export: {{msg}}",
+      "l2_empty_title": "No compressed memory",
+      "l2_empty_hint": "Summaries created during context compression are stored here",
+      "l2_count": "{{count}} items · {{tokens}} compressed tokens",
+      "l2_search_placeholder": "Search summary / entities / intent…",
+      "all_intents": "All intents",
+      "export_all": "Export all",
+      "selected": "{{count}} selected",
+      "merge_selected": "Merge selected",
+      "export_selected": "Export selected",
+      "cancel": "Cancel",
+      "no_match": "No matching results",
+      "collapse": "Collapse details",
+      "view_detail": "View details",
+      "delete": "Delete",
+      "entity": "Entities",
+      "none": "None",
+      "compressed_content": "Compressed content",
+      "references": "References",
+      "raw_content": "Raw content",
+      "truncated_suffix": "… (truncated)",
+      "loading": "Loading…",
+      "pending": "{{count}} pending",
+      "merge_all": "Merge all",
+      "no_pending": "No pending entries",
+      "discard": "Discard",
+      "archive_search": "Archive Search",
+      "archive_placeholder": "Search past memories…",
+      "copy_snippet": "Copy snippet",
+      "no_hit": "No matching archive found",
+      "edit": "Edit",
+      "saving": "Saving…",
+      "save_immediate": "Save now",
+      "empty": "(empty)",
+      "rolled_back": "Rolled back to v{{version}}",
+      "rollback_failed": "Failed to roll back: {{msg}}",
+      "observations": "{{count}} observations",
+      "no_observations": "No observations yet",
+      "history": "{{count}} history versions",
+      "rollback_tooltip": "Roll back to this version",
+      "rollback": "Roll back",
+      "user_profile": "User Profile",
+      "no_synthesis": "No profile content yet",
+      "save": "Save",
+      "pending_merged": "Merged {{count}} pending items{{suffix}}",
+      "pending_merged_suffix": " (incl. LLM merge)",
+      "curated_snapshot": "Curated snapshot"
+    },
+    "automations": {
+      "weekday": {
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat",
+        "sun": "Sun"
+      },
+      "presets": {
+        "daily9": "Daily at 9:00",
+        "weekdays9": "Weekdays at 9:00",
+        "monday9": "Every Monday at 9:00",
+        "hourly": "Every hour",
+        "midnight": "Daily at 0:00"
+      },
+      "summary": {
+        "once": "Run once at {{time}}",
+        "daily": "Daily at {{time}}",
+        "weekdays": "Every weekday at {{time}}",
+        "weekends": "Every weekend at {{time}}",
+        "weekly_unknown": "Weekly at {{time}} (no day selected)",
+        "weekly": "Every {{names}} at {{time}}",
+        "monthly": "Monthly on day {{day}} at {{time}}",
+        "custom": "Custom: {{expr}}"
+      },
+      "title": "Automations",
+      "new_tooltip": "New automation",
+      "new_desc": "Create an automation to run an Agent on a schedule or manually",
+      "edit_title": "Edit automation",
+      "new_title": "New automation",
+      "name": "Name",
+      "name_placeholder": "Enter a task name",
+      "prompt": "Prompt",
+      "prompt_placeholder": "Describe the task to run",
+      "agent": "Agent",
+      "model": "Model",
+      "follow_agent": "Follow agent default",
+      "no_models": "No models available",
+      "trigger": "Trigger",
+      "manual_trigger": "Manual",
+      "cron_trigger": "Scheduled",
+      "schedule": "Schedule",
+      "freq": {
+        "once": "Once",
+        "daily": "Daily",
+        "weekdays": "Weekdays",
+        "weekends": "Weekends",
+        "weekly": "Weekly",
+        "monthly": "Monthly",
+        "custom": "Custom cron"
+      },
+      "hour": "Hour",
+      "minute": "Minute",
+      "month_day": "Day of month",
+      "day": "Day {{day}}",
+      "presets_label": "Common presets",
+      "cron_placeholder": "min hour day month dow, e.g. 0 9 * * 1-5",
+      "cron_hint": "Example: 0 9 * * 1-5 means weekdays at 9:00",
+      "cron_invalid": "Invalid cron expression, please check the format",
+      "cron_display_label": "Cron expression",
+      "need_weekday": "Weekly mode requires at least one weekday",
+      "need_time": "Please set a schedule time",
+      "invalid_time": "Invalid cron expression: {{expr}}",
+      "cancel": "Cancel",
+      "create": "Create",
+      "empty_title": "No automations yet",
+      "empty_hint": "Create an automation to run an Agent on a schedule or on demand",
+      "create_btn": "New automation",
+      "running": "Running",
+      "paused": "Paused",
+      "schedule_line_cron": "Scheduled: {{expr}} · Agent: {{agent}}",
+      "schedule_line_manual": "Manual trigger · Agent: {{agent}}",
+      "last_run": "Last run {{time}}",
+      "not_run": "Not run yet",
+      "next": "· Next {{time}}",
+      "run_now": "Run",
+      "pause": "Pause",
+      "enable": "Enable",
+      "edit": "Edit",
+      "delete_tooltip": "Delete",
+      "delete_desc": "Delete this automation. This action cannot be undone"
+    },
+    "abilities": {
+      "tab": {
+        "skills": "Skills",
+        "plugins": "Plugins"
+      },
+      "hint": {
+        "skills": "Tool capabilities from ArkWork or imported from the marketplace (SKILL.md)",
+        "plugins": "External tool capabilities connected via MCP Servers (stdio / sse)"
+      }
+    },
+    "agents": {
+      "newAgent": "New Agent",
+      "empty": {
+        "title": "No agents yet",
+        "hint": "Create an agent to host skills, roles, and automation flows"
+      },
+      "title": "Agents ({{count}})",
+      "new": "New",
+      "startTaskTitle": "Launch {{name}}",
+      "builtinTooltip": "Built-in agent",
+      "noDescription": "No description",
+      "successRate": "{{rate}}% success",
+      "skillsCount": "{{count}} skills",
+      "startTask": "Start task",
+      "edit": "Edit"
+    },
+    "kb": {
+      "title": "Knowledge Base",
+      "count": "{{count}}",
+      "globalHint": "Global knowledge-base toggle; click to open settings",
+      "enabled": "On",
+      "disabled": "Off",
+      "import": "Import",
+      "parseFailed": "Parse failed",
+      "importDone": "Import done: {{imported}} succeeded, {{failed}} failed",
+      "importFailed": "Import failed: {{message}}",
+      "renamePrompt": "Enter a new file name:",
+      "renamed": "Renamed",
+      "renameFailed": "Rename failed: {{message}}",
+      "reimportTitle": "Re-import",
+      "reimportBody": "Re-import \"{{name}}\"?",
+      "reimport": "Re-import",
+      "reimportTooltip": "Re-import",
+      "parsing": "Parsing",
+      "indexing": "Indexing",
+      "chunks": "{{chunks}} chunks",
+      "failed": "Failed",
+      "emptyTitle": "No knowledge documents yet",
+      "emptyHint": "Click \"Import\" in the top-right corner to add documents and build your local knowledge base",
+      "documents": "Documents ({{count}})",
+      "searchPlaceholder": "Try searching document content…",
+      "noHits": "No matching chunks",
+      "statusParsing": "Parsing",
+      "statusIndexing": "Indexing",
+      "indexed": "Indexed",
+      "retry": "Retry",
+      "rename": "Rename",
+      "delete": "Delete",
+      "reimportDone": "Re-import complete: {{chunks}} chunks",
+      "reimportFailed": "Re-import failed: {{message}}",
+      "deleteTitle": "Delete knowledge base",
+      "deleteBody": "Delete \"{{name}}\"? The source and chunks will be removed. This cannot be undone.",
+      "deleted": "Deleted",
+      "deleteFailed": "Delete failed: {{message}}"
+    },
+    "plugins": {
+      "status": {
+        "connected": "Connected",
+        "connecting": "Connecting",
+        "disconnected": "Disconnected",
+        "error": "Error"
+      },
+      "new": "New",
+      "refreshTooltip": "Refresh",
+      "refresh": "Refresh",
+      "count": "{{count}} in total",
+      "searchPlaceholder": "Search plugins…",
+      "desc": "Connect external tool capabilities via MCP Servers",
+      "empty": {
+        "title": "No plugins yet",
+        "hint": "Click \"New\" to add an MCP Server"
+      },
+      "noMatch": {
+        "title": "No plugin found",
+        "hint": "No results matching \"{{query}}\""
+      },
+      "disabled": "Disabled",
+      "toolsCount": "{{count}} tools",
+      "disconnect": "Disconnect",
+      "disconnecting": "Disconnecting",
+      "connecting": "Connecting",
+      "connect": "Connect",
+      "disabledConnect": "Disabled",
+      "edit": "Edit",
+      "delete": "Delete",
+      "discoveredTools": "Discovered tools",
+      "envCount": "{{count}} variables"
+    },
+    "files": {
+      "title": "Files",
+      "stats": "{{files}} files · {{folders}} folders",
+      "refreshTooltip": "Refresh",
+      "searchPlaceholder": "Search files…",
+      "empty": {
+        "title": "No files yet",
+        "hint": "Open a folder to browse its contents here"
+      },
+      "noMatch": {
+        "title": "No file found",
+        "hint": "No results matching \"{{query}}\""
+      },
+      "renamed": "Renamed to {{name}}",
+      "renameFailed": "Rename failed: {{message}}",
+      "deleteTitle": "Move to Trash",
+      "deleteBody": "Move \"{{name}}\" to the Trash? This will delete it.",
+      "moveToTrash": "Move to Trash",
+      "movedToTrash": "Moved {{name}} to the Trash",
+      "deleteFailed": "Delete failed: {{message}}",
+      "copyPath": "Copy Path",
+      "copyPathDesc": "Copy the full file path to the clipboard",
+      "pathCopied": "Path copied",
+      "copyFailed": "Copy failed",
+      "revealInFolder": "Reveal in Folder",
+      "revealInFolderDesc": "Locate the file in your system",
+      "rename": "Rename",
+      "delete": "Delete",
+      "insertAsContext": "Insert as Context"
+    },
+    "tasks": {
+      "title": "Tasks",
+      "searchPlaceholder": "Search tasks…",
+      "filterAll": "All",
+      "empty": {
+        "title": "No tasks yet",
+        "hint": "Start a new task and it will run here"
+      },
+      "noMatch": {
+        "title": "No task found",
+        "byStatus": "There are no tasks with status \"{{status}}\"",
+        "byQuery": "No tasks matching \"{{query}}\""
+      },
+      "planProgress": "Plan {{done}}/{{total}}",
+      "moreActions": "More actions",
+      "unstar": "Unstar",
+      "star": "Star",
+      "rename": "Rename",
+      "rerun": "Re-run",
+      "pause": "Pause",
+      "resume": "Resume",
+      "stop": "Stop",
+      "deleteTitle": "Delete Task",
+      "deleteBody": "Delete \"{{title}}\"? This cannot be undone.",
+      "deleteConfirm": "Delete",
+      "group": {
+        "today": "Today",
+        "earlier": "Earlier"
+      }
+    },
+    "market": {
+      "title": "Skill Marketplace",
+      "searchPlaceholder": "Search skills…",
+      "searching": "Searching",
+      "cliTitle": "ArkWork CLI",
+      "cliHint": "ArkWork CLI not detected. Install it to invoke skills from the command line.",
+      "installing": "Installing",
+      "cliInstall": "Install CLI",
+      "loading": "Loading",
+      "loadingHint": "Fetching the skill list from the marketplace…",
+      "noResultsTitle": "No skill found",
+      "noResultsQuery": "No skills matching \"{{query}}\"",
+      "noResultsEmpty": "Try different keywords or browse all skills",
+      "total": "{{count}} skills in total",
+      "prevTooltip": "Previous page",
+      "nextTooltip": "Next page",
+      "noDescription": "No description",
+      "installed": "Installed",
+      "install": "Install"
+    },
+    "skills": {
+      "cancelling": "Removing…",
+      "cli": {
+        "installButton": "Install skillhub CLI",
+        "installHint": "Install the skillhub command-line tool to browse and install market skills",
+        "installed": "Installed",
+        "notDetected": "SkillHub CLI not detected",
+        "version": "Version {{version}}",
+        "versionFallback": "For browsing and installing market skills"
+      },
+      "close": "Close",
+      "count": "Total {{count}}",
+      "delete": "Delete",
+      "deleteBuiltin": "Built-in skills cannot be deleted",
+      "detail": {
+        "author": "Author: {{name}}",
+        "compatAll": "All",
+        "compatDeps": "Dependencies",
+        "compatNoDeps": "No dependencies",
+        "compatOs": "System",
+        "compatTitle": "Compatibility",
+        "contextTitle": "Context cost estimate",
+        "costActive": "When active",
+        "costBaseline": "Baseline",
+        "costPerTurn": "Estimated per turn",
+        "license": "License: {{license}}",
+        "tokens": "tokens",
+        "updated": "Updated: {{date}}"
+      },
+      "disabled": "Disabled",
+      "downloads": "{{count}} downloads",
+      "edit": "Edit",
+      "empty": {
+        "hint": "Click “Import” or install from the market",
+        "title": "No skills yet"
+      },
+      "enabled": "Enabled",
+      "export": "Export",
+      "favorite": "Favorite",
+      "group": {
+        "installed": "Installed",
+        "installedHint": "All currently installed skills (incl. built-in, market, and local)",
+        "market": "Market",
+        "marketHint": "Browse / install skills from SkillHub"
+      },
+      "hint": {
+        "builtin": "Skills shipped with ArkWork; cannot be edited or removed",
+        "localImported": "Imported from local files / ZIP / Markdown or connected via an external MCP",
+        "marketImported": "Skills installed from SkillHub; can be updated or removed"
+      },
+      "import": "Import",
+      "importTooltip": "Import from folder / Markdown / ZIP file",
+      "install": "Install",
+      "installed": "Installed",
+      "installing": "Installing…",
+      "loading": "Loading…",
+      "market": {
+        "favorites": {
+          "empty": {
+            "hint": "Click “Favorite” in the skill details to add one",
+            "title": "No favorites yet"
+          }
+        },
+        "installed": {
+          "empty": {
+            "hint": "Go to the “Discover” tab to browse and install",
+            "title": "No installed market skills"
+          }
+        },
+        "loadingHint": "Fetching the skill list from the market",
+        "noInstallable": {
+          "hint": "All results for “{{query}}” are already installed locally",
+          "hintEmpty": "Every skill in the list is already installed — try a different keyword",
+          "title": "No new skills to install"
+        },
+        "noResults": {
+          "hint": "No skills match “{{query}}”",
+          "hintEmpty": "No skills available in the market",
+          "title": "No results"
+        },
+        "searchPlaceholder": "Search market skills…",
+        "sources": {
+          "empty": {
+            "hint": "No market sources are configured",
+            "title": "No market sources"
+          }
+        },
+        "sourcesCount": "Market sources · {{count}}",
+        "tab": {
+          "discover": "Discover",
+          "favorites": "Favorites",
+          "installed": "Installed",
+          "settings": "Settings"
+        },
+        "total": "{{count}} items total"
+      },
+      "needsConfirmation": "Needs confirmation",
+      "newSkill": "New skill",
+      "nextPage": "Next page",
+      "noDescription": "(No description)",
+      "noInstruction": "This skill has no SKILL.md instructions",
+      "noRating": "No ratings",
+      "notEnabled": "Not enabled",
+      "prevPage": "Previous page",
+      "processing": "Processing…",
+      "ratingCount": "({{count}} ratings)",
+      "searchPlaceholder": "Search skills…",
+      "searching": "Searching…",
+      "source": {
+        "builtin": "Built-in",
+        "localImported": "Local",
+        "market": "Market",
+        "marketImported": "Market",
+        "local": "Local",
+        "skillhub": "SkillHub",
+        "github": "GitHub",
+        "url": "URL"
+      },
+      "sourceDetail": "Source: {{source}}",
+      "statusDisable": "Disabled",
+      "statusEnable": "Enabled",
+      "switchOff": "Disabled — click to enable",
+      "switchOn": "Enabled — click to disable",
+      "unfavorite": "Remove favorite",
+      "uninstall": "Uninstall",
+      "uninstalling": "Uninstalling…",
+      "category": {
+        "coding": "Coding",
+        "document": "Document",
+        "data": "Data",
+        "automation": "Automation",
+        "integration": "Integration",
+        "other": "Other"
+      }
+    }
+  },
+  "sidebar": {
+    "resizeHandle": {
+      "label": "Drag to resize width",
+      "desc": "Freely resize between 64–320px",
+      "aria": "Sidebar width resize handle"
+    },
+    "newTask": {
+      "title": "New Task",
+      "desc": "Create a new task and start chatting"
+    },
+    "search": {
+      "aria": "Search task threads",
+      "placeholder": "Search threads…"
+    },
+    "threads": {
+      "empty": "No tasks yet",
+      "group": {
+        "pinned": "Pinned",
+        "today": "Today",
+        "week": "This week",
+        "earlier": "Earlier"
+      }
+    },
+    "threadRow": {
+      "failedBadge": "Plan contains failed steps"
+    },
+    "menu": {
+      "moreActions": "Task {{title}} — more actions",
+      "menuLabel": "Task {{title}} action menu",
+      "unstar": "Unstar",
+      "star": "Star",
+      "rename": "Rename",
+      "run": "Run",
+      "rerun": "Rerun",
+      "pause": "Pause task",
+      "resume": "Resume task",
+      "stop": "Stop",
+      "delete": "Delete"
+    },
+    "confirmDelete": {
+      "title": "Delete task",
+      "body": "Delete task “{{title}}”? This action cannot be undone.",
+      "confirm": "Delete"
+    },
+    "capability": {
+      "agents": "Agents",
+      "skills": "Skills",
+      "kb": "Knowledge",
+      "memory": "Memory",
+      "automations": "Automations",
+      "settings": "Settings",
+      "desc": "Click to open the {{label}} page"
+    },
+    "help": {
+      "title": "Help",
+      "desc": "Open help and keyboard shortcuts",
+      "aria": "Open help"
+    }
+  },
+  "leftnav": {
+    "modules": {
+      "automations": "Automations",
+      "skills": "Skills",
+      "agents": "Agents",
+      "kb": "Knowledge base",
+      "memory": "Memory"
+    },
+    "global": "Global",
+    "collapse": {
+      "title": "Collapse sidebar"
+    },
+    "newTask": {
+      "title": "New Task",
+      "desc": "Create a new task and start chatting"
+    },
+    "expand": {
+      "title": "Expand sidebar"
+    },
+    "taskList": {
+      "title": "Task list"
+    },
+    "descriptions": {
+      "automations": "Scheduled tasks / trigger configuration",
+      "skills": "Skills + plugins (MCP), managed in one place",
+      "agents": "Agent CRUD, including system prompts",
+      "kb": "Local file chunk indexing + full-text search",
+      "memory": "L1/L2/L3/L4 four-layer memory view",
+      "settings": "Model / workspace / appearance / shortcuts / advanced"
+    }
+  },
+  "dock": {
+    "context": {
+      "title": "Context",
+      "empty_select_title": "Select a task to view context usage",
+      "empty_select_hint": "Drill down and clear items within a task",
+      "loading": "Calculating context usage…",
+      "load_failed": "Unable to fetch context data",
+      "workspace_overall": "Workspace overall context",
+      "remaining": "{{pct}}% remaining",
+      "used": "{{count}} used",
+      "budget": "{{count}} budget",
+      "category_aria": "{{label}}: {{pct}}%, click to drill down",
+      "count_items": "{{count}} items",
+      "clearing": "Clearing",
+      "clear": "Clear",
+      "category_empty": "No content in this category",
+      "remove_tooltip": "Remove this item from context",
+      "remove": "Remove",
+      "memory_tier": "Memory tiers",
+      "memory_center": "Memory center",
+      "l1_working_memory": "L1 working memory",
+      "l1_desc": "— L1 entries of the current task (files / conversation, etc.)",
+      "l2_compressed_memory": "L2 compressed memory",
+      "l2_desc": "— Compressed historical summary (coming soon)",
+      "detail": {
+        "system_prompt": "System prompt",
+        "system_section": "System section",
+        "file": "File",
+        "tool": "Tool",
+        "sub_agent": "Sub-agent",
+        "skill_instruction": "Skill instruction",
+        "message": "Message",
+        "memory_injection": "Memory injection",
+        "mcp": "MCP"
+      }
+    },
+    "progress": {
+      "no_task": "No active task",
+      "no_task_hint": "Select a task to view project summary",
+      "next_step": "Next step",
+      "completed_steps": "Completed steps · {{count}}",
+      "collapse": "Collapse",
+      "expand": "Show all",
+      "no_completed_steps": "No completed steps yet",
+      "milestones": "Milestones · {{reached}}/{{total}}",
+      "stage_tooltip": "Stage {{index}}: {{label}}",
+      "milestone_label_open": "{{label}} · click to open artifact",
+      "milestone_label_not_reached": "{{label}} · not reached",
+      "stage_research": "Open-source research",
+      "stage_prd": "Write PRD",
+      "stage_interaction": "Interaction docs",
+      "stage_prototype": "HTML prototype",
+      "stage_system_design": "System design",
+      "stage_code": "Development",
+      "stage_test": "Functional testing",
+      "stage_delivery": "Deployment & delivery",
+      "stage_ops": "Ops & knowledge",
+      "milestone_prd": "PRD frozen",
+      "milestone_prototype": "HTML prototype confirmed",
+      "milestone_design": "System design confirmed",
+      "milestone_code": "Development complete",
+      "milestone_test": "All tests green"
+    },
+    "todo": {
+      "no_plan_yet": "No plan generated yet",
+      "ipc_call_failed": "IPC call failed",
+      "generating": "Generating plan…",
+      "no_list": "No checklists",
+      "generating_hint": "AI is generating an execution checklist for this task",
+      "no_list_hint": "No plan needed for this task · single-step task",
+      "locate_card_tooltip": "Locate the plan card in the conversation",
+      "locate": "Locate",
+      "filter_all": "All",
+      "filter_empty": "No items under current filter",
+      "engine_tooltip": "Status set automatically by the engine based on act results",
+      "engine": "Engine",
+      "submitted": "◐ Submitted",
+      "more_actions": "More actions",
+      "mark_done": "Mark as done",
+      "retry": "Retry item",
+      "cancel": "Cancel item",
+      "locate_step": "Locate execution step",
+      "no_artifact": "No artifact records",
+      "infer_title": "Engine inferring details from execution steps",
+      "infer_desc": "Full planItems are not yet available; they will be backfilled from act steps. The items below are temporary inferences, marked with an \"inferred\" badge.",
+      "inferred": "Inferred"
+    },
+    "bugfix": {
+      "stage_goal_defined": "Goal defined",
+      "stage_fixing": "Fixing",
+      "stage_verifying": "Verifying",
+      "stage_achieved": "Complete",
+      "phase_goal_defined": "Defining goal",
+      "phase_fixing": "Fixing",
+      "phase_verifying": "Verifying",
+      "phase_achieved": "Achieved",
+      "phase_not_achieved": "Not achieved",
+      "aria_progress": "bugfix progress: {{phase}}"
+    },
+    "terminal": {
+      "failed": "Failed: {{msg}}",
+      "title": "Terminal",
+      "output_viewer": "Output viewer",
+      "command_count": "{{count}} commands",
+      "running": "{{count}} running",
+      "viewer_tooltip_label": "Read-only output view — commands cannot be typed",
+      "viewer_tooltip_desc": "An interactive terminal is under evaluation in a future version (P2)",
+      "empty_title": "No terminal records",
+      "empty_hint": "Output of commands run by the Agent is shown here. Input is not available — commands are executed by the Agent under controlled permissions.",
+      "command_aria": "Command: {{command}}",
+      "dir": "Directory: {{dir}}",
+      "no_output_summary": "(No output summary)",
+      "copy_output": "Copy output"
+    },
+    "browser": {
+      "open_in_window": "Browser opened in a separate window",
+      "return_hint": "Closing the window brings it back here; or click \"Return to sidebar\" in the window",
+      "title": "Embedded browser",
+      "empty_hint": "Enter a URL to verify search results or open an artifact HTML to discuss alongside; the agent can also test web pages here on its own"
+    }
+  },
+  "preview": {
+    "window": {
+      "empty": {
+        "title": "Result preview",
+        "desc": "Open HTML / image / text files from the file tree or chat artifacts; URLs are opened in the built-in browser"
+      },
+      "loading": "Loading…",
+      "error": {
+        "title": "Failed to load",
+        "retry": "Retry"
+      },
+      "status": {
+        "noFile": "No file",
+        "ready": "Ready",
+        "loaded": "Loaded",
+        "error": "Failed to load",
+        "lines": "{{count}} lines"
+      },
+      "titleBtn": {
+        "newTab": "New tab (duplicate current)",
+        "minimize": "Minimize",
+        "restore": "Restore",
+        "maximize": "Maximize",
+        "close": "Close (Esc)"
+      },
+      "tabBar": {
+        "tip": "Click to activate; double-click to pin/unpin",
+        "closeTab": "Close tab",
+        "closeTabDesc": "Close the current preview tab"
+      },
+      "toolbar": {
+        "copy": "Copy",
+        "export": "Export",
+        "reveal": "Show in folder",
+        "refresh": "Refresh"
+      },
+      "capsule": {
+        "restore": "Restore: {{title}}",
+        "restoreTip": "Click to restore the minimized preview window",
+        "close": "Close",
+        "closeTip": "Close immediately after restoring"
+      },
+      "toast": {
+        "copied": "Copied",
+        "copyFailed": "Copy failed",
+        "openFromFileTree": "Open a file from the file tree to create a new tab"
+      }
+    },
+    "registry": {
+      "markdown": "Markdown",
+      "code": "Code",
+      "image": "Image",
+      "svg": "SVG",
+      "table": "Table",
+      "browser": "Browser",
+      "fallback": "File",
+      "mode": {
+        "render": "Render",
+        "source": "Source",
+        "split": "Split",
+        "desktop": "Desktop",
+        "tablet": "Tablet",
+        "mobile": "Mobile"
+      }
+    },
+    "fallback": {
+      "metaError": "Unable to read file metadata",
+      "unsupported": "Unsupported preview type",
+      "meta": {
+        "type": "Type",
+        "size": "Size",
+        "lines": "Lines",
+        "encoding": "Encoding",
+        "language": "Language",
+        "modified": "Modified"
+      },
+      "lines": "{{count}} lines",
+      "notAvailable": "Unavailable",
+      "reveal": "Show in folder",
+      "copyPath": "Copy path",
+      "toast": {
+        "copiedPath": "Path copied",
+        "copyFailed": "Copy failed"
+      }
+    },
+    "image": {
+      "fit": "Fit to window",
+      "actual": "Actual size",
+      "fitShort": "Fit",
+      "copyPath": "Copy path",
+      "loading": "Loading…",
+      "error": "Failed to load: {{err}}",
+      "alt": "Image preview",
+      "toast": {
+        "copiedPath": "Image path copied",
+        "copyFailed": "Copy failed"
+      }
+    },
+    "table": {
+      "empty": "The table is empty",
+      "colsRows": "{{cols}} cols · {{rows}} rows",
+      "copyRaw": "Copy raw",
+      "sortHint": "Click to sort: {{column}}",
+      "columnIndex": "Column {{n}}",
+      "prevPage": "Previous",
+      "nextPage": "Next",
+      "cellHint": "Click a cell to copy",
+      "toast": {
+        "copiedCell": "Cell copied",
+        "copiedRaw": "Raw content copied",
+        "copyFailed": "Copy failed"
+      }
+    },
+    "browser": {
+      "emptyAddress": "(Empty address)",
+      "mode": {
+        "desktop": "Desktop",
+        "tablet": "Tablet",
+        "mobile": "Mobile"
+      },
+      "error": "Failed to load: {{err}}",
+      "title": "Browser preview"
+    },
+    "code": {
+      "lines": "{{count}} lines",
+      "wrap": "Wrap",
+      "noWrap": "No wrap",
+      "copy": "Copy"
+    }
+  },
+  "topbar": {
+    "search": {
+      "desc": "Search tasks, files, agents, commands, and settings",
+      "aria": "Open Quick Action search ⌘K",
+      "hint": "Search tasks, files, agents, commands"
+    },
+    "settings": {
+      "label": "Settings",
+      "desc": "Models, workspace, appearance, shortcuts, advanced—all configuration lives here",
+      "aria": "Settings ⌘,"
+    },
+    "workspace": {
+      "switchCap": "{{path}} ｜ Switch workspace",
+      "switch": "Switch workspace",
+      "desc": "Where you work: switch workspace, tasks and memory are isolated",
+      "aria": "Switch workspace ⌘⇧W",
+      "wsLabel": "Agent workspace",
+      "select": "Select workspace",
+      "listTitle": "Workspaces",
+      "remove": "Remove workspace",
+      "removeDesc": "Remove from list (task data stays on disk)",
+      "removeAria": "Remove workspace {{name}}",
+      "removeConfirmBody": "Remove workspace “{{name}}”? Task data stays on disk but will no longer appear in this list.",
+      "removeConfirm": "Remove",
+      "noFolderToast": "Default workspace has no associated folder",
+      "openFail": "Failed to open folder: {{message}}",
+      "showInFolder": "Show in folder",
+      "add": "Add workspace (associate folder)"
+    }
+  },
+  "centerstage": {
+    "header": {
+      "renameTooltip": "Double-click to rename",
+      "renameTooltipDesc": "Double-click here to rename the task",
+      "more": "More actions",
+      "moreDesc": "Rename / duplicate / export / delete",
+      "star": "Star",
+      "unstar": "Unstar",
+      "rename": "Rename",
+      "export": "Export conversation",
+      "pause": "Pause task",
+      "resume": "Resume task",
+      "stop": "Stop running",
+      "delete": "Delete task",
+      "deleteBody": "Delete task “{{title}}”? This cannot be undone.",
+      "deleteConfirm": "Delete"
+    },
+    "greeting": {
+      "workspace": "Workspace: {{name}}",
+      "workspaceOnly": "Workspace",
+      "hint": "Select an existing task or create a new one to get started"
+    }
+  },
+  "runconsole": {
+    "description": {
+      "runError": "Tool call failed, handling…",
+      "pausedResume": "{{desc}} (paused)",
+      "pausedWait": "Paused · waiting for your instruction…",
+      "error": "Error running · see the error message above",
+      "cancelled": "Interrupted · click to re-run on the right"
+    },
+    "pause": "Pause",
+    "pauseTooltipDesc": "Pause the current task; you can edit to append instructions",
+    "pauseAria": "Pause run",
+    "resume": "Resume",
+    "resumeTooltip": "Resume run",
+    "resumeTooltipDesc": "Resume from checkpoint",
+    "resumeAria": "Resume run",
+    "retry": "Retry",
+    "retryTooltipDesc": "Re-run this round with the same input",
+    "rerun": "Re-run",
+    "rerunTask": "Re-run this task",
+    "rerunTooltipDesc": "Re-run with the same input",
+    "stop": "Stop",
+    "stopTooltipDesc": "Terminate the current task; completed steps are kept",
+    "stopAria": "Stop run",
+    "placeholder": "Type an instruction then continue… (leave empty to continue)",
+    "rerunAria": "Rerun this task"
+  },
+  "thought": {
+    "failed": "Execution failed",
+    "summary": {
+      "thoughtTime": "Thought for {{time}}s",
+      "toolCall": "{{count}} tools called ({{tools}})"
+    },
+    "status": {
+      "running": "Thinking…",
+      "failed": "Thinking failed",
+      "done": "Finished thinking"
+    },
+    "copy": "Copy",
+    "hover": {
+      "intent": "Intent: {{intent}}",
+      "result": "Result: {{result}}",
+      "duration": "{{duration}}s · {{time}}"
+    },
+    "guardedTitle": "Blocked by agent (guardrail/budget, not an error)",
+    "action": {
+      "collapse": "Collapse",
+      "detail": "Details",
+      "copyResult": "Copy result",
+      "retry": "Retry",
+      "viewFull": "View full output →"
+    },
+    "contentChars": "({{count}} characters) ",
+    "progress": {
+      "title": "Running {{count}} tools in parallel",
+      "running": "Executing…"
+    }
+  },
+  "modelswitcher": {
+    "selectModel": "Select model",
+    "context": "context {{ctx}}K",
+    "supportThinking": "Supports thinking",
+    "supportTools": "Supports tool calls",
+    "model": "model",
+    "health": {
+      "unconfigured": "No model configured",
+      "unconfiguredTitle": "No model configured, click to open settings",
+      "missing": "Model deleted",
+      "missingTitle": "The current model was removed from config, please select again",
+      "disabledTitle": "The current model is disabled, click to select again"
+    },
+    "kind": {
+      "openai": "OpenAI-compatible",
+      "anthropic": "Anthropic",
+      "ollama": "Ollama local",
+      "vllm": "vLLM"
+    },
+    "onboarding": {
+      "title": "The model moved here — click to switch anytime",
+      "dismiss": "Got it"
+    },
+    "chipDesc": "Select the model used for this conversation",
+    "chipSwitchAria": "Switch model: {{label}}",
+    "agentDefaultTip": "@{{agent}} defaults to {{model}}, click to switch back",
+    "searchPlaceholder": "Search models…",
+    "noMatch": "No matching models, configure one first",
+    "recommended": "Recommended",
+    "providerHeader": "{{label}} ({{count}})",
+    "manageConfig": "Manage model config…",
+    "agentDefault": "Default model for the current agent",
+    "thinkModeTooltip": "Supports thinking mode",
+    "thinkBadge": "Think",
+    "toolModeTooltip": "Supports tool calls",
+    "toolBadge": "Tools"
+  },
+  "quickaction": {
+    "commands": {
+      "newTask": "New Task",
+      "quickOpen": "Quick Open File",
+      "toggleLeft": "Collapse or expand left panel",
+      "toggleRight": "Collapse or expand right panel",
+      "openSettings": "Open Settings",
+      "export": "Export Current Conversation",
+      "returnTask": "Return to Task"
+    },
+    "placeholder": {
+      "all": "Type a command, file, skill, or agent…",
+      "command": "/ Enter a command…",
+      "file": "> Enter a file name…",
+      "skill": "@ Enter a skill name…",
+      "agent": "# Enter an agent name…"
+    },
+    "inputAriaLabel": "Search commands, files, skills, or agents",
+    "prefix": {
+      "all": "All",
+      "command": "/ Commands",
+      "file": "> Files",
+      "skill": "@ Skills",
+      "agent": "# Agents"
+    },
+    "resultsAriaLabel": "Quick Action results",
+    "source": {
+      "command": "Commands",
+      "file": "Files",
+      "skill": "Skills",
+      "agent": "Agents"
+    },
+    "noMatches": "No matches for '{{query}}'",
+    "footer": {
+      "navigate": "Navigate",
+      "select": "Select",
+      "close": "Close",
+      "count": "{{count}} items"
+    }
+  },
+  "modulepage": {
+    "automations": {
+      "title": "Automation",
+      "subtitle": "Agent tasks triggered on a schedule or manually"
+    },
+    "skills": {
+      "title": "Abilities",
+      "subtitle": "Manage skills and plugins (MCP Server) in one place"
+    },
+    "agents": {
+      "title": "Agents",
+      "subtitle": "Agent roles · personas · default models"
+    },
+    "kb": {
+      "title": "Knowledge Base",
+      "subtitle": "Document parsing · retrieval injection"
+    },
+    "memory": {
+      "title": "Memory",
+      "subtitle": "L1–L4 four-layer memory view"
+    },
+    "settings": {
+      "title": "Settings",
+      "subtitle": "Model / Workspace / Appearance / Shortcuts / Advanced"
+    },
+    "close": {
+      "tooltip": "Close and return to task",
+      "aria": "Close {{title}} page and return to task (Esc)"
+    }
+  },
+  "conversationflow": {
+    "loadingAgent": "Loading Agent…",
+    "executing": "Executing…",
+    "newMessagesAria": "{{count}} new messages, click to go to the bottom",
+    "plan": "Task Plan",
+    "goal": "Goal",
+    "completed": "{{done}}/{{total}} completed",
+    "planStepAria": "Plan step {{index}}: {{text}} (status: {{status}})",
+    "steps": "Step flow"
+  },
+  "browserchrome": {
+    "nav": {
+      "cycleTabs": "Switch tabs ({{count}} total)",
+      "back": "Back",
+      "forward": "Forward",
+      "reloading": "Loading…",
+      "refresh": "Refresh",
+      "addressPlaceholder": "Enter URL or path, ⏎ to open",
+      "agentOperating": "Agent is operating this page",
+      "newTab": "New tab",
+      "closeTab": "Close tab"
+    },
+    "tabs": {
+      "newTabPage": "New tab",
+      "close": "Close tab",
+      "new": "New tab"
+    },
+    "status": {
+      "loading": "Loading {{url}}",
+      "openedNewWindow": "Opened in a new window",
+      "loadFailed": "Failed to load: {{error}}",
+      "unknownError": "Unknown error",
+      "browserClosedFloat": "Browser closed, you may close this window",
+      "restoredToDock": "Returned to the sidebar browser, you may close this window",
+      "poppedOut": "Popped out as a standalone window",
+      "loadingIdle": "Loading…",
+      "agentOperating": "Agent is operating"
+    },
+    "host": {
+      "attach": "Return to sidebar browser",
+      "detach": "Pop out as standalone window"
+    },
+    "float": {
+      "waitingLoad": "Waiting for browser to load…"
+    }
+  },
+  "rightdock": {
+    "adjusted": "Workspace adjusted for @{{name}} · {{tab}} pinned on top",
+    "tooltipResize": "Drag to resize",
+    "tooltipResizeDesc": "Drag freely between 300–520px",
+    "tabCustomize": "Right-click to customize this tab",
+    "tabAria": "{{label}} {{kbd}} (right-click to customize)",
+    "resetLayout": "Restore default layout",
+    "resetLayoutDesc": "Undo custom panel order for this agent",
+    "restore": "Restore",
+    "customize": "Customize…",
+    "menuTitle": "{{label}} tab",
+    "hideTab": "Hide tab",
+    "pinned": "(pinned)",
+    "openPanel": "Open panel",
+    "notice": {
+      "adjusted": "Workspace adjusted for @{{name}} · {{tab}} pinned"
+    }
+  },
+  "inspector": {
+    "toolWindowBar": "Right tool window bar",
+    "resize": "Drag to resize",
+    "resizeDesc": "Drag freely between 280–480px",
+    "resizeHandleAria": "Tool window width resize handle",
+    "tabAria": "{{label}} {{kbd}} (drag to reorder, drag out of the bar to hide)",
+    "hiddenLabel": "Hidden tabs",
+    "restoreTab": "Restore \"{{label}}\"",
+    "restoreTabAria": "Restore tab: {{label}}",
+    "expand": "Expand right panel",
+    "collapse": "Collapse right panel",
+    "tabBar": "Tool window tab bar"
+  },
+  "onboarding": {
+    "stepModelsTitle": "Configure AI models",
+    "stepModelsDesc": "Add a model provider so your agents can start working",
+    "stepModelsAction": "Configure models",
+    "stepWorkspaceTitle": "Add a workspace",
+    "stepWorkspaceDesc": "Link a folder to create your first workspace",
+    "stepWorkspaceAction": "Add folder",
+    "stepTaskTitle": "Create a task",
+    "stepTaskDesc": "Start a conversation and tell the agent what you need",
+    "stepTaskActionNew": "Create a task",
+    "stepTaskActionView": "View tasks",
+    "aria": "Onboarding guide",
+    "welcome": "Welcome to ArkWork",
+    "headerSkipAria": "Skip onboarding",
+    "complete": "{{done}} of {{total}} steps done",
+    "skip": "Skip"
+  },
+  "messageactions": {
+    "copied": "Copied",
+    "copyFailed": "Copy failed",
+    "copyLabel": "Copy message",
+    "copyDesc": "Copy the message to clipboard",
+    "copyAria": "Copy message",
+    "regenerateLabel": "Regenerate",
+    "regenerateDesc": "Ask the agent to regenerate this reply",
+    "regenerateAria": "Regenerate",
+    "exportLabel": "Export conversation",
+    "exportDesc": "Export the conversation to a file",
+    "exportAria": "Export conversation"
+  },
+  "sidelist": {
+    "checklist": "Checklist",
+    "context": "Context",
+    "files": "Files",
+    "browser": "Browser",
+    "terminal": "Terminal",
+    "progress": "Progress",
+    "memory": "Memory",
+    "logs": "Logs",
+    "preview": "Preview"
+  },
+  "logsview": {
+    "badgeDebug": "Debug",
+    "badgeInfo": "Info",
+    "badgeWarn": "Warning",
+    "badgeError": "Error",
+    "copyLineAria": "Copy this log line",
+    "copyLineTitle": "Copy this line",
+    "collapseError": "Collapse error",
+    "collapse": "Collapse",
+    "expandError": "Expand error",
+    "expand": "Expand",
+    "copiedLine": "Copied",
+    "copyErrorLine": "Copy error",
+    "copyLine": "Copy",
+    "noCopiable": "No logs to copy",
+    "copyFailedManual": "Copy failed, please select manually",
+    "entriesUnit": "entries",
+    "filterPlaceholder": "Filter logs…",
+    "copyFilteredLabel": "Copied filtered logs",
+    "copyFilteredAria": "Copy filtered logs",
+    "copyFilteredTitle": "Copy the filtered logs to clipboard",
+    "copyFilteredBtn": "Copy",
+    "emptyTitle": "No logs yet",
+    "noMatchTitle": "No matching logs",
+    "emptyHint": "Logs will appear here after you run a task",
+    "copiedOneEntry": "Copied 1 log entry",
+    "ctxCopyLine": "Copy this line",
+    "ctxCopyFilteredAll": "Copy all filtered ({{count}})",
+    "ctxCopyAll": "Copy all ({{count}})",
+    "copyAllLabel": "Copied all logs",
+    "clearFilter": "Clear filter"
+  },
+  "artifactcard": {
+    "kindMarkdown": "Document",
+    "kindBrowser": "Web page",
+    "kindImage": "Image",
+    "kindSvg": "Graphic",
+    "kindTable": "Table",
+    "kindCode": "Code",
+    "kindFallback": "File",
+    "copiedPath": "Path copied",
+    "copyFailed": "Copy failed",
+    "addedToContext": "Added {{name}} to context",
+    "previewAction": "Preview",
+    "preview": "Preview",
+    "copyPath": "Copy path",
+    "insertContext": "Add to context"
+  },
+  "bugfixresult": {
+    "statusAchieved": "Achieved",
+    "statusExhausted": "Attempts exhausted",
+    "statusFailed": "Failed",
+    "attemptCount": "{{count}} attempts",
+    "diffSummary": "Diff summary",
+    "noChanges": "No code changes",
+    "testOutput": "Test output",
+    "noTestOutput": "No test output",
+    "goal": "Goal"
+  },
+  "askuser": {
+    "suggestionAria": "Suggestions",
+    "recommended": "Recommended",
+    "customPlaceholder": "Or type a custom answer…",
+    "answerPlaceholder": "Type your answer…",
+    "customAria": "Custom answer",
+    "submitAria": "Submit",
+    "submit": "Submit",
+    "navHint": "↑↓ select, ↵ confirm",
+    "enterHint": "↵ to send",
+    "stop": "Stop"
+  },
+  "quickopen": {
+    "placeholder": "Search files…",
+    "noFiles": "No files",
+    "noMatch": "No matching files",
+    "navigate": "Navigate",
+    "openInWindow": "Open in new window",
+    "close": "Close",
+    "fileCount": "Showing {{shown}} of {{total}} files"
+  },
+  "toolconfirm": {
+    "riskLow": "Low risk",
+    "riskMedium": "Medium risk",
+    "riskHigh": "High risk",
+    "addedAllowRule": "Added to allow rules",
+    "addAllowRuleFailed": "Failed to add allow rule",
+    "requestShell": "The agent requests to run a shell command",
+    "requestSkill": "The agent requests to use the “{{skill}}” skill",
+    "toolOf": "“{{skill}}” skill",
+    "needConfirm": "Needs your confirmation",
+    "shell": "SHELL",
+    "copy": "Copy",
+    "execDir": "Working directory: {{dir}}",
+    "impacts": "Impact",
+    "alwaysAllow": "Always allow",
+    "noAskSession": "Don't ask again in this session",
+    "deny": "Deny",
+    "allow": "Allow",
+    "closeHint": "Esc to close"
+  },
+  "markdown": {
+    "copied": "Copied",
+    "copy": "Copy",
+    "jsonInvalid": "Invalid JSON",
+    "chart": "Chart",
+    "copiedAction": "Copied",
+    "copyAction": "Copy"
+  },
+  "toastlayer": {
+    "close": "Close"
+  },
+  "confirmdialog": {
+    "closeHint": "Esc to close"
+  },
+  "suggestion": {
+    "nextStep": "Next steps",
+    "recommended": "Recommended"
+  },
+  "agentchip": {
+    "aria": "Agent {{name}}"
+  },
+  "steplist": {
+    "toolFailed": "Tool execution failed",
+    "cacheHitTitle": "Cache hit",
+    "locateTodo": "Locate in checklist"
+  },
+  "meta": {
+    "error": {
+      "errAgentNotFound": "Agent does not exist or has been deleted. Please restore it from the Agents page and try again.",
+      "errModelUnconfigured": "No model configured or model unavailable. Please select an available model in Settings and try again.",
+      "errModelInvalid": "The selected model has been deleted or disabled. Please select a model again in Settings.",
+      "errTaskNotFound": "Task not found. It may have been deleted. Please refresh the task list.",
+      "errToolNotRegistered": "Tool is not registered. Please check the Agent's skill configuration.",
+      "errModelDisabled": "Model is not configured or has been disabled. Please check in Settings.",
+      "errConnRefused": "Cannot connect to the model service. Please make sure the service is running and the address is correct.",
+      "errNetwork": "Network request failed. Please check your network or whether the service is reachable.",
+      "errUnauthorized": "Authentication failed. Please check whether your API Key is correct.",
+      "errRateLimit": "Too many requests. Please try again later.",
+      "errFileNotFound": "File does not exist or the path is invalid.",
+      "errPermission": "The workspace directory is not writable (system permission restriction). If the app was launched from a terminal, use the \"open\" command or double-click the app icon instead.",
+      "errInsufficientBalance": "Insufficient balance on the model account. Please top up on the corresponding platform and try again."
+    },
+    "inspector": {
+      "todos": "Checklist",
+      "context": "Context",
+      "files": "Files",
+      "logs": "Logs",
+      "browser": "Browser",
+      "terminal": "Terminal"
+    },
+    "dock": {
+      "files": "Files",
+      "context": "Context",
+      "terminal": "Terminal",
+      "browser": "Browser",
+      "todos": "Tasks",
+      "progress": "Progress"
+    },
+    "llm": {
+      "balance": "Insufficient LLM account balance. Please top up with the provider, or switch to another available model in Settings.",
+      "auth": "Invalid API Key or insufficient permissions. Please check the model credentials in Settings, or contact the provider to confirm your account status.",
+      "rateLimit": "Request rate limit exceeded. Please try again later, or lower concurrency / switch to another model in Settings.",
+      "serverError": "LLM service error (5xx). Please try again later; if it keeps failing, switch to another model in Settings.",
+      "contextOverflow": "Context exceeds the model limit. Please clear conversation history / reduce the current task document length, or switch to a model with a larger context window.",
+      "network": "Network error. Please check your proxy / network connectivity and try again."
+    }
+  },
+  "slice": {
+    "init": {
+      "themeInitFailed": "Failed to initialize theme"
+    },
+    "persist": {
+      "defaultWorkspace": "Default Workspace"
+    },
+    "ui": {
+      "languageSaveFailed": "Failed to save language settings",
+      "preview": "Preview",
+      "themePersistFailed": "Failed to persist theme",
+      "themeSyncFailed": "Failed to sync native theme"
+    },
+    "feedback": {
+      "confirm": "Confirm",
+      "cancel": "Cancel"
+    },
+    "catalog": {
+      "createdAgent": "Agent created: @{{name}}",
+      "agentUpdated": "Agent updated",
+      "deleteAgentTitle": "Delete Agent",
+      "deleteAgentBody": "Delete Agent \"{{name}}\"? This action cannot be undone.",
+      "delete": "Delete",
+      "agentDeleted": "Agent deleted",
+      "createdSkill": "Skill created: {{name}}",
+      "skillUpdated": "Skill updated",
+      "deleteSkillTitle": "Delete Skill",
+      "deleteSkillBody": "Delete Skill \"{{name}}\"? This action cannot be undone.",
+      "skillDeleted": "Skill deleted",
+      "importedSkill": "Skill imported: {{name}}",
+      "exportedZip": "Exported as ZIP ({{count}} files): {{path}}",
+      "exportedDir": "Exported to directory ({{count}} files): {{path}}",
+      "mcpAdded": "MCP added: {{name}}",
+      "mcpUpdated": "MCP updated",
+      "deleteMcpTitle": "Delete MCP Server",
+      "deleteMcpBody": "Delete MCP \"{{name}}\"? If it is connected, it will be disconnected first.",
+      "mcpDeleted": "MCP deleted",
+      "mcpConnected": "MCP connected",
+      "mcpConnectFailed": "Failed to connect MCP",
+      "modelSwitched": "Switched to {{model}} · context preserved"
+    },
+    "kbMemory": {
+      "automationCreated": "Automation created: {{name}}",
+      "automationUpdated": "Automation updated",
+      "automationDeleted": "Automation deleted",
+      "automationStarted": "Automation started, now running",
+      "kbAdded": "Added to knowledge base: {{name}}",
+      "kbRemoved": "Removed from knowledge base",
+      "memoryEnabled": "Context updated · +1 memory active · effective from next turn",
+      "memoryDisabled": "Context updated · -1 memory deactivated · effective from next turn"
+    },
+    "market": {
+      "cliInstalled": "skillhub CLI installed{{version}}",
+      "skillInstalled": "Skill installed: {{name}}",
+      "skillAlreadyInstalled": "This Skill is already installed",
+      "favoritedSkill": "Favorited skill",
+      "skillUninstalled": "Skill uninstalled"
+    },
+    "tasks": {
+      "requestTimeout": "Request timed out (no receipt within 2s), rolled back",
+      "planRejected": "List operation rejected: {{reason}}",
+      "selectModelFirst": "Please configure and select a model in Settings first",
+      "taskCreateFailed": "Failed to create task. Please check the model configuration",
+      "kbSaveFailed": "Failed to save the global knowledge base switch",
+      "unnamedWorkspace": "Untitled Workspace",
+      "createWorkspaceFailed": "Failed to create workspace: {{error}}",
+      "workspaceSwitched": "Workspace switched · memory is now isolated per task ({{name}})",
+      "switchWorkspaceFailed": "Failed to switch workspace: {{error}}",
+      "exportStepStream": "Step Stream"
+    },
+    "subscriptions": {
+      "taskFailedHint": "Task failed: {{error}}\n\n💡 {{hint}}",
+      "taskFailed": "Task failed: {{error}}",
+      "viewLogs": "Please check the logs for details",
+      "contextCompressed": "Context compressed · {{before}} → {{after}} tokens",
+      "contextCompressedLayer": "Context compressed (L{{layer}} · {{before}} → {{after}} tokens)",
+      "profileUpdated": "User profile updated · v{{version}} (+{{count}} observations)",
+      "memoryMerged": "Memory has been merged into the knowledge base"
+    }
+  },
+  "plantatus": {
+    "waiting": "Pending",
+    "running": "In progress",
+    "done": "Done",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+    "skipped": "Skipped"
+  },
+  "help": {
+    "title": "ArkWork Help Center",
+    "subtitle": "Covers all major features · ⌘? to toggle",
+    "closeLabel": "Close help",
+    "tryNow": "Try it now",
+    "privacyFooter": "Privacy · ArkWork is local-first by default. Conversations, memory, and knowledge-base indexes live in local SQLite and the filesystem. Model calls are made with the API keys you explicitly configure in Settings.",
+    "dir": {
+      "title": "Contents",
+      "ref": "Reference",
+      "shortcuts": "Shortcuts",
+      "navAria": "Help contents"
+    },
+    "shortcuts": {
+      "title": "Keyboard Shortcuts",
+      "subtitle": "Global shortcut reference",
+      "desc": {
+        "quickAction": "Quick Action (search / commands / @ mentions / # topics)",
+        "quickOpen": "QuickOpen: jump to a task, file, or skill by name",
+        "newTask": "Create a new task and focus the Composer",
+        "sidebar": "Collapse / expand the left sidebar",
+        "inspector": "Collapse / expand the right Inspector",
+        "preview": "Toggle the PreviewWindow popup",
+        "settings": "Open Settings (page)",
+        "help": "Toggle HelpCenter (this page)",
+        "helpAlt": "Toggle HelpCenter (alternate shortcut)",
+        "workspace": "Open the workspace switcher",
+        "agents": "Agents",
+        "skills": "Skills",
+        "kb": "Knowledge base (KB)",
+        "memory": "Memory",
+        "automations": "Automations",
+        "settingsModule": "Settings",
+        "inspTodos": "Inspector: Todos",
+        "inspContext": "Inspector: Context",
+        "inspFiles": "Inspector: Files",
+        "inspLogs": "Inspector: Logs",
+        "inspBrowser": "Inspector: Browser",
+        "esc": "Close overlay / ModulePage / Inspector by priority"
+      }
+    },
+    "sections": {
+      "workspace": {
+        "title": "Workspace",
+        "summary": "The sidebar shows the current workspace, task threads, capability entries, and search; when collapsed it keeps a 64px icon rail.",
+        "bullets": {
+          "0": "The primary button at the top jumps straight into a conversation with a new task.",
+          "1": "Threads are grouped by Pinned / Today / This week / Earlier and collapsed by default to reduce visual noise.",
+          "2": "Capability entries (Agents / Skills / Knowledge / Memory / Automations / Settings) open the ModulePage on click; clicking again keeps it open.",
+          "3": "The sidebar width is draggable between 64–320px."
+        },
+        "actions": {
+          "0": "Open the workspace switcher",
+          "1": "Open Settings (appearance / workspace)",
+          "2": "Create a new task"
+        }
+      },
+      "tasks": {
+        "title": "Tasks",
+        "summary": "A task is the smallest unit of collaboration in ArkWork: one task = a conversation + plan + file context + step history.",
+        "bullets": {
+          "0": "The Composer focuses automatically after creating a task; pressing Enter starts the first round, and the title is auto-generated from the first message.",
+          "1": "The ⋯ menu on each Thread row supports rename, run / stop, favorite, and delete.",
+          "2": "Failed or cancelled steps can be re-run individually; message and file history is preserved.",
+          "3": "Per-task knowledge-base toggle: each task can enable KB search independently (without relying on the global setting)."
+        },
+        "actions": {
+          "0": "Try creating a task",
+          "1": "Focus the Composer"
+        }
+      },
+      "parallel": {
+        "title": "Parallel execution",
+        "summary": "Independent tool calls run in parallel automatically; progress is shown per tool without overwriting each other.",
+        "bullets": {
+          "0": "A single Agent inference can trigger multiple tool calls, which the engine executes concurrently.",
+          "1": "Operations with dependencies (write-then-read) still run serially to avoid race conditions.",
+          "2": "The plan card and the right-side list share the same planItems source, preventing premature ticking."
+        },
+        "actions": {
+          "0": "Open Inspector · Todos",
+          "1": "Open Inspector · Logs"
+        }
+      },
+      "conversation": {
+        "title": "Conversation",
+        "summary": "The conversation stream carries user messages, plans, tool results, and Agent replies; it is scrollable and can lock focus.",
+        "bullets": {
+          "0": "User messages and Agent replies are stacked in reverse chronological order; tool calls appear as collapsible cards.",
+          "1": "While an Agent is running, human-readable descriptions like \"running command…\" appear at the top of the conversation (mapped by tool type).",
+          "2": "The Composer supports multi-line input; long tasks can be paused, resumed, or cancelled."
+        },
+        "actions": {
+          "0": "Focus the Composer",
+          "1": "Create a task to start a conversation"
+        }
+      },
+      "agents": {
+        "title": "Agents",
+        "summary": "An Agent = personality + default model + enabled skills + Dock preferences. Agents can be created, edited, and duplicated.",
+        "bullets": {
+          "0": "The Agents page lists all agents, each with an icon, personality summary, model, enabled skill count, and Dock preset.",
+          "1": "Create / edit opens the AgentEditor form: personality prompt, default model, available skills, and Dock layout.",
+          "2": "Switching agents auto-applies their Dock preferences; a hint bar briefly appears in the status bar."
+        },
+        "actions": {
+          "0": "Open the Agents page"
+        }
+      },
+      "skills": {
+        "title": "Skills (Built-in / Marketplace / Imported)",
+        "summary": "Skills are grouped by source into three sets, each with its own badge and count; import sources are traceable.",
+        "bullets": {
+          "0": "Built-in: ArkWork's own skills, cannot be deleted; used for basics like shell, file reading, and KB queries.",
+          "1": "Marketplace: skills installed from SkillHub, can be updated / removed; installed items appear in the Installed area of the Marketplace tab.",
+          "2": "Imported: skills from local file imports or external MCP integrations, with a source field.",
+          "3": "When importing from a zip, the entire zip contents (all .md and subdirectory files) are extracted into the Skill folder."
+        },
+        "actions": {
+          "0": "Open the capability center"
+        }
+      },
+      "kb": {
+        "title": "Knowledge base",
+        "summary": "Parses PDF / TXT / Markdown / DOCX into searchable text (SQLite FTS5); the kb_query tool returns matched passages.",
+        "bullets": {
+          "0": "Supports parsing / indexed / failed states; failed documents can be retried in one click on the KB page.",
+          "1": "Provides a two-layer KB toggle (session-level + global-level); when off, kb-search is not injected into context and no restart is needed.",
+          "2": "Matched passages can be viewed in the Inspector's Context and Files panels."
+        },
+        "actions": {
+          "0": "Open the knowledge base page",
+          "1": "Disable global KB (demo toggle)",
+          "2": "Re-enable global KB"
+        }
+      },
+      "memory": {
+        "title": "Memory L1 – L4",
+        "summary": "ArkWork maintains four layers of memory with automatic distillation; the raw layer is cleaned up automatically.",
+        "bullets": {
+          "0": "L1 working memory: temporary entries within the current conversation context.",
+          "1": "L2 file memory: facts, quotes, and command records extracted within a conversation.",
+          "2": "L3 curated memory: topics / reusable passages across conversations, searchable and injectable.",
+          "3": "L4 identity memory: long-term user preferences and persona, updated slowly.",
+          "4": "When thresholds are met (topic count / reuse rate / L2 size), distillation runs automatically; the manual \"move to knowledge base\" UI has been removed."
+        },
+        "actions": {
+          "0": "Open the Memory page"
+        }
+      },
+      "automations": {
+        "title": "Automations",
+        "summary": "Agent tasks triggered by schedule or manually; supports alarm-style frequency picker plus custom cron.",
+        "bullets": {
+          "0": "Create / edit / delete on the Automations page; triggered tasks enter the task queue.",
+          "1": "Execution results are written back to the corresponding task's conversation for easy review.",
+          "2": "The running status of automations is reflected in real time by the \"Running\" indicator at the bottom-right of the status bar."
+        },
+        "actions": {
+          "0": "Open the Automations page"
+        }
+      },
+      "inspector": {
+        "title": "Inspector",
+        "summary": "Five fixed tabs on the right: Todos / Context / Files / Logs / Browser.",
+        "bullets": {
+          "0": "Clicking the active tab again collapses it; after collapsing, clicking any tab re-expands it (no more \"stuck\" state).",
+          "1": "Todos: syncs planItems in real time; a single source of truth.",
+          "2": "Context: read-only view of the KB / memory snippets and token budget injected into the current task; editable from L2 in the memory center.",
+          "3": "Files: workspace file browser (the fake \"favorite\" button has been removed).",
+          "4": "Logs: tool call / permission / error stream; copyable in one click.",
+          "5": "Browser: embedded BrowserPanel links with PreviewWindow."
+        },
+        "actions": {
+          "0": "Open Todos",
+          "1": "Open Context",
+          "2": "Open Files",
+          "3": "Open Logs",
+          "4": "Open Browser"
+        }
+      },
+      "models": {
+        "title": "Models / Settings",
+        "summary": "Settings page has five sections: Models / Workspace / Appearance / Shortcuts / Advanced.",
+        "bullets": {
+          "0": "Models: choose default / fallback models and configure API keys; supports OpenAI, Anthropic, and local Ollama.",
+          "1": "Workspace: choose the workspace root, default KB, and file ignore rules.",
+          "2": "Appearance: theme (light / dark / system) + font density.",
+          "3": "Shortcuts: a read-only list of all current shortcuts (synced with HelpCenter).",
+          "4": "Advanced: experimental toggles, log level, auto-update channel.",
+          "5": "The current model is shown only in the Composer; other locations (TopBar / StatusBar / task header) have been consolidated."
+        },
+        "actions": {
+          "0": "Open Settings"
+        }
+      },
+      "privacy": {
+        "title": "Privacy / Local Storage",
+        "summary": "ArkWork is local-first by default: tasks / conversations / memory are stored as local JSON, and knowledge-base indexes live in local SQLite (FTS5) and the filesystem.",
+        "bullets": {
+          "0": "Data directory: in development userData is redirected to app/.dev-data; in packaged builds it lives in the system userData (macOS: ~/Library/Application Support/ArkWork).",
+          "1": "The app data root is {userData}/arkwork-data: tasks / agents / skills / models / memory are all persisted there as JSON.",
+          "2": "Current workspace: {userData}/arkwork-data/workspace/default (switchable under Settings · Workspace); task memory lives at {workspaceDir}/.arkwork/memory/{taskId}.",
+          "3": "Model calls are made using API keys you explicitly configure; ArkWork never uploads your conversation content.",
+          "4": "Export or clear workspace data in one click; all changes can be found under Settings → Advanced."
+        },
+        "actions": {
+          "0": "Open Settings · Advanced"
+        }
+      }
+    }
+  },
+  "const": {
+    "status": {
+      "pending": "Pending",
+      "running": "Running",
+      "paused": "Paused",
+      "done": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "todo": {
+      "itemProgress": "Item {{index}} → {{status}}"
+    },
+    "tool": {
+      "fileReader": "Read file",
+      "fileWriter": "Write file",
+      "fileEditor": "Edit file",
+      "globSearch": "Find files",
+      "grepSearch": "Search content",
+      "webSearch": "Search web",
+      "fetchUrl": "Visit page",
+      "shell": "Run command",
+      "delegateAgent": "Delegate to",
+      "sessionSearch": "Search history",
+      "taskComplete": "Complete task",
+      "askUser": "Ask user",
+      "todoUpdate": "Update checklist"
+    },
+    "argKey": {
+      "path": "Path",
+      "query": "Query",
+      "url": "URL",
+      "command": "Command",
+      "question": "Question",
+      "agentId": "Agent",
+      "text": "Text",
+      "prompt": "Prompt",
+      "context": "Context",
+      "cwd": "Directory",
+      "regex": "Regex",
+      "replace": "Replace",
+      "glob": "Glob pattern"
+    },
+    "memory": {
+      "l1": "Working memory",
+      "l2": "Artifact memory",
+      "l3": "Knowledge memory",
+      "l4": "Experience memory"
+    },
+    "exec": {
+      "thinking": "Thinking…",
+      "shell": "Running command",
+      "fileReader": "Reading file",
+      "fileWriter": "Writing file",
+      "fileEditor": "Editing file",
+      "webSearch": "Searching the web",
+      "fetchUrl": "Fetching page",
+      "sessionSearch": "Searching history",
+      "delegateAgent": "Delegating subtask",
+      "kbQuery": "Querying knowledge base",
+      "kbIndex": "Indexing knowledge base",
+      "askUser": "Waiting for user input",
+      "finalizing": "Finalizing result",
+      "external": "Working in external tool"
+    }
+  },
+  "agentEditor": {
+    "nameRequired": "Please enter an agent name",
+    "titleEdit": "Edit Agent",
+    "titleNew": "New Agent",
+    "builtinNotice": "Built-in agent: you can edit its persona and add skills, but the name cannot be changed, intrinsic skills cannot be removed, and it cannot be deleted.",
+    "avatarColor": "Avatar color",
+    "colorAria": "Color {{color}}",
+    "nameLabel": "Name *",
+    "namePlaceholder": "e.g. Code Reviewer",
+    "defaultModel": "Default model",
+    "selectModelPlaceholder": "Select a model…",
+    "noModelsEnabled": "No enabled models yet — configure one in Settings first.",
+    "description": "Description",
+    "descriptionPlaceholder": "One line describing what this agent does",
+    "role": "Role",
+    "rolePlaceholder": "Code Reviewer",
+    "goal": "Goal",
+    "goalPlaceholder": "Review code quality and security",
+    "backstory": "Backstory",
+    "backstoryPlaceholder": "Senior security auditor",
+    "styleGuide": "Style guide",
+    "styleGuidePlaceholder": "Bullet points, conclusion first, English code comments",
+    "systemPromptPlaceholder": "You are an ArkWork agent… (ReAct mode / termination conditions / constraints)",
+    "skillsLabel": "Skills ({{enabled}}/{{total}})",
+    "noSkills": "No skills installed",
+    "intrinsicTag": "Built-in",
+    "disabledTag": "Off",
+    "sidebarWidgetsLabel": "Sidebar widgets ({{enabled}}/{{total}})",
+    "extensionPointTag": "Extension point",
+    "dockTabDesc": "Right-side Dock tab",
+    "extensionPointDesc": "Registered; consumed by module pages, Inspector and floating windows",
+    "memoryScope": "Memory scope",
+    "memoryProfile": "User profile",
+    "memoryProfileDesc": "Injects user preferences and long-term profile",
+    "memorySkill": "Distilled skills",
+    "memorySkillDesc": "Reads its own accumulated skill memories"
+  }
+}

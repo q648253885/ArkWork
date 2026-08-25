@@ -1,0 +1,87 @@
+/* ============================================================
+ * BrowserChrome — v0.26.0 P0（浮窗 UI 根治）
+ *
+ * 纪律：按钮点击域 ≥ 28px（h-7 = 28px）、字号 12–13px、无固定像素宽按钮。
+ * 经全局 postcss（tailwindcss 插件）使用 @apply；伪类状态用 CSS 变量直写，
+ * 规避旧版 Tailwind 对变体 @apply 的兼容问题。
+ * ============================================================ */
+
+[data-browser-chrome] {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.bc-btn {
+  @apply flex h-7 w-7 flex-shrink-0 items-center justify-center rounded transition-colors;
+  color: var(--text-tertiary);
+}
+.bc-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.bc-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.bc-btn--danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+/* 循环切换 chip（float 多标签）：不固定宽，图标 + 计数徽章 */
+.bc-btn--chip {
+  @apply w-auto gap-1 px-1.5;
+}
+.bc-btn--spin svg {
+  animation: bc-spin 0.9s linear infinite;
+}
+@keyframes bc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.bc-addr {
+  @apply h-7 min-w-0 flex-1 rounded-md border border-border-subtle bg-bg-input px-2.5 font-mono text-xs transition-colors;
+  color: var(--text-primary);
+}
+.bc-addr::placeholder {
+  color: var(--text-tertiary);
+}
+.bc-addr:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* 加载进度线：吸附在 chrome 容器底边（float 模式根节点为定位上下文） */
+.bc-progress-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  z-index: 10;
+  overflow: hidden;
+  pointer-events: none;
+}
+.bc-progress-line::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: var(--accent);
+  animation: bc-indeterminate 1.1s ease-in-out infinite;
+}
+@keyframes bc-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+
+/* float 模式无当前标签时的占位提示（导航行下方区域会被 WebContentsView 覆盖，
+ * 此提示仅在「没有可承载的 view」时可见，top-10 避开 40px 导航行） */
+.bc-empty-hint {
+  @apply absolute inset-x-0 bottom-0 top-10 flex items-center justify-center px-6 text-center text-xs;
+  color: var(--text-tertiary);
+}

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' https: http://127.0.0.1:* http://localhost:*; frame-src 'self' https: http: data: file:; img-src 'self' data: https: http:" />
+    <title>ArkWork — AI Agent Workbench</title>
+    <!--
+      v0.21.0 — 参考 deepseek-harness-desktop（DSH），改用系统字体栈：
+        移除 Google Fonts 上的 Inter / JetBrains Mono 外链依赖，
+        改用 native 系统字体（macOS SF Pro / Windows Segoe UI / Linux Cantarell）
+        渲染 Chinese 字体则依赖系统 PingFang SC / Microsoft YaHei / Noto Sans CJK。
+        系统字体在不同平台上能给出最一致的渲染效果，且无外部网络依赖。
+    -->
+    <script>
+      // v0.4.0 — 无闪烁主题脚本
+      // 在 React 渲染前根据 localStorage 决定 <html class="dark">，
+      // 避免"先白后黑"或"先黑后白"的闪烁。
+      // 逻辑与 store.ts applyThemeClass 对齐：
+      //   - 'dark'                     → dark
+      //   - 'light'                    → light（移除 dark）
+      //   - 'system'                   → 跟随 prefers-color-scheme
+      //   - 缺省                       → dark（与 v0.3.0 默认深色一致）
+      (function () {
+        try {
+          var t = localStorage.getItem('arkwork:theme');
+          var resolved;
+          if (t === 'light') resolved = 'light';
+          else if (t === 'system') {
+            resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          } else {
+            // 'dark' 或 null/undefined → 默认深色
+            resolved = 'dark';
+          }
+          if (resolved === 'dark') document.documentElement.classList.add('dark');
+        } catch (e) {
+          // localStorage 不可用（隐私模式等），默认深色
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

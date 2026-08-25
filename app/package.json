@@ -1,0 +1,164 @@
+{
+  "name": "arkwork",
+  "version": "0.28.0",
+  "description": "Local-first AI Agent workbench — ReAct loop visible, controllable, reusable.",
+  "main": "out/main/index.js",
+  "author": "ArkWork",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "node scripts/run-tests.mjs",
+    "test:file-tools": "tsx --test src/main/agent/__tests__/file-tools.test.ts",
+    "test:v0175": "tsx --test src/main/agent/__tests__/todo-update-and-phase-header.test.ts && tsx --test src/main/agent/__tests__/e2e-v0175-task-flow.test.ts",
+    "test:v0180": "tsx --test src/main/agent/__tests__/v018-plan-item-patch-broadcast.test.ts",
+    "test:skills-zip": "tsx --experimental-loader ./src/test/electron-mock-loader.mjs --test src/main/store/__tests__/skills-zip-export.test.ts",
+    "test:step-list": "tsx --test src/renderer/components/right/__tests__/step-list.status.test.tsx",
+    "test:ime": "tsx --test src/shared/utils/__tests__/ime.test.ts",
+    "test:reconcile": "tsx --experimental-loader ./src/test/electron-mock-loader.mjs --test src/main/agent/__tests__/reconcile-tool-calls.test.ts",
+    "test:generate-plan": "tsx --test src/main/agent/__tests__/generate-plan.test.ts",
+    "test:cache": "tsx --test src/main/llm/__tests__/cache-usage.test.ts",
+    "test:anti-loop": "tsx --test src/main/agent/__tests__/read-repeat-guard.test.ts",
+    "test:f1-prompt": "tsx --experimental-loader ./src/test/electron-mock-loader.mjs --test src/main/agent/prompt/__tests__/contract.test.ts && tsx --experimental-loader ./src/test/electron-mock-loader.mjs --test src/main/agent/prompt/__tests__/gates.test.ts && tsx --experimental-loader ./src/test/electron-mock-loader.mjs --test src/main/agent/prompt/__tests__/sections.test.ts",
+    "test:f3-forge": "tsx --experimental-loader ./src/test/electron-mock-loader.mjs --test src/main/memory/__tests__/skill-forge.test.ts",
+    "build:mac": "electron-vite build && electron-builder --mac",
+    "build:dir": "electron-vite build && electron-builder --mac --dir",
+    "build:win": "electron-vite build && electron-builder --win"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.1",
+    "adm-zip": "^0.5.18",
+    "echarts": "^6.1.0",
+    "i18next": "^26.4.0",
+    "mammoth": "^1.12.0",
+    "minisearch": "^7.2.0",
+    "openai": "^4.77.0",
+    "pdf-parse": "^2.4.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^17.0.12",
+    "tsx": "^4.23.12",
+    "ws": "^8.21.3",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "@types/node": "^22.10.5",
+    "@types/pdf-parse": "^1.1.5",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "app-builder-lib": "^26.15.3",
+    "autoprefixer": "^10.4.20",
+    "electron": "^33.2.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^2.3.0",
+    "pngjs": "^7.0.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  },
+  "overrides": {
+    "app-builder-lib": {
+      "@noble/hashes": "1.8.0"
+    }
+  },
+  "build": {
+    "appId": "com.arkwork.app",
+    "productName": "ArkWork",
+    "directories": {
+      "output": "release",
+      "buildResources": "build-resources"
+    },
+    "files": [
+      "out/**/*",
+      "!out/**/*.{map,ts}",
+      "package.json"
+    ],
+    "mac": {
+      "icon": "build-resources/icon.icns",
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "ArkWork-${version}-${arch}.${ext}",
+      "darkModeSupport": true,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null,
+      "entitlements": "build-resources/entitlements.mac.plist",
+      "entitlementsInherit": "build-resources/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "ArkWork 需要麦克风权限以支持语音输入",
+        "NSDocumentsFolderUsageDescription": "ArkWork 需要访问文档文件夹以管理任务文件"
+      }
+    },
+    "dmg": {
+      "title": "${productName} ${version}",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "win": {
+      "icon": "build-resources/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "ArkWork-Setup-${version}-${arch}.${ext}",
+      "files": [
+        "out/**/*",
+        "!out/**/*.{map,ts}",
+        "package.json",
+        "!**/node_modules/@napi-rs/canvas-android*/**",
+        "!**/node_modules/@napi-rs/canvas-darwin*/**",
+        "!**/node_modules/@napi-rs/canvas-freebsd*/**",
+        "!**/node_modules/@napi-rs/canvas-linux*/**",
+        "!**/node_modules/@esbuild/**",
+        "!**/node_modules/app-builder-bin/**"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ArkWork"
+    },
+    "publish": null,
+    "generateUpdatesFilesForAllChannels": false
+  },
+  "optionalDependencies": {
+    "app-builder-bin": "^4.2.0"
+  }
+}
