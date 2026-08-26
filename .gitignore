@@ -63,9 +63,9 @@ overview.md
 .agent-browser/
 **/.smoke-verify/
 bin/
-screenshots/
-shots/
-products/
+/screenshots/
+/shots/
+/products/
 
 # Stray build artifacts & install packages
 app/index-*.js
