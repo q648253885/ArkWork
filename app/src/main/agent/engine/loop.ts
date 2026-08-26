@@ -160,6 +160,10 @@ const MAX_ITERATIONS = 200
 const MAX_PER_SIGNATURE = 5
 const MAX_PER_TOOL_DEFAULT = 400
 const MAX_PER_TOOL_READONLY = 600
+// v0.28.1 fix：无工具调用回合的提示加强阈值。LLM 只回文字不调工具时，注入
+// 提示让模型自愈；连续达到该阈值后提示升级为强指令（继续调工具 / task_complete
+// 二选一）。不打扰用户——用户无从判断引擎内部状态；失控由 maxIterations 兜底。
+const MAX_CONSECUTIVE_NO_TOOL = 2
 const READONLY_TOOLS = new Set([
   'file-reader',
   'glob-search',
@@ -218,6 +222,9 @@ export async function runReActLoop(
   let signatureBlockedTotal = 0
   // 连续多轮所有 action 均被跳过计数（避免模型反复尝试已耗尽签名导致空转）
   let consecutiveSkippedIterations = 0
+  // v0.28.1 fix：连续「无工具调用但清单未完成/输出被截断」计数。用于把注入的
+  // 自愈提示从温和版升级为强指令版；有工具调用时归零。
+  let consecutiveNoToolFinal = 0
 
   // 标记任务为 running
   await updateTask(task.id, { status: 'running', startedAt: Date.now() })
@@ -258,6 +265,18 @@ export async function runReActLoop(
         return
       }
 
+      // v0.28.1 fix B：每轮迭代开始前从 store 同步最新清单到本地引用。
+      // planItems 存在循环外写入方 —— 用户在 UI 中途编辑（ipc/plan-items）、
+      // 暂停恢复 restorePlanItems（pause/manager）等均为整组数组替换，不经本地引用；
+      // 若不同步，「无工具调用守卫」会基于过期清单计算未完成数：漏判 → 提前 done，
+      // 多判 → 无意义提示空转。同步点同时让阶段门禁推进 / 清单状态注入读到实时数据。
+      try {
+        const freshTask = await getTask(task.id)
+        if (freshTask?.planItems) task.planItems = freshTask.planItems
+      } catch (syncErr) {
+        logger.warn('Agent', `planItems sync skipped: ${(syncErr as Error).message}`, task.id)
+      }
+
       // -------- Reason --------
       // Reason 主体（消息组装 / system 契约装配 / 流式 LLM 调用 / 重试与
       // Reactive Fallback 压缩 / reasoning 落盘广播）→ reason-phase.ts（F7 纯移动）
@@ -287,7 +306,46 @@ export async function runReActLoop(
           ? response.toolCallIds
           : pendingActions.map((_, i) => `call_${iteration}_${i}`)
       if (!action && pendingActions.length === 0) {
-        // 模型未调用工具，认为是最终回复
+        // v0.28.1 fix：无工具调用的回合并不总是「最终答复」。
+        // 1) finish=length 且无 action → 工具调用大概率被输出长度截断，注入提示让模型自愈
+        // 2) 任务清单仍有未完成项（running/pending）→ LLM 提前收尾：注入提示引导其继续
+        // 处理策略：不打扰用户（用户无从判断引擎内部状态），全部交给模型自纠——
+        // 首次温和提示，连续多次无工具调用则提示加强（明确二选一：继续调工具 / task_complete）。
+        // 失控风险由 maxIterations 迭代上限兜底（超限走既有 paused + ask_user 路径）。
+        const outputTruncated = response.finishReason === 'length'
+        const unfinishedCount = (task.planItems ?? []).filter(
+          (p) => p.status === 'running' || p.status === 'pending',
+        ).length
+        if (outputTruncated || unfinishedCount > 0) {
+          consecutiveNoToolFinal += 1
+          const truncatedHint =
+            '你上一轮回复被输出长度截断（finish=length），工具调用可能被截掉。' +
+            '请直接继续：重新发起被截断的工具调用，不要复述已完成的步骤。'
+          const unfinishedHint =
+            consecutiveNoToolFinal >= MAX_CONSECUTIVE_NO_TOOL
+              ? `【重要】任务清单仍有 ${unfinishedCount} 项未完成（running/pending），但你已连续 ${consecutiveNoToolFinal} 轮未调用任何工具。` +
+                `请立即做出选择：若剩余项确已无需执行，调用 task_complete 明确收尾并在 summary 中说明原因；` +
+                `否则从第一个未完成项开始继续调用工具执行。禁止只输出文字说明。`
+              : `任务清单仍有 ${unfinishedCount} 项未完成（running/pending），而上一轮回复未调用任何工具。` +
+                `若这些项确已无需执行，请调用 task_complete 明确收尾；否则请继续调用工具完成剩余项，不要只输出文字。`
+          const hint = outputTruncated
+            ? truncatedHint + (unfinishedCount > 0 ? `\n${unfinishedHint}` : '')
+            : unfinishedHint
+          logger.warn(
+            'Agent',
+            `no-tool turn with unfinished work (round ${consecutiveNoToolFinal}) — injected self-heal hint`,
+            task.id,
+          )
+          await appendL1({
+            taskId: task.id,
+            role: 'user',
+            kind: 'user_message',
+            content: hint,
+            iteration,
+          })
+          continue
+        }
+        // 模型未调用工具，且清单无未完成项、输出未被截断 → 认为是最终回复
         await emitEvent(task.id, {
           type: 'task_complete',
           iteration,
@@ -315,6 +373,9 @@ export async function runReActLoop(
         await runDoneMemoryHooks(task, agent, opts.modelId, response.thought)
         return
       }
+
+      // v0.28.1 fix：到达此处说明本轮确有工具调用，重置「无工具调用」连续计数
+      consecutiveNoToolFinal = 0
 
       // v0.14.0 Task 4：action 可能为 null（模型返回多个 pendingActions 时走下方并行 Act），
       // 单工具分支用可选链兜底，避免 null 穿透

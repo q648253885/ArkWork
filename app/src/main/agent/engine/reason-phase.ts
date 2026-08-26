@@ -166,7 +166,7 @@ export async function runReasonPhase(
         memoryInjection,
         contextWindow: model?.contextWindow,
       })
-      const retryResp = await callTurnLlm(8192)
+      const retryResp = await callLlmWithRetry(() => callTurnLlm(8192), signal)
       if (retryResp.content || (retryResp.actions && retryResp.actions.length > 0)) {
         response = retryResp
       } else {
@@ -216,10 +216,11 @@ export async function runReasonPhase(
         memoryInjection,
         contextWindow: model?.contextWindow,
       })
-      // 压缩后重试一次（直接单次调用，不再走 callLlmWithRetry 的多轮重试）
+      // 压缩后重试（走 callLlmWithRetry：压缩后端点仍可能抖动，裸单发会把
+      // 一次瞬时 429/超时直接升级成 task_failed —— v0.28.1 fix C）。
       // v0.27.0 R1：复用 callTurnLlm → 流式管道同样生效；seq 从 1 重启，
       // Renderer 以 seq===1 截断上一轮残流。
-      response = await callTurnLlm()
+      response = await callLlmWithRetry(() => callTurnLlm(), signal)
     } else {
       // 非 context 超限错误 → 走原 catch (line 383)，转为 task_failed
       throw err
