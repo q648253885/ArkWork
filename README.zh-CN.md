@@ -1,6 +1,6 @@
 # ArkWork
 
-[English](./README.md) | **简体中文** | [日本語](./docs/user-guide.ja.md) | [한국어](./docs/user-guide.ko.md)
+[English](./README.md) | **简体中文** | [日本語](./README.ja.md) | [한국어](./README.ko.md)
 
 > 本地优先的 AI Agent 工作台 — 让 ReAct 推理循环**可见、可控、可复用**。
 

@@ -1,6 +1,6 @@
 # ArkWork
 
-**English** | [简体中文](./README.zh-CN.md) | [日本語](./docs/user-guide.ja.md) | [한국어](./docs/user-guide.ko.md)
+**English** | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md)
 
 > A local-first AI Agent workbench — making the ReAct reasoning loop **visible, controllable, and reusable**.
 
