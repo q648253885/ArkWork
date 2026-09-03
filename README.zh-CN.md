@@ -12,7 +12,9 @@
 
 **[下载](https://github.com/q648253885/ArkWork/releases)** 预编译安装包（macOS Apple Silicon / Intel、Windows、Linux），或按下方指南从源码构建。
 
-> **官方官网**：[www.hellowl.com](https://www.hellowl.com/) — 产品主页、功能介绍、真机截图与下载入口。
+## 官方网站
+
+**[→ www.hellowl.com](https://www.hellowl.com/)** 是 ArkWork 的产品官网。它以真实应用截图展示工作台的视觉设计（ReAct 任务视图、帮助中心、设置与多语言），介绍四层记忆与「无云端 · 零遥测 · 纯文件」的设计理念，并提供 macOS / Windows / Linux 三平台的下载入口。点击上方链接即可从 GitHub 直接跳转到官网。
 
 ## 核心功能
 

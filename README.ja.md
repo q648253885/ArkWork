@@ -12,7 +12,9 @@
 
 **[ダウンロード](https://github.com/q648253885/ArkWork/releases)** からビルド済みインストーラ（macOS Apple Silicon / Intel、Windows、Linux）を入手、または下記の手順でソースからビルドしてください。
 
-> **公式ウェブサイト**：[www.hellowl.com](https://www.hellowl.com/) — 製品ホームページ、機能紹介、スクリーンショット、ダウンロード。
+## 公式ウェブサイト
+
+**[→ www.hellowl.com](https://www.hellowl.com/)** は ArkWork の公式製品サイトです。実アプリのスクリーンショット（ReAct タスクビュー、ヘルプセンター、設定と多言語）でワークベンチを紹介し、四層メモリと「クラウドなし・テレメトリなし・純ファイル」の設計理念と、macOS / Windows / Linux の 3 プラットフォーム向けダウンロードリンクを掲載しています。上のリンクをクリックすると、GitHub からそのまま公式サイトへ移動できます。
 
 ## 主な機能
 
