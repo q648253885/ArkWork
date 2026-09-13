@@ -7,6 +7,9 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getArkworkDir, getWorkspaceDir } from '../store/db.js'
 import type { Agent, LlmModel, Skill } from '@shared/types/agent'
+// v0.30.0：TaskGraph 任务工具集（9 个）的规格。定义放在 graph/tools.ts，
+// 此处只 spread —— 保证工具规格与 handler 定义同源，不会两处漂移。
+import { GRAPH_TOOL_SPECS } from '../agent/graph/tools.js'
 
 const SEED_FLAG = 'seeded.v0.6.0.json'
 const LEGACY_SEED_FLAGS = ['seeded.v1.json']  // 旧版本 flag，需触发升级迁移
@@ -209,7 +212,10 @@ const BUILTIN_AGENTS: Agent[] = [
 - 任务完成调用 task_complete，参数包含：改了什么 / 验证结果 / 文档同步情况 / 遗留风险。
 - 需要用户输入或门禁确认时调用 ask_user。
 - 最多 80 次迭代；单次工具超时 30 秒。工具调用预算按签名/类别动态管控（写入类 40、只读类 16），避免重复调用。`,
-    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.browser', 'S-core.todo-update'],
+    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.browser', 'S-core.todo-update',
+      // v0.30.0：TaskGraph 任务工具集
+      'S-core.task-create', 'S-core.task-update', 'S-core.task-get', 'S-core.task-list',
+      'S-core.task-evidence', 'S-core.task-block', 'S-core.request-plan', 'S-core.submit-plan', 'S-core.replan'],
     defaultMcpIds: [],
     // v0.25.0 F1：常驻能力 — run 启动时把 SKILL.md 指令体注入 system agent-static 段，
     // 任务全程生效。react-core-skills 的 frontmatter gates 同步初始化 task.gateStates，
@@ -729,6 +735,10 @@ const BUILTIN_SKILLS: Skill[] = [
     enabled: true,
     tags: ['coding', 'docs', 'swe'],
   },
+  // v0.30.0：TaskGraph 任务工具集（task_create / task_update / task_get /
+  // task_list / task_evidence / task_block / request_plan / submit_plan / replan）。
+  // 描述与 schema 在 graph/tools.ts 中定义（与 handler 同源）。
+  ...GRAPH_TOOL_SPECS,
 ]
 
 const BUILTIN_MODELS: LlmModel[] = [

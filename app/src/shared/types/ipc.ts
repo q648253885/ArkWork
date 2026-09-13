@@ -23,6 +23,20 @@ import type {
 import type { Agent, Skill, McpServer, LlmModel, LlmProviderKind, SkillSource } from './agent'
 import type { Automation, KnowledgeBase } from './conversation'
 import type { PermissionMode, ResolvedRules, PermissionDecision } from './permission'
+// v0.30.0：TaskGraph（任务面板 IPC 的载荷类型）
+import type {
+  GraphResult,
+  GraphSnapshot,
+  MetricsSnapshot,
+  NodeChange,
+  NodeLayer,
+  NodeStatus,
+  PlanApproval,
+  ReplanPatch,
+  TaskGraph,
+  TaskNode,
+  Tier,
+} from './graph'
 
 /** IPC 通道命名约定：{domain}:{action} */
 
@@ -1173,7 +1187,173 @@ export interface ArkApi {
     /** Task 6：清空某类上下文（如清空所有文件引用） */
     clearCategory: (taskId: string, category: ContextCategory) => Promise<boolean>
   }
+  /**
+   * v0.30.0：TaskGraph 任务面板 IPC（13 个频道）
+   *
+   * 统一响应包络 `GraphResult<T>`：`{ ok: true, data }` 或 `{ ok: false, error }`。
+   * 失败时 `error` 是**结构化错误**（含 `invariant` / `hint`），UI 直接渲染 `hint`，
+   * 不需要自己拼文案 —— 保证"引擎给模型的纠错提示"与"给人看的提示"同源
+   * （设计稿 §S4：拒绝要有结构化理由，而非"操作失败"）。
+   */
+  graph: {
+    /** 读取完整图（含 evidence 明细、notes、修订）。无图返回 null。 */
+    get: (taskId: string) => Promise<GraphResult<TaskGraph | null>>
+    /** 面板专用轻量投影（树 + 计数 + 预算 + 通知条），一次拉齐画面所需信息 */
+    snapshot: (taskId: string) => Promise<GraphResult<GraphSnapshot | null>>
+    /** 用户编辑节点字段（标题 / 意图 / 优先级 / notes） */
+    updateNode: (payload: GraphNodeUpdatePayload) => Promise<GraphResult<GraphSnapshot>>
+    /** 用户追加子任务（derivedFrom: manual） */
+    createNode: (payload: GraphNodeCreatePayload) => Promise<GraphResult<GraphSnapshot>>
+    /** 图内删除节点（连带子树）。reason 必填。 */
+    deleteNode: (payload: GraphNodeDeletePayload) => Promise<GraphResult<GraphSnapshot>>
+    /** 手工改状态。绕过不变量需 force + reason（二次确认 + 记 Revision）。 */
+    setStatus: (payload: GraphSetStatusPayload) => Promise<GraphResult<GraphSnapshot>>
+    /** 回答 needs_human（submit / skip / cancel-all） */
+    answerBlock: (payload: GraphAnswerPayload) => Promise<GraphResult<GraphSnapshot>>
+    /** 决定 Replan 补丁（accept / reject / edit） */
+    decideReplan: (payload: GraphReplanDecisionPayload) => Promise<GraphResult<GraphSnapshot>>
+    /** 处理收敛报告（accept-all / accept-some / dismiss） */
+    resolveConverge: (payload: GraphConvergePayload) => Promise<GraphResult<GraphSnapshot>>
+    /** 用户覆盖 Tier（记入 revisions 作为 few-shot） */
+    setTier: (payload: { taskId: string; tier: Tier }) => Promise<GraphResult<GraphSnapshot>>
+    /** 导出 graph.md（只读渲染产物） */
+    exportMd: (taskId: string) => Promise<GraphResult<{ path: string }>>
+    /** 从快照恢复（图损坏时的唯一出口） */
+    restoreSnapshot: (payload: { taskId: string; stamp: string }) => Promise<GraphResult<GraphSnapshot>>
+    /** 用户主动触发一次收敛检查（深度：含漂移与重复实现检测） */
+    runConverge: (taskId: string) => Promise<GraphResult<GraphSnapshot>>
+    /** 待批准的 Replan 补丁列表（面板刷新时补齐通知条） */
+    pendingPatches: (taskId: string) => Promise<ReplanPatch[]>
+    /** P8：读取计划闸门瞬时态（首帧；后续增量走 `onUpdate` kind='plan'）。无闸门返回 null */
+    pendingPlan: (taskId: string) => Promise<PlanApproval | null>
+    /** P8：决定计划闸门（approve 冻结 AC 并放行 / reject 打回 / edit 反向解析校验后合并） */
+    decidePlan: (payload: GraphPlanDecisionPayload) => Promise<GraphResult<GraphSnapshot | null>>
+    /** 指标快照（幻影完成率 / 同步开销率，用于开发期观测） */
+    metrics: () => Promise<MetricsSnapshot>
+    /** 增量刷新推送（graph_patch / status / evidence / needs_human / replan / converge / notice / plan 全走这条） */
+    onUpdate: (cb: (payload: GraphUpdatePayload) => void) => () => void
+  }
 }
+
+/* ============================================================
+ * v0.30.0：TaskGraph IPC 载荷类型
+ * ============================================================ */
+
+/** 面板增量刷新载荷（`graph:update` 通道） */
+export interface GraphUpdatePayload {
+  taskId: string
+  graphId: string
+  kind: 'patch' | 'status' | 'evidence' | 'needs-human' | 'replan' | 'converge' | 'notice' | 'created' | 'plan'
+  /** kind='patch' 时的增量行变更（沿用 v0.18 的 patch 策略，不整图广播） */
+  changes?: NodeChange[]
+  graphRevision?: number
+  /** 需要面板立刻重新拉快照（大变更：replan / converge 应用后、图创建后） */
+  refresh?: boolean
+}
+
+export interface GraphNodeUpdatePayload {
+  taskId: string
+  nodeId: string
+  patch: Partial<Pick<TaskNode, 'title' | 'intent' | 'description' | 'priority' | 'notes'>>
+}
+
+export interface GraphNodeCreatePayload {
+  taskId: string
+  parentId: string | null
+  title: string
+  intent?: string
+  layer?: NodeLayer
+  /** 插到该节点之后（同一父下） */
+  after?: string
+}
+
+export interface GraphNodeDeletePayload {
+  taskId: string
+  nodeId: string
+  /** 必填：图内删除不等于取消，需要留痕说明为什么 */
+  reason: string
+}
+
+export interface GraphSetStatusPayload {
+  taskId: string
+  nodeId: string
+  status: NodeStatus
+  reason?: string
+  /** 二次确认后绕过不变量（记入 revisions，reason 必填） */
+  force?: boolean
+}
+
+export interface GraphAnswerPayload {
+  taskId: string
+  nodeId: string
+  action: 'submit' | 'skip' | 'cancel-all'
+  /** submit 时的答案（选项 label 或自定义文本） */
+  answer?: string
+  /** 补充说明，追加进 node.notes */
+  note?: string
+}
+
+export interface GraphReplanDecisionPayload {
+  taskId: string
+  patchId: string
+  decision: 'accept' | 'reject' | 'edit'
+  /** reject / edit 时的用户说明 */
+  userNote?: string
+}
+
+export interface GraphConvergePayload {
+  taskId: string
+  action: 'accept-all' | 'accept-some' | 'dismiss'
+  /** accept-some 时选中的 unmodeledWork 下标 */
+  indices?: number[]
+}
+
+/**
+ * P8 · 计划闸门决策载荷。
+ *
+ * - `approve`：`spec.state` 置 `approved` + AC 快照为 `frozenTests`（I3 生效）→ 放行执行；
+ * - `reject` ：记 `Revision.reason='user-rejected'`，`userNote` 作为用户消息注入，Planner 重规划；
+ * - `edit`   ：`markdown` 走反向解析 + schema 校验，通过则合并进 spec（仍待批准），
+ *              失败返回 `SCHEMA_INVALID` + `violatedBy.field`（前端高亮该字段并保留原 JSON）。
+ */
+export interface GraphPlanDecisionPayload {
+  taskId: string
+  decision: 'approve' | 'reject' | 'edit'
+  /** reject 时的打回说明（必填，会作为用户消息注入对话流） */
+  userNote?: string
+  /** edit 时改写后的 Markdown（只读渲染产物 graph.md 的内容） */
+  markdown?: string
+}
+
+/**
+ * v0.30.0：把 TaskGraph 的契约类型透出给 preload / main / renderer 三方共用。
+ * 透出而不是重复定义 —— 保证「一份类型，三处引用」，不会出现面板与内核字段漂移。
+ */
+export type {
+  GraphResult,
+  GraphSnapshot,
+  GraphRow,
+  GraphNotice,
+  PlanApproval,
+  AcceptanceStatus,
+  EvidenceKind,
+  ReplanOp,
+  MetricsSnapshot,
+  NodeStatus,
+  NodeLayer,
+  NodeChange,
+  Tier,
+  TaskGraph,
+  TaskNode,
+  ReplanPatch,
+  ReplanApprovalLevel,
+  DriftReport,
+  GraphWriteError,
+} from './graph'
+
+/* ============================================================
+ * v0.30.0 end
+ * ============================================================ */
 
 declare global {
   interface Window {

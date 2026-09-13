@@ -16,6 +16,8 @@ import type { ComponentType } from 'react'
 import type { Agent, DockTabId } from '@shared/types/agent'
 import type { IconName } from '../icons'
 import { TodoPanel } from './dock/TodoPanel'
+// v0.30.0：任务面板（TaskGraph 化）。内部在无图时回落 TodoPanel，行为与 v0.29 一致。
+import { TaskPanel } from './dock/TaskPanel'
 import { ContextPanel } from './dock/ContextPanel'
 import { TerminalPanel } from './dock/TerminalPanel'
 import { BrowserPanel } from './dock/BrowserPanel'
@@ -54,7 +56,8 @@ export const SIDEBAR_WIDGETS: SidebarWidget[] = [
     widgetId: 'checklist',
     name: 'sidelist.checklist',
     icon: 'List',
-    component: TodoPanel,
+    // v0.30.0：原位升级为任务面板（无图时内部回落 TodoPanel）
+    component: TaskPanel,
     supportedScenes: ['general', 'coding', 'writing', 'research'],
     defaultEnabled: true,
     dockTabId: 'todos',

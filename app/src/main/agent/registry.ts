@@ -148,6 +148,21 @@ const READONLY_BUILTINS: Record<string, ToolRiskLevel> = {
   'session-search': 'workspace-readonly',
   'web-search': 'external-readonly',
   'fetch-url': 'external-readonly',
+  // v0.30.0：TaskGraph 任务工具集 —— 只写任务元数据（不是文件系统），
+  // 与既有 `todo_update` 同级，不弹 confirm。
+  // 理由：它们改的是"计划"而不是"用户的代码"，且每次写入都过 I1–I7 门禁 +
+  // 落一条 Revision 审计；把它们做成每次确认会让长任务变成点击地狱。
+  // ★ 注意：`verification.command` 的执行**不在这里** —— 它复用既有 shell 通道，
+  // 必然经过 assessCommandRisk / shell-audit / 当前 permission-mode。
+  'task_create': 'workspace-readonly',
+  'task_update': 'workspace-readonly',
+  'task_get': 'workspace-readonly',
+  'task_list': 'workspace-readonly',
+  'task_evidence': 'workspace-readonly',
+  'task_block': 'workspace-readonly',
+  'request_plan': 'workspace-readonly',
+  'submit_plan': 'workspace-readonly',
+  'replan': 'workspace-readonly',
 }
 
 const LIGHT_WRITE_BUILTINS: Record<string, ToolRiskLevel> = {
@@ -203,6 +218,37 @@ const handlers: Record<string, BuiltinHandler> = {
   'bugfix': async (args, ctx) => bugfix(args as BugfixArgs, ctx) as Promise<BugfixResult | { status: 'failed'; error: string }>,
   'react-core-skills': async (args, ctx) => reactCoreSkills(args as ReactCoreSkillsArgs, ctx) as Promise<ReactCoreSkillsResult | { status: 'failed'; error: string }>,
 }
+
+/* ============================================================
+ * v0.30.0：TaskGraph 工具 handler 的**延迟注册**
+ *
+ * 为什么不在这里直接 `...GRAPH_TOOL_HANDLERS`：
+ *   本文件与 `window.ts → agent/runner.js` 之间存在既有的 ESM 循环依赖链
+ *   （registry → graph/tools → graph/store → store/tasks → agent/events → window → runner → registry）。
+ *   在**模块求值期**展开该绑定会触发 TDZ：
+ *     ReferenceError: Cannot access 'GRAPH_TOOL_HANDLERS' before initialization
+ *   （该缺陷由既有测试 `skill-discovery.test.ts` / `skill-forge.test.ts` 捕获。）
+ *
+ *   改为在**首次使用时**（invokeSkill 是 async）动态 import 并合并，
+ *   此时全部模块已完成求值，不存在 TDZ。
+ *
+ * 为什么不改依赖方向：那会波及 window/runner/store 三个既有模块 —— 违反
+ * "其他核心功能不变"的边界。延迟注册只增加 6 行，侵入面最小。
+ * ============================================================ */
+let graphHandlersState: 'pending' | 'ready' | 'failed' = 'pending'
+
+async function ensureGraphHandlers(): Promise<void> {
+  if (graphHandlersState !== 'pending') return
+  graphHandlersState = 'ready'
+  try {
+    const mod = await import('./graph/tools.js')
+    Object.assign(handlers, mod.GRAPH_TOOL_HANDLERS)
+  } catch (err) {
+    graphHandlersState = 'failed'
+    logger.warn('Tool', `graph handlers 注册失败（任务图工具将不可用）：${(err as Error).message}`)
+  }
+}
+
 
 // v0.19.0 M5：技能缓存按工作区隔离（project 层技能随 workspace 变化）
 const skillCacheByWorkspace = new Map<string, Skill[]>()
@@ -360,6 +406,8 @@ export async function invokeSkill(
   }
 
   if (skill.source === 'builtin' && skill.builtinHandler) {
+    // v0.30.0：确保 TaskGraph 工具 handler 已注册（延迟注册，见文件上方的说明）
+    await ensureGraphHandlers()
     const handler = handlers[skill.builtinHandler]
     if (!handler) {
       throw new Error(`No handler for builtin skill: ${skill.builtinHandler}`)

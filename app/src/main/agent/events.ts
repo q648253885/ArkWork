@@ -10,7 +10,7 @@ import { broadcast } from '../window.js'
 import { logger } from '../system/logger.js'
 import type { ReActStep, ReActEvent } from '@shared/types/react'
 import type { Task, PlanItem, PlanItemStatus, PlanItemSource } from '@shared/types/task'
-import type { PlanItemStatusChanged, PlanItemListSnapshotPayload, TaskTextDeltaPayload } from '@shared/types/ipc'
+import type { PlanItemStatusChanged, PlanItemListSnapshotPayload, TaskTextDeltaPayload, GraphUpdatePayload } from '@shared/types/ipc'
 
 const stepCollections = new Map<string, JsonlCollection<ReActStep>>()
 
@@ -57,6 +57,59 @@ export function broadcastReActEvent(event: ReActEvent): void {
   }
   if (event.type === 'log') {
     logger.info('Agent', `[${event.level}] ${event.source}: ${event.message}`)
+  }
+  // v0.30.0：图事件额外扇出到专用通道 `graph:update`
+  //
+  // 为什么不复用 task:event：图事件频率高（每轮 act 都可能推 patch），
+  // 混在 ReAct 事件流里会让「任务面板」的订阅者收到大量与之无关的噪声
+  // （思考流、文本增量、上下文报告…）。开一条低噪声专用通道后，
+  // 面板的订阅逻辑只需处理 8 种 kind。
+  if (event.type.startsWith('graph_')) {
+    try {
+      broadcast('graph:update', toGraphUpdatePayload(event))
+    } catch (err) {
+      logger.warn('Agent', `broadcast graph:update failed (silent): ${(err as Error).message}`)
+    }
+  }
+}
+
+/**
+ * ReActEvent（graph_* 家族）→ `graph:update` 载荷。
+ *
+ * 用 `switch` 穷举而不是 `as` 强转：ReActEvent 的 graph_* 分支若新增成员，
+ * TS 会在此处报错提醒补齐映射（这是有意的编译期护栏）。
+ */
+function toGraphUpdatePayload(event: ReActEvent): GraphUpdatePayload {
+  switch (event.type) {
+    case 'graph_created':
+      return { taskId: event.taskId, graphId: event.graphId, kind: 'created', refresh: true }
+    case 'graph_patch':
+      return {
+        taskId: event.taskId,
+        graphId: event.graphId,
+        kind: 'patch',
+        changes: event.changes,
+        graphRevision: event.graphRevision,
+      }
+    case 'graph_status':
+      return { taskId: event.taskId, graphId: event.graphId, kind: 'status' }
+    case 'graph_evidence':
+      return { taskId: event.taskId, graphId: event.graphId, kind: 'evidence', refresh: true }
+    case 'graph_needs_human':
+      return { taskId: event.taskId, graphId: event.graphId, kind: 'needs-human', refresh: true }
+    case 'graph_replan_proposed':
+      return { taskId: event.taskId, graphId: event.graphId, kind: 'replan', refresh: true }
+    case 'graph_converge_report':
+      return { taskId: event.taskId, graphId: event.graphId, kind: 'converge', refresh: true }
+    case 'graph_notice':
+      return { taskId: event.taskId, graphId: event.graphId, kind: 'notice' }
+    case 'graph_drift':
+      return { taskId: event.taskId, graphId: event.graphId, kind: 'notice' }
+    case 'graph_plan_gate':
+      return { taskId: event.taskId, graphId: event.graphId, kind: 'plan', refresh: true }
+    default:
+      // 不可达：调用方已用 startsWith('graph_') 过滤
+      return { taskId: '', graphId: '', kind: 'notice' }
   }
 }
 

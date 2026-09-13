@@ -3,6 +3,19 @@
  * 设计文档 §6.2 / §10.2
  * ============================================================ */
 
+// v0.30.0：TaskGraph 事件的载荷类型（仅类型引用，不产生运行时代价）
+import type {
+  BlockingOption,
+  DriftReport,
+  Evidence,
+  GraphNotice,
+  NodeChange,
+  NodeStatus,
+  PlanApproval,
+  ReplanPatch,
+} from './graph.js'
+
+
 /** v0.7.0：新增 'plan' 类型（iteration 0 决策前置） */
 export type ReActStepType = 'plan' | 'reason' | 'act' | 'observation'
 export type ReActStepStatus = 'success' | 'failed' | 'cancelled' | 'running'
@@ -174,8 +187,7 @@ export type ReActEvent =
       memoryInjectionTokens?: number
       modelContextWindow: number
     }
-  // Task 9：进度摘要事件（侧边栏 ProgressPanel 专用）
-  // - task_progress：阶段级进度（currentStage / overallPercentage / nextStep）
+  // Task 9：进度摘要事件（侧边栏 ProgressPanel 专用）  // - task_progress：阶段级进度（currentStage / overallPercentage / nextStep）
   // - task_step_complete：SubTask（ReAct 步 / 必产文档子步骤）完成
   // - task_milestone：里程碑节点到达（如 PRD 已确认冻结 / HTML 原型已确认 / 编码完成）
   | { type: 'task_progress'; taskId: string; currentStage: string; stageIndex: number; overallPercentage: number; nextStepId?: string; nextStepLabel?: string }
@@ -196,3 +208,57 @@ export type ReActEvent =
       reachedAt: number
       artifactPath?: string
     }
+  /* ============================================================
+   * v0.30.0：TaskGraph 事件（8 种）
+   *
+   * 增量更新策略沿用 v0.18.0 的 patch 思路（`graph_patch` 只带变化的行），
+   * 不做整图广播 —— 100 节点的整图广播会拖慢面板。
+   * 既有 23 种事件逐字段不变，消费方零改动。
+   * ============================================================ */
+  | { type: 'graph_created'; taskId: string; graphId: string; tier: number; nodeCount: number }
+  | { type: 'graph_patch'; taskId: string; graphId: string; changes: NodeChange[]; graphRevision: number }
+  | {
+      type: 'graph_status'
+      taskId: string
+      graphId: string
+      nodeId: string
+      from: NodeStatus
+      to: NodeStatus
+      source: string
+      reason?: string
+    }
+  | { type: 'graph_evidence'; taskId: string; graphId: string; nodeId: string; evidence: Evidence }
+  | {
+      type: 'graph_needs_human'
+      taskId: string
+      graphId: string
+      nodeId: string
+      question: string
+      options: BlockingOption[]
+      since: number
+    }
+  | { type: 'graph_replan_proposed'; taskId: string; graphId: string; patch: ReplanPatch }
+  | { type: 'graph_converge_report'; taskId: string; graphId: string; report: DriftReport }
+  | {
+      type: 'graph_drift'
+      taskId: string
+      graphId: string
+      nodeId?: string
+      score: number
+      streak: number
+      action: 'soft' | 'hard'
+      detail: string
+    }
+  | {
+      type: 'graph_notice'
+      taskId: string
+      graphId: string
+      notice: GraphNotice
+      /** 撤销已自动应用的补丁（仅 kind='auto-applied' 有效） */
+      patchId?: string
+    }
+  /**
+   * v0.30.0 / P8：计划闸门状态变化（generating → pending → approved / rejected）。
+   * 对话流内联卡 `PlanApprovalCard` 订阅它做增量刷新（`graph:update` kind='plan'）。
+   */
+  | { type: 'graph_plan_gate'; taskId: string; graphId: string; plan: PlanApproval }

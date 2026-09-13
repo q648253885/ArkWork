@@ -109,6 +109,64 @@ import { safeSlice } from './broadcast.js'
 import { injectSkillInstruction } from './skills.js'
 import { sanitizePlanItemText } from './plan-parser.js'
 import { decidePlanAdvance } from './gates.js'
+// v0.30.0：Sync 五子阶段的 act 后写回（S2 Drift → S3 Write → S4 Gate → S5 Event）
+import { syncPostAct } from '../graph/sync.js'
+import { renderGraphErrorForModel } from '../graph/invariants.js'
+import { recordMetric } from '../graph/metrics.js'
+
+/* ============================================================
+ * v0.30.0：从 Act 参数中提取"漂移检测 / 验证匹配"所需的结构化信息
+ *
+ * 放在 engine 侧（而不是 graph 侧）的理由：**只有这里知道每个工具的参数形状**。
+ * graph/drift.ts 与 graph/write.ts 只接受已经归一化的 files / command 字符串，
+ * 保持内核与具体工具解耦。
+ * ============================================================ */
+
+/**
+ * 提取本次 act 触碰的文件路径（用于 S2 漂移检测的文件交集信号）。
+ *
+ * 只覆盖**会产生文件系统副作用**的工具；读类工具的文件**也算**（读错文件同样是漂移）。
+ */
+export function extractTouchedFiles(tool: string, args: Record<string, unknown> | undefined): string[] {
+  if (!args) return []
+  const out: string[] = []
+  const push = (v: unknown): void => {
+    if (typeof v === 'string' && v.trim()) out.push(v.trim())
+    else if (Array.isArray(v)) for (const x of v) if (typeof x === 'string' && x.trim()) out.push(x.trim())
+  }
+  switch (tool) {
+    case 'file-writer':
+    case 'file-editor':
+    case 'file-reader':
+      push(args.path)
+      break
+    case 'glob-search':
+      push(args.pattern)
+      break
+    case 'grep-search':
+      push(args.path)
+      break
+    case 'shell':
+      // shell 的文件改动无法可靠静态解析（可以 cat > x、tee、mkdir -p…），
+      // 故**不猜测**：只把命令原文交给 E3 的启发式（它比对的是显式声明模块），
+      // 文件信号留空 → drift 的文件信号为 null（被排除而不是算作"偏离"）。
+      break
+    default:
+      break
+  }
+  return out
+}
+
+/**
+ * 提取 shell 命令原文（用于 S3 的"验证命令匹配"）。
+ *
+ * 只处理 shell 工具 —— 验证命令必须通过 shell 执行，才能经过权限与风险守卫。
+ */
+export function extractShellCommand(tool: string, args: Record<string, unknown> | undefined): string | undefined {
+  if (tool !== 'shell' || !args) return undefined
+  const raw = args.command ?? args.cmd ?? args.script
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined
+}
 
 export function buildObservationSummary(
   tool: string,
@@ -593,7 +651,87 @@ export async function executeAct(
   //   3. act 成功 + 只读工具（file-reader / web-search / ...）→ 保持 running，让 LLM 决定
   // v0.18.0 F1：决策落定后通过 broadcastPlanItemStatus 推单条 patch（不调整对象广播）。
   // 写入顺序：先落盘（updateTask）→ 再广播 patch，保证内存/磁盘/三视图一致。
-  if (ctx.task.planItems && ctx.task.planItems.length > 0 && action.tool !== 'todo-update' && action.tool !== 'todo_update') {
+  // ============================================================
+  // v0.30.0（Sync · S2–S5）：有 TaskGraph 时改走图写回
+  //
+  // 与下面既有 `decidePlanAdvance` 路径的**唯一语义差异**：
+  //   判定依据从「工具调用成功」换成「验收通过」。
+  //   普通工具成功不再自动把节点标 done —— 只有验证命令（匹配
+  //   `verification.command` 或 `acceptance[].verify.command`，退出码符合期望）
+  //   才会更新验收状态并推进完成。
+  //
+  // 在同一位置追加三个子阶段：S2 Drift（比对动作 vs 任务意图）、
+  // S4 Gate（写前跑 I1–I7）、S5 Event（E1–E9 → Replan / 干预 / 收敛）。
+  //
+  // 无图时（tier 0/1 轻量任务、尚未迁移的老任务）继续走下面的既有路径，
+  // **行为与 v0.29 完全一致**。
+  // ============================================================
+  if (ctx.task.graphId) {
+    try {
+      const syncRes = await syncPostAct(
+        { taskId: placeholder.taskId, graphId: ctx.task.graphId, iteration: ctx.iteration ?? 0 },
+        {
+          toolName: action.tool,
+          ok,
+          args: action.args ?? {},
+          errorMessage,
+          files: extractTouchedFiles(action.tool, action.args),
+          command: extractShellCommand(action.tool, action.args),
+        },
+      )
+      recordMetric('tool_call')
+
+      // 验证触发：把"该跑哪条命令"以指令性 observation 交给模型执行。
+      // 为什么不在这里直接跑：复用既有 shell 工具通道才能保证命令经过
+      // assessCommandRisk / shell-audit / 当前 permission-mode；引擎内直跑
+      // 会绕过（或重复实现）这套守卫。详见 04-system-design.md §6.2 的回溯说明。
+      if (syncRes.verifyTrigger) {
+        const node = syncRes.graph?.nodes[syncRes.verifyTrigger.nodeId]
+        resultSummary +=
+          `\n\n[verification-required] 节点 ${node?.key ?? syncRes.verifyTrigger.nodeId} 已进入 verifying，` +
+          `但"完成"要由验证结果判定，不是由宣称判定。请立即执行验证命令：\n` +
+          `  \`${syncRes.verifyTrigger.command}\`\n` +
+          `跑完后本节点会按退出码自动转为 completed（退出码符合期望）或 failed（超次触发重规划）。`
+      }
+
+      // 门禁拒绝：把结构化错误（含 hint）交给模型自纠
+      if (syncRes.gateError) {
+        resultSummary += `\n\n[gate-rejected] ${renderGraphErrorForModel(syncRes.gateError)}`
+      }
+
+      // 状态变更摘要（沿用既有 [engine-decision] 的呈现习惯，便于 UI/日志一致）
+      if (syncRes.changes.length > 0) {
+        const lines = syncRes.changes
+          .map((c) => {
+            const g = syncRes.graph
+            const key = g?.nodes[c.nodeId]?.key ?? c.nodeId
+            const t = c.from && c.to ? `${c.from} → ${c.to}` : '字段更新'
+            return `  - ${key}：${t}（${(c.reason ?? '').slice(0, 80)}）`
+          })
+          .join('\n')
+        resultSummary += `\n\n[engine-decision] 引擎独立判断任务图状态：\n${lines}`
+        logger.info(
+          'Agent',
+          `graph-sync tool=${action.tool} ok=${ok} ${syncRes.changes
+            .map((c) => `${c.nodeId}:${c.from ?? '-'}->${c.to ?? '-'}`)
+            .join(',')}`,
+          placeholder.taskId,
+        )
+      }
+
+      // 漂移软提示（不阻止，只把漂移变成显式信息）
+      if (syncRes.driftHint) {
+        resultSummary += `\n\n${syncRes.driftHint}`
+      }
+      // 漂移硬干预：交给上层 UI/用户确认（这里只把偏离点写进 observation）
+      if (syncRes.driftHardText) {
+        resultSummary += `\n\n[drift-alert] 检测到持续偏离，已提请用户确认：\n${syncRes.driftHardText}`
+      }
+    } catch (syncErr) {
+      // Sync 是增强不是关键路径：任何异常都不允许让 act 失败
+      logger.warn('Agent', `graph-sync skipped: ${(syncErr as Error).message}`, placeholder.taskId)
+    }
+  } else if (ctx.task.planItems && ctx.task.planItems.length > 0 && action.tool !== 'todo-update' && action.tool !== 'todo_update') {
     try {
       const { planItems: nextItems, decisions } = decidePlanAdvance(
         ctx.task.planItems,

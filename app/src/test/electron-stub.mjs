@@ -52,10 +52,25 @@ export const session = {
   },
 }
 
+/* 测试内可直接调用已注册的 handler（v0.30.0 详测：graph:* 频道的行为验证）。
+ * 行为兼容：handle 原为 no-op，现在只是顺手记下 —— 不注册时不影响任何既有套件。 */
+const ipcHandlerRegistry = new Map()
+
 export const ipcMain = {
-  handle: () => {},
+  handle: (channel, fn) => {
+    ipcHandlerRegistry.set(channel, fn)
+  },
   on: () => {},
-  removeHandler: () => {},
+  removeHandler: (channel) => {
+    ipcHandlerRegistry.delete(channel)
+  },
+}
+
+/** 测试辅助：取出已注册的 IPC handler（未注册返回 undefined） */
+export function __invokeIpc(channel, ...args) {
+  const fn = ipcHandlerRegistry.get(channel)
+  if (!fn) throw new Error(`no ipc handler registered for '${channel}'`)
+  return fn(undefined, ...args)
 }
 
 export const dialog = {

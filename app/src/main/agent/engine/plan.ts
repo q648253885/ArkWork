@@ -193,6 +193,12 @@ const PLAN_SYSTEM_PROMPT_RETRY = `你是一个任务规划助手。请将用户�
 /**
  * v0.9.x：单次计划生成尝试（首次 + 降级重试共用）。
  * 解析失败（含 Spec 级长计划被 maxTokens 截断）时返回 null，由调用方决定是否降级重试。
+ *
+ * v0.30.0 / P8：`onNull` 回传失败成因，供调用方区分——
+ *  - `explicitEmpty=true`：模型**显式**输出空数组 `[]`（Tier 0，单步/问答/确定性小改），
+ *    属**正常**结果，不弹 Plan 闸门错误态；
+ *  - `explicitEmpty=false`：模型输出不可解析（非 JSON / 被截断），属**真实失败**，
+ *    三级降级链全部失败后由 `generatePlan` 上报为错误态（原型 page-08 error）。
  */
 export async function tryGeneratePlan(
   systemPrompt: string,
@@ -203,6 +209,7 @@ export async function tryGeneratePlan(
   modelId: string,
   signal: AbortSignal,
   extraSystemHint?: string,
+  onNull?: (info: { explicitEmpty: boolean }) => void,
 ): Promise<PlanContent | null> {
   const messages = await assembleMessages(task, agent, { excludePlanContext: true })
   const adapter = await getAdapter(modelId)
@@ -237,6 +244,9 @@ export async function tryGeneratePlan(
   const items = parsePlanItems(raw)
   if (!items || items.length === 0) {
     logger.debug('Agent', 'plan parse failed — items empty/null, will fall back')
+    // 显式空计划（模型主动回 `[]`，Tier 0）与真实解析失败必须区分：
+    // 前者不弹错误态卡片，后者由 generatePlan 在三级全败后上报 degraded。
+    onNull?.({ explicitEmpty: /\[\s*\]/.test(String(raw ?? '')) })
     return null
   }
   logger.info('Agent', `plan parsed: ${items.length} items`)
@@ -255,11 +265,23 @@ export async function generatePlan(
   signal: AbortSignal,
   extraSystemHint?: string,
   docDriven?: boolean,
+  /**
+   * v0.30.0 / P8：三级降级链**全部失败**（且非模型显式空计划）时回调。
+   * 由 `run-setup.ts` 据此登记 Plan 闸门的**错误态**（`degraded=true`），
+   * 使对话流内联卡 `PlanApprovalCard` 能展示原型 page-08 的 error 态。
+   */
+  onDegraded?: () => void,
 ): Promise<PlanContent | null> {
   // v0.17.4：react-core-skills 启用时，用文档驱动开发专用 prompt 替换通用 prompt。
   // v0.17.5：docDriven 由引擎层传入（已通过 getSkill 名称匹配），兜底 isCoreSkillsEnabled
   const useDocDriven = docDriven ?? isCoreSkillsEnabled(task, agent)
   const basePrompt = useDocDriven ? PLAN_SYSTEM_PROMPT_DOC_DRIVEN : PLAN_SYSTEM_PROMPT
+  // 只要任一次尝试是「模型显式回空数组」，就按 Tier 0 处理（不弹错误态）——
+  // 宁可漏报也不误报：把简单任务误判成"计划生成失败"比漏一次提示更伤体验。
+  let sawExplicitEmpty = false
+  const onNull = (info: { explicitEmpty: boolean }): void => {
+    if (info.explicitEmpty) sawExplicitEmpty = true
+  }
   // 首次：完整 Spec/Plan/对话三模式 prompt。v0.9.x 由 maxTokens 400 提升至 1024，
   // 避免 Spec 级 12 步中文计划被截断导致 parsePlanItems 返回 null。
   const plan = await tryGeneratePlan(
@@ -271,6 +293,7 @@ export async function generatePlan(
     modelId,
     signal,
     extraSystemHint,
+    onNull,
   )
   if (plan) return plan
   // v0.15.0：思考模型（deepseek-v4-flash 等）可能在 1024 输出预算内只完成思考
@@ -285,11 +308,12 @@ export async function generatePlan(
     modelId,
     signal,
     extraSystemHint,
+    onNull,
   )
   if (planBig) return planBig
   // 降级重试：精简 3~5 步 prompt + 512 maxTokens + 0.2 temperature
   logger.debug('Agent', 'plan generation first pass failed — retrying with condensed prompt (512 tok, t=0.2)')
-  return tryGeneratePlan(
+  const planSmall = await tryGeneratePlan(
     PLAN_SYSTEM_PROMPT_RETRY,
     512,
     0.2,
@@ -298,5 +322,9 @@ export async function generatePlan(
     modelId,
     signal,
     extraSystemHint,
+    onNull,
   )
+  // 三级全败（且非显式空计划）→ 上报 P8 错误态：任务退回扁平清单路径，但让用户看见"为何没有图"。
+  if (!planSmall && !sawExplicitEmpty) onDegraded?.()
+  return planSmall
 }

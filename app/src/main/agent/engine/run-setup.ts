@@ -8,6 +8,7 @@
 
 import type { Task, PlanItem } from '@shared/types/task'
 import type { PlanContent, ReActStep } from '@shared/types/react'
+import type { PlanApproval } from '@shared/types/graph'
 import type { Agent } from '@shared/types/agent'
 import { readFile } from 'node:fs/promises'
 import { appendL1, listEnabledL1 } from '../../memory/l1-working.js'
@@ -15,16 +16,22 @@ import { applyPending } from '../../memory/l3-curated.js'
 import { initArchiveIndex } from '../../memory/l3-archive.js'
 import { logger } from '../../system/logger.js'
 import { genId } from '@shared/utils/id'
-import { updateTask } from '../../store/tasks.js'
+import { updateTask, getTask } from '../../store/tasks.js'
 import { getWorkspaceDir } from '../../store/db.js'
 import { getSkill } from '../registry.js'
 import { collectAlwaysOnSections } from '../prompt/sections.js'
 import { collectGateSpecs, initGateStates, confirmGate, isDocDrivenAgent } from '../prompt/gates.js'
 import { isCoreSkillsEnabled, computeAllowedStage } from '../../skills/builtin/react-core-skills/stage-gates.js'
-import { broadcastStep, broadcastPlanListSnapshot } from '../events.js'
+import { broadcastStep, broadcastPlanListSnapshot, broadcastReActEvent } from '../events.js'
 import { emitEvent } from './broadcast.js'
 import { autoRecallKb, buildMemoryInjection } from './memory-hooks.js'
 import { generatePlan } from './plan.js'
+// v0.30.0：TaskGraph 初始化（迁移 / 载入 / 建图广播）
+import { migrateToGraph, needsGraphMigration } from '../graph/migrate.js'
+import { getPlanApproval, registerPlanApproval } from '../graph/pending.js'
+import { getGraphById, putGraphCache } from '../graph/sync.js'
+import { saveGraph } from '../graph/store.js'
+import { recordMetric } from '../graph/metrics.js'
 import { isPhaseHeader } from './plan-parser.js'
 import { injectSkillInstruction, broadcastSkillAutoLoaded } from './skills.js'
 
@@ -190,8 +197,13 @@ export async function prepareRun(args: {
   if (startIter === 0) {
     const planStartedAt = Date.now()
     let plan: PlanContent | null = null
+    // v0.30.0 / P8：三级降级链全部失败（且非模型显式空计划）时置位 ——
+    // 决定是否登记 Plan 闸门**错误态**（原型 page-08 error），让用户看见"为何没有图"。
+    let planDegraded = false
     try {
-      plan = await generatePlan(task, agent, modelId, signal, alwaysOnPlanHint, docDriven)
+      plan = await generatePlan(task, agent, modelId, signal, alwaysOnPlanHint, docDriven, () => {
+        planDegraded = true
+      })
     } catch (err) {
       logger.warn('Agent', `plan generation failed: ${(err as Error).message}`, task.id)
       plan = null
@@ -275,6 +287,27 @@ export async function prepareRun(args: {
       await updateTask(task.id, { planItems: fallbackPlanItems })
       broadcastPlanListSnapshot(task.id, fallbackPlanItems, 'plan-fallback')
       logger.info('Agent', `plan-fallback: 写入兜底单步清单（${fallbackPlanItems[0]?.text}）`, task.id)
+      // v0.30.0 / P8：三级降级链全败（且非模型显式空计划）→ 登记 Plan 闸门**错误态**。
+      // 卡片 `PlanApprovalCard` 据此展示原型 page-08 的 error 态（三级降级顺序 + 重试/接受）。
+      // 注意：闸门是瞬时内存态，任务结束/重启即清空；此处只负责"让它可达"。
+      if (planDegraded) {
+        const degradedPlan: PlanApproval = {
+          taskId: task.id,
+          graphId: task.graphId,
+          state: 'pending',
+          proposedAt: getPlanApproval(task.id)?.proposedAt ?? Date.now(),
+          uncovered: [],
+          degraded: true,
+        }
+        registerPlanApproval(degradedPlan)
+        broadcastReActEvent({
+          type: 'graph_plan_gate',
+          taskId: task.id,
+          graphId: task.graphId ?? '',
+          plan: degradedPlan,
+        })
+        logger.warn('Agent', 'P8: 计划生成失败，已登记 Plan 闸门错误态（degraded）', task.id)
+      }
     }
   }
 
@@ -441,6 +474,75 @@ export async function prepareRun(args: {
       ? `${pendingSystemHint}\n\n---\n${replanHint}`
       : replanHint
   }
+  // ============================================================
+  // v0.30.0：确保任务图存在（TaskGraph 化的统一出入口）
+  //
+  // 放在 prepareRun 的**最后**，覆盖上面全部 4 条 planItems 写入路径
+  // （首次计划 / 兜底清单 / plan-regen / continuation），避免在四处各埋一份。
+  //
+  // 三个分支：
+  //  1. 已有 graphId 且图可加载 → 载入内存缓存，供本轮 Sync 使用
+  //  2. 无 graphId 但有 planItems → 迁移成图（`migrateToGraph`），落盘并回写 Task
+  //  3. 无 planItems → 轻量模式（tier 0/1），**不建图**（F20：不该用的时候别用）
+  //
+  // 失败一律不阻断任务：迁移/加载异常只记日志，任务按 v0.29 的扁平清单路径继续跑。
+  // ============================================================
+  try {
+    const fresh = await getTask(task.id)
+    if (fresh?.graphId) {
+      const g = await getGraphById(fresh.graphId)
+      if (g) {
+        task.graphId = g.id
+        task.graphRevision = g.graphRevision
+        logger.info('Agent', `graph loaded: ${g.id}（${Object.keys(g.nodes).length} 节点）`, task.id)
+      } else {
+        logger.warn('Agent', `graph 加载失败（graphId=${fresh.graphId}），回退扁平清单路径`, task.id)
+      }
+    } else if (needsGraphMigration({ graphId: task.graphId, planItems: task.planItems })) {
+      const migrated = migrateToGraph({
+        taskId: task.id,
+        title: task.title,
+        goal: (task.input.text || task.title).split('\n')[0].slice(0, 200),
+        planItems: task.planItems ?? [],
+      })
+      if (migrated) {
+        // 首次迁移跳过写前快照（没有"上一次状态"值得快照）
+        const saved = await saveGraph(migrated, {
+          revision: {
+            by: { kind: 'system' },
+            op: 'migrate',
+            targetId: migrated.id,
+            reason: `v0.28.x planItems（${task.planItems?.length ?? 0} 项）→ TaskGraph`,
+          },
+          skipSnapshot: true,
+          taskId: task.id,
+        })
+        putGraphCache(saved)
+        task.graphId = saved.id
+        task.graphRevision = saved.graphRevision
+        broadcastReActEvent({
+          type: 'graph_created',
+          taskId: task.id,
+          graphId: saved.id,
+          tier: saved.policy.tier,
+          nodeCount: Object.keys(saved.nodes).length,
+        })
+        recordMetric('tier_decided', { tier: saved.policy.tier })
+        logger.info(
+          'Agent',
+          `graph migrated: ${saved.id}（${Object.keys(saved.nodes).length} 节点，来自 ${task.planItems?.length ?? 0} 条扁平清单）`,
+          task.id,
+        )
+      }
+    }
+  } catch (graphErr) {
+    logger.warn(
+      'Agent',
+      `graph 初始化失败（回退扁平清单路径，任务继续执行）：${(graphErr as Error).message}`,
+      task.id,
+    )
+  }
+
   return {
     startIter,
     memoryInjection,

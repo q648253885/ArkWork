@@ -16,12 +16,96 @@
  * 编码→测试→交付→运维沉淀）严格对齐；非文档驱动任务仍可复用同一
  * 数据结构（步/里程碑自定义），UI 不耦合具体场景。
  * ============================================================ */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../../store'
 import type { TaskProgress, TaskProgressMilestone, TaskProgressStage, TaskProgressStep } from '@shared/types/progress'
+import type { GraphRow, GraphSnapshot } from '@shared/types/ipc'
 import { EmptyState, Tooltip } from '../ui'
 import { Icon } from '../../icons'
+import { statusMeta, formatWaiting } from '../graph/graphMeta'
+
+/* ============================================================
+ * v0.30.0：图感知活跃节点（11 态适配）
+ *
+ * 依据：docs/versions/v0.30.0/00-release-goal.md「ProgressPanel 适配 11 态」
+ * 语义边界：本面板的**阶段 / 里程碑 / 进度百分比展示不变**（既有约定）；
+ * 仅把「下一步预览」区升级为图感知 —— 当所选任务有 TaskGraph 时，
+ * 按 needs_human > verifying > in_progress > blocked 的优先级展示活跃节点。
+ *
+ * 为什么独立订阅而不复用 useGraph：本面板只需要轻量快照（不含图本体与
+ * 待决补丁），且与 TaskPanel 分属不同 Dock 页签，生命周期不同。
+ * ============================================================ */
+
+/** 订阅当前任务的图快照（无图 / 轻量模式 / 损坏时返回 null，本面板不承担降级展示） */
+function useGraphSnapshot(taskId: string | null): GraphSnapshot | null {
+  const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null)
+
+  useEffect(() => {
+    if (!taskId) {
+      setSnapshot(null)
+      return
+    }
+    let alive = true
+    const load = async (): Promise<void> => {
+      try {
+        const res = await window.ark.graph.snapshot(taskId)
+        if (!alive) return
+        setSnapshot(res.ok && res.data && !res.data.lightweight ? res.data : null)
+      } catch {
+        if (alive) setSnapshot(null) // 快照失败不阻塞既有进度展示
+      }
+    }
+    void load()
+    // graph:update 载荷含 taskId；只响应当前任务，避免多任务串台
+    const off = window.ark.graph.onUpdate((payload) => {
+      if (payload.taskId === taskId) void load()
+    })
+    return () => {
+      alive = false
+      off()
+    }
+  }, [taskId])
+
+  return snapshot
+}
+
+/**
+ * 从图快照提取活跃节点行（按视觉优先级排序）。
+ * 11 态中只有这四种是"进行中"语义；terminal 态（completed/cancelled/failed）
+ * 与排队态（draft/proposed/approved/ready）不进入本区 —— 面板底部已有计数与里程碑表达。
+ */
+function activeGraphRows(snapshot: GraphSnapshot | null): GraphRow[] {
+  if (!snapshot) return []
+  const order: Record<string, number> = { needs_human: 0, verifying: 1, in_progress: 2, blocked: 3 }
+  return snapshot.rows
+    .filter((r) => order[r.status] !== undefined)
+    .sort((a, b) => order[a.status] - order[b.status])
+}
+
+/** 图感知活跃节点行（视觉映射复用 graphMeta —— 状态颜色的唯一映射点） */
+function GraphActiveRow({ row }: { row: GraphRow }) {
+  const m = statusMeta(row.status)
+  return (
+    <div className={`flex items-center gap-1.5 rounded px-1.5 py-1 text-xs ${m.bg}`} title={row.title}>
+      <span className={`flex-shrink-0 tabular ${m.text}`} aria-hidden>
+        {m.glyph}
+      </span>
+      <span className={`min-w-0 flex-1 truncate ${m.text} ${m.weight}`}>
+        {row.key ? `${row.key} ` : ''}
+        {row.title}
+      </span>
+      {row.status === 'verifying' && row.runningCommand && (
+        <code className="max-w-[45%] flex-shrink-0 truncate text-2xs text-text-tertiary" title={row.runningCommand}>
+          {row.runningCommand}
+        </code>
+      )}
+      {row.status === 'needs_human' && row.waitingMs !== undefined && row.waitingMs > 0 && (
+        <span className="flex-shrink-0 text-2xs tabular text-danger">{formatWaiting(row.waitingMs)}</span>
+      )}
+    </div>
+  )
+}
 
 /**
  * 初始化空进度（无 taskProgress 记录时展示骨架，与 react-core-skills 阶段对齐）。
@@ -209,6 +293,9 @@ export function ProgressPanel() {
   const setSelectedFile = useStore((s) => s.setSelectedFile)
   // Task 9：已完成步骤展开/折叠（紧凑列表默认折叠最近 5 条之前）
   const [showAllSteps, setShowAllSteps] = useState(false)
+  // v0.30.0：图感知活跃节点（有 TaskGraph 时替代通用「下一步」预览）
+  const graphSnapshot = useGraphSnapshot(selectedTaskId)
+  const graphRows = useMemo(() => activeGraphRows(graphSnapshot), [graphSnapshot])
 
   /** 当前任务的进度摘要（无则用骨架占位，避免空态闪烁） */
   const progress = useMemo<TaskProgress | null>(() => {
@@ -282,8 +369,18 @@ export function ProgressPanel() {
         </div>
       </div>
 
-      {/* 下一步预览（高亮） */}
-      {progress.nextStep && (
+      {/* 下一步预览：图感知（有活跃节点时）→ 通用 nextStep（无图 / 全部 terminal） */}
+      {graphRows.length > 0 ? (
+        <div className="px-2.5 py-2 border-b border-border-subtle flex-shrink-0 space-y-1">
+          <div className="text-2xs text-text-tertiary mb-0.5">{t('dock.progress.graph_active')}</div>
+          {graphRows.slice(0, 4).map((row) => (
+            <GraphActiveRow key={row.id} row={row} />
+          ))}
+          {graphRows.length > 4 && (
+            <div className="text-2xs text-text-tertiary px-1.5">+{graphRows.length - 4}</div>
+          )}
+        </div>
+      ) : progress.nextStep && (
         <div className="px-3 py-2 border-b border-border-subtle bg-accent-soft flex-shrink-0">
           <div className="text-2xs text-text-tertiary mb-0.5">{t('dock.progress.next_step')}</div>
           <div className="flex items-center gap-1.5 text-xs text-text-primary">

@@ -119,6 +119,19 @@ export type BuiltinHandler =
   | 'plan'
   | 'bugfix'
   | 'react-core-skills'
+  /* v0.30.0：TaskGraph 任务工具集（9 个）
+   * 命名说明：`task_*` 沿用 v0.17.5 起 `todo_update` / `task_complete` 的下划线风格
+   * （与 LLM 调用的 tool name 完全一致，避免多一层映射）。
+   * 处理器实现在 `main/agent/graph/tools.ts`。 */
+  | 'task_create'
+  | 'task_update'
+  | 'task_get'
+  | 'task_list'
+  | 'task_evidence'
+  | 'task_block'
+  | 'request_plan'
+  | 'submit_plan'
+  | 'replan'
   | 'todo_update'
 
 export interface Skill {

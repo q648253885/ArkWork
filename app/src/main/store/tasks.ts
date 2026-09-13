@@ -274,7 +274,12 @@ export async function appendUserMessage(taskId: string, text: string): Promise<T
   // runTask 内部会再次做 controllers.has(taskId) 检查并清理残 controller，幂等安全。
   try {
     const { runTask } = await import('../agent/runner.js')
-    void runTask(taskId)
+    // runTask 是 async：模型/Agent 校验失败（noAgent/noModel/invalidModel）会以
+    // promise rejection 形式抛出，同步 try/catch 无法捕获。必须显式挂 catch，
+    // 否则会变成进程级 unhandledRejection（续聊场景下用户输入已落 L1，可手动重试）。
+    void runTask(taskId).catch((err) => {
+      logger.warn('System', `appendUserMessage: runTask rejected: ${(err as Error).message}`, taskId)
+    })
   } catch (err) {
     logger.warn('System', `appendUserMessage: runTask skipped: ${(err as Error).message}`, taskId)
   }

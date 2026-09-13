@@ -19,6 +19,8 @@ import { FilesPanel } from './panels/FilesPanel'
 import { ContextPanel } from './dock/ContextPanel'
 import { BrowserPanel } from './dock/BrowserPanel'
 import { TodoPanel } from './dock/TodoPanel'
+// v0.30.0：任务面板（内部在无图时回落 TodoPanel）
+import { TaskPanel } from './dock/TaskPanel'
 import { LogsView } from './right/LogsView'
 // v0.27.0 r10-F14a：终端（输出查看器）纳入 Inspector —— 原 RightDock 宿主无挂载点
 import { TerminalPanel } from './dock/TerminalPanel'
@@ -199,7 +201,7 @@ export function Inspector() {
             >
               <BrowserPanel />
             </div>
-            {inspectorTab === 'todos' && <TodoPanel />}
+            {inspectorTab === 'todos' && <TaskPanel />}
             {inspectorTab === 'context' && <ContextPanel />}
             {inspectorTab === 'files' && <FilesPanel />}
             {inspectorTab === 'logs' && <LogsView />}

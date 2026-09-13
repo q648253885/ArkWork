@@ -22,6 +22,8 @@ import { getWorkspaceDir } from '../../store/db.js'
 import { broadcastStep, broadcastTextDelta } from '../events.js'
 import { emitEvent } from './broadcast.js'
 import { emitPlanStatus } from './gates.js'
+// v0.30.0：Sync · S1 Project（活跃窗口投影）
+import { syncProject } from '../graph/sync.js'
 import { assembleMessages, assembleTools } from './messages.js'
 import { emitContextSizeReport } from './context.js'
 import { persistAbortedReason } from './abort.js'
@@ -59,7 +61,26 @@ export async function runReasonPhase(
 
   // v0.17.6：每轮 Reason 前注入引擎独立判断的清单状态（独立 user 消息，非 system prompt 文本）。
   // 模型必须以这条消息为准，避免"LLM 自报已完成"的失真。
-  if (task.planItems && task.planItems.length > 0) {
+  //
+  // v0.30.0（Sync · S1 Project）：若该任务已有 TaskGraph，改用「活跃窗口投影」替代
+  // 旧的扁平清单注入。投影内容 = [NOW] 当前任务 + 其验收条件 + [NEXT] 2–3 项 +
+  // [DONE] 计数 + [BUDGET]，固定预算 ≤800 tok（超预算按 DONE→NEXT→验收细节 裁剪），
+  // 并额外产出「锚点段」（GOAL + SCOPE-OUT，放进 system 尾部）与「工具后一行刷新」。
+  //
+  // 为什么保留旧路径：tier 0/1 轻量任务不建图（F20），且迁移前的老任务可能还没有图 ——
+  // 此时 `emitPlanStatus` 的扁平六态注入仍是正确的呈现方式，行为不变。
+  if (task.graphId) {
+    try {
+      const proj = await syncProject({ taskId: task.id, graphId: task.graphId, iteration })
+      if (proj.anchorText) {
+        // 锚点段（GOAL + SCOPE-OUT）恒在，不参与裁剪 —— 对抗 F4 目标漂移。
+        // 走 pendingSystemHint 通道（瞬时、不进 L1、不破坏 system 前缀缓存）。
+        pendingSystemHint = [proj.anchorText, pendingSystemHint].filter(Boolean).join('\n\n')
+      }
+    } catch (e) {
+      logger.warn('Agent', `syncProject skipped: ${(e as Error).message}`, task.id)
+    }
+  } else if (task.planItems && task.planItems.length > 0) {
     try {
       await emitPlanStatus(task, iteration, '迭代开始')
     } catch (e) {

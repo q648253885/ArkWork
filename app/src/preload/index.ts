@@ -247,6 +247,41 @@ const ark: ArkApi = {
   },
   // v0.24.1：agent 自主驱动的内置浏览器
   // v0.27.0 F12：loadDone / onDidFinishLoad / onDidFailLoad 随 webview 旧轨删除
+  /**
+   * v0.30.0：TaskGraph 任务面板（17 个 invoke 频道 + 1 个订阅通道）
+   *
+   * 全部返回 `GraphResult<T>` 包络；订阅通道 `graph:update` 收敛了 9 种图事件
+   * （patch / status / evidence / needs-human / replan / converge / notice / created / plan），
+   * 渲染层只需处理一个回调 —— 避免为每种图事件开一条通道。
+   *
+   * `plan` 事件 = P8 计划闸门（`graph_plan_gate`）：request_plan / submit_plan / decide-plan
+   * 均会广播，携带 `refresh: true`。对话流内联卡 `PlanApprovalCard` 据此重读 `pendingPlan`。
+   */
+  graph: {
+    get: (taskId) => ipcRenderer.invoke('graph:get', taskId),
+    snapshot: (taskId) => ipcRenderer.invoke('graph:snapshot', taskId),
+    updateNode: (payload) => ipcRenderer.invoke('graph:update-node', payload),
+    createNode: (payload) => ipcRenderer.invoke('graph:create-node', payload),
+    deleteNode: (payload) => ipcRenderer.invoke('graph:delete-node', payload),
+    setStatus: (payload) => ipcRenderer.invoke('graph:set-status', payload),
+    answerBlock: (payload) => ipcRenderer.invoke('graph:answer-block', payload),
+    decideReplan: (payload) => ipcRenderer.invoke('graph:decide-replan', payload),
+    resolveConverge: (payload) => ipcRenderer.invoke('graph:resolve-converge', payload),
+    setTier: (payload) => ipcRenderer.invoke('graph:set-tier', payload),
+    exportMd: (taskId) => ipcRenderer.invoke('graph:export-md', taskId),
+    restoreSnapshot: (payload) => ipcRenderer.invoke('graph:restore-snapshot', payload),
+    runConverge: (taskId) => ipcRenderer.invoke('graph:run-converge', taskId),
+    pendingPatches: (taskId) => ipcRenderer.invoke('graph:pending-patches', taskId),
+    metrics: () => ipcRenderer.invoke('graph:metrics'),
+    // v0.30.0 P8：计划闸门（Plan 审批卡）—— pendingPlan 读、decidePlan 决
+    pendingPlan: (taskId) => ipcRenderer.invoke('graph:pending-plan', taskId),
+    decidePlan: (payload) => ipcRenderer.invoke('graph:decide-plan', payload),
+    onUpdate: (cb) => {
+      const handler = (_e: IpcRendererEvent, payload: Parameters<typeof cb>[0]) => cb(payload)
+      ipcRenderer.on('graph:update', handler)
+      return () => ipcRenderer.removeListener('graph:update', handler)
+    },
+  },
   browser: {
     onLoadRequest: (cb) => {
       const handler = (_e: IpcRendererEvent, req: Parameters<typeof cb>[0]) => cb(req)

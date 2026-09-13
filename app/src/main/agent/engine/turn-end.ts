@@ -16,6 +16,9 @@ import { appendPairedControlObservations } from './act.js'
 import { runDoneMemoryHooks } from './memory-hooks.js'
 import { buildFallbackAskUserQuestion } from './gates.js'
 import { continueTurnIfInjected } from './abort.js'
+// v0.30.0：完成语义（Sync · S3 Write + S4 Gate）—— 用"验收通过"替代"模型宣称"
+import { syncModelClaim } from '../graph/sync.js'
+import { appendL1 } from '../../memory/l1-working.js'
 import { getUiLocale, tFor } from '../../i18n/messages.js'
 
 export interface TurnEndCtx {
@@ -31,8 +34,66 @@ export async function finishViaTaskComplete(
   pendingActions: ReActAction[],
   pendingActionIds: string[],
   iteration: number,
-): Promise<void> {
+): Promise<boolean> {
   const { task, agent, modelId } = ctx
+
+  // ============================================================
+  // v0.30.0：完成语义变更 —— "完成"由验证结果判定，不再由模型宣称判定
+  //
+  // v0.29 的行为：模型调 task_complete → 直接 `updateTask(status:'done')`（F3 自评失明）。
+  // v0.30.0：先走 syncModelClaim，由 harness 决定采纳方式：
+  //   · 节点 verification.required=true 且缺充分证据 → **不结束任务**，把节点置为
+  //     verifying 并返回一条指令性 observation 要求模型执行验证命令；
+  //     下一轮 shell 跑出符合期望的退出码后，节点才会转 completed。
+  //   · 否则 → 补一条证据后置 completed，继续走既有收尾流程。
+  //
+  // 返回 `true` 表示"本回合不结束、继续循环"（与 pauseViaAskUser 的约定一致）。
+  // ============================================================
+  if (task.graphId) {
+    const claim = await syncModelClaim(
+      { taskId: task.id, graphId: task.graphId, iteration },
+      {
+        nodeId: typeof action.args.node_id === 'string' ? (action.args.node_id as string) : undefined,
+        summary: (action.args.summary as string) ?? safeSlice(response.thought, 500),
+      },
+    )
+    if (claim.verifyTrigger) {
+      // 配对 observation（防悬空 tool_calls 导致服务端 400 —— 与既有修复同理）
+      await appendPairedControlObservations({
+        taskId: task.id,
+        iteration,
+        actions: pendingActions,
+        actionIds: pendingActionIds,
+        controlTool: 'task_complete',
+        controlContent: '[task_complete] 已受理，但完成需验证通过',
+        skipPrefix: '[skipped] 等待验证，跳过：',
+      })
+      // 指令性 user message：让模型在下一轮执行验证命令
+      const node = claim.graph?.nodes[claim.verifyTrigger.nodeId]
+      await appendL1({
+        taskId: task.id,
+        role: 'user',
+        kind: 'user_message',
+        iteration,
+        content:
+          `[verification-required] 节点 ${node?.key ?? claim.verifyTrigger.nodeId} 已进入 verifying。\n` +
+          `任务的"完成"由验证结果判定，不是由宣称判定。请立即用 shell 执行验证命令：\n` +
+          `  ${claim.verifyTrigger.command}\n` +
+          `退出码符合期望后该节点会自动转为 completed；失败会按 maxAttempts 重试，超次触发重规划。\n` +
+          `不要重复调用 task_complete —— 它不会让未验证的节点变成完成。`,
+      })
+      logger.info(
+        'Agent',
+        `task_complete 被拦截：${claim.verifyTrigger.nodeId} 需先跑验证命令 \`${claim.verifyTrigger.command}\``,
+        task.id,
+      )
+      return true // 不结束任务，回到循环顶部
+    }
+    if (claim.gateError) {
+      logger.info('Agent', `task_complete 被门禁拒绝：${claim.gateError.message}`, task.id)
+    }
+  }
+
   // v0.14.0 修复：task_complete 由模型以 tool_calls 形式触发，但本分支直接完成
   // 不执行工具。若不补写配对的 tool observation，assistant 的 tool_calls 将悬空，
   // 下次 assembleMessages 重建消息时服务端会 400
@@ -79,6 +140,7 @@ export async function finishViaTaskComplete(
   })
   // v0.8.0 F803/F804/F805：run done 归档 + 画像合成 + 蒸馏评估
   await runDoneMemoryHooks(task, agent, modelId, response.thought)
+  return false
 }
 
 export async function pauseViaAskUser(

@@ -18,6 +18,7 @@ import { ThoughtStream } from './ThoughtStream'
 import { MessageActions } from './MessageActions'
 import { ArtifactCard, type Artifact } from './ArtifactCard'
 import { SuggestionCards } from './SuggestionCards'
+import { PlanApprovalCard } from './graph/PlanApprovalCard'
 import { executionDescription, reasoningDescription } from '../constants'
 import { intentText } from '../utils/intent-text'
 import { PLAN_STATUS_META, aggregatePlanStatus } from '../utils/plan-status'
@@ -323,6 +324,11 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
           {!isRunning && !askUserQuestion && suggestions.length > 0 && (
             <SuggestionCards suggestions={suggestions} />
           )}
+
+          {/* v0.30.0：P8 · Plan 审批卡（对话流内联卡；「不批准不执行」的第一层闸门）。
+              自订阅 graph:update(kind='plan') 并兜底拉 pendingPlan + snapshot；
+              无待审计划时自行返回 null（空态 Tier 0 不渲染）。 */}
+          <PlanApprovalCard taskId={task?.id ?? ''} />
 
           {/* 底部留白（v0.23.0：增大 h-12 防止与 Composer / RunConsole 输入区重叠） */}
           <div className="h-12" />

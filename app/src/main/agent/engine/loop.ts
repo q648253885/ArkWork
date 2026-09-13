@@ -381,14 +381,19 @@ export async function runReActLoop(
       // 单工具分支用可选链兜底，避免 null 穿透
       if (action?.tool === 'task_complete') {
         // v0.27.0 R2/F7：完成收尾（配对 observation / 完成态 / 里程碑 / 记忆钩子）→ turn-end.ts
-        await finishViaTaskComplete(
-          { task, agent, modelId: opts.modelId },
-          action,
-          response,
-          pendingActions,
-          pendingActionIds,
-          iteration,
-        )
+        // v0.30.0：返回 true 表示"完成被验证门禁拦截，本回合不结束"（需先跑验证命令）
+        if (
+          await finishViaTaskComplete(
+            { task, agent, modelId: opts.modelId },
+            action,
+            response,
+            pendingActions,
+            pendingActionIds,
+            iteration,
+          )
+        ) {
+          continue
+        }
         return
       }
 
@@ -577,12 +582,19 @@ export async function runReActLoop(
       // v0.16.x：阶段门禁信号 — 本轮迭代触发了文档驱动开发门禁（写完 PRD / 交互 / 原型 /
       // 系统设计等）。引擎强制暂停任务并自动 ask_user，避免 LLM 写完不询问直接跳下一阶段。
       let stageGateHit: import('../../skills/builtin/react-core-skills/stage-gates.js').StageGate | null = null
+      // v0.30.0 / P8：计划闸门信号 — Planner 调 submit_plan 成功，计划卡进入
+      // 对话流内联卡等待用户「批准 / 打回 / 编辑」。三层确认闸门第一层：不批准不执行。
+      let planGateHit = false
       for (let i = 0; i < actions.length; i++) {
         const a = actions[i]
         const step = actSteps[i]
         const r = actResults[i]
         broadcastStep(r.completedStep)
         broadcastToolProgress(toFinishedProgress(r.completedStep, groupId))
+        // P8：识别 submit_plan 成功 → 本轮结束后暂停任务（见下方 planGateHit 处理）
+        if (r.ok && a.tool === 'submit_plan' && (r.result as { submitted?: boolean } | undefined)?.submitted === true) {
+          planGateHit = true
+        }
         await emitEvent(task.id, {
           type: 'act_end',
           iteration,
@@ -667,6 +679,18 @@ export async function runReActLoop(
       // 严重脱节（调研阶段就跳到"设计关卡布局"）。
       // 现在改为：只有阶段门禁（产物文档真正写完）触发时才标 done，
       // 对齐 TraeWork「tasks.md 状态随产物落地自动更新」的做法。
+
+      // v0.30.0 / P8：计划闸门暂停 —— 「不批准不执行」。
+      // Planner 的 submit_plan 已把计划闸门登记为 pending 并广播（对话流内联卡渲染）。
+      // 引擎在此暂停任务即可：批准走 `graph:decide-plan`（冻结 AC + 注入 user 消息续跑），
+      // 打回走同一频道的 reject 分支（注入意见 user 消息触发重规划）。这里不注入 L1 ——
+      // 此刻还不知道用户会批准还是打回，注入任一方向的措辞都会误导下一轮 Reason。
+      if (planGateHit) {
+        logger.info('Agent', 'P8 计划闸门触发：计划已提交，暂停等待用户批准', task.id)
+        await updateTask(task.id, { status: 'paused' })
+        broadcastTaskStatus({ ...task, status: 'paused' })
+        return
+      }
 
       // v0.16.x：阶段门禁 — 写完产物后立即推 task_progress + milestone，并
       // 自动 ask_user + 暂停任务（强制门禁）。修复「写完文档没询问直接开始」。

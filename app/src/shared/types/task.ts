@@ -133,7 +133,27 @@ export interface Task {
   starred?: boolean
   /** 由自动化触发的任务，用于侧边栏标识来源 */
   automationId?: string
-  /** v0.14.0 Task 1：任务关联的 PlanItem 六态列表（v0.13.1 无此字段，可选） */
+  /**
+   * v0.30.0：关联的 TaskGraph id（`tg_...`）。
+   *
+   * 存在 graphId 时，**图的 nodes 是任务的唯一真相**，
+   * 下面的 {@link Task.planItems} 降级为由图重算出的**只读镜像**
+   * （唯一写入点是 `main/agent/graph/store.ts` 的 `mirrorPlanItems`）。
+   * tier 0/1 任务不建图，此字段为 undefined，走轻量模式。
+   */
+  graphId?: string
+  /**
+   * v0.30.0：图版本号（乐观锁）。与 `TaskGraph.graphRevision` 同步，
+   * 用于检测"面板拿到的快照是否已过期"。
+   */
+  graphRevision?: number
+  /**
+   * v0.14.0 Task 1：任务关联的 PlanItem 六态列表。
+   *
+   * v0.30.0 起语义变更：**不再是真相源，而是 TaskGraph 的派生镜像**
+   * （见 graphId 字段说明）。既有消费方（StepList / 三视图 / 筛选器）
+   * 仍可零改动读取；但**不允许再直接写它**。
+   */
   planItems?: PlanItem[]
   /**
    * v0.25.0 F1：门禁状态机（run 启动时从 always-on / 已激活技能的 frontmatter

@@ -25,6 +25,8 @@ import { registerPermissionHandlers } from './permission.js'
 import { registerContextHandlers } from './context.js'
 import { registerProgressHandlers } from './progress.js'
 import { registerPlanItemHandlers } from './plan-items.js'
+// v0.30.0：TaskGraph 任务面板（13 个 graph:* 频道）
+import { registerGraphHandlers } from './graph.js'
 // v0.25.0 F2：WebContentsView Tab 化路由
 // v0.27.0 F12：browser:resolve 并入 browser-tabs.js，ipc/browser.js 已删除
 import { registerBrowserTabHandlers } from './browser-tabs.js'
@@ -61,6 +63,9 @@ export function registerIpcHandlers(): void {
 
   // v0.18.0：planItem 用户手动切状态 + planItems 快照兜底
   registerPlanItemHandlers()
+
+  // v0.30.0：TaskGraph 任务面板（任务树 / Evidence / needs_human / Replan / 收敛 / Tier）
+  registerGraphHandlers()
 
   // v0.25.0 F2：WebContentsView Tab 化路由（view-manager）
   // v0.27.0 F12：registerBrowserHandlers 已删除（webview 旧轨），browser:resolve 并入 browser-tabs.js

@@ -1,0 +1,747 @@
+/**
+ * ArkWork — 任务面板（TaskPanel）
+ *
+ * 依据：docs/versions/v0.30.0/03-interaction.md §P1
+ *       prototype/page-01-task-panel.html（已冻结的视觉基准）
+ *
+ * 这个面板要回答设计稿定义的**三个必答问题**：
+ *   ① 它在做什么？   → 顶部 in_progress 行 + 状态图标
+ *   ② 做到哪了？     → 树 / DAG + 进度计数 + 预算
+ *   ③ 凭什么说做完了？→ Evidence 查看器（点任意 completed 节点展开证据链）
+ *
+ * ★ 与原 TodoPanel 的关系（重要）：
+ *   本组件是 TodoPanel 的**原位升级**，不是替代品 ——
+ *   当任务没有 TaskGraph（Tier 0/1 轻量任务、尚未建图的老任务）时，
+ *   直接回落渲染 `<TodoPanel />`，**行为与 v0.29 完全一致**。
+ *   这保证了"其他核心功能不变"在 UI 层的落地。
+ *
+ * 五态（03-interaction.md §P1）：
+ *   默认 = 有图有数据 ｜ 加载 = 骨架行 ｜ 空 = 无图 → 回落 TodoPanel 或空态
+ *   错误 = 图损坏（拒绝加载 + 错误字段 + 快照恢复入口）｜ 成功 = 全部 terminal
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Icon } from '../../icons'
+import { useStore } from '../../store'
+import type { GraphNotice, GraphRow, ReplanPatch } from '@shared/types/ipc'
+import { TIER_LABEL } from '@shared/types/graph'
+import type { Tier } from '@shared/types/ipc'
+import { TodoPanel } from './TodoPanel'
+import { useGraph } from '../graph/useGraph'
+import { GraphNotices } from '../graph/GraphNotices'
+import { NodeRow } from '../graph/NodeRow'
+import { EvidenceDrawer } from '../graph/EvidenceDrawer'
+import { DagView } from '../graph/DagView'
+import { ConvergeCard, NeedsHumanCard, ReplanCard, CardButton, noticeToCard, type OpenedCard } from '../graph/ActionCards'
+import { AC_META, formatTokens, statusMeta } from '../graph/graphMeta'
+import { EmptyState } from '../ui'
+
+/** 窄面板阈值：低于此宽度隐藏元信息（保留状态图标 + key + 标题） */
+const NARROW_WIDTH = 360
+
+export function TaskPanel() {
+  const { t } = useTranslation()
+  const selectedTaskId = useStore((s) => s.selectedTaskId)
+  const task = useStore((s) => s.tasks.find((x) => x.id === s.selectedTaskId))
+  const createToast = useStore((s) => s.pushToast)
+  const createTask = useStore((s) => s.createTask)
+  const setActiveActivity = useStore((s) => s.setActiveActivity)
+
+  const g = useGraph(selectedTaskId)
+
+  const [view, setView] = useState<'tree' | 'dag'>('tree')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [foldAll, setFoldAll] = useState(false)
+  const [drawerNodeId, setDrawerNodeId] = useState<string | null>(null)
+  const [card, setCard] = useState<OpenedCard | null>(null)
+  const [menu, setMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null)
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+  const [width, setWidth] = useState(NARROW_WIDTH)
+  const rootRef = useRef<HTMLDivElement>(null)
+  /** Replan 卡的"接受"需二次确认（影响已完成任务 > 3 项时） */
+  const [tierMenuOpen, setTierMenuOpen] = useState(false)
+
+  /* ---------------- 面板宽度（窄面板降级） ---------------- */
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? NARROW_WIDTH
+      setWidth(w)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const narrow = width < NARROW_WIDTH
+
+  /* ---------------- 默认展开：前两个 milestone ---------------- */
+  const rows = g.snapshot?.rows ?? []
+  useEffect(() => {
+    if (rows.length === 0) return
+    setExpanded((prev) => {
+      if (prev.size > 0) return prev
+      // 首次加载：展开第一个有子节点的 milestone（让用户看到层级，而不是一行折叠摘要）
+      const first = rows.find((r) => r.layer === 'milestone' && r.hasChildren)
+      return first ? new Set([first.id]) : prev
+    })
+  }, [rows])
+
+  /* ---------------- needs_human 置顶（最高视觉优先级） ---------------- */
+  const waitingRows = useMemo(() => rows.filter((r) => r.status === 'needs_human'), [rows])
+  const visibleRows = useMemo(() => rows.filter((r) => r.status !== 'needs_human'), [rows])
+
+  const notices = useMemo(
+    () => (g.snapshot?.notices ?? []).filter((n) => !dismissed.has(`${n.kind}-${n.refId ?? n.text}`)),
+    [g.snapshot?.notices, dismissed],
+  )
+
+  /* ---------------- 动作 ---------------- */
+  const toggle = useCallback((id: string) => {
+    setExpanded((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
+  }, [])
+
+  const openDetail = useCallback(
+    (id: string) => {
+      const row = rows.find((r) => r.id === id)
+      // 只有 completed 节点才有证据链可看；其余节点也允许打开（元信息 / AC）
+      setDrawerNodeId(id)
+      void row
+    },
+    [rows],
+  )
+
+  const openCard = useCallback(
+    (notice: GraphNotice) => {
+      const c = noticeToCard(notice, g.pendingPatches)
+      if (c) setCard(c)
+      else setDismissed((s) => new Set(s).add(`${notice.kind}-${notice.refId ?? notice.text}`))
+    },
+    [g.pendingPatches],
+  )
+
+  const drawerNode = useMemo(
+    () => (drawerNodeId ? g.graph?.nodes[drawerNodeId] ?? null : null),
+    [drawerNodeId, g.graph],
+  )
+
+  const labelOf = useCallback(
+    (id: string) => {
+      const n = g.graph?.nodes[id]
+      return n ? `${n.key ? `${n.key} ` : ''}${n.title}` : id
+    },
+    [g.graph],
+  )
+
+  /** 通知 toast（沿用既有 ToastLayer） */
+  const toast = useCallback(
+    (msg: string) => {
+      try {
+        createToast?.({ type: 'success', message: msg, duration: 2000 })
+      } catch {
+        /* toast 失败不影响主流程 */
+      }
+    },
+    [createToast],
+  )
+
+  /* ---------------- 键盘导航（↑↓ 移动 / ←→ 折叠展开 / Enter 打开） ---------------- */
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      const list = [...waitingRows, ...visibleRows]
+      if (list.length === 0) return
+      const idx = list.findIndex((r) => r.id === selectedId)
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSelectedId(list[Math.min(list.length - 1, idx + 1)]?.id ?? null)
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSelectedId(list[Math.max(0, idx - 1)]?.id ?? null)
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        if (idx >= 0) setExpanded((s) => new Set(s).add(list[idx].id))
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        if (idx >= 0)
+          setExpanded((s) => {
+            const n = new Set(s)
+            n.delete(list[idx].id)
+            return n
+          })
+      } else if (e.key === 'Enter' && idx >= 0) {
+        e.preventDefault()
+        openDetail(list[idx].id)
+      }
+    },
+    [waitingRows, visibleRows, selectedId, openDetail],
+  )
+
+  /* ============================================================
+   * 分支 1：无图 → 回落既有 TodoPanel（行为与 v0.29 一致）
+   * ============================================================ */
+  if (!g.loading && !g.error && g.snapshot === null) {
+    if (!selectedTaskId) {
+      return (
+        <EmptyState
+          icon={<span className="text-2xl leading-none">○</span>}
+          title={t('taskPanel.emptyTitle')}
+          action={
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <CardButton variant="primary" onClick={() => void createTask({ title: '', text: '' })}>
+                {t('taskPanel.emptyNewFromTemplate')}
+              </CardButton>
+              <CardButton onClick={() => setActiveActivity('tasks')}>
+                {t('taskPanel.emptyViewHistory')}
+              </CardButton>
+            </div>
+          }
+        />
+      )
+    }
+    return <TodoPanel />
+  }
+
+  /* ============================================================
+   * 分支 2：图损坏（F20 降级态 —— 拒绝加载，不做部分渲染）
+   * ============================================================ */
+  if (g.broken || (g.error && g.error.code === 'SCHEMA_INVALID')) {
+    return (
+      <div className="flex h-full flex-col overflow-hidden" ref={rootRef}>
+        <PanelHeader
+          view={view}
+          setView={setView}
+          snapshot={null}
+          narrow={narrow}
+          foldAll={foldAll}
+          setFoldAll={setFoldAll}
+          tierMenuOpen={tierMenuOpen}
+          setTierMenuOpen={setTierMenuOpen}
+          onSetTier={(tier) => void g.setTier(tier)}
+        />
+        <div className="flex-1 overflow-y-auto p-3">
+          <div className="rounded-md border border-danger bg-danger-soft p-3">
+            <h4 className="mb-2 text-sm font-semibold">{t('taskPanel.brokenTitle')}</h4>
+            <div className="mb-2 break-all rounded-sm bg-bg-base p-2 font-mono text-2xs leading-[18px] text-text-secondary">
+              {g.error?.message}
+            </div>
+            <p className="mb-3 text-xs leading-[18px] text-text-secondary">{g.error?.hint}</p>
+            <div className="flex flex-wrap gap-2">
+              <CardButton variant="primary" onClick={() => void g.restoreSnapshot('')}>
+                {t('taskPanel.restoreSnapshot')}
+              </CardButton>
+              <CardButton onClick={() => toast(t('taskPanel.readOnlyOpenToast'))}>
+                {t('taskPanel.readOnlyOpen')}
+              </CardButton>
+              <CardButton
+                onClick={() => {
+                  g.clearError()
+                  void g.refresh()
+                }}
+              >
+                {t('taskPanel.retryLoad')}
+              </CardButton>
+            </div>
+            <p className="mt-2 text-2xs text-text-tertiary">{t('taskPanel.brokenNote')}</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const snap = g.snapshot
+  const allTerminal =
+    !!snap && snap.counts.total > 0 &&
+    snap.counts.completed + snap.counts.cancelled === snap.counts.total
+  const pendingPatch: ReplanPatch | undefined = card?.kind === 'replan'
+    ? g.pendingPatches.find((p) => p.id === card.patchId)
+    : undefined
+  const waitingNode = card?.kind === 'needs-human' ? g.graph?.nodes[card.nodeId] : undefined
+
+  return (
+    <div className="relative flex h-full flex-col overflow-hidden" ref={rootRef} onKeyDown={onKeyDown} tabIndex={-1}>
+      <PanelHeader
+        view={view}
+        setView={setView}
+        snapshot={snap}
+        narrow={narrow}
+        foldAll={foldAll}
+        setFoldAll={setFoldAll}
+        tierMenuOpen={tierMenuOpen}
+        setTierMenuOpen={setTierMenuOpen}
+        onSetTier={(tier) => void g.setTier(tier)}
+      />
+
+      {/* 加载态：骨架行（保持行高，避免布局跳动） */}
+      {g.loading && !snap && (
+        <div className="flex-1 overflow-hidden px-3 py-2" aria-busy="true">
+          {[52, 78, 66, 84, 44, 70, 58].map((w, i) => (
+            <div key={i} className="mb-2.5 h-2.5 rounded-sm bg-bg-surface-2" style={{ width: `${w}%` }} />
+          ))}
+          <p className="mt-3 text-center text-xs text-text-tertiary">{t('taskPanel.loading')}</p>
+        </div>
+      )}
+
+      {/* 轻量模式（Tier 0/1）：不显示依赖图，只给内联清单提示 */}
+      {snap?.lightweight && (
+        <div className="shrink-0 border-b border-border-subtle px-3 py-2 text-2xs text-text-tertiary">
+          {t('taskPanel.lightweightBanner', { tier: snap.tier })}
+        </div>
+      )}
+
+      {snap && !allTerminal && <GraphNotices notices={notices} onOpen={openCard} onDismiss={(n) =>
+        setDismissed((s) => new Set(s).add(`${n.kind}-${n.refId ?? n.text}`))
+      } />}
+      {snap && allTerminal && (
+        <GraphNotices
+          notices={[
+            {
+              kind: 'auto-applied',
+              severity: 'success',
+              text: t('taskPanel.allDone', {
+                done: snap.counts.completed,
+                total: snap.counts.total,
+                tokens: formatTokens(snap.budget.tokensUsed),
+              }),
+              dismissible: false,
+            },
+          ]}
+          onOpen={() => undefined}
+          onDismiss={() => undefined}
+        />
+      )}
+
+      {/* 视图切换：树 / DAG */}
+      {snap && !snap.lightweight && view === 'dag' && g.graph ? (
+        <DagView graph={g.graph} onLocate={(id) => {
+          setView('tree')
+          setSelectedId(id)
+          setExpanded((s) => new Set(s).add(id))
+        }} onSwitchToTree={() => setView('tree')} />
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden" role="tree" aria-label={t('taskPanel.treeAria')}>
+          {/* needs_human 置顶区 */}
+          {waitingRows.length > 0 && (
+            <div className="shrink-0 border-b border-border-subtle px-3 pt-2">
+              <div className="mb-1 text-2xs tracking-wide text-danger">{t('taskPanel.pinnedLabel')}</div>
+              {waitingRows.map((r) => (
+                <NodeRow
+                  key={`pinned-${r.id}`}
+                  row={r}
+                  expanded={false}
+                  selected={selectedId === r.id}
+                  summary={false}
+                  onSelect={() => {
+                    setSelectedId(r.id)
+                    setCard({ kind: 'needs-human', nodeId: r.id })
+                  }}
+                  onToggle={() => toggle(r.id)}
+                  onOpenDetail={() => openDetail(r.id)}
+                  onMenu={(a) => setMenu({ nodeId: r.id, ...a })}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* 树本体 */}
+          <div className="min-h-0 flex-1 overflow-y-auto py-2">
+            {visibleRows.length === 0 && !g.loading && (
+              <p className="px-3 py-8 text-center text-xs text-text-tertiary">
+                {t('taskPanel.emptyTree')}
+              </p>
+            )}
+            {visibleRows.map((r) => {
+              const collapsed =
+                foldAll || (!expanded.has(r.id) && r.hasChildren && r.status === 'completed')
+              return (
+                <NodeRow
+                  key={r.id}
+                  row={r}
+                  expanded={!collapsed && expanded.has(r.id)}
+                  selected={selectedId === r.id}
+                  summary={collapsed || (foldAll && r.hasChildren && r.status === 'completed')}
+                  onSelect={() => setSelectedId(r.id)}
+                  onToggle={() => toggle(r.id)}
+                  onOpenDetail={() => openDetail(r.id)}
+                  onMenu={(a) => setMenu({ nodeId: r.id, ...a })}
+                />
+              )
+            })}
+          </div>
+
+          {/* AC 覆盖条 */}
+          {snap && snap.spec.acceptance.length > 0 && (
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border-default px-3 py-2 text-2xs">
+              <span className="text-text-secondary">{t('taskPanel.acceptance')}</span>
+              {snap.spec.acceptance.map((a) => {
+                const m = AC_META[a.status]
+                return (
+                  <span key={a.id} className={`inline-flex items-center gap-1 font-mono ${m.text}`} title={a.statement}>
+                    <span aria-hidden>{m.glyph}</span>
+                    {a.id}
+                  </span>
+                )
+              })}
+              <button
+                type="button"
+                className="ml-auto text-business-primary hover:underline"
+                onClick={() => {
+                  const first = snap.spec.acceptance[0]
+                  const owner = first?.coveredBy[0]
+                  if (owner) openDetail(owner)
+                  else toast(t('taskPanel.noAcOwner'))
+                }}
+              >
+                {t('taskPanel.expandAllAc', { n: snap.spec.acceptance.length })}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---------------- 覆盖层 ---------------- */}
+
+      {/* 行内菜单 */}
+      {menu && (
+        <RowMenu
+          x={menu.x}
+          y={menu.y}
+          row={rows.find((r) => r.id === menu.nodeId)}
+          onClose={() => setMenu(null)}
+          onMarkDone={() =>
+            void g.setStatus({ nodeId: menu.nodeId, status: 'completed', reason: '用户手动标记完成' }).then((ok) => {
+              toast(ok ? t('taskPanel.markedDone') : t('taskPanel.markFailed'))
+              setMenu(null)
+            })
+          }
+          onCancel={() =>
+            void g.setStatus({ nodeId: menu.nodeId, status: 'cancelled', reason: '用户手动取消' }).then((ok) => {
+              toast(ok ? t('taskPanel.markedCancelled') : t('taskPanel.markFailed'))
+              setMenu(null)
+            })
+          }
+          onForceDone={() =>
+            void g
+              .setStatus({
+                nodeId: menu.nodeId,
+                status: 'completed',
+                force: true,
+                reason: '用户强制标记完成（知悉绕过校验）',
+              })
+              .then((ok) => {
+                toast(ok ? t('taskPanel.markedDone') : t('taskPanel.markFailed'))
+                setMenu(null)
+              })
+          }
+          onDelete={() =>
+            void g.deleteNode(menu.nodeId, t('taskPanel.deletedByUser')).then((ok) => {
+              toast(ok ? t('taskPanel.deleted') : t('taskPanel.markFailed'))
+              setMenu(null)
+            })
+          }
+        />
+      )}
+
+      {/* Evidence 抽屉 */}
+      {drawerNode && (
+        <EvidenceDrawer
+          node={drawerNode}
+          onClose={() => setDrawerNodeId(null)}
+          onOpenEvidence={(ref, kind) => toast(t('taskPanel.openEvidence', { kind, ref: ref ?? '—' }))}
+          onOpenRevisions={() => toast(t('taskPanel.revisionsHint'))}
+          zombie={(g.graph?.spec.driftReport?.zombieTasks ?? []).some((z) => z.taskId === drawerNode.id)}
+        />
+      )}
+
+      {/* needs_human 卡片 */}
+      {waitingNode && (
+        <NeedsHumanCard
+          node={waitingNode}
+          hasNext={waitingRows.length > 1}
+          error={g.error}
+          onSubmit={(p) => g.answerBlock(p)}
+          onSkip={(p) => g.answerBlock(p)}
+          onCancelAll={(p) => g.answerBlock(p)}
+          onClose={() => setCard(null)}
+        />
+      )}
+
+      {/* Replan 卡片 */}
+      {pendingPatch && (
+        <ReplanCard
+          patch={pendingPatch}
+          labelOf={labelOf}
+          error={g.error}
+          onAccept={() => g.decideReplan({ patchId: pendingPatch.id, decision: 'accept' })}
+          onReject={(note) => g.decideReplan({ patchId: pendingPatch.id, decision: 'reject', userNote: note })}
+          onEdit={() => g.decideReplan({ patchId: pendingPatch.id, decision: 'edit' })}
+          onViewDiff={() => toast(t('taskPanel.diffHint'))}
+          onClose={() => setCard(null)}
+        />
+      )}
+
+      {/* 收敛报告卡 */}
+      {card?.kind === 'converge' && g.graph?.spec.driftReport && (
+        <ConvergeCard
+          report={g.graph.spec.driftReport}
+          labelOf={labelOf}
+          error={g.error}
+          onAcceptAll={() => g.resolveConverge({ action: 'accept-all' })}
+          onAcceptSome={(indices) => g.resolveConverge({ action: 'accept-some', indices })}
+          onDismiss={() => g.resolveConverge({ action: 'dismiss' })}
+          onClose={() => setCard(null)}
+        />
+      )}
+
+      {/* 内联错误条（非模态操作的失败） */}
+      {g.error && !g.broken && !waitingNode && !pendingPatch && card?.kind !== 'converge' && (
+        <div className="absolute inset-x-2 bottom-2 z-[20] flex items-start gap-2 rounded-md border border-danger bg-danger-soft px-3 py-2 text-xs leading-[18px] shadow-md">
+          <span aria-hidden>⚠</span>
+          <span className="min-w-0 flex-1">
+            <strong className="block">{g.error.message}</strong>
+            <span className="text-text-secondary">{g.error.hint}</span>
+          </span>
+          <button type="button" onClick={g.clearError} aria-label={t('taskPanel.close')}>
+            <Icon.X width={12} height={12} />
+          </button>
+        </div>
+      )}
+
+      {/* 面板提示（任务标题，便于多任务切换时确认在看哪个） */}
+      {task && !narrow && (
+        <span className="sr-only">{task.title}</span>
+      )}
+    </div>
+  )
+}
+
+/* ============================================================
+ * 头部工具条
+ * ============================================================ */
+
+function PanelHeader({
+  view,
+  setView,
+  snapshot,
+  narrow,
+  foldAll,
+  setFoldAll,
+  tierMenuOpen,
+  setTierMenuOpen,
+  onSetTier,
+}: {
+  view: 'tree' | 'dag'
+  setView: (v: 'tree' | 'dag') => void
+  snapshot: import('@shared/types/ipc').GraphSnapshot | null
+  narrow: boolean
+  foldAll: boolean
+  setFoldAll: (v: boolean) => void
+  tierMenuOpen: boolean
+  setTierMenuOpen: (v: boolean) => void
+  onSetTier: (tier: Tier) => void
+}) {
+  const { t } = useTranslation()
+  const counts = snapshot?.counts
+  const done = (counts?.completed ?? 0) + (counts?.cancelled ?? 0)
+  const total = counts?.total ?? 0
+
+  return (
+    <header className="flex shrink-0 items-center gap-2 border-b border-border-default px-3 py-2">
+      {/* 视图切换（分段控件）；轻量模式（Tier 0/1）不提供依赖图，只保留树 -->
+      <div className="flex gap-0.5 rounded-md border border-border-default bg-bg-surface-2 p-0.5">
+        <SegBtn active={view === 'tree'} onClick={() => setView('tree')} label={t('taskPanel.viewTree')}>
+          <Icon.List width={12} height={12} />
+        </SegBtn>
+        {!snapshot?.lightweight && (
+          <SegBtn active={view === 'dag'} onClick={() => setView('dag')} label={t('taskPanel.viewDag')}>
+            <Icon.Graph width={12} height={12} />
+          </SegBtn>
+        )}
+      </div>
+
+      {/* tier 徽章（可点升降级） */}
+      {snapshot && (
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setTierMenuOpen(!tierMenuOpen)}
+            title={snapshot.tierReason ?? TIER_LABEL[snapshot.tier]}
+            className="rounded-sm border border-transparent bg-info-soft px-1.5 py-0.5 text-2xs text-info hover:border-info"
+          >
+            T{snapshot.tier}
+          </button>
+          {tierMenuOpen && (
+            <ul className="absolute left-0 top-full z-[40] mt-1 w-[180px] rounded-md border border-border-default bg-bg-overlay py-1 shadow-md">
+              {([0, 1, 2, 3] as Tier[]).map((ti) => (
+                <li key={ti}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSetTier(ti)
+                      setTierMenuOpen(false)
+                    }}
+                    className={`block w-full px-3 py-1.5 text-left text-xs hover:bg-bg-surface-2 ${
+                      ti === snapshot.tier ? 'text-accent' : 'text-text-primary'
+                    }`}
+                  >
+                    {TIER_LABEL[ti]}
+                  </button>
+                </li>
+              ))}
+              <li className="border-t border-border-subtle px-3 py-1.5 text-2xs text-text-tertiary">
+                {t('taskPanel.tierOverrideHint')}
+              </li>
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* 进度计数 */}
+      {snapshot && !narrow && (
+        <span className="ml-auto text-2xs tabular-nums text-text-secondary">
+          {done}/{total}
+          {snapshot.budget.tokensUsed > 0 && ` · ${formatTokens(snapshot.budget.tokensUsed)}`}
+          {snapshot.budget.tokenBudget ? `/${formatTokens(snapshot.budget.tokenBudget)}` : ''}
+        </span>
+      )}
+
+      {/* 一键折叠 */}
+      <button
+        type="button"
+        aria-label={t('taskPanel.foldAll')}
+        title={t('taskPanel.foldAll')}
+        onClick={() => setFoldAll(!foldAll)}
+        className={`shrink-0 rounded-sm p-1 text-text-tertiary hover:bg-bg-surface-2 hover:text-text-primary ${
+          narrow ? 'ml-auto' : ''
+        }`}
+      >
+        <Icon.ChevronDown width={12} height={12} />
+      </button>
+    </header>
+  )
+}
+
+function SegBtn({
+  active,
+  onClick,
+  label,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+      onClick={onClick}
+      className={`flex h-5 w-6 items-center justify-center rounded-sm ${
+        active ? 'bg-accent-soft text-accent' : 'text-text-tertiary hover:text-text-primary'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+/* ============================================================
+ * 行内「⋯」菜单（P1 的「人工改状态 / 追加子任务 / 手动完成 / 取消」）
+ * ============================================================ */
+
+function RowMenu({
+  x,
+  y,
+  row,
+  onClose,
+  onMarkDone,
+  onCancel,
+  onForceDone,
+  onDelete,
+}: {
+  x: number
+  y: number
+  row: GraphRow | undefined
+  onClose: () => void
+  onMarkDone: () => void
+  onCancel: () => void
+  onForceDone: () => void
+  onDelete: () => void
+}) {
+  const { t } = useTranslation()
+  /** 二次确认：危险动作（强制完成 / 删除）首击只「上膛」，再击才执行 —— 与 P3 双段确认一致 */
+  const [confirm, setConfirm] = useState<null | 'forceDone' | 'delete'>(null)
+  useEffect(() => {
+    const h = (): void => onClose()
+    window.addEventListener('click', h)
+    window.addEventListener('scroll', h, true)
+    return () => {
+      window.removeEventListener('click', h)
+      window.removeEventListener('scroll', h, true)
+    }
+  }, [onClose])
+
+  if (!row) return null
+  const m = statusMeta(row.status)
+
+  const items: {
+    label: string
+    onClick: () => void
+    danger?: boolean
+    hint?: string
+    armed?: boolean
+  }[] = [
+    { label: t('taskPanel.menuMarkDone'), onClick: onMarkDone },
+    {
+      label: confirm === 'forceDone' ? t('taskPanel.menuForceDoneConfirm') : t('taskPanel.menuForceDone'),
+      onClick: () => (confirm === 'forceDone' ? onForceDone() : setConfirm('forceDone')),
+      hint: t('taskPanel.menuForceDoneHint'),
+      armed: confirm === 'forceDone',
+    },
+    { label: t('taskPanel.menuCancel'), onClick: onCancel },
+    {
+      label: confirm === 'delete' ? t('taskPanel.menuDeleteConfirm') : t('taskPanel.menuDelete'),
+      onClick: () => (confirm === 'delete' ? onDelete() : setConfirm('delete')),
+      danger: true,
+      hint: t('taskPanel.menuDeleteHint'),
+      armed: confirm === 'delete',
+    },
+  ]
+
+  return (
+    <ul
+      role="menu"
+      className="fixed z-[50] w-[220px] rounded-md border border-border-default bg-bg-overlay py-1 shadow-lg"
+      style={{ left: Math.min(x, window.innerWidth - 236), top: y }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <li className="border-b border-border-subtle px-3 py-1.5 text-2xs text-text-tertiary">
+        <span className={m.text} aria-hidden>
+          {m.glyph}
+        </span>{' '}
+        {row.key ?? row.id} · {t(`taskPanel.status.${row.status}` as never)}
+      </li>
+      {items.map((it) => (
+        <li key={it.label}>
+          <button
+            type="button"
+            onClick={it.onClick}
+            title={it.hint}
+            className={`block w-full px-3 py-1.5 text-left text-xs hover:bg-bg-surface-2 ${
+              it.danger ? 'text-danger' : 'text-text-primary'
+            } ${it.armed ? (it.danger ? 'bg-danger-soft font-medium' : 'bg-bg-surface-3 font-medium') : ''}`}
+          >
+            {it.label}
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
