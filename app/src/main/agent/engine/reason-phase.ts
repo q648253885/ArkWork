@@ -24,6 +24,7 @@ import { emitEvent } from './broadcast.js'
 import { emitPlanStatus } from './gates.js'
 // v0.30.0：Sync · S1 Project（活跃窗口投影）
 import { syncProject } from '../graph/sync.js'
+import { markPlanItemInProgress } from '../graph/plan-sync.js'
 import { assembleMessages, assembleTools } from './messages.js'
 import { emitContextSizeReport } from './context.js'
 import { persistAbortedReason } from './abort.js'
@@ -53,9 +54,14 @@ export async function runReasonPhase(
   if (iteration === 0 && task.planItems && task.planItems.length > 0) {
     const firstPendingIdx = task.planItems.findIndex((it) => it.status === 'pending')
     if (firstPendingIdx >= 0) {
-      task.planItems[firstPendingIdx].status = 'running'
-      task.planItems[firstPendingIdx].updatedAt = Date.now()
-      await updateTask(task.id, { planItems: task.planItems })
+      const item = task.planItems[firstPendingIdx]
+      // v0.30.0 D9：有图任务写图（唯一真相），镜像/广播由 saveGraph 补发；无图保持 v0.29 直写。
+      if (task.graphId) await markPlanItemInProgress({ taskId: task.id, graphId: task.graphId, iteration }, item.id)
+      else {
+        item.status = 'running'
+        item.updatedAt = Date.now()
+        await updateTask(task.id, { planItems: task.planItems })
+      }
     }
   }
 

@@ -26,6 +26,8 @@ export interface NodeRowProps {
   selected: boolean
   /** 是否已完成子树被折叠成摘要行 */
   summary: boolean
+  /** 窄面板降级：隐藏非关键元信息，保证「状态图标 + key + 标题」单行可读 */
+  narrow?: boolean
   /** 点击整行 */
   onSelect: () => void
   /** 点击折叠箭头 */
@@ -41,6 +43,7 @@ function NodeRowImpl({
   expanded,
   selected,
   summary,
+  narrow = false,
   onSelect,
   onToggle,
   onOpenDetail,
@@ -63,6 +66,7 @@ function NodeRowImpl({
   return (
     <div
       role="treeitem"
+      data-node-id={row.id}
       aria-selected={selected}
       aria-label={`${row.key ?? row.id} ${row.title} ${t(`taskPanel.status.${row.status}` as never)}`}
       tabIndex={0}
@@ -137,45 +141,49 @@ function NodeRowImpl({
       {/* 折叠摘要（子任务数 / token / 耗时） */}
       {summaryText && <span className="shrink-0 text-xs text-text-tertiary">{summaryText}</span>}
 
-      {/* 元信息区（窄面板下由面板层控制隐藏） */}
+      {/* 元信息区（窄面板只保留 needs_human 角标，其余隐藏以保住标题单行） */}
       <span className="ml-auto flex shrink-0 items-center gap-2 text-2xs tabular-nums text-text-tertiary">
-        {/* needs_human 的未读角标 —— 全面板唯一的角标 */}
+        {/* needs_human 的未读角标 —— 全面板唯一的角标（关键信息，窄面板也保留） */}
         {!!row.pendingQuestions && (
           <span className="inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-danger px-1 font-semibold text-white">
             {row.pendingQuestions}
           </span>
         )}
-        {/* 等待时长（needs_human） */}
-        {row.status === 'needs_human' && row.waitingMs !== undefined && (
-          <span className="text-warning">{t('taskPanel.waiting', { time: formatDuration(row.waitingMs) })}</span>
-        )}
-        {/* 正在验证的命令 */}
-        {!!row.runningCommand && (
-          <span className="max-w-[9rem] truncate font-mono text-warning" title={row.runningCommand}>
-            {row.runningCommand}
-          </span>
-        )}
-        {/* 被依赖阻塞 */}
-        {!!row.blockedBy?.length && (
-          <Tooltip label={t('taskPanel.blockedByTip')}>
-            <span className="rounded-sm border border-border-default px-1 leading-[14px]">
-              {t('taskPanel.blockedBy', { keys: row.blockedBy.join(', ') })}
-            </span>
-          </Tooltip>
-        )}
-        {/* 失败尝试 */}
-        {!!row.attemptsLabel && <span className="text-danger">{row.attemptsLabel}</span>}
-        {/* 进度 token / 耗时 */}
-        {!summary && !!row.tokensUsed && <span>{formatTokens(row.tokensUsed)}</span>}
-        {/* 层徽章 */}
-        {row.layer !== 'goal' && (
-          <span className="rounded-sm border border-border-default px-1 text-[9px] leading-[14px]">
-            {LAYER_LABEL[row.layer]}
-          </span>
+        {!narrow && (
+          <>
+            {/* 等待时长（needs_human） */}
+            {row.status === 'needs_human' && row.waitingMs !== undefined && (
+              <span className="text-warning">{t('taskPanel.waiting', { time: formatDuration(row.waitingMs) })}</span>
+            )}
+            {/* 正在验证的命令 */}
+            {!!row.runningCommand && (
+              <span className="max-w-[9rem] truncate font-mono text-warning" title={row.runningCommand}>
+                {row.runningCommand}
+              </span>
+            )}
+            {/* 被依赖阻塞 */}
+            {!!row.blockedBy?.length && (
+              <Tooltip label={t('taskPanel.blockedByTip')}>
+                <span className="rounded-sm border border-border-default px-1 leading-[14px]">
+                  {t('taskPanel.blockedBy', { keys: row.blockedBy.join(', ') })}
+                </span>
+              </Tooltip>
+            )}
+            {/* 失败尝试 */}
+            {!!row.attemptsLabel && <span className="text-danger">{row.attemptsLabel}</span>}
+            {/* 进度 token / 耗时 */}
+            {!summary && !!row.tokensUsed && <span>{formatTokens(row.tokensUsed)}</span>}
+            {/* 层徽章 */}
+            {row.layer !== 'goal' && (
+              <span className="rounded-sm border border-border-default px-1 text-[9px] leading-[14px]">
+                {LAYER_LABEL[row.layer]}
+              </span>
+            )}
+          </>
         )}
       </span>
 
-      {/* 行内操作菜单 */}
+      {/* 行内操作菜单：绝对定位浮层（不占常态宽度、出现时不挤动元信息） */}
       <button
         type="button"
         aria-label={t('taskPanel.rowMenu')}
@@ -184,7 +192,7 @@ function NodeRowImpl({
           const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
           onMenu({ x: r.left, y: r.bottom + 4 })
         }}
-        className="ml-1 hidden h-5 w-5 shrink-0 items-center justify-center rounded-sm text-text-tertiary hover:bg-bg-surface-3 hover:text-text-primary group-hover:flex"
+        className="pointer-events-none absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-sm border border-border-subtle bg-bg-surface-2 text-text-tertiary opacity-0 transition-opacity duration-100 hover:bg-bg-surface-3 hover:text-text-primary group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
       >
         <Icon.Settings width={12} height={12} />
       </button>

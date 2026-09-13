@@ -2295,7 +2295,16 @@
     },
     "viewTree": "트리 보기",
     "viewDag": "의존 그래프",
-    "foldAll": "완료된 하위 트리 모두 접기",
+    "filter": {
+      "all": "전체",
+      "todo": "할 일",
+      "active": "진행 중",
+      "ended": "종료"
+    },
+    "locate": "이동",
+    "locateTip": "응답 대기 / 진행 중 / 검증 중인 노드를 나열하며, 선택하면 해당 행으로 스크롤합니다",
+    "progressTip": "종료 {{done}} / 전체 {{total}} (goal 제외) · {{used}} / {{budget}} tokens 사용",
+    "foldAll": "모든 하위 트리 접기 / 펼치기 (기본값: 모두 펼침)",
     "tierOverrideHint": "재정의는 리비전에 기록되어 이후 판단의 참고가 됩니다",
     "loading": "작업 그래프를 불러오는 중…",
     "emptyTree": "표시할 행이 없습니다",

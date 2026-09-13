@@ -23,7 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Icon } from '../../icons'
 import { useStore } from '../../store'
-import type { GraphNotice, GraphRow, ReplanPatch } from '@shared/types/ipc'
+import type { GraphNotice, GraphRow, NodeStatus, ReplanPatch } from '@shared/types/ipc'
 import { TIER_LABEL } from '@shared/types/graph'
 import type { Tier } from '@shared/types/ipc'
 import { TodoPanel } from './TodoPanel'
@@ -39,6 +39,24 @@ import { EmptyState } from '../ui'
 /** 窄面板阈值：低于此宽度隐藏元信息（保留状态图标 + key + 标题） */
 const NARROW_WIDTH = 360
 
+/**
+ * 筛选条 4 档（03-interaction.md §P1「筛选条 4 档映射」）。
+ * 计数与过滤都基于 `snapshot.rows`（已剔除 goal），保证与进度分母同源。
+ */
+type FilterKey = 'all' | 'todo' | 'active' | 'ended'
+const FILTER_KEYS: readonly FilterKey[] = ['all', 'todo', 'active', 'ended']
+const FILTER_STATUSES: Record<Exclude<FilterKey, 'all'>, readonly NodeStatus[]> = {
+  todo: ['draft', 'proposed', 'approved', 'ready', 'blocked'],
+  active: ['in_progress', 'verifying', 'needs_human'],
+  ended: ['completed', 'cancelled', 'failed'],
+}
+
+/**
+ * 不受折叠开关影响的状态（03-interaction.md §P1「边界交互」）。
+ * needs_human 恒在置顶区；failed 混在树体里，二者都「永不自动折叠」。
+ */
+const NEVER_FOLD: ReadonlySet<NodeStatus> = new Set<NodeStatus>(['needs_human', 'failed'])
+
 export function TaskPanel() {
   const { t } = useTranslation()
   const selectedTaskId = useStore((s) => s.selectedTaskId)
@@ -50,7 +68,8 @@ export function TaskPanel() {
   const g = useGraph(selectedTaskId)
 
   const [view, setView] = useState<'tree' | 'dag'>('tree')
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  /** 显式折叠的节点集合：默认为空 = 初始全展开（03-interaction.md §P1「默认全展开」） */
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [foldAll, setFoldAll] = useState(false)
   const [drawerNodeId, setDrawerNodeId] = useState<string | null>(null)
@@ -61,6 +80,10 @@ export function TaskPanel() {
   const rootRef = useRef<HTMLDivElement>(null)
   /** Replan 卡的"接受"需二次确认（影响已完成任务 > 3 项时） */
   const [tierMenuOpen, setTierMenuOpen] = useState(false)
+  /** 筛选条当前档位（默认「全部」） */
+  const [filter, setFilter] = useState<FilterKey>('all')
+  /** 「定位▾」下拉是否展开 */
+  const [locateOpen, setLocateOpen] = useState(false)
 
   /* ---------------- 面板宽度（窄面板降级） ---------------- */
   useEffect(() => {
@@ -75,21 +98,70 @@ export function TaskPanel() {
   }, [])
   const narrow = width < NARROW_WIDTH
 
-  /* ---------------- 默认展开：前两个 milestone ---------------- */
   const rows = g.snapshot?.rows ?? []
-  useEffect(() => {
-    if (rows.length === 0) return
-    setExpanded((prev) => {
-      if (prev.size > 0) return prev
-      // 首次加载：展开第一个有子节点的 milestone（让用户看到层级，而不是一行折叠摘要）
-      const first = rows.find((r) => r.layer === 'milestone' && r.hasChildren)
-      return first ? new Set([first.id]) : prev
+  const rowById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows])
+
+  /** 「折叠 / 展开全部子树」：折叠时全部折叠；再次点击清空手动折叠、恢复全展开 */
+  const toggleFoldAll = useCallback(() => {
+    setFoldAll((v) => {
+      if (!v) setCollapsedIds(new Set())
+      return !v
     })
-  }, [rows])
+  }, [])
 
   /* ---------------- needs_human 置顶（最高视觉优先级） ---------------- */
   const waitingRows = useMemo(() => rows.filter((r) => r.status === 'needs_human'), [rows])
-  const visibleRows = useMemo(() => rows.filter((r) => r.status !== 'needs_human'), [rows])
+
+  /* ---------------- 筛选条：4 档计数（均基于非 goal 行） ---------------- */
+  const filterCounts = useMemo<Record<FilterKey, number>>(() => {
+    const inSet = (k: Exclude<FilterKey, 'all'>): number =>
+      rows.reduce((n, r) => (FILTER_STATUSES[k].includes(r.status) ? n + 1 : n), 0)
+    return { all: rows.length, todo: inSet('todo'), active: inSet('active'), ended: inSet('ended') }
+  }, [rows])
+
+  /* ---------------- 「定位」候选：needs_human / in_progress / verifying ---------------- */
+  const locateRows = useMemo(
+    () => rows.filter((r) => r.status === 'needs_human' || r.status === 'in_progress' || r.status === 'verifying'),
+    [rows],
+  )
+
+  // 树体：始终剔除 needs_human（已在置顶区渲染），再按当前档位过滤
+  const visibleRows = useMemo(
+    () =>
+      rows.filter(
+        (r) =>
+          r.status !== 'needs_human' &&
+          (filter === 'all' || FILTER_STATUSES[filter].includes(r.status)),
+      ),
+    [rows, filter],
+  )
+
+  /** 单行是否处于折叠态：有子节点、非 neverFold、且（全局折叠 或 手动折叠） */
+  const rowCollapsedOf = useCallback(
+    (r: GraphRow): boolean =>
+      r.hasChildren && !NEVER_FOLD.has(r.status) && (foldAll || collapsedIds.has(r.id)),
+    [foldAll, collapsedIds],
+  )
+
+  /** 被任一「折叠祖先」遮住的行：折叠要真正隐藏后代，而不是只把父行变细 */
+  const hiddenIds = useMemo(() => {
+    const graph = g.graph
+    const hidden = new Set<string>()
+    if (!graph) return hidden
+    for (const r of visibleRows) {
+      let p = graph.nodes[r.id]?.parentId
+      let guard = 0
+      while (p && guard++ < 32) {
+        const pr = rowById.get(p)
+        if (pr && rowCollapsedOf(pr)) {
+          hidden.add(r.id)
+          break
+        }
+        p = graph.nodes[p]?.parentId
+      }
+    }
+    return hidden
+  }, [g.graph, visibleRows, rowById, rowCollapsedOf])
 
   const notices = useMemo(
     () => (g.snapshot?.notices ?? []).filter((n) => !dismissed.has(`${n.kind}-${n.refId ?? n.text}`)),
@@ -98,13 +170,43 @@ export function TaskPanel() {
 
   /* ---------------- 动作 ---------------- */
   const toggle = useCallback((id: string) => {
-    setExpanded((s) => {
+    setFoldAll(false)
+    setCollapsedIds((s) => {
       const n = new Set(s)
       if (n.has(id)) n.delete(id)
       else n.add(id)
       return n
     })
   }, [])
+
+  /** 「定位」：展开祖先链 → 选中 → 滚动到可视区（并高亮） */
+  const locateTo = useCallback(
+    (id: string) => {
+      setLocateOpen(false)
+      setFilter('all')
+      setSelectedId(id)
+      const graph = g.graph
+      if (graph) {
+        const chain = new Set<string>([id])
+        let cur = graph.nodes[id]?.parentId
+        let guard = 0
+        while (cur && guard++ < 32) {
+          chain.add(cur)
+          cur = graph.nodes[cur]?.parentId
+        }
+        setFoldAll(false)
+        setCollapsedIds((s) => {
+          const n = new Set(s)
+          for (const c of chain) n.delete(c)
+          return n
+        })
+      }
+      requestAnimationFrame(() => {
+        rootRef.current?.querySelector<HTMLElement>(`[data-node-id="${id}"]`)?.scrollIntoView({ block: 'nearest' })
+      })
+    },
+    [g.graph],
+  )
 
   const openDetail = useCallback(
     (id: string) => {
@@ -164,13 +266,20 @@ export function TaskPanel() {
         setSelectedId(list[Math.max(0, idx - 1)]?.id ?? null)
       } else if (e.key === 'ArrowRight') {
         e.preventDefault()
-        if (idx >= 0) setExpanded((s) => new Set(s).add(list[idx].id))
+        if (idx >= 0) {
+          setFoldAll(false)
+          setCollapsedIds((s) => {
+            const n = new Set(s)
+            n.delete(list[idx].id)
+            return n
+          })
+        }
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
         if (idx >= 0)
-          setExpanded((s) => {
+          setCollapsedIds((s) => {
             const n = new Set(s)
-            n.delete(list[idx].id)
+            n.add(list[idx].id)
             return n
           })
       } else if (e.key === 'Enter' && idx >= 0) {
@@ -218,7 +327,14 @@ export function TaskPanel() {
           snapshot={null}
           narrow={narrow}
           foldAll={foldAll}
-          setFoldAll={setFoldAll}
+          onToggleFoldAll={toggleFoldAll}
+          filter={filter}
+          setFilter={setFilter}
+          filterCounts={filterCounts}
+          locateRows={locateRows}
+          locateOpen={locateOpen}
+          setLocateOpen={setLocateOpen}
+          onLocate={locateTo}
           tierMenuOpen={tierMenuOpen}
           setTierMenuOpen={setTierMenuOpen}
           onSetTier={(tier) => void g.setTier(tier)}
@@ -255,8 +371,7 @@ export function TaskPanel() {
 
   const snap = g.snapshot
   const allTerminal =
-    !!snap && snap.counts.total > 0 &&
-    snap.counts.completed + snap.counts.cancelled === snap.counts.total
+    !!snap && snap.progress.total > 0 && snap.progress.done === snap.progress.total
   const pendingPatch: ReplanPatch | undefined = card?.kind === 'replan'
     ? g.pendingPatches.find((p) => p.id === card.patchId)
     : undefined
@@ -270,7 +385,14 @@ export function TaskPanel() {
         snapshot={snap}
         narrow={narrow}
         foldAll={foldAll}
-        setFoldAll={setFoldAll}
+        onToggleFoldAll={toggleFoldAll}
+        filter={filter}
+        setFilter={setFilter}
+        filterCounts={filterCounts}
+        locateRows={locateRows}
+        locateOpen={locateOpen}
+        setLocateOpen={setLocateOpen}
+        onLocate={locateTo}
         tierMenuOpen={tierMenuOpen}
         setTierMenuOpen={setTierMenuOpen}
         onSetTier={(tier) => void g.setTier(tier)}
@@ -303,8 +425,8 @@ export function TaskPanel() {
               kind: 'auto-applied',
               severity: 'success',
               text: t('taskPanel.allDone', {
-                done: snap.counts.completed,
-                total: snap.counts.total,
+                done: snap.progress.done,
+                total: snap.progress.total,
                 tokens: formatTokens(snap.budget.tokensUsed),
               }),
               dismissible: false,
@@ -320,7 +442,12 @@ export function TaskPanel() {
         <DagView graph={g.graph} onLocate={(id) => {
           setView('tree')
           setSelectedId(id)
-          setExpanded((s) => new Set(s).add(id))
+          setFoldAll(false)
+          setCollapsedIds((s) => {
+            const n = new Set(s)
+            n.delete(id)
+            return n
+          })
         }} onSwitchToTree={() => setView('tree')} />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden" role="tree" aria-label={t('taskPanel.treeAria')}>
@@ -335,6 +462,7 @@ export function TaskPanel() {
                   expanded={false}
                   selected={selectedId === r.id}
                   summary={false}
+                  narrow={narrow}
                   onSelect={() => {
                     setSelectedId(r.id)
                     setCard({ kind: 'needs-human', nodeId: r.id })
@@ -355,15 +483,15 @@ export function TaskPanel() {
               </p>
             )}
             {visibleRows.map((r) => {
-              const collapsed =
-                foldAll || (!expanded.has(r.id) && r.hasChildren && r.status === 'completed')
+              if (hiddenIds.has(r.id)) return null
               return (
                 <NodeRow
                   key={r.id}
                   row={r}
-                  expanded={!collapsed && expanded.has(r.id)}
+                  expanded={!rowCollapsedOf(r)}
                   selected={selectedId === r.id}
-                  summary={collapsed || (foldAll && r.hasChildren && r.status === 'completed')}
+                  summary={false}
+                  narrow={narrow}
                   onSelect={() => setSelectedId(r.id)}
                   onToggle={() => toggle(r.id)}
                   onOpenDetail={() => openDetail(r.id)}
@@ -529,7 +657,14 @@ function PanelHeader({
   snapshot,
   narrow,
   foldAll,
-  setFoldAll,
+  onToggleFoldAll,
+  filter,
+  setFilter,
+  filterCounts,
+  locateRows,
+  locateOpen,
+  setLocateOpen,
+  onLocate,
   tierMenuOpen,
   setTierMenuOpen,
   onSetTier,
@@ -539,88 +674,179 @@ function PanelHeader({
   snapshot: import('@shared/types/ipc').GraphSnapshot | null
   narrow: boolean
   foldAll: boolean
-  setFoldAll: (v: boolean) => void
+  onToggleFoldAll: () => void
+  filter: FilterKey
+  setFilter: (v: FilterKey) => void
+  filterCounts: Record<FilterKey, number>
+  locateRows: GraphRow[]
+  locateOpen: boolean
+  setLocateOpen: (v: boolean) => void
+  onLocate: (id: string) => void
   tierMenuOpen: boolean
   setTierMenuOpen: (v: boolean) => void
   onSetTier: (tier: Tier) => void
 }) {
   const { t } = useTranslation()
-  const counts = snapshot?.counts
-  const done = (counts?.completed ?? 0) + (counts?.cancelled ?? 0)
-  const total = counts?.total ?? 0
+  const progress = snapshot?.progress
+  const done = progress?.done ?? 0
+  const total = progress?.total ?? 0
+  const title = snapshot?.title || snapshot?.goal || ''
+  const progressTip = snapshot
+    ? t('taskPanel.progressTip', {
+        done,
+        total,
+        used: formatTokens(snapshot.budget.tokensUsed),
+        budget: snapshot.budget.tokenBudget ? formatTokens(snapshot.budget.tokenBudget) : '—',
+      })
+    : undefined
 
   return (
-    <header className="flex shrink-0 items-center gap-2 border-b border-border-default px-3 py-2">
-      {/* 视图切换（分段控件）；轻量模式（Tier 0/1）不提供依赖图，只保留树 -->
-      <div className="flex gap-0.5 rounded-md border border-border-default bg-bg-surface-2 p-0.5">
-        <SegBtn active={view === 'tree'} onClick={() => setView('tree')} label={t('taskPanel.viewTree')}>
-          <Icon.List width={12} height={12} />
-        </SegBtn>
-        {!snapshot?.lightweight && (
-          <SegBtn active={view === 'dag'} onClick={() => setView('dag')} label={t('taskPanel.viewDag')}>
-            <Icon.Graph width={12} height={12} />
-          </SegBtn>
-        )}
+    <header className="shrink-0 border-b border-border-default px-3.5 pb-2.5 pt-3">
+      {/* 标题行：task.title(=graph.goal) + 进度 + 定位（与列表留出呼吸空间） */}
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-lg font-semibold leading-6 tracking-tight" title={title}>
+          <span className="mr-1.5 text-sm text-accent" aria-hidden>
+            ◆
+          </span>
+          {title}
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="text-sm font-medium tabular-nums text-text-secondary" title={progressTip}>
+            {snapshot ? `${done}/${total}` : '—/—'}
+          </span>
+          {snapshot && locateRows.length > 0 && (
+            <div className="relative">
+              <button
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded={locateOpen}
+                onClick={() => setLocateOpen(!locateOpen)}
+                title={t('taskPanel.locateTip')}
+                className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-border-default bg-bg-surface-2 px-2 py-0.5 text-2xs text-text-secondary hover:bg-bg-surface-3 hover:text-text-primary"
+              >
+                <span className="text-[8px] text-danger" aria-hidden>
+                  ●
+                </span>
+                {!narrow && t('taskPanel.locate')}
+                <span className="tabular-nums text-text-tertiary">{locateRows.length}</span>
+                <Icon.ChevronDown width={10} height={10} />
+              </button>
+              {locateOpen && (
+                <ul className="absolute right-0 top-full z-[40] mt-1 max-h-64 w-[240px] overflow-y-auto rounded-md border border-border-default bg-bg-overlay py-1 shadow-md">
+                  {locateRows.map((r) => {
+                    const m = statusMeta(r.status)
+                    return (
+                      <li key={`locate-${r.id}`}>
+                        <button
+                          type="button"
+                          onClick={() => onLocate(r.id)}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-bg-surface-2"
+                        >
+                          <span className={`shrink-0 ${m.text}`} aria-hidden>
+                            {m.glyph}
+                          </span>
+                          {r.key && <span className="shrink-0 font-mono text-2xs text-text-tertiary">{r.key}</span>}
+                          <span className="min-w-0 flex-1 truncate">{r.title}</span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
+        </span>
       </div>
 
-      {/* tier 徽章（可点升降级） */}
-      {snapshot && (
-        <div className="relative">
+      {/* 控制行：4 档筛选条 + 视图切换 / 全局折叠 */}
+      <div className="mt-2.5 flex min-w-0 items-center gap-2">
+        <span className="inline-flex min-w-0 overflow-hidden rounded-md border border-border-default bg-bg-surface-2 p-0.5">
+          {FILTER_KEYS.map((k) => {
+            const active = filter === k
+            return (
+              <button
+                key={k}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setFilter(k)}
+                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-sm px-1.5 py-0.5 text-2xs ${
+                  active
+                    ? 'bg-accent-soft font-medium text-accent'
+                    : 'text-text-secondary hover:bg-bg-surface-3 hover:text-text-primary'
+                }`}
+              >
+                {t(`taskPanel.filter.${k}`)}
+                <span className={`tabular-nums ${active ? 'text-accent' : 'text-text-tertiary'}`}>{filterCounts[k]}</span>
+              </button>
+            )
+          })}
+        </span>
+
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          {/* 视图切换（分段控件）；轻量模式（Tier 0/1）不提供依赖图，只保留树 */}
+          <div className="flex gap-0.5 rounded-md border border-border-default bg-bg-surface-2 p-0.5">
+            <SegBtn active={view === 'tree'} onClick={() => setView('tree')} label={t('taskPanel.viewTree')}>
+              <Icon.List width={12} height={12} />
+            </SegBtn>
+            {!snapshot?.lightweight && (
+              <SegBtn active={view === 'dag'} onClick={() => setView('dag')} label={t('taskPanel.viewDag')}>
+                <Icon.Graph width={12} height={12} />
+              </SegBtn>
+            )}
+          </div>
+
+          {/* tier 徽章（可点升降级） */}
+          {snapshot && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setTierMenuOpen(!tierMenuOpen)}
+                title={snapshot.tierReason ?? TIER_LABEL[snapshot.tier]}
+                className="rounded-sm border border-transparent bg-info-soft px-1.5 py-0.5 text-2xs text-info hover:border-info"
+              >
+                T{snapshot.tier}
+              </button>
+              {tierMenuOpen && (
+                <ul className="absolute right-0 top-full z-[40] mt-1 w-[180px] rounded-md border border-border-default bg-bg-overlay py-1 shadow-md">
+                  {([0, 1, 2, 3] as Tier[]).map((ti) => (
+                    <li key={ti}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSetTier(ti)
+                          setTierMenuOpen(false)
+                        }}
+                        className={`block w-full px-3 py-1.5 text-left text-xs hover:bg-bg-surface-2 ${
+                          ti === snapshot.tier ? 'text-accent' : 'text-text-primary'
+                        }`}
+                      >
+                        {TIER_LABEL[ti]}
+                      </button>
+                    </li>
+                  ))}
+                  <li className="border-t border-border-subtle px-3 py-1.5 text-2xs text-text-tertiary">
+                    {t('taskPanel.tierOverrideHint')}
+                  </li>
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* 一键折叠 */}
           <button
             type="button"
-            onClick={() => setTierMenuOpen(!tierMenuOpen)}
-            title={snapshot.tierReason ?? TIER_LABEL[snapshot.tier]}
-            className="rounded-sm border border-transparent bg-info-soft px-1.5 py-0.5 text-2xs text-info hover:border-info"
+            aria-label={t('taskPanel.foldAll')}
+            aria-pressed={foldAll}
+            title={t('taskPanel.foldAll')}
+            onClick={onToggleFoldAll}
+            className={`shrink-0 rounded-sm p-1 hover:bg-bg-surface-2 hover:text-text-primary ${
+              foldAll ? 'text-accent' : 'text-text-tertiary'
+            }`}
           >
-            T{snapshot.tier}
+            <Icon.ChevronDown width={12} height={12} />
           </button>
-          {tierMenuOpen && (
-            <ul className="absolute left-0 top-full z-[40] mt-1 w-[180px] rounded-md border border-border-default bg-bg-overlay py-1 shadow-md">
-              {([0, 1, 2, 3] as Tier[]).map((ti) => (
-                <li key={ti}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onSetTier(ti)
-                      setTierMenuOpen(false)
-                    }}
-                    className={`block w-full px-3 py-1.5 text-left text-xs hover:bg-bg-surface-2 ${
-                      ti === snapshot.tier ? 'text-accent' : 'text-text-primary'
-                    }`}
-                  >
-                    {TIER_LABEL[ti]}
-                  </button>
-                </li>
-              ))}
-              <li className="border-t border-border-subtle px-3 py-1.5 text-2xs text-text-tertiary">
-                {t('taskPanel.tierOverrideHint')}
-              </li>
-            </ul>
-          )}
-        </div>
-      )}
-
-      {/* 进度计数 */}
-      {snapshot && !narrow && (
-        <span className="ml-auto text-2xs tabular-nums text-text-secondary">
-          {done}/{total}
-          {snapshot.budget.tokensUsed > 0 && ` · ${formatTokens(snapshot.budget.tokensUsed)}`}
-          {snapshot.budget.tokenBudget ? `/${formatTokens(snapshot.budget.tokenBudget)}` : ''}
         </span>
-      )}
-
-      {/* 一键折叠 */}
-      <button
-        type="button"
-        aria-label={t('taskPanel.foldAll')}
-        title={t('taskPanel.foldAll')}
-        onClick={() => setFoldAll(!foldAll)}
-        className={`shrink-0 rounded-sm p-1 text-text-tertiary hover:bg-bg-surface-2 hover:text-text-primary ${
-          narrow ? 'ml-auto' : ''
-        }`}
-      >
-        <Icon.ChevronDown width={12} height={12} />
-      </button>
+      </div>
     </header>
   )
 }

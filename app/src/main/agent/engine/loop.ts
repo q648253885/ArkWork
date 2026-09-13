@@ -112,6 +112,7 @@ import { emitContextSizeReport } from './context.js'
 import { buildFallbackAskUserQuestion, markRunningPlanItemFailed, discardIncompletePlanItems, isProductiveTool, decidePlanAdvance, emitPlanStatus } from './gates.js'
 import { tryGeneratePlan, generatePlan } from './plan.js'
 import { findPlanItemForStage } from './plan-parser.js'
+import { applyStageGateAdvance } from '../graph/plan-sync.js'
 import { injectSkillInstruction, broadcastSkillAutoLoaded } from './skills.js'
 import { buildObservationSummary, collectActionsForIteration, appendPairedControlObservations, executeAct, toFinishedProgress } from './act.js'
 import { maybePrecallCompact, assembleMessages, assembleTools } from './messages.js'
@@ -702,17 +703,32 @@ export async function runReActLoop(
           task.id,
         )
         // v0.17.5：把对应阶段的 planItem 标 done，下一个标 running（清单↔阶段产物对齐）
+        // v0.30.0 D9：有图任务写图（唯一真相），镜像与广播由 graph/store.saveGraph 统一补发；
+        //            无图任务（tier 0/1）保持 v0.29 直写。
         if (task.planItems && task.planItems.length > 0) {
           const doneIdx = findPlanItemForStage(task.planItems, gate.stage)
           if (doneIdx >= 0) {
-            task.planItems[doneIdx].status = 'done'
-            task.planItems[doneIdx].completedAt = Date.now()
-            task.planItems[doneIdx].updatedAt = Date.now()
-            if (doneIdx + 1 < task.planItems.length && task.planItems[doneIdx + 1].status === 'pending') {
-              task.planItems[doneIdx + 1].status = 'running'
-              task.planItems[doneIdx + 1].updatedAt = Date.now()
+            const doneId = task.planItems[doneIdx].id
+            const nextId =
+              doneIdx + 1 < task.planItems.length && task.planItems[doneIdx + 1].status === 'pending'
+                ? task.planItems[doneIdx + 1].id
+                : undefined
+            if (task.graphId) {
+              await applyStageGateAdvance(
+                { taskId: task.id, graphId: task.graphId },
+                doneId,
+                nextId,
+              )
+            } else {
+              task.planItems[doneIdx].status = 'done'
+              task.planItems[doneIdx].completedAt = Date.now()
+              task.planItems[doneIdx].updatedAt = Date.now()
+              if (nextId) {
+                task.planItems[doneIdx + 1].status = 'running'
+                task.planItems[doneIdx + 1].updatedAt = Date.now()
+              }
+              await updateTask(task.id, { planItems: task.planItems })
             }
-            await updateTask(task.id, { planItems: task.planItems })
           }
         }
         // 1) 推进 ProgressPanel 阶段显示

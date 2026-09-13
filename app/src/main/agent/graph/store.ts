@@ -31,6 +31,7 @@ import {
   flattenGraph,
   isValidGraphId,
   countStatuses,
+  progressCounts,
   sumTokens,
   type GraphNotice,
   type GraphSnapshot,
@@ -48,6 +49,28 @@ import { logger } from '../../system/logger.js'
 
 /** 快照保留份数 */
 const SNAPSHOT_KEEP = 5
+
+/* ============================================================
+ * 〇、镜像写入通知（依赖倒置）
+ *
+ * `Task.planItems` 的镜像写入发生在 `saveGraph` 第 ⑥ 步。按 §4.7 / §10.6，镜像写入处
+ * 必须**显式补广播** `task:plan-list-snapshot`，否则通道 A（交互区清单）与通道 B
+ * （graph.json / 面板）会各自漂移。
+ *
+ * 但 `store.ts` 是底层持久化模块，**不允许**静态 import `agent/events`（避免层次倒挂 /
+ * 求值期成环，同 §10.1 的 gate hook 手法）。故这里只提供**注册口**，由上层桥模块
+ * （`graph/plan-sync.ts`）在启动时注入回调。
+ * ============================================================ */
+
+/** 镜像写入回调：`(taskId, planItems)`。未注册时为 no-op（测试 / 无图场景不受影响） */
+export type MirrorWrittenHook = (taskId: string, planItems: PlanItem[]) => void
+
+let mirrorWrittenHook: MirrorWrittenHook | null = null
+
+/** 注册 / 清除镜像写入回调（传 `null` 清除） */
+export function registerMirrorWrittenHook(fn: MirrorWrittenHook | null): void {
+  mirrorWrittenHook = fn
+}
 
 /* ============================================================
  * 一、路径
@@ -332,11 +355,14 @@ export async function saveGraph(
   // 6) 重算 planItems 镜像（唯一写入点）
   if (options?.taskId) {
     try {
+      const planItems = mirrorPlanItems(next)
       await updateTask(options.taskId, {
         graphId: next.id,
         graphRevision: next.graphRevision,
-        planItems: mirrorPlanItems(next),
+        planItems,
       })
+      // 镜像写入处显式补广播（通道 A ←→ 通道 B 同帧一致，见 §4.7 / §10.6 步骤 3+4）
+      mirrorWrittenHook?.(options.taskId, planItems)
     } catch (err) {
       logger.warn('Agent', `graph ${graph.id}: planItems 镜像写入失败：${(err as Error).message}`)
     }
@@ -846,7 +872,13 @@ export function buildSnapshot(graph: TaskGraph, taskId: string): GraphSnapshot {
     })
   }
 
-  const rows = flattenGraph(graph, { autoFoldDone: true })
+  // 面板投影：只含非 goal 节点（含 cancelled），不做自动折叠 —— 折叠完全交由渲染层
+  // `expandedSet` 控制（默认全展开），使筛选条计数与树体行数同源一致（§4.8）。
+  const rows = flattenGraph(graph, {
+    autoFoldDone: false,
+    excludeLayers: ['goal'],
+    includeCancelled: true,
+  })
   const lightweight = graph.policy.tier <= 1
 
   return {
@@ -876,6 +908,7 @@ export function buildSnapshot(graph: TaskGraph, taskId: string): GraphSnapshot {
     },
     rows,
     counts,
+    progress: progressCounts(graph),
     budget: { tokensUsed: sumTokens(graph), tokenBudget: sumBudget(graph) },
     notices,
     lightweight,

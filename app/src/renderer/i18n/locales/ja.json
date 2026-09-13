@@ -2295,7 +2295,16 @@
     },
     "viewTree": "ツリー表示",
     "viewDag": "依存グラフ",
-    "foldAll": "完了したサブツリーを折りたたむ",
+    "filter": {
+      "all": "すべて",
+      "todo": "未着手",
+      "active": "進行中",
+      "ended": "終了"
+    },
+    "locate": "ジャンプ",
+    "locateTip": "回答待ち／進行中／検証中のノードを一覧表示し、選ぶとその行までスクロールします",
+    "progressTip": "終端 {{done}} / {{total}}（goal を除く）· 使用 {{used}} / {{budget}} tokens",
+    "foldAll": "すべてのサブツリーを折りたたむ / 展開する（初期状態は展開）",
     "tierOverrideHint": "上書きはリビジョンに記録され、以後の判定の参考になります",
     "loading": "タスクグラフを読み込み中…",
     "emptyTree": "表示できる行がありません",

@@ -167,6 +167,7 @@ export {
   mapRevisionToPlanItemSource,
   mirrorPlanItems,
   readIndex,
+  registerMirrorWrittenHook,
   removeIndexEntry,
   renderGraphMd,
   resetGraphDocs,
@@ -177,7 +178,19 @@ export {
   validateGraphShape,
   type GraphIndexEntry,
   type GraphLoadResult,
+  type MirrorWrittenHook,
 } from './store.js'
+
+export {
+  applyPlanItemStatus,
+  applyPlanItemStatuses,
+  applyStageGateAdvance,
+  cancelIncomplete,
+  installPlanSync,
+  markRunningFailed,
+  type PlanSyncCtx,
+  type PlanSyncResult,
+} from './plan-sync.js'
 
 export {
   getMetricsSnapshot,

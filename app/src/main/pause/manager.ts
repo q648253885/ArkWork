@@ -18,6 +18,8 @@ import { dirname, join } from 'node:path'
 import { getTask, updateTask } from '../store/tasks.js'
 import { listEnabledL1 } from '../memory/l1-working.js'
 import { listSteps, broadcastTaskStatus } from '../agent/events.js'
+// v0.30.0 D9：planItem ↔ graph 唯一桥（有图任务写图，无图任务保持 v0.29 直写）
+import { applyPlanItemStatuses } from '../agent/graph/plan-sync.js'
 import {
   writeCheckpoint,
   getPauseCheckpoint,
@@ -89,13 +91,28 @@ export async function resumeTask(taskId: string): Promise<boolean> {
   // 2. 跳过已 done 项：done/failed/cancelled/skipped 原样保留；
   //    暂停瞬间 running 的项重置为 pending（恢复后从该步继续执行）。
   if (cp?.planItems && cp.planItems.length > 0) {
-    const restored: PlanItem[] = cp.planItems.map((it) =>
-      it.status === 'running'
-        ? { ...it, status: 'pending' as const, updatedAt: Date.now() }
-        : it,
-    )
-    // 保持暂停前清单视图（done 不重跑，running 从该步继续）
-    await updateTask(taskId, { planItems: restored })
+    const runningItems = cp.planItems.filter((it) => it.status === 'running')
+    // v0.30.0 D9：有图任务写图（唯一真相），镜像与广播由 graph/store.saveGraph 统一补发。
+    //   planItem 的 'running' 在图上对应 in_progress（见 store.ts:mapNodeStatusToPlanItemStatus），
+    //   'pending' 经 plan-sync:resolveTargetNodeStatus 解析为 ready —— 语义即「从该步继续执行」。
+    if (task.graphId) {
+      if (runningItems.length > 0) {
+        await applyPlanItemStatuses(
+          { taskId, graphId: task.graphId },
+          runningItems.map((it) => ({ planItemId: it.id, to: 'pending' as const })),
+          'engine-decide',
+          '恢复已暂停任务：running → pending',
+        )
+      }
+    } else {
+      const restored: PlanItem[] = cp.planItems.map((it) =>
+        it.status === 'running'
+          ? { ...it, status: 'pending' as const, updatedAt: Date.now() }
+          : it,
+      )
+      // 保持暂停前清单视图（done 不重跑，running 从该步继续）
+      await updateTask(taskId, { planItems: restored })
+    }
   }
 
   // 3. 恢复事件写入审计日志 audit/task.log

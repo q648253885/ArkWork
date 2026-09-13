@@ -2295,7 +2295,16 @@
     },
     "viewTree": "树视图",
     "viewDag": "依赖图",
-    "foldAll": "一键折叠已完成子树",
+    "filter": {
+      "all": "全部",
+      "todo": "待办",
+      "active": "进行中",
+      "ended": "已结束"
+    },
+    "locate": "定位",
+    "locateTip": "列出「等待你回答 / 进行中 / 验证中」的节点，选中后滚动到该行",
+    "progressTip": "已终态 {{done}} / 共 {{total}}（分母不含 goal）· 已用 {{used}} / {{budget}} tokens",
+    "foldAll": "折叠 / 展开全部子树（初始为全展开）",
     "tierOverrideHint": "覆盖会记入修订历史，作为后续判定的参考",
     "loading": "正在加载任务图…",
     "emptyTree": "当前没有可显示的任务行",

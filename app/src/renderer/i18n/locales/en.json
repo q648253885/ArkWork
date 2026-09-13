@@ -2295,7 +2295,16 @@
     },
     "viewTree": "Tree view",
     "viewDag": "Dependency graph",
-    "foldAll": "Fold all completed subtrees",
+    "filter": {
+      "all": "All",
+      "todo": "To do",
+      "active": "Active",
+      "ended": "Ended"
+    },
+    "locate": "Locate",
+    "locateTip": "Lists nodes that are waiting for you, in progress, or verifying; picking one scrolls to its row",
+    "progressTip": "Terminal {{done}} / {{total}} (goal excluded) · {{used}} / {{budget}} tokens used",
+    "foldAll": "Fold / expand all subtrees (expanded by default)",
     "tierOverrideHint": "Overrides are recorded in revisions and used as a reference for later decisions",
     "loading": "Loading task graph…",
     "emptyTree": "No rows to show",

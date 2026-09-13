@@ -227,6 +227,9 @@ export async function prepareRun(args: {
         createdAt: now,
         updatedAt: now,
       }))
+      // v0.30.0 D9：本分支在 `startIter === 0` 时执行；`startIter` 由 L1 最大 iteration 推导，
+      // 故此刻任务必为**全新任务、尚无 graphId** —— 直写与 v0.29 等价；紧随其后的
+      // 「确保任务图存在」块会据这份 planItems 建图（migrateToGraph），两通道按构造一致。
       task.planItems = planItems
       await updateTask(task.id, { planItems })
       // v0.18.0 F1/F2：plan 全量生成走 snapshot 通道（与 patch 分开，避免队列交叉）；
@@ -283,6 +286,8 @@ export async function prepareRun(args: {
           updatedAt: nowFallback,
         },
       ]
+      // v0.30.0 D9：同 8a —— `startIter === 0` 时任务尚无 graphId，直写等价 v0.29，
+      // 随后的建图块据这份兜底清单建图，两通道一致。
       task.planItems = fallbackPlanItems
       await updateTask(task.id, { planItems: fallbackPlanItems })
       broadcastPlanListSnapshot(task.id, fallbackPlanItems, 'plan-fallback')
@@ -358,6 +363,10 @@ export async function prepareRun(args: {
   }
   // v0.16.7+：续聊路径 plan 重评提示（紧跟 react-core-skills preload 后）
   if (startIter > 0) {
+    // v0.30.0 D9 偏离：本块三条写入路径（plan-regen / continuation ×2）均为「**新建**合成 planItem」
+    // （id 非既有图节点），在图模型里对应「建节点」，须走受审计的 Replan 通道（§4.5）；
+    // plan-sync 只桥接「已有节点」的状态变更，无建节点原语，故保留 v0.29 直写。
+    // 详见 04-system-design.md §10.6 的 D9 偏离记录（2）。
     // v0.24.x：plan-regen 决策（替代 v0.21.0 continuation 兜底）
     // 旧逻辑只在「旧 plan 全部完成」时追加一个「续接新需求」承接项。
     // 用户体验上：旧清单全部 done 后新指令仍要 Agent 自己 plan，无脑追加「续接新需求」

@@ -12,10 +12,12 @@
  *
  * 所有变更都走：
  *  1) 校验（任务/项存在 + 终态规则）
- *  2) 写 planItem.status + source + updatedAt/completedAt
- *  3) updateTask 持久化
- *  4) broadcastPlanItemStatus 推单条 patch（F1 通道激活）
- *  5) 返回 { ok, version, effectiveStatus } 给 Renderer 做 optimistic reconcile
+ *  2) 写状态：
+ *     - **有图任务**（`task.graphId`）：写图 → 由图重算 `planItems` 镜像（v0.30.0 §4.7 唯一写入序列，
+ *       镜像写入处统一补发 `task:plan-list-snapshot`）；
+ *     - **无图任务**（tier 0/1）：保持 v0.29 直写 `planItems`。
+ *  3) 广播
+ *  4) 返回 { ok, version, effectiveStatus } 给 Renderer 做 optimistic reconcile
  * ============================================================ */
 import { ipcMain } from 'electron'
 import { getTask, updateTask } from '../store/tasks.js'
@@ -23,6 +25,7 @@ import {
   broadcastPlanItemStatus,
   getPlanListVersion,
 } from '../agent/events.js'
+import { applyPlanItemStatus } from '../agent/graph/plan-sync.js'
 import type { PlanItemActionResult } from '@shared/types/ipc'
 import type { PlanItem, PlanItemStatus, PlanItemSource } from '@shared/types/task'
 import { logger } from '../system/logger.js'
@@ -109,6 +112,35 @@ async function setPlanItemStatus(
       },
     }
   }
+
+  // v0.30.0 D9：有图任务 → 写图（唯一真相），镜像与广播由 graph/store.saveGraph 统一补发。
+  // 无图任务（tier 0/1）→ 保持 v0.29 直写 planItems。
+  if (task.graphId) {
+    const res = await applyPlanItemStatus(
+      { taskId, graphId: task.graphId },
+      planItemId,
+      targetStatus,
+      source,
+      source === 'user-cancel' ? '用户在 TodoPanel 取消' : undefined,
+    )
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: {
+          code: res.error?.code === 'NOT_FOUND' ? 'E_NOT_FOUND' : 'E_INVALID_STATE',
+          message: res.error?.message ?? `图写入失败：${planItemId}`,
+        },
+      }
+    }
+    const version = getPlanListVersion(taskId)
+    logger.info(
+      'Agent',
+      `[plan-item-action] task=${taskId} id=${planItemId} ${item.status}->${targetStatus} source=${source}（图侧写入）`,
+      taskId,
+    )
+    return { ok: true, version, effectiveStatus: res.effectiveStatus ?? targetStatus }
+  }
+
   const fromStatus = item.status
   item.status = targetStatus
   item.source = source

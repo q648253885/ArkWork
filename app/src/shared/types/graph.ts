@@ -711,9 +711,17 @@ export interface GraphSnapshot {
     autoConverge: boolean
     allowSelfAttest: boolean
   }
-  /** 按显示顺序拍平的可见行（已完成子树若折叠则只出一行摘要） */
+  /** 按显示顺序拍平的可见行（含全部非 goal 节点，折叠交由渲染层 `expandedSet` 决定） */
   rows: GraphRow[]
   counts: Record<NodeStatus, number> & { total: number }
+  /**
+   * P1 · 面板进度口径（分母不含 `layer === 'goal'`）。
+   *
+   * 与 `counts` 的区别：goal 节点恒为 `ready`（系统设计 §10.4），若用 `counts.total`
+   * 当分母，任务永远差 1 项无法收敛。`done = completed + cancelled`。
+   * `counts` 语义保持不变，其它消费方零改动。
+   */
+  progress: { done: number; total: number }
   budget: { tokensUsed: number; tokenBudget?: number }
   notices: GraphNotice[]
   /** 轻量模式（tier 0/1 或无图） */
@@ -873,19 +881,41 @@ export function isValidNodeId(id: string): boolean {
 /** 按 rootIds + children 深度优先拍平（保持显示顺序） */
 export function flattenGraph(
   graph: TaskGraph,
-  opts?: { isExpanded?: (nodeId: string) => boolean; autoFoldDone?: boolean },
+  opts?: {
+    isExpanded?: (nodeId: string) => boolean
+    autoFoldDone?: boolean
+    /**
+     * 排除的层：被排除的节点不产出行，其子节点在同 depth 继续（用于面板投影剔除
+     * goal 摘要节点，让 milestone 升为顶层）。默认不排除。
+     */
+    excludeLayers?: NodeLayer[]
+    /** 是否保留 cancelled 节点（面板投影需要；默认 false 保持既有语义） */
+    includeCancelled?: boolean
+  },
 ): GraphRow[] {
   const rows: GraphRow[] = []
   const isExpanded = opts?.isExpanded ?? (() => false)
   const autoFoldDone = opts?.autoFoldDone ?? true
+  const excludeLayers = opts?.excludeLayers ?? []
+  const includeCancelled = opts?.includeCancelled ?? false
+
+  const visibleChildren = (node: TaskNode): string[] =>
+    node.children.filter(
+      (c) => graph.nodes[c] && (includeCancelled || graph.nodes[c]?.status !== 'cancelled'),
+    )
 
   const visit = (id: string, depth: number): void => {
     const node = graph.nodes[id]
     if (!node) return
-    const nonCancelledChildren = node.children.filter((c) => graph.nodes[c]?.status !== 'cancelled')
-    const doneChildCount = nonCancelledChildren.filter(
-      (c) => graph.nodes[c]?.status === 'completed',
-    ).length
+    const children = visibleChildren(node)
+
+    // 被排除层（如 goal）：不产出行，子节点在同 depth 继续
+    if (excludeLayers.includes(node.layer)) {
+      for (const child of children) visit(child, depth)
+      return
+    }
+
+    const doneChildCount = children.filter((c) => graph.nodes[c]?.status === 'completed').length
     const pendingQuestions = node.status === 'needs_human' ? 1 : 0
 
     rows.push({
@@ -895,8 +925,8 @@ export function flattenGraph(
       depth,
       title: node.title,
       status: node.status,
-      hasChildren: nonCancelledChildren.length > 0,
-      childCount: nonCancelledChildren.length,
+      hasChildren: children.length > 0,
+      childCount: children.length,
       doneChildCount,
       tokensUsed: node.tokensUsed || undefined,
       blockedBy:
@@ -921,10 +951,7 @@ export function flattenGraph(
     const neverFold = node.status === 'needs_human' || node.status === 'failed'
     const shouldExpand = neverFold || isExpanded(node.id) || (!autoFoldDone ? true : node.status !== 'completed')
     if (!shouldExpand) return
-    for (const child of node.children) {
-      if (graph.nodes[child]?.status === 'cancelled') continue
-      visit(child, depth + 1)
-    }
+    for (const child of children) visit(child, depth + 1)
   }
 
   for (const rootId of graph.rootIds) visit(rootId, 0)
@@ -940,6 +967,24 @@ export function countStatuses(graph: TaskGraph): Record<NodeStatus, number> & { 
     total += 1
   }
   return { ...counts, total }
+}
+
+/**
+ * 面板进度口径：分母不含 `layer === 'goal'`。
+ *
+ * goal 节点恒为 `ready`（系统设计 §10.4），不能计入分母，否则进度永远无法到达 100%。
+ * `done = completed + cancelled`（取消同样视为「已结束」）。
+ * 仅用于 `GraphSnapshot.progress`；`counts` 语义保持不变。
+ */
+export function progressCounts(graph: TaskGraph): { done: number; total: number } {
+  let done = 0
+  let total = 0
+  for (const node of Object.values(graph.nodes)) {
+    if (node.layer === 'goal') continue
+    total += 1
+    if (node.status === 'completed' || node.status === 'cancelled') done += 1
+  }
+  return { done, total }
 }
 
 /** 汇总整图已消耗 token */

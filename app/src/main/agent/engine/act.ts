@@ -3,7 +3,7 @@
  * 由 engine.ts 纯移动而来（行区间 2416-3010）。
  */
 
-import type { Task, PlanItem } from '@shared/types/task'
+import type { Task, PlanItem, PlanItemStatus } from '@shared/types/task'
 import type {
   ReActEvent,
   ReActAction,
@@ -113,6 +113,7 @@ import { decidePlanAdvance } from './gates.js'
 import { syncPostAct } from '../graph/sync.js'
 import { renderGraphErrorForModel } from '../graph/invariants.js'
 import { recordMetric } from '../graph/metrics.js'
+import { applyPlanItemStatuses } from '../graph/plan-sync.js'
 
 /* ============================================================
  * v0.30.0：从 Act 参数中提取"漂移检测 / 验证匹配"所需的结构化信息
@@ -436,6 +437,9 @@ export async function executeAct(
       // 校验：索引越界或状态非法 → 返回失败，让 LLM 下一轮修正。
       // v0.24.x：清单为空时宽容 —— 自动追加被引用项（以 comment 或占位文本），
       // 避免 LLM 因"清单共 0 项"反复报错死循环。
+      // v0.30.0 D9：本分支是「清单为空」的宽容兜底，追加项**尚无对应图节点**；plan-sync 只桥接
+      //            已有节点的状态变更（§4.7 的 planItemId === nodeId 不变量），无「建节点」原语，
+      //            故此处保留 v0.29 直写（详见 04-system-design.md §10.6 的偏离记录）。
       if (planItems.length === 0 && itemIndex === 0) {
         const nowAppend = Date.now()
         const appended: PlanItem = {
@@ -533,7 +537,24 @@ export async function executeAct(
         planItems[itemIndex + 1].updatedAt = Date.now()
         advancedNext = true
       }
-      await updateTask(placeholder.taskId, { planItems })
+      // v0.30.0 D9：有图任务写图（唯一真相），镜像与广播由 graph/store.saveGraph 统一补发；
+      //            无图任务（tier 0/1）保持 v0.29 直写。
+      if (ctx.task.graphId) {
+        const updates: { planItemId: string; to: PlanItemStatus }[] = [
+          { planItemId: target.id, to: status as PlanItemStatus },
+        ]
+        if (advancedNext) {
+          updates.push({ planItemId: planItems[itemIndex + 1].id, to: 'running' })
+        }
+        await applyPlanItemStatuses(
+          { taskId: placeholder.taskId, graphId: ctx.task.graphId, iteration: ctx.iteration ?? 0 },
+          updates,
+          'todo-update',
+          comment || undefined,
+        )
+      } else {
+        await updateTask(placeholder.taskId, { planItems })
+      }
 
       // v0.18.0 F1：todo_update 拦截后也通过 patch 通道广播；
       // 多项变更（done → 自动推进下一项）走串行 N 次广播（version 自增）。

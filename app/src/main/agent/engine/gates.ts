@@ -52,6 +52,8 @@ import { isNoisePlanItem } from '@shared/utils/plan-noise'
 import { describeAction } from '@shared/utils/action-description'
 import { createHash } from 'node:crypto'
 import { updateTask, getTask } from '../../store/tasks.js'
+// v0.30.0 D9：planItem ↔ graph 唯一桥（有图任务写图，无图任务保持 v0.29 直写）
+import { markRunningFailed, cancelIncomplete } from '../graph/plan-sync.js'
 import { getAgent } from '../../store/agents.js'
 import {
   broadcastStep,
@@ -120,6 +122,11 @@ export function buildFallbackAskUserQuestion(): string {
  * 用户看不到任何失败反馈。
  */
 export async function markRunningPlanItemFailed(task: Task): Promise<void> {
+  // v0.30.0 D9：有图任务写图（唯一真相），镜像与广播由 graph/store.saveGraph 统一补发。
+  if (task.graphId) {
+    await markRunningFailed({ taskId: task.id, graphId: task.graphId }, '任务失败，引擎标记当前项 failed')
+    return
+  }
   const planItems = task.planItems ?? []
   if (planItems.length === 0) return
   const runningIdx = planItems.findIndex((p) => p.status === 'running')
@@ -150,6 +157,11 @@ export async function markRunningPlanItemFailed(task: Task): Promise<void> {
  * 用户 v0.19.0 反馈：中断或换路线时，原有清单未执行完的项应变为丢弃，而不是纹丝不动。
  */
 export async function discardIncompletePlanItems(task: Task, reason: string): Promise<void> {
+  // v0.30.0 D9：有图任务写图（唯一真相），镜像与广播由 graph/store.saveGraph 统一补发。
+  if (task.graphId) {
+    await cancelIncomplete({ taskId: task.id, graphId: task.graphId }, reason)
+    return
+  }
   const planItems = task.planItems ?? []
   if (planItems.length === 0) return
   const decisions: Array<{ index: number; fromStatus: PlanItem['status'] }> = []
