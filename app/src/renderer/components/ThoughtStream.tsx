@@ -64,7 +64,7 @@ export function ThoughtStream({ steps }: ThoughtStreamProps) {
   if (running) {
     const currentUnit = units.find((u) => u.iteration === running.iteration) ?? units[units.length - 1]
     return (
-      <div className="py-1 space-y-1">
+      <div className="py-1 space-y-1 select-text">
         {/* v0.14.0 Task 4：按工具维度并行的进度聚合（不漂移、不互盖） */}
         {inflight.length > 0 && <ParallelProgressBar progress={inflight} />}
         {/* 之前已完成的单元折叠 */}
@@ -87,7 +87,7 @@ export function ThoughtStream({ steps }: ThoughtStreamProps) {
 
   /* ---- 完成或失败：折叠摘要 ---- */
   return (
-    <div className="text-xs text-text-tertiary select-none">
+    <div className="text-xs text-text-tertiary select-text">
       <CollapsedSummary
         units={units}
         totalMs={totalMs}

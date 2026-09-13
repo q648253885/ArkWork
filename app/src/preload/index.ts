@@ -273,6 +273,8 @@ const ark: ArkApi = {
     runConverge: (taskId) => ipcRenderer.invoke('graph:run-converge', taskId),
     pendingPatches: (taskId) => ipcRenderer.invoke('graph:pending-patches', taskId),
     metrics: () => ipcRenderer.invoke('graph:metrics'),
+    // v0.30.1 F3-1：轻量/无图时降级读取默认 policy 供面板展示（main 侧频道已存在）
+    defaultPolicy: () => ipcRenderer.invoke('graph:default-policy'),
     // v0.30.0 P8：计划闸门（Plan 审批卡）—— pendingPlan 读、decidePlan 决
     pendingPlan: (taskId) => ipcRenderer.invoke('graph:pending-plan', taskId),
     decidePlan: (payload) => ipcRenderer.invoke('graph:decide-plan', payload),

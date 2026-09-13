@@ -38,7 +38,7 @@ import { applyPatch, buildPatch, renderPatchSummary } from './replan.js'
 import { getGraph, persist, summarizeGraph, type SyncCtx } from './sync.js'
 import { renderGraphErrorForModel } from './invariants.js'
 import { recordMetric } from './metrics.js'
-import { getPlanApproval, registerPlanApproval } from './pending.js'
+import { getPlanApproval, listPendingPatches, registerPendingPatch, registerPlanApproval } from './pending.js'
 import { logger } from '../../system/logger.js'
 
 /* ============================================================
@@ -765,6 +765,21 @@ export const GRAPH_TOOL_HANDLERS: Record<string, BuiltinHandler> = {
     }
 
     // 第 2/3 级：等用户批准
+    // ★ v0.30.1 问题②：必须先把补丁登记进待决注册表并广播，
+    //   否则前端拿不到待批准项、`graph:decide-replan` 会因 getPendingPatch 落空返回 NOT_FOUND。
+    //   registerPendingPatch 内部按 patch.id 去重（同一补丁重复提交不会堆叠）。
+    const before = listPendingPatches(graph.id).filter((p) => p.state === 'pending').length
+    registerPendingPatch(graph.id, patch)
+    const after = listPendingPatches(graph.id).filter((p) => p.state === 'pending').length
+    if (after > before) {
+      const { broadcastReActEvent } = await import('../events.js')
+      broadcastReActEvent({
+        type: 'graph_replan_proposed',
+        taskId: ctx.taskId,
+        graphId: graph.id,
+        patch,
+      })
+    }
     recordMetric('sync_action', { op: 'replan-pending' })
     const sum = renderPatchSummary(graph, patch)
     return {

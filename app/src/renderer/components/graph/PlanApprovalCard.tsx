@@ -30,7 +30,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { TIER_LABEL } from '@shared/types/graph'
+import { tierLabel } from '@shared/types/graph'
 import type { GraphSnapshot, PlanApproval, Tier } from '@shared/types/ipc'
 import { useStore } from '../../store'
 import { CardButton } from './ActionCards'
@@ -51,7 +51,7 @@ export interface PlanApprovalCardProps {
 }
 
 export function PlanApprovalCard({ taskId }: PlanApprovalCardProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const pushToast = useStore((s) => s.pushToast)
 
   const [plan, setPlan] = useState<PlanApproval | null>(null)
@@ -315,10 +315,10 @@ export function PlanApprovalCard({ taskId }: PlanApprovalCardProps) {
             <button
               type="button"
               onClick={() => setTierMenuOpen((v) => !v)}
-              title={snapshot.tierReason ?? TIER_LABEL[tier]}
+              title={snapshot.tierReason ?? tierLabel(tier, i18n.language)}
               className="rounded-sm border border-transparent bg-info-soft px-2 py-0.5 text-2xs text-info hover:border-info"
             >
-              {TIER_LABEL[tier]} ⌄
+              {tierLabel(tier, i18n.language)} ⌄
             </button>
             {tierMenuOpen && (
               <ul className="absolute right-0 top-full z-[40] mt-1 w-[180px] rounded-md border border-border-default bg-bg-overlay py-1 shadow-md">
@@ -331,7 +331,7 @@ export function PlanApprovalCard({ taskId }: PlanApprovalCardProps) {
                         ti === tier ? 'text-accent' : 'text-text-primary'
                       }`}
                     >
-                      {TIER_LABEL[ti]}
+                      {tierLabel(ti, i18n.language)}
                     </button>
                   </li>
                 ))}

@@ -387,6 +387,26 @@ export const TIER_LABEL: Record<Tier, string> = {
   3: 'T3 · 跨模块高风险',
 }
 
+/**
+ * v0.30.1 问题④（风险 R5）：tier 释义的四语言真源。
+ * 与 TIER_LABEL（中文）保持同一语义，避免 UI 另写同义文案。
+ */
+export const TIER_LABEL_I18N: Record<Tier, Record<'zh' | 'en' | 'ja' | 'ko', string>> = {
+  0: { zh: 'T0 · 单步/问答', en: 'T0 · Single step / Q&A', ja: 'T0 · 単一ステップ/質疑応答', ko: 'T0 · 단일 단계/문답' },
+  1: { zh: 'T1 · 轻量多步', en: 'T1 · Light multi-step', ja: 'T1 · 軽量マルチステップ', ko: 'T1 · 경량 다단계' },
+  2: { zh: 'T2 · 多文件有取舍', en: 'T2 · Multi-file trade-offs', ja: 'T2 · 複数ファイルのトレードオフ', ko: 'T2 · 다중 파일 트레이드오프' },
+  3: { zh: 'T3 · 跨模块高风险', en: 'T3 · Cross-module high risk', ja: 'T3 · モジュール横断の高リスク', ko: 'T3 · 모듈 횡단 고위험' },
+}
+
+/** 按当前语言取 tier 释义；未知/缺省语言回退中文（单一真源，不崩溃） */
+export function tierLabel(tier: Tier, lang?: string): string {
+  const key = (lang ?? 'zh').slice(0, 2)
+  if (key === 'en' || key === 'ja' || key === 'ko' || key === 'zh') {
+    return TIER_LABEL_I18N[tier][key]
+  }
+  return TIER_LABEL[tier]
+}
+
 /** 执行策略 */
 export interface PolicyBlock {
   tier: Tier

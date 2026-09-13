@@ -32,6 +32,7 @@ import type {
   NodeLayer,
   NodeStatus,
   PlanApproval,
+  PolicyBlock,
   ReplanPatch,
   TaskGraph,
   TaskNode,
@@ -1230,6 +1231,8 @@ export interface ArkApi {
     decidePlan: (payload: GraphPlanDecisionPayload) => Promise<GraphResult<GraphSnapshot | null>>
     /** 指标快照（幻影完成率 / 同步开销率，用于开发期观测） */
     metrics: () => Promise<MetricsSnapshot>
+    /** v0.30.1 F3-1：无图时返回默认策略块（面板降级展示，纯新增频道） */
+    defaultPolicy: () => Promise<PolicyBlock>
     /** 增量刷新推送（graph_patch / status / evidence / needs_human / replan / converge / notice / plan 全走这条） */
     onUpdate: (cb: (payload: GraphUpdatePayload) => void) => () => void
   }

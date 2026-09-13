@@ -138,12 +138,21 @@ export async function resumeTask(taskId: string): Promise<void> {
   await runTask(taskId)
 }
 
-export async function cancelTask(taskId: string): Promise<void> {
+export async function cancelTask(
+  taskId: string,
+  opts: { transient?: boolean } = {},
+): Promise<void> {
   const controller = controllers.get(taskId)
   if (controller) {
     controllers.delete(taskId)
     controller.abort()
   }
+  // v0.30.1 问题②：transient = 仅中止在跑的循环（续聊/放行前的复位）。
+  // 此时**不得**写终态：否则会命中 store/tasks 的终态清理，
+  // 误删刚登记的待决补丁 / 计划闸门
+  // （appendUserMessage → cancelTask('cancelled') → dropGraphPending）。
+  // 复位后的状态由调用方（appendUserMessage）以 pending 落库。
+  if (opts.transient) return
   const updated = await updateTask(taskId, { status: 'cancelled', completedAt: Date.now() })
   if (updated) broadcastTaskStatus(updated)
 }

@@ -496,12 +496,82 @@ export function registerGraphHandlers(): void {
 
       if (p.decision === 'reject') {
         markPatchDecided(graph.id, p.patchId, 'rejected', p.userNote)
+        recordMetric('sync_action', { op: 'ipc-reject-replan' })
         logger.info('Agent', `replan: 用户拒绝补丁 ${p.patchId}（${p.userNote ?? '未说明'}）`, p.taskId)
+        // 广播让面板重拉 pendingPatches（onUpdate 收到任意 kind 都会 load(true)）
+        broadcastReActEvent({
+          type: 'graph_notice',
+          taskId: p.taskId,
+          graphId: graph.id,
+          notice: {
+            kind: 'replan',
+            severity: 'info',
+            text: `计划变更已打回（${patch.ops.length} 项变更未应用）`,
+            refId: patch.id,
+            dismissible: true,
+          },
+          patchId: patch.id,
+        })
         return ok(buildSnapshot(graph, p.taskId))
       }
+      // edit：语义 =「打回并附修改意见」（真正的在线编辑补丁属 Scope Out S2）。
+      // 与 reject 的区别：edit 必须携带 userNote，写入 Revision.reason 并把意见注入
+      // 对话流，驱动 Agent 据此重新生成补丁。
       if (p.decision === 'edit') {
-        markPatchDecided(graph.id, p.patchId, 'rejected', p.userNote)
-        return ok(buildSnapshot(graph, p.taskId))
+        const note = (p.userNote ?? '').trim()
+        if (!note) {
+          return fail(
+            err(
+              'SCHEMA_INVALID',
+              '修改意见为空',
+              '「打回并附修改意见」需要填写你希望怎样调整这次计划变更。',
+            ),
+          )
+        }
+        const next: TaskGraph = {
+          ...graph,
+          updatedAt: Date.now(),
+          revisions: [
+            ...graph.revisions,
+            {
+              seq: (graph.revisions.at(-1)?.seq ?? 0) + 1,
+              at: Date.now(),
+              by: { kind: 'human', id: 'user' },
+              op: 'update',
+              targetId: graph.id,
+              before: { patchId: patch.id, patchState: patch.state },
+              after: { patchDecision: 'rejected', rework: true },
+              reason: `user-rework-replan: ${note}`,
+            },
+          ],
+        }
+        markPatchDecided(graph.id, p.patchId, 'rejected', note)
+        recordMetric('sync_action', { op: 'ipc-rework-replan' })
+        logger.info('Agent', `replan: 用户打回并附修改意见 ${p.patchId}（${note.slice(0, 40)}）`, p.taskId)
+        const out = await commit(p.taskId, next, {
+          reason: `用户打回计划变更并附修改意见：${note}`,
+          source: 'ipc-rework-replan',
+          skipRevision: true,
+        })
+        broadcastReActEvent({
+          type: 'graph_notice',
+          taskId: p.taskId,
+          graphId: graph.id,
+          notice: {
+            kind: 'replan',
+            severity: 'warn',
+            text: '计划变更已打回，已把你的意见交给 Agent 重新规划',
+            refId: patch.id,
+            dismissible: true,
+          },
+          patchId: patch.id,
+        })
+        // 意见作为 user message 注入 → appendUserMessage 内部重启 ReAct，Agent 重新规划
+        await appendUserMessage(
+          p.taskId,
+          `我打回了你提交的计划变更（补丁 ${patch.id}），请据此重新规划。\n\n我的意见：${note}`,
+        )
+        return out
       }
 
       // accept：应用（带批准）

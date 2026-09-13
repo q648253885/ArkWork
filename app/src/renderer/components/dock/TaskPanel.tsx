@@ -24,7 +24,7 @@ import { useTranslation } from 'react-i18next'
 import { Icon } from '../../icons'
 import { useStore } from '../../store'
 import type { GraphNotice, GraphRow, NodeStatus, ReplanPatch } from '@shared/types/ipc'
-import { TIER_LABEL } from '@shared/types/graph'
+import { tierLabel } from '@shared/types/graph'
 import type { Tier } from '@shared/types/ipc'
 import { TodoPanel } from './TodoPanel'
 import { useGraph } from '../graph/useGraph'
@@ -350,7 +350,12 @@ export function TaskPanel() {
               <CardButton variant="primary" onClick={() => void g.restoreSnapshot('')}>
                 {t('taskPanel.restoreSnapshot')}
               </CardButton>
-              <CardButton onClick={() => toast(t('taskPanel.readOnlyOpenToast'))}>
+              {/* v0.30.1 F3-2：诚实降级 —— 只读渲染视图属新功能，本版不假承诺，禁用 + 说明 */}
+              <CardButton
+                disabled
+                onClick={() => {}}
+                title={t('taskPanel.readOnlyOpenDisabledNote')}
+              >
                 {t('taskPanel.readOnlyOpen')}
               </CardButton>
               <CardButton
@@ -362,6 +367,9 @@ export function TaskPanel() {
                 {t('taskPanel.retryLoad')}
               </CardButton>
             </div>
+            <p className="mt-2 text-2xs leading-[16px] text-text-tertiary">
+              {t('taskPanel.readOnlyOpenDisabledNote')}
+            </p>
             <p className="mt-2 text-2xs text-text-tertiary">{t('taskPanel.brokenNote')}</p>
           </div>
         </div>
@@ -579,7 +587,13 @@ export function TaskPanel() {
         <EvidenceDrawer
           node={drawerNode}
           onClose={() => setDrawerNodeId(null)}
-          onOpenEvidence={(ref, kind) => toast(t('taskPanel.openEvidence', { kind, ref: ref ?? '—' }))}
+          onOpenEvidence={(ref) => {
+            // v0.30.1 F3-3：接线到既有「在文件夹中显示」能力（fs:reveal-in-folder），
+            // 不再弹假 toast。无可用路径时给出诚实说明。
+            const target = ref?.trim()
+            if (target) void window.ark.fs.revealInFolder(target)
+            else toast(t('taskPanel.noEvidenceRef'))
+          }}
           onOpenRevisions={() => toast(t('taskPanel.revisionsHint'))}
           zombie={(g.graph?.spec.driftReport?.zombieTasks ?? []).some((z) => z.taskId === drawerNode.id)}
         />
@@ -686,7 +700,7 @@ function PanelHeader({
   setTierMenuOpen: (v: boolean) => void
   onSetTier: (tier: Tier) => void
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const progress = snapshot?.progress
   const done = progress?.done ?? 0
   const total = progress?.total ?? 0
@@ -759,8 +773,8 @@ function PanelHeader({
       </div>
 
       {/* 控制行：4 档筛选条 + 视图切换 / 全局折叠 */}
-      <div className="mt-2.5 flex min-w-0 items-center gap-2">
-        <span className="inline-flex min-w-0 overflow-hidden rounded-md border border-border-default bg-bg-surface-2 p-0.5">
+      <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-2">
+        <span className="inline-flex min-w-0 overflow-x-auto rounded-md border border-border-default bg-bg-surface-2 p-0.5">
           {FILTER_KEYS.map((k) => {
             const active = filter === k
             return (
@@ -783,28 +797,43 @@ function PanelHeader({
         </span>
 
         <span className="ml-auto flex shrink-0 items-center gap-1">
-          {/* 视图切换（分段控件）；轻量模式（Tier 0/1）不提供依赖图，只保留树 */}
+          {/* v0.30.1 问题④：视图切换改为「图标 + 文字」，窄态（<360px）降级为纯图标（保留 title/aria-label） */}
           <div className="flex gap-0.5 rounded-md border border-border-default bg-bg-surface-2 p-0.5">
-            <SegBtn active={view === 'tree'} onClick={() => setView('tree')} label={t('taskPanel.viewTree')}>
+            <SegBtn
+              active={view === 'tree'}
+              onClick={() => setView('tree')}
+              label={t('taskPanel.viewTree')}
+              showText={!narrow}
+            >
               <Icon.List width={12} height={12} />
             </SegBtn>
             {!snapshot?.lightweight && (
-              <SegBtn active={view === 'dag'} onClick={() => setView('dag')} label={t('taskPanel.viewDag')}>
+              <SegBtn
+                active={view === 'dag'}
+                onClick={() => setView('dag')}
+                label={t('taskPanel.viewDag')}
+                showText={!narrow}
+              >
                 <Icon.Graph width={12} height={12} />
               </SegBtn>
             )}
           </div>
 
-          {/* tier 徽章（可点升降级） */}
+          {/* v0.30.1 问题④：tier 徽章从缩写升级为「T{n} · 释义」（窄态省略释义）；释义单一真源 = TIER_LABEL */}
           {snapshot && (
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setTierMenuOpen(!tierMenuOpen)}
-                title={snapshot.tierReason ?? TIER_LABEL[snapshot.tier]}
-                className="rounded-sm border border-transparent bg-info-soft px-1.5 py-0.5 text-2xs text-info hover:border-info"
+                title={snapshot.tierReason ?? tierLabel(snapshot.tier, i18n.language)}
+                aria-label={tierLabel(snapshot.tier, i18n.language)}
+                aria-expanded={tierMenuOpen}
+                className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-sm border border-border-default bg-info-soft px-2 py-0.5 text-2xs tabular-nums text-info hover:border-info"
               >
-                T{snapshot.tier}
+                <span>{narrow ? `T${snapshot.tier}` : tierLabel(snapshot.tier, i18n.language)}</span>
+                <span className="text-[9px] opacity-70" aria-hidden>
+                  ▾
+                </span>
               </button>
               {tierMenuOpen && (
                 <ul className="absolute right-0 top-full z-[40] mt-1 w-[180px] rounded-md border border-border-default bg-bg-overlay py-1 shadow-md">
@@ -820,7 +849,7 @@ function PanelHeader({
                           ti === snapshot.tier ? 'text-accent' : 'text-text-primary'
                         }`}
                       >
-                        {TIER_LABEL[ti]}
+                        {tierLabel(ti, i18n.language)}
                       </button>
                     </li>
                   ))}
@@ -832,18 +861,19 @@ function PanelHeader({
             </div>
           )}
 
-          {/* 一键折叠 */}
+          {/* v0.30.1 问题④：一键折叠改为状态化文案（全展开→「全部折叠」；已折叠→「全部展开」），图标随态；窄态降级为纯图标 */}
           <button
             type="button"
-            aria-label={t('taskPanel.foldAll')}
+            aria-label={foldAll ? t('taskPanel.expandAllShort') : t('taskPanel.foldAllShort')}
             aria-pressed={foldAll}
             title={t('taskPanel.foldAll')}
             onClick={onToggleFoldAll}
-            className={`shrink-0 rounded-sm p-1 hover:bg-bg-surface-2 hover:text-text-primary ${
-              foldAll ? 'text-accent' : 'text-text-tertiary'
+            className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-sm border border-border-default px-2 py-0.5 text-2xs hover:bg-bg-surface-3 hover:text-text-primary ${
+              foldAll ? 'text-accent' : 'text-text-secondary'
             }`}
           >
-            <Icon.ChevronDown width={12} height={12} />
+            {foldAll ? <Icon.ChevronRight width={12} height={12} /> : <Icon.ChevronDown width={12} height={12} />}
+            {!narrow && <span>{foldAll ? t('taskPanel.expandAllShort') : t('taskPanel.foldAllShort')}</span>}
           </button>
         </span>
       </div>
@@ -855,11 +885,13 @@ function SegBtn({
   active,
   onClick,
   label,
+  showText = true,
   children,
 }: {
   active: boolean
   onClick: () => void
   label: string
+  showText?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -869,11 +901,12 @@ function SegBtn({
       title={label}
       aria-pressed={active}
       onClick={onClick}
-      className={`flex h-5 w-6 items-center justify-center rounded-sm ${
-        active ? 'bg-accent-soft text-accent' : 'text-text-tertiary hover:text-text-primary'
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-sm px-1.5 py-0.5 text-2xs ${
+        active ? 'bg-accent-soft font-medium text-accent' : 'text-text-tertiary hover:text-text-primary'
       }`}
     >
       {children}
+      {showText && <span>{label}</span>}
     </button>
   )
 }

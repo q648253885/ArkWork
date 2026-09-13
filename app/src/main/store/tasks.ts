@@ -18,6 +18,10 @@ import { broadcastTaskStatus } from '../agent/events.js'
 import { logger } from '../system/logger.js'
 import { getUiLocale, tFor } from '../i18n/messages.js'
 import { migrateTasks } from './tasks.migrate.js'
+// v0.30.1 问题②·修复点 C：任务终态/删除时清理待决补丁与计划闸门。
+// `agent/graph/pending.ts` 是**零运行时依赖**的纯内存表（仅 import type），
+// 静态引入不会形成 tasks ↔ graph 的 ESM 求值期循环（风险 R4 已核）。
+import { dropGraphPending, dropTaskPlanApproval } from '../agent/graph/pending.js'
 
 let collection: JsonCollection<Task> | null = null
 /**
@@ -210,8 +214,16 @@ export async function updateTask(
     updatedAt: Date.now(),
   }
   await writeCollection(() => getCollection().upsert(updated))
+  // v0.30.1 问题②·修复点 C：任务进入终态（done/failed/cancelled）时清理该图的
+  // 待决补丁（纯内存表，防泄漏）。paused 可恢复，**不**清理。
+  if (patch.status && TERMINAL_TASK_STATUSES.has(patch.status) && updated.graphId) {
+    dropGraphPending(updated.graphId)
+  }
   return updated
 }
+
+/** 判定「任务终态」：进入后不再自动续跑（paused 可恢复，故不算） */
+const TERMINAL_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set(['done', 'failed', 'cancelled'])
 
 export async function updateTaskStatus(
   id: string,
@@ -256,7 +268,9 @@ export async function appendUserMessage(taskId: string, text: string): Promise<T
   // 4. 立即调 runTask 触发新一轮 ReAct 循环。
   try {
     const { cancelTask } = await import('../agent/runner.js')
-    await cancelTask(taskId)
+    // v0.30.1 问题②：transient 模式只中止在跑的循环，不写 cancelled 终态，
+    // 避免触发终态清理误删待决补丁 / 计划闸门（见 runner.cancelTask 注释）。
+    await cancelTask(taskId, { transient: true })
   } catch (err) {
     // cancel 失败不阻塞后续流程
     logger.warn('System', `appendUserMessage: cancelTask skipped: ${(err as Error).message}`, taskId)
@@ -288,8 +302,13 @@ export async function appendUserMessage(taskId: string, text: string): Promise<T
 }
 
 export async function deleteTask(id: string): Promise<void> {
+  const existing = await getTask(id)
   await writeCollection(() => getCollection().delete(id))
   await removeTaskDir(id)
+  // v0.30.1 问题②·修复点 C：删除任务时清理待决补丁（按 graphId）+ 计划闸门（按 taskId），
+  // 防止长生命周期进程里内存表残留。
+  if (existing?.graphId) dropGraphPending(existing.graphId)
+  dropTaskPlanApproval(id)
   broadcast('task:list-changed', null)
   logger.info('System', `task deleted: ${id}`)
 }
