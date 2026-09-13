@@ -4,13 +4,42 @@
 
 > 로컬 우선 AI Agent 워크벤치 — ReAct 추론 루프를 **보이고, 제어하고, 재사용**할 수 있게 만듭니다.
 
-![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
+![Version](https://img.shields.io/badge/version-v0.30.1-blueviolet) ![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
 ![ArkWork 워크벤치 — 실시간 ReAct 단계 스트림, ask_user 단계 게이트, 플랜 리스트](docs/screenshots/workbench-react-task.png)
 
 대부분의 AI 제품에서 Agent의 추론은 블랙박스입니다. 디버그할 수도 없고, 중간에 개입할 수도 없으며, 컨텍스트를 제어할 수도 없습니다. ArkWork는 ReAct 루프를 일급 객체로 만들어 관찰·조종·재사용할 수 있게 합니다 — 모든 데이터는 사용자의 컴퓨터 안에만 머무릅니다. 클라우드도, 텔레메트리도 없습니다. 대화·기억·인덱스는 워크스페이스의 평범한 파일로 저장되며, 모델 호출은 사용자가 설정한 API 키로 직접 이루어집니다.
 
 **[다운로드](https://github.com/q648253885/ArkWork/releases)** 페이지에서 미리 빌드된 설치 프로그램(macOS Apple Silicon / Intel, Windows, Linux)을 받거나, 아래 안내에 따라 소스에서 빌드하세요.
+
+## 최신 릴리스 — v0.30.1
+
+> **커널 세대 교체(TaskGraph) + 태스크 패널** —— ReAct가 "단일 추론 라인"에서 **병렬 실행이 가능한 태스크 그래프**로 확장됩니다.
+
+### v0.30.0 · TaskGraph 커널
+
+- **새 태스크 커널** —— 태스크 모델이 **11개 상태 머신**(불변식 검증 I1–I7 포함)으로 진화했습니다. 전용 그래프 엔진과 **IPC 채널 18개**(기존 13개), 커널 약 6,600줄 + UI/IPC 약 4,150줄.
+
+- **Sync 5단계** —— 매 Act 이후 **투영 → 드리프트 감지 → 하이브리드 기록 → 게이팅 → 이벤트 판정**을 자동 수행합니다. 모델이 "완료했다"고 말하는 것만으로는 끝나지 않고, **검증을 통과해야 완료**됩니다.
+
+- **ReplanPatch 원자적 트랜잭션** —— 실행 중 계획 변경은 **원자적 패치 + 4단계 승인**을 거치며, 영향 범위를 먼저 계산합니다.
+
+- **수렴 루프** —— 3가지 드리프트 신호와 `DriftReport`가 벗어난 태스크를 본선으로 되돌립니다.
+
+- **태스크 패널 전면 개편** —— 태스크 그래프 시각화 + 4단계 필터(전체 / 할 일 / 진행 중 / 종료), 커널 상태와 실시간 양방향 동기화.
+
+- **4개 언어 1,944개 키 완전 일치**, 53개 스위트 회귀 테스트 전부 통과.
+
+### v0.30.1 · 4가지 문제 수정 패치
+
+| 수정 | 내용 |
+| --- | --- |
+| **스텝 스트림 전체 복사 가능** | i18n 자리표시자 문법을 수정(`{value}` → `{{value}}`)해 원시 리터럴이 더 이상 노출되지 않습니다. 도구 스트림·도구 카드 본문·태스크 제목을 다시 선택할 수 있어 이슈나 노트에 바로 붙여넣을 수 있습니다 |
+| **Replan 승인 링크 정상화** | 실행이 중간에 중단되거나 새 태스크로 대체된 경우에도 승인 대기 중인 Replan 패치가 정상적으로 표시됩니다. 수락 / 거절이 "더 이상 존재하지 않음"으로 실패하지 않습니다 |
+| **기능 완전성** | 메인 프로세스 기능(그래프 기본 정책 등)이 UI에서 접근 가능해졌습니다. 토스트만 띄우던 버튼이 사라졌습니다 |
+| **태스크 패널 헤더 재설계** | `T1`/`T2`의 의미가 명확해졌습니다 —— 헤더가 **뷰 전환 + 티어 필 + 전체 접기** 3개 컨트롤로 바뀌었고, 티어 이름은 4개 언어로 표시됩니다 |
+
+> 검증: `typecheck` exit 0 · **60개 스위트 / 737개 케이스, fail 0** · i18n **1,955개 키 × 4개 언어** 일치 · 패키징된 `build:dir` 산출물 기동 스모크 통과.
 
 ## 공식 웹사이트
 

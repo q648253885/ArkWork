@@ -4,13 +4,42 @@
 
 > ローカルファーストの AI Agent ワークベンチ — ReAct 推論ループを**可視化・制御可能・再利用可能**に。
 
-![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
+![Version](https://img.shields.io/badge/version-v0.30.1-blueviolet) ![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
 ![ArkWork ワークベンチ — リアルタイム ReAct ステップストリーム、ask_user ステージゲート、プランリスト](docs/screenshots/workbench-react-task.png)
 
 多くの AI 製品では Agent の推論はブラックボックスです。デバッグもできない、途中で介入もできない、コンテキストも制御できない。ArkWork は ReAct ループをファーストクラスのオブジェクトに変え、観察・誘導・再利用を可能にします — すべてのデータはお手元のマシンにだけ残ります。クラウドも、テレメトリもなし。会話・記憶・インデックスはワークスペース内のプレーンなファイルに保存され、モデル呼び出しはあなたが設定した API キーで直接行われます。
 
 **[ダウンロード](https://github.com/q648253885/ArkWork/releases)** からビルド済みインストーラ（macOS Apple Silicon / Intel、Windows、Linux）を入手、または下記の手順でソースからビルドしてください。
+
+## 最新リリース — v0.30.1
+
+> **カーネル世代交代（TaskGraph）＋ タスクパネル** —— ReAct が「単線の推論」から**並列実行できるタスクグラフ**へ。
+
+### v0.30.0 · TaskGraph カーネル
+
+- **新しいタスクカーネル** —— タスクモデルが**11 状態のステートマシン**（不変条件チェック I1–I7 付き）に進化。専用のグラフエンジンと **IPC チャンネル 18 本**（従来 13 本）、カーネル約 6,600 行 + UI/IPC 約 4,150 行。
+
+- **Sync の 5 段階** —— 各 Act の後に **投影 → ドリフト検出 → ハイブリッド書き戻し → ゲーティング → イベント判定** を自動実行。モデルが「完了した」と言うだけでは終われず、**検証を通って初めて完了**になります。
+
+- **ReplanPatch の原子的トランザクション** —— 実行中の計画変更は**原子的パッチ + 4 段階の承認**。影響範囲を先に算出してから適用します。
+
+- **収束ループ** —— 3 つのドリフト信号と `DriftReport` が、逸脱したタスクを本線へ引き戻します。
+
+- **タスクパネルを刷新** —— タスクグラフの可視化と 4 つのフィルタ（すべて / 未着手 / 進行中 / 終了）、カーネル状態とリアルタイム双方向同期。
+
+- **4 言語・1,944 キーが完全一致**、53 スイートの回帰テストはすべてグリーン。
+
+### v0.30.1 · 4 件の修正パッチ
+
+| 修正 | 内容 |
+| --- | --- |
+| **ステップストリームを全文コピー可能に** | i18n プレースホルダの構文を修正（`{value}` → `{{value}}`）し、生のリテラルが漏れなくなりました。ツールストリーム・ツールカード本文・タスク行タイトルが再び選択可能になり、issue やメモにそのまま貼れます |
+| **Replan 承認リンクの修復** | 実行が途中で中断された場合や新しいタスクに置き換えられた場合でも、未承認の Replan パッチが正しく表示されます。承認 / 却下が「既に存在しません」で失敗しなくなりました |
+| **機能の完全性** | メインプロセスの機能（グラフの既定ポリシーなど）が UI から到達可能に。トーストを出すだけのボタンは解消しました |
+| **タスクパネルのヘッダー再設計** | `T1`/`T2` の謎が解消 —— ヘッダーは**ビュー切替 + ティアピル + 一括折りたたみ**の 3 コントロールに。ティア名は 4 言語で読めます |
+
+> 検証済み：`typecheck` exit 0 · **60 スイート / 737 ケース、fail 0** · i18n は **1,955 キー × 4 言語**で一致 · パッケージ済み `build:dir` 成果物の起動スモーク合格。
 
 ## 公式ウェブサイト
 

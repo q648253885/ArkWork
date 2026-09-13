@@ -4,13 +4,42 @@
 
 > A local-first AI Agent workbench — making the ReAct reasoning loop **visible, controllable, and reusable**.
 
-![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
+![Version](https://img.shields.io/badge/version-v0.30.1-blueviolet) ![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
 ![ArkWork workbench — live ReAct step stream, ask\_user stage gate, and plan checklist](docs/screenshots/workbench-react-task.png)
 
 In most AI products the agent is a black box: you can't debug it, can't intervene mid-run, and can't control what enters the context. ArkWork turns the ReAct loop into a first-class object you can watch, steer, and reuse — while everything stays on your machine. No cloud, no telemetry: conversations, memory, and indexes live in plain files inside your workspace folder, and model calls are made directly with the API keys you configure.
 
 **[Download](https://github.com/q648253885/ArkWork/releases)** pre-built installers (macOS Apple Silicon / Intel, Windows, Linux) — or build from source below.
+
+## What's New — v0.30.1
+
+> **Kernel generation change (TaskGraph) + task panel** — ReAct grows from a single reasoning line into a **parallel-capable task graph**.
+
+### v0.30.0 · TaskGraph kernel
+
+- **New task kernel** — the task model becomes an **11-state machine** with invariant checks (I1–I7); a dedicated graph engine and **18 IPC channels** (up from 13), roughly 6,600 lines of kernel plus 4,150 lines of UI/IPC.
+
+- **Five-stage Sync** — after every act step the engine runs **projection → drift detection → hybrid write-back → gating → event evaluation**. A task can no longer be "completed" just because the model claims so — **verification must pass first**.
+
+- **ReplanPatch as an atomic transaction** — mid-run plan changes go through **atomic patches with 4 approval levels**, with the impact surface computed before anything lands.
+
+- **Convergence loop** — three drift signals plus a `DriftReport` pull a wandering task back onto the main line.
+
+- **Brand-new task panel** — task-graph visualization with 4 filters (All / Todo / In progress / Finished), bidirectionally synced with kernel state in real time.
+
+- **4 locales, 1,944 keys, identical key sets**; full regression across 53 suites green.
+
+### v0.30.1 · Four-issue patch
+
+| Fix | What changed |
+| --- | ------------ |
+| **Copy anything in the step stream** | Fixed the i18n placeholder syntax (`{value}` → `{{value}}`) so raw literals no longer leak; tool streams, tool-card bodies and task titles are selectable again — paste straight into an issue or your notes |
+| **Replan approval link closed** | When a run is interrupted mid-way or superseded by a new task, pending Replan patches now actually show up; Accept / Reject no longer fails with "no longer exists" |
+| **Feature completeness** | Main-process capabilities (graph default policy, etc.) are now reachable from the UI — no more buttons that only pop a toast |
+| **Task panel header redesigned** | `T1`/`T2` is no longer a mystery — the header is now **view switch + tier pill + collapse-all**, with tier labels readable in all four languages |
+
+> Verified: `typecheck` exit 0 · **60 suites / 737 cases, 0 fail** · i18n parity at **1,955 keys × 4 locales** · the packaged `build:dir` artifact boots clean.
 
 ## Official Website
 

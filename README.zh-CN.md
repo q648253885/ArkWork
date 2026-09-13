@@ -4,13 +4,42 @@
 
 > 本地优先的 AI Agent 工作台 — 让 ReAct 推理循环**可见、可控、可复用**。
 
-![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
+![Version](https://img.shields.io/badge/version-v0.30.1-blueviolet) ![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
 ![ArkWork 工作台 — 实时 ReAct 步骤流、ask_user 阶段门禁与计划清单](docs/screenshots/workbench-react-task.png)
 
 主流 AI 产品的 Agent 推理是黑盒：用户无法调试、无法在中间状态介入、上下文不可控。ArkWork 把 ReAct 循环变成头等对象，你可以观察、引导、并复用它 — 所有数据都留在本机。无云端、无埋点：对话、记忆、索引以纯文件形式保存在你的工作区文件夹里，模型调用通过你配置的 API Key 直接发起。
 
 **[下载](https://github.com/q648253885/ArkWork/releases)** 预编译安装包（macOS Apple Silicon / Intel、Windows、Linux），或按下方指南从源码构建。
+
+## 最新版本 — v0.30.1
+
+> **内核换代（TaskGraph）+ 任务面板** — ReAct 从「单线推理」升级为**可并行的任务图**。
+
+### v0.30.0 · TaskGraph 内核换代
+
+- **全新任务内核** — 任务模型升级为 **11 态状态机**（含不变量校验 I1–I7），新增图谱引擎与 **18 个 IPC 频道**（原 13 个），约 6,600 行内核 + 4,150 行 UI/IPC。
+
+- **Sync 五阶段** — 每轮 Act 之后自动执行 **投影 → 漂移检测 → 混合写回 → 门控 → 事件判定**。任务不再能靠模型"口头宣称完成"结束，**必须验收通过才置完成**。
+
+- **ReplanPatch 原子事务** — 计划中途变更走**原子补丁 + 4 级批准**，影响面先算清楚再落地。
+
+- **收敛环** — 漂移三信号 + `DriftReport`，跑偏的任务会被自动拉回主线。
+
+- **全新任务面板** — 任务图可视化 + 4 档筛选（全部 / 待办 / 进行中 / 已结束），与内核状态实时双向同步。
+
+- **四语言 1,944 键集完全一致**，53 套件全量回归通过。
+
+### v0.30.1 · 四问题修复补丁
+
+| 修复 | 内容 |
+| --- | --- |
+| **交互区全量可复制** | 修正 i18n 占位符语法（`{value}` → `{{value}}`），不再泄露字面量；工具流、工具卡正文、任务行标题全部恢复可选中，可直接粘进 issue 或笔记 |
+| **Replan 待批准链路收口** | 任务执行中途被打断、被新任务顶替等场景下，待批准的 Replan 补丁现在会正常出现，接受 / 打回不再报「已不存在」 |
+| **功能完整性补齐** | 主进程能力（图默认策略等）下沉到界面，消除"按钮只弹提示不干活"的降级路径 |
+| **任务面板顶栏重设计** | `T1`/`T2` 不再是哑谜 — 顶栏改为**视图切换 + 档位标签 + 一键折叠**三控件，档位标签四语言可读 |
+
+> 验证：`typecheck` exit 0 · 全量 **60 套件 / 737 条用例 0 fail** · i18n **1,955 键 × 4 语言** parity · 打包 `build:dir` 产物启动冒烟通过。
 
 ## 官方网站
 
