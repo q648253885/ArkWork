@@ -68,6 +68,7 @@ bin/
 /products/
 
 # Stray build artifacts & install packages
+app/index.js
 app/index-*.js
 *.blockmap
 *.zip
