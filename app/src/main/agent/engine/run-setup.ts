@@ -123,6 +123,11 @@ export async function prepareRun(args: {
     logger.warn('Agent', `gate init skipped: ${(err as Error).message}`, task.id)
   }
 
+  // v0.30.2 D12：答复型续聊判定 —— 必须在消费标记**前**捕获。
+  // 门禁答复（pendingGateBlock）与 ask_user/计划闸门/迭代上限答复（pendingAskUser）
+  // 都是对引擎提问的回应，不是新指令：清单保持不变，replanHint 走「答复型」文案。
+  const isReplyContinuation = Boolean(task.pendingGateBlock || task.pendingAskUser)
+
   // v0.25.0 F1：消费 pendingGateBlock —— 上一次 run 被 todo_update 门禁拦截后，
   // LLM 已按指令 ask_user 且用户已答复（答复即本轮 run 的最新 user_message）。
   // 据答复写回 gateStates（含「跳过」语义识别），中断续聊后状态机不丢。
@@ -149,6 +154,13 @@ export async function prepareRun(args: {
       gateStates: task.gateStates,
       pendingGateBlock: undefined,
     })
+  }
+
+  // v0.30.2 D12：消费 ask_user 暂停标记 —— 答复已到（即本轮最新 user_message），
+  // isReplyContinuation 已捕获；清除标记避免影响后续 run 的性质判定。
+  if (task.pendingAskUser) {
+    task.pendingAskUser = undefined
+    await updateTask(task.id, { pendingAskUser: undefined })
   }
 
   // v0.25.0 F1：常驻技能指令体供 generatePlan 注入（计划清单与阶段严格对齐，
@@ -361,124 +373,21 @@ export async function prepareRun(args: {
       }
     }
   }
-  // v0.16.7+：续聊路径 plan 重评提示（紧跟 react-core-skills preload 后）
+  // v0.16.7+ → v0.30.2 D12 v2：续聊清单语义（用户澄清取向：清单是活树）
+  // 引擎侧**不再清空重建**（v0.30.2 首版方案在 UAT 中误伤门禁答复，见 04-system-design §2.4）——
+  // 图与清单的写入权回归受审计的 Replan 通道（task_create / replan 工具），引擎只注入性质判定提示。
   if (startIter > 0) {
-    // v0.30.0 D9 偏离：本块三条写入路径（plan-regen / continuation ×2）均为「**新建**合成 planItem」
-    // （id 非既有图节点），在图模型里对应「建节点」，须走受审计的 Replan 通道（§4.5）；
-    // plan-sync 只桥接「已有节点」的状态变更，无建节点原语，故保留 v0.29 直写。
-    // 详见 04-system-design.md §10.6 的 D9 偏离记录（2）。
-    // v0.24.x：plan-regen 决策（替代 v0.21.0 continuation 兜底）
-    // 旧逻辑只在「旧 plan 全部完成」时追加一个「续接新需求」承接项。
-    // 用户体验上：旧清单全部 done 后新指令仍要 Agent 自己 plan，无脑追加「续接新需求」
-    // 反而成了「原任务完成 + 新任务承接」两条线、不一致。
-    // 新逻辑：若旧 plan 全部 done / failed / cancelled / skipped
-    //   → 调 generatePlan 重新生成 planItems，覆盖旧 plan（broadcastPlanListSnapshot source='plan-regen'）。
-    // 若旧 plan 还有 running/pending 项
-    //   → 保留旧 plan + 追加 continuation 承接项（保持 v0.21.0 行为，避免打断在飞清单）。
-    const planItems = task.planItems ?? []
-    const hasActive = planItems.some(
-      (p) => p.status === 'running' || p.status === 'pending',
-    )
-    const isAllFinished =
-      planItems.length > 0 &&
-      planItems.every(
-        (p) =>
-          p.status === 'done' ||
-          p.status === 'failed' ||
-          p.status === 'cancelled' ||
-          p.status === 'skipped',
-      )
-    if (planItems.length > 0 && !hasActive && isAllFinished) {
-      // 旧 plan 全部完成 / 失败 / 跳过：自动重新生成 plan（不沿用旧 plan）
-      let newPlan: PlanContent | null = null
-      try {
-        newPlan = await generatePlan(
-          task,
-          agent,
-          modelId,
-          signal,
-          alwaysOnPlanHint,
-          docDriven,
-        )
-      } catch (err) {
-        logger.warn(
-          'Agent',
-          `plan-regen failed: ${(err as Error).message}`,
-          task.id,
-        )
-        newPlan = null
-      }
-      if (newPlan && newPlan.items.length > 0) {
-        const filtered = newPlan.items.filter((text) => !isPhaseHeader(text))
-        const now = Date.now()
-        const newPlanItems: PlanItem[] = filtered.map((text, i) => ({
-          id: `plan_${i}_${now}_regen`,
-          text,
-          status: i === 0 ? 'running' : 'pending',
-          createdAt: now,
-          updatedAt: now,
-          source: 'plan-regen',
-        }))
-        task.planItems = newPlanItems
-        await updateTask(task.id, { planItems: newPlanItems })
-        broadcastPlanListSnapshot(task.id, newPlanItems, 'plan-regen')
-        logger.info(
-          'Agent',
-          `plan-regen: ${filtered.length} items (replaced ${planItems.length} finished items)`,
-          task.id,
-        )
-        // plan-regen 成功 → 直接继续（不再追加 continuation、不再注入 replan hint）
-        // fall through 到下面的循环即可
-      } else {
-        // generatePlan 失败 → 降级到 v0.21.0 续接模式，确保任务不会卡死
-        const latestUser = [...allL1]
-          .reverse()
-          .find((m) => m.kind === 'user_message' && m.content?.trim())
-        const brief = (latestUser?.content ?? '').trim().replace(/\s+/g, ' ')
-        const text = brief
-          ? `续接新需求：${brief.length > 80 ? brief.slice(0, 80) + '…' : brief}`
-          : '处理用户追加的新需求'
-        const now = Date.now()
-        const continuation: PlanItem = {
-          id: genId('plan'),
-          text,
-          status: 'running',
-          createdAt: now,
-          updatedAt: now,
-          source: 'continuation',
-        }
-        task.planItems = [...planItems, continuation]
-        await updateTask(task.id, { planItems: task.planItems })
-        broadcastPlanListSnapshot(task.id, task.planItems, 'continuation')
-        logger.warn(
-          'Agent',
-          `plan-regen failed → fallback to continuation: ${text}`,
-          task.id,
-        )
-      }
-    } else if (planItems.length > 0 && !hasActive) {
-      // 旧 plan 空但仍有「非结束态」空壳（理论不会发生）→ 同上兜底
-      const continuation: PlanItem = {
-        id: genId('plan'),
-        text: '处理用户追加的新需求',
-        status: 'running',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        source: 'continuation',
-      }
-      task.planItems = [...planItems, continuation]
-      await updateTask(task.id, { planItems: task.planItems })
-      broadcastPlanListSnapshot(task.id, task.planItems, 'continuation')
-    }
-    // 旧 plan 还有 active 项（running/pending）→ 保留原 plan，不追加 continuation，
-    // 让 Agent 自然推进已有清单；replanHint 仍然注入提示 Agent 评估新旧指令一致性。
-
-    const replanHint = `## 续聊计划重评（v0.24.x）
-用户追加了新指令。先评估现有 plan 与新指令的一致性：
-1. 若新指令仍属于当前 plan 的某一步 → 直接继续，标记该 step 为 in_progress。
-2. 若新指令偏离原 plan 但属于同一目标 → 用 ask_user 让用户确认是否调整 plan。
-3. 若新指令是全新目标（已有 plan 已全部完成 / 失败 / 跳过）→ 引擎已自动重新生成 plan，按新 plan 推进。
-禁止在没经用户确认时静默重置进行中的 plan。`
+    const replanHint = isReplyContinuation
+      ? `## 答复型续聊（v0.30.2 D12）
+本轮最新 user_message 是对引擎提问（门禁 / ask_user / 计划闸门 / 迭代上限）的**答复**，不是新指令：
+1. 任务清单保持不变 —— 直接继续推进当前进行中的节点；门禁状态已由引擎写回。
+2. 答复若隐含方向或范围调整 → 用 task_create 把调整挂为子任务，或 replan 增量补丁；禁止整体作废清单。`
+      : `## 续聊指令与清单（v0.30.2 D12）
+用户追加了新输入。先判断它与现有清单的关系，**三选一**处理（清单是活树，禁止未经批准擅自整体作废）：
+1. **子任务/细化**（属于当前目标的分解或补充）→ 用 task_create 新建节点（parent_id 挂到相关节点下，add-only 第 1 级自动应用，侧边栏树形显示）。
+2. **独立追加**（新增工作但不影响既有项）→ 用 replan 提交 add-only 补丁（第 1 级自动应用）。
+3. **真正切换任务**（旧目标作废，按新指令重来）→ 用 replan 提交 remove+add 重构补丁 → 第 2 级**等待用户批准**，批准后自动应用；未获批准前旧清单原样保留。
+4. 无清单的对话级任务 → 沿用对话式推进；新指令需要多步执行时用 task_create 建图登记。`
     pendingSystemHint = pendingSystemHint
       ? `${pendingSystemHint}\n\n---\n${replanHint}`
       : replanHint
@@ -486,8 +395,9 @@ export async function prepareRun(args: {
   // ============================================================
   // v0.30.0：确保任务图存在（TaskGraph 化的统一出入口）
   //
-  // 放在 prepareRun 的**最后**，覆盖上面全部 4 条 planItems 写入路径
-  // （首次计划 / 兜底清单 / plan-regen / continuation），避免在四处各埋一份。
+  // 放在 prepareRun 的**最后**，覆盖上面全部 planItems 写入路径
+  // （首次计划 / 兜底清单；v0.30.2 D12 v2 起续聊分支不再写 planItems，
+  // 子任务与重构分别经 task_create / replan 受审计通道，镜像由 persist 回写）。
   //
   // 三个分支：
   //  1. 已有 graphId 且图可加载 → 载入内存缓存，供本轮 Sync 使用

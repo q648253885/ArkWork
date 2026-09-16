@@ -169,6 +169,42 @@ export function extractShellCommand(tool: string, args: Record<string, unknown> 
   return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined
 }
 
+/** 大载荷字段：是"内容本体"不是"动作意图"，喂进语义信号会稀释重合度（v0.30.2 D13） */
+const PAYLOAD_KEYS = new Set([
+  'content', 'body', 'code', 'text', 'data', 'source', 'script', 'html', 'markdown', 'diff',
+  'base64', 'buffer', 'json', 'value', 'items', 'args',
+])
+
+/**
+ * 提取本次 act 的自然语言动作描述（用于 S2 漂移检测的第三信号 —— 语义/词法重合度）。
+ *
+ * v0.30.2 D13 根因修复：此前 act 调 syncPostAct 从不传 descriptions，sync.ts 兜底成
+ * `[command ?? toolName]` —— 第三信号实际退化为「工具名 vs 节点意图」，调研/浏览类
+ * 动作几乎必然 0 分（用户实测：调研任务 0.00 分连续 16 轮 hard 告警）。
+ * 这里把工具参数中**承载意图**的文本（query/command/path/url/title/…）提出来喂给它，
+ * 回归设计本意「Action 描述 vs 节点 intent」。大载荷字段（content/code/…）显式排除。
+ *
+ * 返回段落数组（tool 名固定为首段）；每段截断 120 字符、总量截断 360 字符。
+ */
+export function extractActionDescriptions(tool: string, args: Record<string, unknown> | undefined): string[] {
+  const out: string[] = [tool]
+  if (args) {
+    for (const [k, v] of Object.entries(args)) {
+      if (PAYLOAD_KEYS.has(k)) continue
+      const texts = Array.isArray(v) ? v.slice(0, 3) : [v]
+      for (const t of texts) {
+        if (typeof t === 'string' && t.trim()) {
+          out.push(`${k}: ${t.trim().slice(0, 120)}`)
+        }
+        if (out.length >= 6) break
+      }
+      if (out.length >= 6) break
+    }
+  }
+  const joined = out.join(' | ')
+  return [joined.slice(0, 360)]
+}
+
 export function buildObservationSummary(
   tool: string,
   result: unknown,
@@ -387,6 +423,9 @@ export async function executeAct(
   let rawL2Path: string | undefined
   let ok = true
   let errorMessage: string | undefined
+  // v0.30.2 D13-E：本次 act 是否为技能加载（工具名 = skillToolName 动态名）。
+  // 技能加载是准备动作，与节点意图零词法关联是预期行为，不参与漂移判定。
+  let skillAct = false
   try {
     // v0.17.x：阶段感知写入守卫（react-core-skills 启用时）——
     // 拦截文档阶段越级写脚手架/源码，或写入 ArkWork 保留路径（tasks.json / .arkwork / .git）。
@@ -617,6 +656,7 @@ export async function executeAct(
     const skills = await listSkills()
     const skill = skills.find((s) => skillToolName(s) === action.tool)
     if (!skill) throw new Error(`Tool not found: ${action.tool}`)
+    skillAct = true
 
     const r = await invokeSkill(skill.id, action.args, skillCtx)
     result = r.result
@@ -698,6 +738,10 @@ export async function executeAct(
           errorMessage,
           files: extractTouchedFiles(action.tool, action.args),
           command: extractShellCommand(action.tool, action.args),
+          // v0.30.2 D13：喂真实动作描述给第三信号（此前退化为 toolName 兜底 → 语义恒 0）
+          descriptions: extractActionDescriptions(action.tool, action.args ?? {}),
+          // v0.30.2 D13-E：技能加载不参与漂移判定（sync.ts 据此跳过 S2）
+          metaTool: skillAct,
         },
       )
       recordMetric('tool_call')
@@ -744,9 +788,11 @@ export async function executeAct(
       if (syncRes.driftHint) {
         resultSummary += `\n\n${syncRes.driftHint}`
       }
-      // 漂移硬干预：交给上层 UI/用户确认（这里只把偏离点写进 observation）
+      // 漂移硬干预提示（v0.30.2 D13：同一任务只提请一次，见 sync.ts hardAlerted）。
+      // 文案实话实说：E2 ask 事件目前不暂停执行，这里是让模型自纠/调方向；
+      // 用户可在对话流看到该提示并随时介入。
       if (syncRes.driftHardText) {
-        resultSummary += `\n\n[drift-alert] 检测到持续偏离，已提请用户确认：\n${syncRes.driftHardText}`
+        resultSummary += `\n\n[drift-alert] 检测到持续偏离（本提示对同一任务只提请一次；请自纠或用 replan 调整方向）：\n${syncRes.driftHardText}`
       }
     } catch (syncErr) {
       // Sync 是增强不是关键路径：任何异常都不允许让 act 失败

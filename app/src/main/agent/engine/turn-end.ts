@@ -233,7 +233,12 @@ export async function pauseViaAskUser(
   })
   // v0.19.0 M3：停止候选——先给监听器注入 continuation 的机会，注入则同轮继续
   if (await continueTurnIfInjected(task, iteration)) return true
-  await updateTask(task.id, { status: 'paused' })
+  // v0.30.2 D12：打 ask_user 暂停标记 —— 用户答复后下一轮 run 据此识别为
+  // 「答复型续聊」（清单保持不变，不触发重评/重建）；此处仅在确认暂停时写。
+  await updateTask(task.id, {
+    status: 'paused',
+    pendingAskUser: { question, askedAt: Date.now() },
+  })
   broadcastTaskStatus({ ...task, status: 'paused' })
   return false
 }

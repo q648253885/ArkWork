@@ -212,17 +212,16 @@ export function deriveConversation(
   // v0.27.0 F10：渲染层不再派生逐项状态，
   // 单一真源为 task.planItems（Main patch/snapshot 推送）；
   // 卡片状态链：task.planItems > item.planStates > []，见 ConversationFlow.PlanMessage。
-  const planStep = steps.find((s) => s.type === 'plan' && s.plan)
-  let planItem: ConversationItem | null = null
-  if (planStep?.plan) {
-    planItem = {
-      id: `${task.id}-plan`,
-      type: 'plan',
-      plan: planStep.plan,
-      ts: planStep.startedAt,
-      tsLabel: formatTimeLabel(planStep.startedAt),
-    }
-  }
+  // v0.30.2 修复②：续聊清空重建会广播**新的** plan step —— 每个带 plan 的 plan step
+  // 各成一张计划卡（按 startedAt 排序入时间线），旧计划卡保留为历史，新计划卡显示新目标。
+  const planSteps = steps.filter((s) => s.type === 'plan' && s.plan)
+  const planEvents: ConversationItem[] = planSteps.map((s) => ({
+    id: `${task.id}-plan-${s.id}`,
+    type: 'plan',
+    plan: s.plan!,
+    ts: s.startedAt,
+    tsLabel: formatTimeLabel(s.startedAt),
+  }))
 
   // 3. 按 iteration 分组 reason/act/observation，每组作为带 ts 的事件
   // v0.8.0：plan 步骤单独作为清单条目（见上），不进入 react 分组，避免空步骤流
@@ -272,15 +271,15 @@ export function deriveConversation(
     reactEvents.push({ ts, items })
   }
 
-  // 4. 空任务（无用户消息 + 无 react）返回空，由 ConversationGreeting 接管
-  if (userEvents.length === 0 && reactEvents.length === 0 && !planItem) {
+  // 4. 空任务（无用户消息 + 无 react + 无计划卡）返回空，由 ConversationGreeting 接管
+  if (userEvents.length === 0 && reactEvents.length === 0 && planEvents.length === 0) {
     return []
   }
 
   // 5. 按时间戳合并所有事件（计划清单插在用户消息之后、首个 react 之前）
   const allEvents: { ts: number; item: ConversationItem | ConversationItem[] }[] = [
     ...userEvents.map((e) => ({ ts: e.ts ?? 0, item: e as ConversationItem })),
-    ...(planItem ? [{ ts: planItem.ts ?? 0, item: planItem }] : []),
+    ...planEvents.map((e) => ({ ts: e.ts ?? 0, item: e })),
     ...reactEvents.map((e) => ({ ts: e.ts, item: e.items })),
   ]
   allEvents.sort((a, b) => a.ts - b.ts)

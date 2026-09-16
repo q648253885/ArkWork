@@ -149,7 +149,13 @@ export function computeDrift(
   //   没说第 1 轮怎么办。若静默处理，第 1 轮的偏离信号会**完全丢失** ——
   //   而软提示的成本只是一行文本，收益是模型有机会自纠。
   //   （该取舍由 TC-SYNC-010 明确固化。）
-  if (score < DRIFT_SOFT && streak >= DRIFT_HARD_STREAK) action = 'hard'
+  // ★ v0.30.2 D13：无声明不 hard —— 节点未声明任何可比对对象（file/symbol
+  //   refs 全空）时唯一活信号是语义代理，其权重被归一化放大到 1.0，误报集中
+  //   爆发（用户实测：调研任务 0.00 分连续 16 轮 hard）。hard 文案的
+  //   「声明相关的文件：（未声明）」自证不成立 —— 判定漂移等于惩罚"声明不全"，
+  //   与 intersectionRatio 的既有立场一致。降级 soft：漂移仍是显式信息，但不要求人工确认。
+  const hasDeclaredRefs = declaredFiles.length > 0 || declaredSymbols.length > 0
+  if (score < DRIFT_SOFT && streak >= DRIFT_HARD_STREAK && hasDeclaredRefs) action = 'hard'
   else if (score < DRIFT_NORMAL) action = 'soft'
 
   // 诊断说明：写日志 / 挂事件 / 给用户看，三处共用同一份文案，避免口径漂移
@@ -172,11 +178,21 @@ export function renderDriftHint(focus: TaskNode | undefined, result: DriftResult
   )
 }
 
+/**
+ * v0.30.2 D13-F：剥离 v0.29 → v0.30 迁移期写进 intent 的机器前缀
+ * （「迁移自 v0.29 清单项：<原文>」）。存量已迁移图无法重写数据，
+ * 在渲染与语义取词层统一自愈；新迁移已不再产生该前缀（migrate.ts）。
+ */
+export function cleanIntent(intent: string | undefined, fallbackTitle: string): string {
+  if (!intent) return fallbackTitle
+  return intent.replace(/^迁移自 v[\w.]+ 清单项：/, '') || fallbackTitle
+}
+
 /** 把漂移结果渲染成硬干预文本（要求人确认或 Replan） */
 export function renderDriftHardBlock(focus: TaskNode | undefined, result: DriftResult): string {
   if (!focus) return ''
   return (
-    `偏离点：正在做的「${focus.key ?? focus.id} ${focus.title}」${focus.intent ? `（目的：${focus.intent}）` : ''}\n` +
+    `偏离点：正在做的「${focus.key ?? focus.id} ${focus.title}」${focus.intent ? `（目的：${cleanIntent(focus.intent, focus.title)}）` : ''}\n` +
     `  · 声明相关的文件：${focus.contextRefs.filter((r) => r.kind === 'file').map((r) => r.ref).join(', ') || '（未声明）'}\n` +
     `  · 实际一致性分数：${result.score.toFixed(2)}（连续 ${result.streak} 轮低于 ${DRIFT_SOFT}）`
   )
@@ -279,5 +295,6 @@ function pickFocus(graph: TaskGraph): TaskNode | undefined {
 }
 
 function describeFocus(node: TaskNode): string {
-  return node.intent ?? node.title
+  // v0.30.2 D13-F：语义信号取词同样剥离迁移机器前缀（前缀 token 对重合度是纯噪音）
+  return cleanIntent(node.intent, node.title)
 }

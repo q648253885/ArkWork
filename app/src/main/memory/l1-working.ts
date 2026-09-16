@@ -78,45 +78,54 @@ export async function listL1(taskId: string): Promise<MemoryItem[]> {
 
 export async function toggleL1(taskId: string, id: string, enabled: boolean): Promise<void> {
   const col = collection(taskId)
-  const items = await col.list()
-  const idx = items.findIndex((m) => m.id === id)
-  if (idx < 0) return
-  items[idx] = { ...items[idx], enabled }
-  await col.rewrite(items)
+  // v0.30.2 修复①：list→算→write 收敛进互斥链（col.mutate），并发 append 不再被吞
+  await col.mutate((items) => {
+    const idx = items.findIndex((m) => m.id === id)
+    if (idx < 0) return null
+    const next = [...items]
+    next[idx] = { ...next[idx], enabled }
+    return next
+  })
   broadcast('memory:changed', taskId)
 }
 
 export async function editL1(taskId: string, id: string, content: string): Promise<void> {
   const col = collection(taskId)
-  const items = await col.list()
-  const idx = items.findIndex((m) => m.id === id)
-  if (idx < 0) return
-  items[idx] = { ...items[idx], content, tokens: estimateTokens(content) }
-  await col.rewrite(items)
+  await col.mutate((items) => {
+    const idx = items.findIndex((m) => m.id === id)
+    if (idx < 0) return null
+    const next = [...items]
+    next[idx] = { ...next[idx], content, tokens: estimateTokens(content) }
+    return next
+  })
   broadcast('memory:changed', taskId)
 }
 
 export async function archiveL1(taskId: string, id: string): Promise<void> {
   const col = collection(taskId)
-  const items = await col.list()
-  const idx = items.findIndex((m) => m.id === id)
-  if (idx < 0) return
-  items[idx] = { ...items[idx], enabled: false, archivedAt: Date.now() }
-  await col.rewrite(items)
+  await col.mutate((items) => {
+    const idx = items.findIndex((m) => m.id === id)
+    if (idx < 0) return null
+    const next = [...items]
+    next[idx] = { ...next[idx], enabled: false, archivedAt: Date.now() }
+    return next
+  })
   broadcast('memory:changed', taskId)
 }
 
 export async function archiveMany(taskId: string, ids: string[]): Promise<void> {
   if (ids.length === 0) return
   const col = collection(taskId)
-  const items = await col.list()
   const idSet = new Set(ids)
-  const next = items.map((m) =>
-    idSet.has(m.id)
-      ? { ...m, enabled: false, archivedAt: Date.now() }
-      : m,
+  // v0.30.2 修复①：锁内读-改-写 —— 压缩归档（compaction 走这里）与并发 append
+  // 交错时，快照之后新写入的条目按「保序映射」原样保留，不再丢失
+  await col.mutate((items) =>
+    items.map((m) =>
+      idSet.has(m.id)
+        ? { ...m, enabled: false, archivedAt: Date.now() }
+        : m,
+    ),
   )
-  await col.rewrite(next)
   broadcast('memory:changed', taskId)
 }
 
@@ -135,11 +144,13 @@ export async function markL1Distilled(
   targetId: string,
 ): Promise<void> {
   const col = collection(taskId)
-  const items = await col.list()
-  const idx = items.findIndex((m) => m.id === id)
-  if (idx < 0) return
-  items[idx] = { ...items[idx], distilled: { target, targetId } }
-  await col.rewrite(items)
+  await col.mutate((items) => {
+    const idx = items.findIndex((m) => m.id === id)
+    if (idx < 0) return null
+    const next = [...items]
+    next[idx] = { ...next[idx], distilled: { target, targetId } }
+    return next
+  })
   broadcast('memory:changed', taskId)
 }
 
@@ -155,14 +166,14 @@ export async function archiveL1AfterIteration(
   targetIteration: number,
 ): Promise<void> {
   const col = collection(taskId)
-  const items = await col.list()
-  const next = items.map((m) => {
-    // system_prompt 与 user_message（iteration=-1 或 0 之前）始终保留
-    if (m.kind === 'system_prompt') return m
-    if (m.iteration <= targetIteration) return m
-    return { ...m, enabled: false, archivedAt: Date.now() }
-  })
-  await col.rewrite(next)
+  await col.mutate((items) =>
+    items.map((m) => {
+      // system_prompt 与 user_message（iteration=-1 或 0 之前）始终保留
+      if (m.kind === 'system_prompt') return m
+      if (m.iteration <= targetIteration) return m
+      return { ...m, enabled: false, archivedAt: Date.now() }
+    }),
+  )
   broadcast('memory:changed', taskId)
 }
 
@@ -176,14 +187,13 @@ export async function removeL1Items(taskId: string, ids: string[]): Promise<void
   if (ids.length === 0) return
   const col = collection(taskId)
   const idSet = new Set(ids)
-  const next = (await col.list()).filter((m) => !idSet.has(m.id))
-  await col.rewrite(next)
+  await col.mutate((items) => items.filter((m) => !idSet.has(m.id)))
   broadcast('memory:changed', taskId)
 }
 
 export async function clearL1(taskId: string): Promise<void> {
   const col = collection(taskId)
-  await col.rewrite([])
+  await col.mutate(() => [])
   collections.delete(taskId)
   broadcast('memory:changed', taskId)
 }

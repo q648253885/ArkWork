@@ -165,6 +165,14 @@ export interface Task {
    * 下一次 ask_user 完成后消费并清空）。
    */
   pendingGateBlock?: { gateId: string }
+  /**
+   * v0.30.2 D12：ask_user 暂停标记（引擎 ask_user 暂停时写入；下一次 run 开始时消费并清空）。
+   * 语义：该标记存在 = 本轮最新 user_message 是对提问的**答复**而非新指令，
+   * 续聊不触发清单重评/重建（见 run-setup.ts isReplyContinuation）。
+   * 写入点：turn-end.pauseViaAskUser + loop.ts 预算中断/计划闸门/阶段门禁/迭代上限；
+   * 用户手动暂停（abort.ts）不写 —— 手动暂停后的首条输入就是新指令。
+   */
+  pendingAskUser?: { question: string; askedAt: number }
   /** 任务失败时的错误信息摘要 */
   errorMessage?: string
 }

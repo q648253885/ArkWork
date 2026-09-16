@@ -452,7 +452,11 @@ export async function runReActLoop(
               { label: tFor(locale, 'askUser.budgetStop.label'), description: tFor(locale, 'askUser.budgetStop.desc') },
             ],
           })
-          await updateTask(task.id, { status: 'paused' })
+          // v0.30.2 D12：预算中断也属 ask_user 暂停 → 打答复型续聊标记（同 turn-end）
+          await updateTask(task.id, {
+            status: 'paused',
+            pendingAskUser: { question, askedAt: Date.now() },
+          })
           broadcastTaskStatus({ ...task, status: 'paused' })
           return
         }
@@ -688,7 +692,12 @@ export async function runReActLoop(
       // 此刻还不知道用户会批准还是打回，注入任一方向的措辞都会误导下一轮 Reason。
       if (planGateHit) {
         logger.info('Agent', 'P8 计划闸门触发：计划已提交，暂停等待用户批准', task.id)
-        await updateTask(task.id, { status: 'paused' })
+        // v0.30.2 D12：计划闸门暂停属 ask_user 交互 → 打答复型续聊标记
+        // （批准/打回注入的 user 消息下一轮 run 识别为答复，不触发清单重评）
+        await updateTask(task.id, {
+          status: 'paused',
+          pendingAskUser: { question: '计划已提交，等待批准', askedAt: Date.now() },
+        })
         broadcastTaskStatus({ ...task, status: 'paused' })
         return
       }
@@ -770,7 +779,11 @@ export async function runReActLoop(
         })
         // v0.19.0 M3：停止候选——先给监听器注入 continuation 的机会，注入则同轮继续
         if (await continueTurnIfInjected(task, iteration)) continue
-        await updateTask(task.id, { status: 'paused' })
+        // v0.30.2 D12：阶段门禁直推 ask_user → 打答复型续聊标记（同 turn-end）
+        await updateTask(task.id, {
+          status: 'paused',
+          pendingAskUser: { question: gate.question, askedAt: Date.now() },
+        })
         broadcastTaskStatus({ ...task, status: 'paused' })
         return
       }
@@ -835,7 +848,14 @@ export async function runReActLoop(
         { label: tFor(getUiLocale(), 'suggest.finishHere.label'), description: tFor(getUiLocale(), 'suggest.finishHere.desc') },
       ],
     })
-    await updateTask(task.id, { status: 'paused' })
+    // v0.30.2 D12：迭代上限暂停属 ask_user 交互（继续/结束选项卡）→ 打答复型续聊标记
+    await updateTask(task.id, {
+      status: 'paused',
+      pendingAskUser: {
+        question: tFor(getUiLocale(), 'askUser.maxIterQuestion', { max: maxIter }),
+        askedAt: Date.now(),
+      },
+    })
     broadcastTaskStatus({ ...task, status: 'paused' })
     logger.warn('Agent', `max iterations reached for ${task.id} — paused for user decision`, task.id)
   } catch (err) {

@@ -263,14 +263,13 @@ export const ConversationFlow = forwardRef<ConversationFlowHandle, ConversationF
           })}
 
           {/* v0.27.0 R1：Reason 流式预览（渲染加速通道）。
-              纯文本 + 闪烁光标（Markdown 对残缺语法会抖动）；reason step 落地后
-              buffer 被 store 清空 → 权威步骤流接管渲染（R-stream-3）。 */}
+              v0.30.2 修复③：裸文本升级为 StreamingThinkBlock（.react-reason 外观，
+              Brain 图标 + 「思考中」+ 闪烁点，默认展开、可折叠）—— 流式思考不再
+              以无语义裸文本出现；reason step 落地后 buffer 被 store 清空（R-stream-3）
+              → 权威 ThinkBlock 以「运行时展开 + 完成后折叠」语义接管，内容全程不消失。 */}
           {isRunning && streamText && (
             <div className="fade-in-up" aria-live="polite">
-              <div className="text-sm leading-6 text-text-secondary whitespace-pre-wrap break-words">
-                {streamText}
-                <span className="stream-caret" aria-hidden="true" />
-              </div>
+              <StreamingThinkBlock text={streamText} />
             </div>
           )}
 
@@ -808,6 +807,49 @@ function ReactStreamGroup({
           )
         })}
       </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * StreamingThinkBlock — v0.30.2 修复③：流式思考块（traework 对齐）
+ * 把裸 streamText 包进 .react-reason 外观（Brain 图标 + 「思考中」+ 闪烁点 + chevron），
+ * 默认展开、可折叠；reason step 落地后缓冲被清（R-stream-3），
+ * 权威 ThinkBlock 以「运行时展开 + 完成后折叠」语义接管 —— 内容从「流式展示 →
+ * 折叠摘要」平滑过渡，全程不消失。视觉复用既有 .react-reason CSS（v0.22.0）。
+ * ============================================================ */
+function StreamingThinkBlock({ text }: { text: string }) {
+  const { t } = useTranslation('translation', { keyPrefix: 'thought' })
+  // userOpen: null = 未手动干预（默认展开）；手动切换后以用户为准
+  const [userOpen, setUserOpen] = useState<boolean | null>(null)
+  const showFull = userOpen ?? true
+  return (
+    <div className="react-reason" data-state="running">
+      <button
+        onClick={() => setUserOpen(!showFull)}
+        className="react-reason__head"
+        aria-expanded={showFull}
+      >
+        <span className="react-reason__icon" aria-hidden="true">
+          <Icon.Brain width={14} height={14} />
+        </span>
+        <span>{t('status.running')}</span>
+        <span className="w-1.5 h-1.5 rounded-full bg-business-primary pulse-dot" />
+        <span className="react-reason__duration tabular">…</span>
+        <Icon.ChevronDown
+          width={12}
+          height={12}
+          className="react-reason__chevron"
+          style={{ transform: showFull ? 'none' : 'rotate(-90deg)' }}
+          aria-hidden="true"
+        />
+      </button>
+      {showFull && (
+        <div className="react-reason__body">
+          {text}
+          <span className="inline-block w-0.5 h-3.5 bg-business-primary ml-0.5 animate-pulse" />
+        </div>
+      )}
     </div>
   )
 }

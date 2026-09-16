@@ -171,7 +171,9 @@ export function migrateToGraph(input: MigrateInput): TaskGraph | null {
       layer: 'task',
       title: item.text.slice(0, 80),
       // I7：迁移节点没有 derivedFrom 的 AC（v0.29 无 AC 概念），用 intent 满足
-      intent: `迁移自 v0.29 清单项：${item.text}`,
+      // v0.30.2 D13-F：intent 直接用原清单项文本 —— 此前的「迁移自 v0.29 清单项：」
+      // 机器前缀会污染 UI（漂移告警渲染「（目的：迁移自…）」用户看不懂）与语义信号取词。
+      intent: item.text,
       status,
       assignee: { kind: 'system' },
       priority: 'p1',

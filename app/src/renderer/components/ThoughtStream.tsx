@@ -277,12 +277,17 @@ function IterationBlock({ unit, isActive }: { unit: IterationUnit; isActive?: bo
  * - running 态带 shimmer 横扫（CSS .react-reason[data-state="running"]::after）
  * - 展开后 body 段落式 + 复制按钮
  * - 左 2px 状态条：running 业务蓝、failed 危险
+ * v0.30.2 修复③（对齐 traework：运行时展开 + 完成后折叠）：
+ * - `userOpen: boolean | null`（null = 未手动干预），showFull = userOpen ?? isRunning
+ *   —— 运行中默认展开（思考实时可见），完成后默认折叠（摘要行可点击回看）；
+ * - 用户手动展开/折叠优先（userOpen 非空时不再随 isRunning 自动切换）。
  * ============================================================ */
 function ThinkBlock({ step, isActive }: { step: ReActStep; isActive?: boolean }) {
   const { t } = useTranslation('translation', { keyPrefix: 'thought' })
-  const [showFull, setShowFull] = useState(false)
+  const [userOpen, setUserOpen] = useState<boolean | null>(null)
   const thought = step.thought ?? ''
   const isRunning = step.status === 'running' && isActive
+  const showFull = userOpen ?? isRunning
   const duration = step.durationMs
 
   if (!thought) return null
@@ -299,7 +304,7 @@ function ThinkBlock({ step, isActive }: { step: ReActStep; isActive?: boolean })
   return (
     <div className="react-reason" data-state={state}>
       <button
-        onClick={() => setShowFull((v) => !v)}
+        onClick={() => setUserOpen(!showFull)}
         className="react-reason__head"
         aria-expanded={showFull}
       >

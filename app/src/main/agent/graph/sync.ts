@@ -64,6 +64,11 @@ const graphCache = new Map<string, TaskGraph>()
 
 /** 漂移连续低分计数：key = `${graphId}:${nodeId ?? '*'} ` */
 const driftStreaks = new Map<string, number>()
+// v0.30.2 D13：hard 只提请一次 —— 同 focus 的 hard 已注入过 observation 后，
+// 后续轮次 streak 继续累计但不再重复注入 driftHardText / 广播 graph_drift
+// （防"连续 16 轮刷屏"，用户实测 D13）；streak 归零（score 回升 ≥0.4）时清除，
+// focus 切换天然因 key 变化而重置。
+const hardAlerted = new Set<string>()
 
 /** 取图（命中缓存优先）。加载失败返回 null（调用方短路，不阻断任务） */
 export async function getGraph(ctx: SyncCtx): Promise<TaskGraph | null> {
@@ -94,6 +99,9 @@ export function dropGraphCache(graphId: string): void {
   graphCache.delete(graphId)
   for (const key of [...driftStreaks.keys()]) {
     if (key.startsWith(`${graphId}:`)) driftStreaks.delete(key)
+  }
+  for (const key of [...hardAlerted]) {
+    if (key.startsWith(`${graphId}:`)) hardAlerted.delete(key)
   }
 }
 
@@ -271,6 +279,8 @@ export interface PostActInput extends ActSyncInput {
   afterCompaction?: boolean
   /** 用户是否插入了新需求（E5） */
   userInserted?: boolean
+  /** v0.30.2 D13-E：技能加载等准备动作（工具名 = skillToolName 动态名）—— 不参与漂移判定 */
+  metaTool?: boolean
 }
 
 /**
@@ -307,25 +317,34 @@ export async function syncPostAct(ctx: SyncCtx, input: PostActInput): Promise<Sy
     const focusId = pickFocusId(graph)
     const key = `${graph.id}:${focusId ?? '*'}`
     const prev = driftStreaks.get(key) ?? 0
-    drift = computeDrift(graph, driftInput, prev, focusId)
-    driftStreaks.set(key, drift.streak)
-    if (drift.action === 'soft') {
-      driftHint = renderDriftHint(graph.nodes[focusId ?? ''], drift)
-    } else if (drift.action === 'hard') {
-      driftHardText = renderDriftHardBlock(graph.nodes[focusId ?? ''], drift)
-      broadcastReActEvent({
-        type: 'graph_drift',
-        taskId: ctx.taskId,
-        graphId: graph.id,
-        nodeId: focusId,
-        score: drift.score,
-        streak: drift.streak,
-        action: 'hard',
-        detail: drift.detail,
-      })
-    }
-    if (drift.action !== 'none') {
-      logger.info('Agent', `sync: drift ${drift.action}（${drift.score.toFixed(2)}）streak=${drift.streak}——${drift.detail}`, ctx.taskId)
+    if (input.metaTool === true) {
+      // v0.30.2 D13-E：技能加载是准备动作，与节点意图零词法关联是预期行为，
+      // 不构成漂移证据 —— 跳过 S2 判定，streak 保持不洗白，不产 hint/alert。
+      driftStreaks.set(key, prev)
+    } else {
+      drift = computeDrift(graph, driftInput, prev, focusId)
+      driftStreaks.set(key, drift.streak)
+      // v0.30.2 D13：score 回升（streak 归零）→ 解除 hard 已提请状态，允许下次再报
+      if (drift.streak === 0) hardAlerted.delete(key)
+      if (drift.action === 'soft') {
+        driftHint = renderDriftHint(graph.nodes[focusId ?? ''], drift)
+      } else if (drift.action === 'hard' && !hardAlerted.has(key)) {
+        hardAlerted.add(key)
+        driftHardText = renderDriftHardBlock(graph.nodes[focusId ?? ''], drift)
+        broadcastReActEvent({
+          type: 'graph_drift',
+          taskId: ctx.taskId,
+          graphId: graph.id,
+          nodeId: focusId,
+          score: drift.score,
+          streak: drift.streak,
+          action: 'hard',
+          detail: drift.detail,
+        })
+      }
+      if (drift.action !== 'none') {
+        logger.info('Agent', `sync: drift ${drift.action}（${drift.score.toFixed(2)}）streak=${drift.streak}——${drift.detail}`, ctx.taskId)
+      }
     }
   } catch (err) {
     logger.warn('Agent', `sync: S2 漂移检测失败（跳过）${(err as Error).message}`, ctx.taskId)

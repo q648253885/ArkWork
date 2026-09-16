@@ -171,6 +171,19 @@ export class JsonDoc<T> {
 export class JsonlCollection<T extends { id: string }> {
   constructor(private readonly filePath: string) {}
 
+  // v0.30.2 修复：写互斥链——串行化 append / appendMany / rewrite / delete。
+  // 此前 append（flag:'a' 追加）与 rewrite（整文件截断重写，compaction/归档走它）
+  // 并发交错时，rewrite 的「list → 写」窗口会吞掉已完成的 append（新用户消息
+  // 从 l1.jsonl 消失 → 对话气泡显示上一次输入）。
+  private writeChain: Promise<unknown> = Promise.resolve()
+
+  /** 串行化写操作（读多写少，list 不上锁——rename 原子性已足够） */
+  private async runExclusive<R>(fn: () => Promise<R>): Promise<R> {
+    const next = this.writeChain.then(fn, fn)
+    this.writeChain = next.catch(() => {})
+    return next
+  }
+
   async list(): Promise<T[]> {
     if (!existsSync(this.filePath)) return []
     try {
@@ -186,27 +199,58 @@ export class JsonlCollection<T extends { id: string }> {
   }
 
   async append(item: T): Promise<void> {
-    await ensureDir(dirname(this.filePath))
-    await writeFile(this.filePath, JSON.stringify(item) + '\n', { flag: 'a' })
+    await this.runExclusive(async () => {
+      await ensureDir(dirname(this.filePath))
+      await writeFile(this.filePath, JSON.stringify(item) + '\n', { flag: 'a' })
+    })
   }
 
   async appendMany(items: T[]): Promise<void> {
     if (items.length === 0) return
-    await ensureDir(dirname(this.filePath))
-    const block = items.map((i) => JSON.stringify(i)).join('\n') + '\n'
-    await writeFile(this.filePath, block, { flag: 'a' })
+    await this.runExclusive(async () => {
+      await ensureDir(dirname(this.filePath))
+      const block = items.map((i) => JSON.stringify(i)).join('\n') + '\n'
+      await writeFile(this.filePath, block, { flag: 'a' })
+    })
   }
 
   async rewrite(items: T[]): Promise<void> {
+    await this.runExclusive(async () => {
+      await this.rewriteLocked(items)
+    })
+  }
+
+  /**
+   * 锁内读-改-写：fn 在互斥链上执行，入参为最新全量条目，返回下一份全量条目
+   * （返回 null 表示无变更，跳过写入）。
+   * v0.30.2：l1-working 的 toggle/edit/archive/remove 等此前在**锁外** list 再 rewrite，
+   * 与并发 append 交错时 rewrite 仍会吞掉快照之后的新条目（丢写根因）——
+   * mutate 把整个读-改-写收敛到互斥链上，窗口彻底关闭。
+   */
+  async mutate(fn: (items: T[]) => Promise<T[] | null> | T[] | null): Promise<void> {
+    await this.runExclusive(async () => {
+      const items = await this.list()
+      const next = await fn(items)
+      if (next === null) return
+      await this.rewriteLocked(next)
+    })
+  }
+
+  /** 锁内重写：先写临时文件再 rename，并发读者要么读到旧完整文件、要么读到新完整文件 */
+  private async rewriteLocked(items: T[]): Promise<void> {
     await ensureDir(dirname(this.filePath))
     const block = items.map((i) => JSON.stringify(i)).join('\n') + '\n'
-    await writeFile(this.filePath, block, 'utf-8')
+    const tmp = `${this.filePath}.${randomBytes(4).toString('hex')}.tmp`
+    await writeFile(tmp, block, 'utf-8')
+    await rename(tmp, this.filePath)
   }
 
   async delete(id: string): Promise<void> {
-    const items = await this.list()
-    const next = items.filter((x) => x.id !== id)
-    await this.rewrite(next)
+    await this.runExclusive(async () => {
+      const items = await this.list()
+      const next = items.filter((x) => x.id !== id)
+      await this.rewriteLocked(next)
+    })
   }
 }
 
