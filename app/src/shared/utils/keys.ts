@@ -213,12 +213,25 @@ export function chordFromEvent(e: ChordEvent): Chord {
  *
  * `isMac` 只影响 `Mod` 的展开：macOS → `metaKey`；其它平台 → `ctrlKey`。
  * 其余修饰键精确比较（多按一个修饰键即不匹配，避免 `Mod+K` 被 `Mod+Shift+K` 抢走）。
+ *
+ * v0.31.1 修复（Windows 用户实测「快捷键全部失效」）：非 macOS 上 `Mod`
+ * 的物理落点就是 `ctrlKey` —— 同一次 Ctrl 按下**不能既要求它满足 Mod
+ * 又要求它不满足物理 Ctrl**。旧实现对 `Mod+K`（p.ctrl=false）比较
+ * `p.ctrl !== e.ctrlKey`，Windows 上按 Ctrl+K 时 e.ctrlKey=true → 恒不匹配，
+ * 全部 Mod 和弦在 Windows 上失效。修正：非 macOS 上把 `Mod` 合并进物理
+ * Ctrl 位再比较（`needCtrl = p.mod || p.ctrl`，与 canonicalChord 的
+ * 「Mod/Ctrl 退化同格」口径一致）。
  */
 export function matchesChord(chord: Chord, e: ChordEvent, isMac: boolean): boolean {
   const p = parseChord(chord)
-  const modDown = isMac ? e.metaKey === true : e.ctrlKey === true
-  if (p.mod !== modDown) return false
-  if (p.ctrl !== (e.ctrlKey === true)) return false
+  if (isMac) {
+    if (p.mod !== (e.metaKey === true)) return false
+    if (p.ctrl !== (e.ctrlKey === true)) return false
+  } else {
+    // 非 macOS：Mod 与物理 Ctrl 都落到 ctrlKey，合并成一个位比较
+    const needCtrl = p.mod || p.ctrl
+    if (needCtrl !== (e.ctrlKey === true)) return false
+  }
   if (p.alt !== (e.altKey === true)) return false
   if (p.shift !== (e.shiftKey === true)) return false
   return p.key === logicalKeyFromEventKey(e.key)

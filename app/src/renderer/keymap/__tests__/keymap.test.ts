@@ -369,3 +369,36 @@ test('TC-KEY-010 键位域与 i18n 内零裸修饰键符号（U+2318/U+2303/U+23
   assert.equal(chordToDisplay('Escape', true), 'Esc')
   assert.equal(chordToDisplay('Shift+Tab', false), 'Shift+Tab')
 })
+
+/* ============================================================
+ * v0.31.1 追加 — Windows Mod 匹配回归（TC-KEY-011..013）
+ *
+ * 缺陷：matchesChord 旧实现对 `Mod+K`（p.ctrl=false）比较
+ * `p.ctrl !== e.ctrlKey`，Windows 上按 Ctrl+K 时 e.ctrlKey=true
+ * → 恒不匹配，全部 Mod 和弦在 Windows 失效（用户实测）。
+ * 修复：非 macOS 上把 Mod 合并进物理 Ctrl 位（needCtrl = mod||ctrl），
+ * 与 canonicalChord「Mod/Ctrl 退化同格」口径一致。
+ * ============================================================ */
+test('TC-KEY-011 Windows 上 Ctrl+K 匹配 Mod+K（本缺陷主场景）', async () => {
+  const { matchesChord } = await import('@shared/utils/keys')
+  assert.equal(matchesChord('Mod+K', { key: 'k', ctrlKey: true }, false), true)
+  assert.equal(matchesChord('Mod+Shift+W', { key: 'w', ctrlKey: true, shiftKey: true }, false), true)
+  assert.equal(matchesChord('Mod+,', { key: ',', ctrlKey: true }, false), true)
+})
+
+test('TC-KEY-012 Windows 匹配仍保持修饰键精确性（多按即不匹配）', async () => {
+  const { matchesChord } = await import('@shared/utils/keys')
+  // Mod+K 不被 Mod+Shift+K 满足
+  assert.equal(matchesChord('Mod+K', { key: 'k', ctrlKey: true, shiftKey: true }, false), false)
+  // 不按 Ctrl 不匹配
+  assert.equal(matchesChord('Mod+K', { key: 'k' }, false), false)
+  // 显式 Ctrl 和弦在 Windows 上仍匹配物理 Ctrl
+  assert.equal(matchesChord('Ctrl+G', { key: 'g', ctrlKey: true }, false), true)
+})
+
+test('TC-KEY-013 macOS 语义回归：Cmd 命中 Mod、物理 Ctrl 不代偿（B0 刻意偏差不变）', async () => {
+  const { matchesChord } = await import('@shared/utils/keys')
+  assert.equal(matchesChord('Mod+K', { key: 'k', metaKey: true }, true), true)
+  // Control+K 不代偿 Mod+K（B0 刻意登记的迁移偏差）
+  assert.equal(matchesChord('Mod+K', { key: 'k', ctrlKey: true }, true), false)
+})

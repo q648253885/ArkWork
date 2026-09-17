@@ -8,7 +8,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { getArkworkDir } from '../store/db.js'
 import type { LlmAdapter } from './adapter.js'
-import { OpenAIAdapter } from './openai.js'
+import { OpenAIAdapter, normalizeOpenAIBaseURL } from './openai.js'
 import { AnthropicAdapter } from './anthropic.js'
 import { builtinModels } from '../store/seed.js'
 import type { LlmModel, LlmProviderKind } from '@shared/types/agent'
@@ -190,7 +190,9 @@ export async function testModel(req: TestModelRequest): Promise<TestModelResult>
 
     // OpenAI 兼容端点（openai / vllm）
     if (kind === 'openai' || kind === 'vllm') {
-      const url = (baseURL ?? 'https://api.openai.com/v1') + '/models'
+      // v0.31.1：与 OpenAIAdapter 同口径归一化 —— 用户填完整对话端点
+      //（…/chat/completions 结尾）时剥掉再拼 /models，否则双重路径 404
+      const url = normalizeOpenAIBaseURL(baseURL ?? 'https://api.openai.com/v1') + '/models'
       const res = await fetch(url, {
         headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
         signal: AbortSignal.timeout(8000),

@@ -21,31 +21,31 @@
   color-scheme: light;
   /* v0.21.0 浅色 — cold bluish gray（DSH #15171 / #E1E5EE 族系） */
   --bg-base: #FFFFFF;           /* canvas：纯白 */
-  --bg-surface: #F4F6F9;        /* 表面（DSH --dsw-static-neutral-bluish-50/60 过渡） */
-  --bg-surface-2: #EBEEF3;      /* 卡片（DSH neutral-bluish-60/75） */
-  --bg-surface-3: #DDE2EA;      /* 更深档（DSH neutral-bluish-150/200） */
+  --bg-surface: #F7F7F8;        /* 表面（DSH --dsw-static-neutral-bluish-50/60 过渡） */
+  --bg-surface-2: #F0F0F2;      /* 卡片（DSH neutral-bluish-60/75） */
+  --bg-surface-3: #E5E5E8;      /* 更深档（DSH neutral-bluish-150/200） */
   --bg-overlay: #FFFFFF;        /* 浮层（弹层、popover、dialog） */
   --bg-input: #FFFFFF;          /* 输入框底（DSH --dsw-specific-input-major） */
 
   /* 中性 hover/active/selected 阶梯（DSH --dsw-alias-interactive-bg-*） */
-  --bg-overlay-l1: rgba(27, 27, 28, 0.04);
-  --bg-overlay-l2: rgba(27, 27, 28, 0.06);
-  --bg-overlay-l3: rgba(27, 27, 28, 0.09);
-  --bg-overlay-l4: rgba(27, 27, 28, 0.12);
+  --bg-overlay-l1: rgba(0, 0, 0, 0.04);
+  --bg-overlay-l2: rgba(0, 0, 0, 0.055);
+  --bg-overlay-l3: rgba(0, 0, 0, 0.08);
+  --bg-overlay-l4: rgba(0, 0, 0, 0.11);
   /* 兼容别名（既有组件引用） */
   --bg-hover: var(--bg-overlay-l1);
   --bg-active: var(--bg-overlay-l3);
 
   /* 三级中性边框（DSH --dsw-alias-border-l1/l2/l3） */
-  --border-subtle: rgba(15, 17, 21, 0.04);
-  --border-default: rgba(15, 17, 21, 0.10);
-  --border-strong: rgba(15, 17, 21, 0.16);
+  --border-subtle: rgba(0, 0, 0, 0.05);
+  --border-default: rgba(0, 0, 0, 0.10);
+  --border-strong: rgba(0, 0, 0, 0.16);
 
   /* 文字 — 四级对比（DSH --dsw-alias-label-primary/secondary/tertiary/caption） */
   --text-primary: #0F1115;      /* --dsw-static-neutral-bluish-1000 */
-  --text-secondary: #54555B;    /* --dsw-static-neutral-bluish-700 */
-  --text-tertiary: #81858C;     /* --dsw-static-neutral-bluish-600 / DSH caption */
-  --text-disabled: #ADB2B8;     /* DSH caption */
+  --text-secondary: #57575C;    /* --dsw-static-neutral-bluish-700 */
+  --text-tertiary: #83838A;     /* --dsw-static-neutral-bluish-600 / DSH caption */
+  --text-disabled: #ADAEB2;     /* DSH caption */
   --text-inverse: #FFFFFF;
   /* v0.31.0 D21：第四级文字（时间戳 / 计数 / 次要元信息）。
      此前组件大量使用 text-text-faint，但 token 从未定义且未注册进
@@ -55,22 +55,23 @@
   /* v0.31.0 D21：中性填充阶梯（代码面板 / 结果区 / 气泡底）。
      与背景阶梯同源但独立命名——填充是「贴在卡片里的第二层」，
      背景是「卡片本身」，二者语义不同，不得互相借用。 */
-  --fill-secondary: #EBEEF3;
-  --fill-tertiary: #DDE2EA;
+  --fill-secondary: #F2F2F4;
+  --fill-tertiary: #E7E7EA;
 
-  /* v0.21.0 品牌 — 保留紫罗兰（与 DSH 的 deepseek 蓝并行作为品牌色，
-     主体交互元素改用下方的 --business-primary 业务蓝） */
-  --accent: #7C3AED;
-  --accent-hover: #6D28D9;
-  --accent-active: #5B21B6;
-  --accent-soft: rgba(124, 58, 237, 0.10);
-  --accent-strong: rgba(124, 58, 237, 0.18);
-  --accent-50: #EDE9FE;
-  --accent-100: #DDD6FE;
-  --accent-300: #C4B5FD;
-  --accent-500: #8B5CF6;
-  --accent-600: #7C3AED;
-  --accent-700: #6D28D9;
+  /* v0.31.1：品牌色紫罗兰 → 业务蓝（与 --business-primary 同源，对标 WorkBuddy）。
+     用户两轮反馈紫色过艳；蓝系与选中/AI 语义同样成立。 */
+  --accent: #3964FE;
+  --accent-hover: #2E55D9;
+  --accent-active: #2547C8;
+  --accent-soft: rgba(57, 100, 254, 0.10);
+  --accent-strong: rgba(57, 100, 254, 0.18);
+  --editor-selection: rgba(70, 108, 158, 0.28);
+  --accent-50: #E8EDFF;
+  --accent-100: #D6E0FF;
+  --accent-300: #9DB4FE;
+  --accent-500: #679EFE;
+  --accent-600: #5680FE;
+  --accent-700: #4570D9;
 
   /* v0.21.0 业务蓝（DSH --dsw-alias-state-business-primary：发送按钮 / 链接 / 焦点光晕） */
   --business-primary: #3964FE;
@@ -89,7 +90,7 @@
   --info-soft: rgba(37, 99, 235, 0.10);
 
   /* Shell 终端专属 */
-  --shell-bg: #121216;
+  --shell-bg: #151517;
   --shell-fg: #E2E2E6;
   --shell-stderr: #F87171;
   /* v0.27.1：锁深面板语义色（两套主题取值一致——终端面板底色恒深，
@@ -112,12 +113,12 @@
   --shadow-panel: 0 0 1px 0 rgba(0, 0, 0, 0.20), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
 
   /* 滚动条（DSH --dsh-scrollbar-thumb 双路径，缩窄到 8px） */
-  --scrollbar-thumb: #DDE2EA;
-  --scrollbar-thumb-hover: #C8CFD9;
+  --scrollbar-thumb: #E4E4E7;
+  --scrollbar-thumb-hover: #D3D3D7;
   --scrollbar-width: 8px;
 
   /* CtxRing 轨道色（浅色） */
-  --ring-track: rgba(15, 17, 21, 0.10);
+  --ring-track: rgba(0, 0, 0, 0.10);
 
   /* ============================================================
    * v0.21.0 圆角（Radius）—— 8 档（新增 22px capsule 用 3xl）
@@ -213,12 +214,12 @@
 .dark {
   color-scheme: dark;
   /* v0.21.0 深色 — cold bluish dark（DSH --dsw-static-neutral-bluish-950 系） */
-  --bg-base: #15171C;          /* canvas（DSH neutral-bluish-950） */
-  --bg-surface: #1B1D24;       /* 侧栏 / 面板表面（DSH neutral-bluish-900） */
-  --bg-surface-2: #23252C;     /* 卡片 / 输入框（DSH neutral-bluish-875） */
-  --bg-surface-3: #2B2D35;     /* 更深档（DSH neutral-bluish-850） */
-  --bg-overlay: #1B1D24;       /* 浮层（与 surface 同色，避免硬切换） */
-  --bg-input: #23252C;         /* 输入框底（DSH --dsw-specific-input-major dark） */
+  --bg-base: #1A1B1E;          /* canvas（DSH neutral-bluish-950） */
+  --bg-surface: #202123;       /* 侧栏 / 面板表面（DSH neutral-bluish-900） */
+  --bg-surface-2: #26272B;     /* 卡片 / 输入框（DSH neutral-bluish-875） */
+  --bg-surface-3: #2D2E32;     /* 更深档（DSH neutral-bluish-850） */
+  --bg-overlay: #202123;       /* 浮层（与 surface 同色，避免硬切换） */
+  --bg-input: #26272B;         /* 输入框底（DSH --dsw-specific-input-major dark） */
 
   /* 中性 hover/active/selected 阶梯 */
   --bg-overlay-l1: rgba(255, 255, 255, 0.06);
@@ -236,28 +237,32 @@
 
   /* 文字 — 四级对比（DSH --dsw-alias-label-* dark） */
   --text-primary: #F1F3F5;
-  --text-secondary: #B5B8BF;
-  --text-tertiary: #81858C;
+  --text-secondary: #B6B7BA;
+  --text-tertiary: #85868B;
   --text-disabled: #54555B;
   --text-inverse: #15171C;
   /* v0.31.0 D21：第四级文字（同 :root，见该处注释） */
-  --text-faint: #6E727A;
+  --text-faint: #6F7075;
   /* v0.31.0 D21：中性填充阶梯（同 :root，见该处注释） */
-  --fill-secondary: #23252C;
-  --fill-tertiary: #2B2D35;
+  --fill-secondary: #2A2B2F;
+  --fill-tertiary: #323338;
 
-  /* v0.21.0 品牌 — 深色紫罗兰 */
-  --accent: #8B5CF6;
-  --accent-hover: #A78BFA;
-  --accent-active: #7C3AED;
-  --accent-soft: rgba(139, 92, 246, 0.16);
-  --accent-strong: rgba(139, 92, 246, 0.28);
-  --accent-50: #2A2140;
-  --accent-100: #3B2F5F;
-  --accent-300: #A78BFA;
-  --accent-500: #8B5CF6;
-  --accent-600: #7C3AED;
-  --accent-700: #6D28D9;
+  /* v0.31.1：深色品牌蓝（原紫罗兰，对标 WorkBuddy dark） */
+  --accent: #679EFE;
+  --accent-hover: #82B1FE;
+  --accent-active: #5680FE;
+  --accent-soft: rgba(103, 158, 254, 0.14);
+  --accent-strong: rgba(103, 158, 254, 0.24);
+  /* v0.31.1：编辑器选区专用 token（editor/theme.ts 引用）——
+     不与品牌紫共用：品牌紫做选区背景过于艳丽、文字可读性差（用户实测两轮）。
+     对标 WorkBuddy / VS Code dark selection 的低饱和暗蓝，文字保持原色即可读 */
+  --editor-selection: rgba(70, 108, 158, 0.55);
+  --accent-50: #1B2740;
+  --accent-100: #24335A;
+  --accent-300: #82B1FE;
+  --accent-500: #3964FE;
+  --accent-600: #2E55D9;
+  --accent-700: #2547C8;
 
   /* v0.21.0 业务蓝（DSH dark --dsw-alias-state-business-primary：#679EFE） */
   --business-primary: #679EFE;
@@ -275,7 +280,7 @@
   --info-soft: rgba(96, 165, 250, 0.14);
 
   /* Shell 终端专属 */
-  --shell-bg: #0F1115;
+  --shell-bg: #131417;
   --shell-fg: #D4D4DC;
   --shell-stderr: #F87171;
   /* v0.27.1：锁深面板语义色（与 :root 同值，终端面板恒深） */
@@ -296,8 +301,8 @@
   --shadow-lg: 0 0 1px rgba(0, 0, 0, 0.6), 0 0 4px rgba(0, 0, 0, 0.10), 0 12px 32px rgba(0, 0, 0, 0.45);
   --shadow-panel: 0 0 1px rgba(0, 0, 0, 0.6), 0 0 4px rgba(0, 0, 0, 0.10), 0 12px 32px rgba(0, 0, 0, 0.45);
 
-  --scrollbar-thumb: #2B2D35;
-  --scrollbar-thumb-hover: #3A3D45;
+  --scrollbar-thumb: #333438;
+  --scrollbar-thumb-hover: #404146;
 
   /* CtxRing 轨道色（深色） */
   --ring-track: rgba(255, 255, 255, 0.12);
@@ -500,6 +505,46 @@ textarea {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ============================================================
+ * v0.31.1 — 性能降级模式（perf-lite）
+ *
+ * 背景：低配机器（如双路 Xeon 工作站 + 无独显）上 Chromium 常因驱动评分低
+ * 静默回退 **SwiftShader 软件渲染**，整个 UI 由弱单核光栅化；此时 27 处
+ * animation（含 6 处 infinite 连续动画：pulse-dot / thinking-bar /
+ * plan-spin / dsh-row-sweep×2 / stream-caret-blink）会持续触发全屏重绘，
+ * 表现为「运行非常卡」。
+ *
+ * 触发方式（主进程负责判定并注入 class，renderer 零逻辑）：
+ *   - 检测到软件渲染（app.getGPUFeatureStatus() → software）；或
+ *   - 环境变量 ARK_PERF_LITE=1（手动强制）
+ * 语义与 prefers-reduced-motion 一致：抑制连续动画与过渡，保留一次性
+ * 入场动画的终态（用 animation-duration≈0 而非 none，避免元素停在初始帧）。
+ * ============================================================ */
+html.perf-lite *,
+html.perf-lite *::before,
+html.perf-lite *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+/* 连续动画的显式收口（这几处有 background-position/opacity 维持语义，
+   与既有 prefers-reduced-motion 特例保持一致） */
+html.perf-lite .react-reason[data-state='running']::after,
+html.perf-lite .tool-card[data-state='running']::after {
+  animation: none !important;
+  opacity: 0 !important;
+}
+html.perf-lite .turn-status {
+  animation: none !important;
+  background-position: 0 0 !important;
+  background-size: 100% 100% !important;
+}
+html.perf-lite .stream-caret {
+  animation: none !important;
+  opacity: 1 !important;
 }
 
 /* 数字等宽 */
@@ -922,26 +967,33 @@ textarea {
   box-shadow: var(--toast-shadow);
   animation: fade-in-up var(--duration-base) var(--ease-out-expo);
 }
+/* v0.31.1：toast 是「双态反色卡」——浅色模式深底、深色模式同为深底
+   （--toast-bg: #2D2F36 + --toast-text: #F1F3F5），因此内部文字/图标
+   **一律用 --toast-* 与 accent-300**，不得用页面主题变量（--text-*）：
+   浅色模式下 text-primary 是深色字，叠在深底上即「内容与背景重叠」
+   （Windows 用户实测看不清）。action/close 同理；深底上的 hover 高亮
+   用白色低透明而非 bg-hover（页面变量）。 */
 .toast__icon { flex-shrink: 0; font-size: 15px; }
 .toast--success .toast__icon { color: var(--success); }
 .toast--warning .toast__icon { color: var(--warning); }
 .toast--danger  .toast__icon { color: var(--danger); }
-.toast__message { font-size: 13px; color: var(--text-primary); flex: 1; min-width: 0; }
+.toast__message { font-size: 13px; color: var(--toast-text); flex: 1; min-width: 0; }
 .toast__action {
   font-size: 12px;
   font-weight: 500;
-  color: var(--accent);
+  color: var(--accent-300);
   white-space: nowrap;
   flex-shrink: 0;
 }
 .toast__action:hover { text-decoration: underline; }
 .toast__close {
   flex-shrink: 0;
-  color: var(--text-tertiary);
+  color: var(--toast-text);
+  opacity: 0.6;
   padding: 2px;
   border-radius: var(--radius-sm);
 }
-.toast__close:hover { color: var(--text-primary); background: var(--bg-hover); }
+.toast__close:hover { opacity: 1; background: rgba(255, 255, 255, 0.14); }
 
 /* ---------- ConfirmDialog ---------- */
 .dialog-backdrop {

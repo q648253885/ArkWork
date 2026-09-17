@@ -1,12 +1,14 @@
 /* ============================================================
  * ArkWork — Quick Action (v0.13.0)
- * ⌘K 四源搜索：Commands / Files / Skills / Agents
+ * Quick Action（Mod+K）：四源搜索 Commands / Files / Skills / Agents
  * ============================================================ */
 import { useEffect, useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
 import { Icon, type IconName } from '../icons'
 import { Kbd } from './ui'
+// v0.31.1：shortcut 不再硬编码 mac 符号 —— 一律经 keymap 按平台渲染（Windows 显示 Ctrl+…）
+import { chordText } from '../keymap'
 import type { FsNode } from '../types'
 
 interface QuickItem {
@@ -104,7 +106,7 @@ export function QuickAction() {
       {
         id: 'cmd-new-task',
         label: t('quickaction.commands.newTask'),
-        shortcut: '⌘N',
+        shortcut: chordText('Mod+N'),
         icon: 'Plus',
         source: 'command',
         action: () => {
@@ -117,7 +119,7 @@ export function QuickAction() {
       {
         id: 'cmd-quick-open',
         label: t('quickaction.commands.quickOpen'),
-        shortcut: '⌘P',
+        shortcut: chordText('Mod+P'),
         icon: 'File',
         source: 'command',
         action: () => setQuickOpenOpen(true),
@@ -125,7 +127,7 @@ export function QuickAction() {
       {
         id: 'cmd-toggle-left',
         label: t('quickaction.commands.toggleLeft'),
-        shortcut: '⌘B',
+        shortcut: chordText('Mod+B'),
         icon: 'ChevronLeft',
         source: 'command',
         action: toggleLeftNav,
@@ -133,7 +135,7 @@ export function QuickAction() {
       {
         id: 'cmd-toggle-right',
         label: t('quickaction.commands.toggleRight'),
-        shortcut: '⌘J',
+        shortcut: chordText('Mod+J'),
         icon: 'ChevronRight',
         source: 'command',
         action: toggleRightDock,
@@ -141,7 +143,7 @@ export function QuickAction() {
       {
         id: 'cmd-open-settings',
         label: t('quickaction.commands.openSettings'),
-        shortcut: '⌘,',
+        shortcut: chordText('Mod+,'),
         icon: 'Settings',
         source: 'command',
         action: () => openModulePage('settings'),
@@ -296,15 +298,18 @@ export function QuickAction() {
   return (
     <div
       className="fixed inset-0 z-[60] flex items-start justify-center pt-[12vh] bg-black/50 backdrop-blur-sm"
-      // Phase A Task 3：QuickAction 背景不再点击关闭（防误触），仅 Esc 退出
-      onMouseDown={(e) => e.stopPropagation()}
+      // v0.31.1（用户裁决）：点击遮罩空白处关闭 —— 覆盖 v0.13 的「防误触仅 Esc」
+      // 旧决策。只有直接点到遮罩本身（target === currentTarget）才关，
+      // 面板内部的点击不受影响，无需再 stopPropagation。
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) setOpen(false)
+      }}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Quick Action"
         className="w-[min(640px,calc(100vw-32px))] h-[480px] max-h-[480px] bg-bg-overlay border border-border-default rounded-lg shadow-panel flex flex-col overflow-hidden scale-in overscroll-contain"
-        onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle focus-within:ring-2 focus-within:ring-inset focus-within:ring-accent">
           <Icon.Search width={16} height={16} className="text-text-tertiary flex-shrink-0" aria-hidden="true" />

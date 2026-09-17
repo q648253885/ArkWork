@@ -2,13 +2,54 @@
  * ArkWork — Main Window
  * 设计文档 §8.3 — 主窗口（三栏布局）
  * ============================================================ */
-import { app, BrowserWindow, shell, nativeTheme, session } from 'electron'
+import { app, BrowserWindow, Menu, shell, nativeTheme, session } from 'electron'
+import type { MenuItemConstructorOptions } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import { reconcileOrphanRunning } from './agent/runner.js'
+import { getUiLocale, tFor } from './i18n/messages.js'
+import { logger } from './system/logger.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+
+// v0.31.1：GPU / 性能模式判定 —— 低配机器（如双路 Xeon 工作站）上 Chromium
+// 常因驱动评分低静默回退 SwiftShader 软件渲染，此时连续动画会持续全屏重绘，
+// 表现为「运行非常卡」。这里在窗口加载完成后读取真实 GPU 状态：
+//   ① 始终写一行 `gpu status` 日志（诊断用，用户回报日志即可判定渲染后端）；
+//   ② 软件渲染（或 ARK_PERF_LITE=1）→ 给 <html> 注入 .perf-lite，
+//      由 globals.css 抑制全部连续动画/过渡（见该处注释）。
+// 注入走 executeJavaScript 而非 IPC：避免为一次性降级改动 preload 契约。
+async function applyPerformanceMode(win: BrowserWindow): Promise<void> {
+  try {
+    const status = app.getGPUFeatureStatus() as unknown as Record<string, string>
+    const softwareRendering =
+      /software/i.test(status['gpu_compositing'] ?? '') ||
+      /software/i.test(status['gl'] ?? '') ||
+      /disabled/i.test(status['gpu_compositing'] ?? '')
+    const forceLite = process.env.ARK_PERF_LITE === '1'
+    logger.info(
+      'System',
+      `gpu status ${JSON.stringify({
+        gpu_compositing: status['gpu_compositing'],
+        gl: status['gl'],
+        gl_renderer: status['gl_renderer'],
+        video_decode: status['video_decode'],
+        softwareRendering,
+        perfLite: softwareRendering || forceLite,
+        source: forceLite ? 'env' : softwareRendering ? 'auto' : 'none',
+      })}`,
+    )
+    if (softwareRendering || forceLite) {
+      await win.webContents.executeJavaScript(
+        "document.documentElement.classList.add('perf-lite')",
+      )
+    }
+  } catch (err) {
+    // 性能降级是「尽力而为」，任何异常都不得影响启动
+    logger.warn('System', `performance mode detection failed: ${String(err)}`)
+  }
+}
 
 /**
  * Task 13：解析应用图标资源。
@@ -71,6 +112,19 @@ const RENDERER_URL = isDev
 
 let mainWindow: BrowserWindow | null = null
 
+// v0.31.1：Windows 原生窗口控件覆盖（WCO）配色 —— 创建与运行时主题切换共用，
+// 避免「创建时定死、切换后漂移」两处颜色各自维护。
+export const TITLEBAR_OVERLAY_HEIGHT = 40
+
+export function titleBarOverlayColors(resolved: 'dark' | 'light'): {
+  color: string
+  symbolColor: string
+} {
+  return resolved === 'dark'
+    ? { color: '#16181D', symbolColor: '#A6ABB5' }
+    : { color: '#FFFFFF', symbolColor: '#A6ABB5' }
+}
+
 export function createMainWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin'
   const isWin = process.platform === 'win32'
@@ -92,9 +146,15 @@ export function createMainWindow(): BrowserWindow {
     // 跨平台无框标题栏：mac 用 hiddenInset（系统交通灯在左），
     // Windows 用 hidden + titleBarOverlay（原生控件在右），Linux 保留 default
     titleBarStyle: isMac ? 'hiddenInset' : isWin ? 'hidden' : 'default',
-    // Win11 原生窗口控件覆盖（右上角），尺寸与系统一致
+    // Win11 原生窗口控件覆盖（右上角），尺寸与系统一致；
+    // 运行时主题切换由 ipc/theme.ts 的 onSystemChange 回调接续更新（v0.31.1）
     ...(isWin
-      ? { titleBarOverlay: { color: nativeTheme.shouldUseDarkColors ? '#16181D' : '#FFFFFF', symbolColor: '#A6ABB5', height: 40 } }
+      ? {
+          titleBarOverlay: {
+            ...titleBarOverlayColors(nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
+            height: TITLEBAR_OVERLAY_HEIGHT,
+          },
+        }
       : {}),
     // macOS 交通灯位置（左上角）
     ...(isMac ? { trafficLightPosition: { x: 14, y: 16 } } : {}),
@@ -117,12 +177,39 @@ export function createMainWindow(): BrowserWindow {
     return { action: 'allow' }
   })
 
+  // v0.31.1：编辑器/输入区原生右键菜单（Windows 用户实测：编辑器右键无菜单，
+  // 无法复制粘贴）。CM6 的 contenteditable 与各输入框命中 params.isEditable；
+  // 只读渲染区有选中文本时给「复制」。纯浏览区（无选区、不可编辑）不弹菜单，
+  // 保持页面自身可能存在的右键行为（如文件树自定义菜单）不被抢占。
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const editable = params.isEditable
+    const hasSelection = params.selectionText.trim().length > 0
+    if (!editable && !hasSelection) return
+    const locale = getUiLocale()
+    const template: MenuItemConstructorOptions[] = [
+      { role: 'cut', label: tFor(locale, 'contextmenu.cut'), visible: editable && hasSelection },
+      { role: 'copy', label: tFor(locale, 'contextmenu.copy'), visible: hasSelection },
+      { role: 'paste', label: tFor(locale, 'contextmenu.paste'), visible: editable },
+      { type: 'separator' },
+      { role: 'selectAll', label: tFor(locale, 'contextmenu.selectAll'), visible: editable },
+    ]
+    Menu.buildFromTemplate(template).popup({ window: mainWindow ?? undefined })
+  })
+
   if (isDev && RENDERER_URL) {
     mainWindow.loadURL(RENDERER_URL)
     mainWindow.webContents.openDevTools({ mode: 'detach' })
   } else {
     mainWindow.loadFile(resolve(__dirname, '../renderer/index.html'))
   }
+
+  // v0.31.1：DOM 就绪后判定 GPU 后端并（必要时）注入性能降级模式。
+  // 放在 did-finish-load 而非 ready-to-show：前者保证 documentElement 已存在，
+  // 注入 class 不会被后续导航/重载丢弃。
+  mainWindow.webContents.once('did-finish-load', () => {
+    const win = mainWindow
+    if (win) void applyPerformanceMode(win)
+  })
 
   mainWindow.on('closed', () => {
     mainWindow = null

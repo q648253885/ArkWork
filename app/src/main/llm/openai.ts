@@ -25,6 +25,22 @@ export interface OpenAIOptions {
   provider?: 'openai' | 'ollama' | 'custom-openai'
 }
 
+/**
+ * v0.31.1：baseURL 归一化（用户实测缺陷）。
+ * 官方 SDK 会在 baseURL 后自动拼 `/chat/completions`；若用户在设置里填的
+ * 就是**完整对话端点**（以 `/chat/completions` 结尾），SDK 会二次拼接成
+ * `.../chat/completions/chat/completions` → 404。
+ * 规则：剥掉尾部的 `/chat/completions`（大小写不敏感、容忍尾斜杠），
+ * 其余情况原样返回 —— 用户填 base 或完整端点都能正确工作。
+ * registry 的 `/models` 连通性检查也走本函数，保证两处口径一致。
+ */
+export function normalizeOpenAIBaseURL(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined
+  const url = raw.trim()
+  if (!url) return raw
+  return url.replace(/\/chat\/completions\/?$/i, '')
+}
+
 export class OpenAIAdapter implements LlmAdapter {
   readonly name: string
   readonly provider: 'openai' | 'ollama' | 'custom-openai'
@@ -37,7 +53,7 @@ export class OpenAIAdapter implements LlmAdapter {
     this.defaultModel = opts.defaultModel
     this.client = new OpenAI({
       apiKey: opts.apiKey || 'dummy',
-      baseURL: opts.baseURL,
+      baseURL: normalizeOpenAIBaseURL(opts.baseURL),
     })
   }
 

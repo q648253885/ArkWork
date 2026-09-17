@@ -5,7 +5,7 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
-import { mkdirSync, existsSync } from 'node:fs'
+import { mkdirSync, existsSync, readFileSync } from 'node:fs'
 import { createMainWindow, getMainWindow } from './window.js'
 import { registerIpcHandlers } from './ipc/index.js'
 import { initStore } from './store/db.js'
@@ -18,6 +18,26 @@ import { scheduleCleanup } from './fs/cleanup.js'
 import { logger } from './system/logger.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+
+// v0.31.1：ARK_CDP_PORT 环境变量开启远程调试（launchctl setenv ARK_CDP_PORT 9223
+// 后 open 生效）——供自动化工具连接实测 UI；不设置则完全不开启。
+// 必须在任何 window 创建之前、app ready 之前调用 appendSwitch。
+if (process.env.ARK_CDP_PORT && /^\d{2,5}$/.test(process.env.ARK_CDP_PORT)) {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.ARK_CDP_PORT)
+}
+
+// v0.31.1：低配机器性能开关（打包版可用，命令行/环境变量二选一）
+//   ARK_FORCE_GPU=1 —— 强制启用被 Chromium 拉黑的 GPU 与光栅化。
+//     适用：机器**有**可用独显/核显，但驱动评分低被 Chromium 判为不可用，
+//     从而静默回退 SwiftShader 软件渲染（低配 Windows 卡顿的常见首因）。
+//     副作用：驱动质量差时可能花屏/闪退，异常即去掉该变量。
+//   ARK_PERF_LITE=1 —— 强制性能降级模式（抑制全部连续动画，见 globals.css）。
+//     适用：只想立刻降低渲染开销，或 GPU 状态检测未命中但实际仍卡的场景。
+if (process.env.ARK_FORCE_GPU === '1') {
+  app.commandLine.appendSwitch('ignore-gpu-blocklist')
+  app.commandLine.appendSwitch('enable-gpu-rasterization')
+  app.commandLine.appendSwitch('enable-zero-copy')
+}
 
 // 开发环境使用项目内的 .dev-data 目录作为 userData，避免 macOS TCC 限制
 // 在 ~/Library/Application Support/Chromium 下创建 SingletonLock 时的 EPERM 错误
@@ -38,11 +58,16 @@ if (!app.isPackaged) {
   }
 } else {
   app.setName('ArkWork')
-  // 调试：存在 {userData}/.debug-cdp 标志文件时开启远程调试端口 9222
-  // （供 agent-browser 等自动化工具连接验证 UI；生产默认不创建该文件即不开启）
+  // 调试：存在 {userData}/.debug-cdp 标志文件时开启远程调试端口
+  // （供 agent-browser 等自动化工具连接验证 UI；生产默认不创建该文件即不开启）。
+  // v0.31.1：文件内容为端口号（空/非法 → 9223）；默认端口避开 9222
+  // （本机 Chrome 扩展服务常驻占用 9222，曾导致 CDP 永远连不上 ArkWork）。
   try {
-    if (existsSync(join(app.getPath('userData'), '.debug-cdp'))) {
-      app.commandLine.appendSwitch('remote-debugging-port', '9222')
+    const flagPath = join(app.getPath('userData'), '.debug-cdp')
+    if (existsSync(flagPath)) {
+      const raw = readFileSync(flagPath, 'utf-8').trim()
+      const port = /^\d{2,5}$/.test(raw) ? raw : '9223'
+      app.commandLine.appendSwitch('remote-debugging-port', port)
     }
   } catch {
     // ignore

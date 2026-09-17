@@ -54,9 +54,20 @@ export const arkEditorTheme = EditorView.theme({
     padding: 'var(--space-2) 0',
   },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
-    backgroundColor: 'var(--accent-strong)',
-  },
+  // v0.31.1：选区覆盖 —— **必须带 !important**。
+  // CM6 drawSelection 的 baseTheme 内建了
+  //   &light.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground
+  //     { background: #d7d4f0 }   ← 淡紫罗兰（light 主题聚焦态）
+  // 它是 5 层选择器，优先级高于本主题的 `.cm-selectionBackground`（2 层），
+  // 导致「失焦时显示 token 蓝、一旦聚焦立刻被盖成 #d7d4f0 淡紫」——
+  // 用户三轮实测反馈的真凶（旧版看聚合为「选中即紫」）。
+  // !important 可无视优先级差距，直接压过 CM 内建值。
+  // 同时补齐 CM 聚焦态的同结构选择器（cm-selectionLayer > .cm-selectionBackground）。
+  '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionLayer .cm-selectionBackground, &.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
+    {
+      backgroundColor: 'var(--editor-selection) !important',
+      color: 'var(--text-primary)',
+    },
   '.cm-activeLine': { backgroundColor: 'var(--bg-overlay-l1)' },
   '.cm-activeLineGutter': {
     backgroundColor: 'var(--bg-overlay-l1)',

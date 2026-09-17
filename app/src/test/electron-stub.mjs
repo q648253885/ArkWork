@@ -36,6 +36,11 @@ export class BrowserWindow {
 /* 测试仅需模块可加载，这里提供空壳类即可（方法按需再补）。 */
 export class WebContentsView {}
 
+/* v0.31.1：编辑器右键原生菜单（window.ts context-menu）——Menu 空壳 */
+export const Menu = {
+  buildFromTemplate: () => ({ popup: () => {} }),
+}
+
 export const nativeTheme = {
   shouldUseDarkColors: false,
 }
