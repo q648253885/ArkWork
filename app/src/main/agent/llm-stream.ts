@@ -4,9 +4,10 @@
  * 职责：
  *  - completeWithStream：adapter 流式调用封装。completeStream 缺失或明确报
  *    「不支持」时静默降级 complete()（R-stream-4，不弹错误打扰）；
- *  - createTextDeltaPump：per-(taskId+scope) 增量泵 —— 首包立即广播，
+ *  - createTextDeltaPump：per-(taskId+scope+kind) 增量泵 —— 首包立即广播，
  *    后续按 40–80ms 自适应窗口攒批（到达密集→80ms 攒批；稀疏→40ms 快发），
  *    seq 单调递增；Renderer 端按 seq 单调追加、乱序丢弃、seq=1 视为重启截断。
+ *    v0.31.0 B1：新增 `kind` 通道维度（text / reasoning），两条通道互不撞缓冲。
  *
  * 纪律：本模块不 import electron / window（保持可密闭单测）；
  *       广播 sender 由调用方注入（engine 侧注入 broadcast('task:text-delta')）。
@@ -20,8 +21,9 @@ import type {
 import type { TaskTextDeltaPayload } from '@shared/types/ipc'
 
 export type TextDeltaScope = TaskTextDeltaPayload['scope']
+/** v0.31.0 B1：通道维度（text = 叙述/正文；reasoning = 思考）。与 scope 正交。 */
+export type TextDeltaKind = TaskTextDeltaPayload['kind']
 export type TextDeltaSender = (payload: TaskTextDeltaPayload) => void
-
 /** adapter 明确不支持流式（区别于网络/鉴权等真错误）的报错特征 */
 const UNSUPPORTED_STREAM = /not implemented|unsupported|not supported/i
 
@@ -63,11 +65,14 @@ const DENSE_GAP_MS = 100
  * v0.27.0 R1：流式文本增量泵。
  * @param taskId 任务 id
  * @param scope  'turn'（ReAct Reason）/ 'chat'（runChatOnce）
+ * @param kind   v0.31.0 B1 新增：通道维度 —— 'text'（叙述/正文）/ 'reasoning'（思考）。
+ *               同一 (taskId, scope) 下的两个通道各自独立计 seq、独立攒批。
  * @param send   广播函数（engine 注入 broadcast('task:text-delta')；测试注入收集器）
  */
 export function createTextDeltaPump(
   taskId: string,
   scope: TextDeltaScope,
+  kind: TextDeltaKind,
   send: TextDeltaSender,
 ): TextDeltaPump {
   let seq = 0
@@ -80,7 +85,7 @@ export function createTextDeltaPump(
     timer = null
     if (!pending) return
     seq += 1
-    const payload: TaskTextDeltaPayload = { taskId, scope, seq, text: pending }
+    const payload: TaskTextDeltaPayload = { taskId, scope, kind, seq, text: pending }
     pending = ''
     lastSentAt = Date.now()
     try {

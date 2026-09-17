@@ -80,9 +80,18 @@ test('loop.ts: 无工具调用分支同时检查「截断」与「未完成清�
   assert.match(loopSrc, /if\s*\(\s*outputTruncated\s*\|\|\s*unfinishedCount\s*>\s*0\s*\)\s*\{/, '应基于截断/未完成项进入守卫')
 })
 
-test('loop.ts: 守卫路径只注入 user 提示并 continue，不标 done 也不暂停', () => {
+test('loop.ts: 守卫路径只注入瞬时提示并 continue，不标 done 也不暂停', () => {
   assert.match(loopSrc, /consecutiveNoToolFinal\s*\+=\s*1/, '每次无工具调用递增连续计数')
-  assert.match(loopSrc, /kind:\s*['"]user_message['"]/, '应注入 user 消息作为提示')
+  // v0.31.0 D22（用户实测缺陷修复）：提示必须走 pendingSystemHint 瞬时通道，
+  // **不得**以 kind:'user_message' 落 L1 —— 渲染层把所有 user_message 映射成
+  // 用户气泡（derive-conversation.ts），落盘会让模型自救提示在重开任务后
+  // 以「用户说的话」出现，并永久污染模型上下文。
+  assert.doesNotMatch(
+    loopSrc.slice(loopSrc.indexOf('consecutiveNoToolFinal += 1'), loopSrc.indexOf('// 模型未调用工具')),
+    /kind:\s*['"]user_message['"]/,
+    '守卫块不得再把提示落 L1（user_message 会被渲染层当成用户发言）',
+  )
+  assert.match(loopSrc, /pendingSystemHint\s*=\s*labelEngineHint\(hint\)/, '应走瞬时通道并以引擎提示标签标注')
   // 守卫块内不得出现 paused / ask_user / task_complete 终止语义
   const guardStart = loopSrc.indexOf('if (outputTruncated || unfinishedCount > 0)')
   const guardEnd = loopSrc.indexOf('// 模型未调用工具，且清单无未完成项、输出未被截断')

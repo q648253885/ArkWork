@@ -160,7 +160,7 @@ export async function runChatOnce(
       onText: (delta) => {
         if (!opts.taskId) return
         if (!pumpRef.current) {
-          pumpRef.current = createTextDeltaPump(opts.taskId, 'chat', broadcastTextDelta)
+          pumpRef.current = createTextDeltaPump(opts.taskId, 'chat', 'text', broadcastTextDelta)
         }
         pumpRef.current.push(delta)
       },

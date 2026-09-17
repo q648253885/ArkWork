@@ -6,17 +6,26 @@
  * 入口，复用 store.openModulePage / selectTask / setInspectorTab
  * / setCmdPaletteOpen / setQuickOpenOpen 等已有动作。
  *
- * 入口：⌘? 全局快捷键；Sidebar 底部"帮助"按钮；
+ * 入口：Mod+/（逻辑和弦，声明见 renderer/keymap/spec.ts）；Sidebar 底部"帮助"按钮；
  * ModulePage / 任务对话顶部也可直接挂载。
  *
  * 视觉：与 ModulePage 同一族（页面化 + 统一头部 + 关闭按钮）。
- * 关闭优先级由 App.tsx 的 Esc 链处理。
+ * 关闭优先级由 App.tsx 的 Esc 链处理（v0.31.0 B0 起：`overlay.escape` 是唯一入口，
+ * 本组件不再自行挂 Escape 监听）。
+ *
+ * v0.31.0 B0 — **键位表唯一真源是 renderer/keymap 注册表**：
+ * 本组件不再硬编码和弦（迁移前为 22 行字面量表，且漏列「Alt+6 终端」与
+ * 「Shift+Tab 权限循环」两条已实现键位）。现改为 `listKeybindings()` 按 `group`
+ * 分组渲染，展示串一律经 `chordsText()` 产出 —— 平台符号（macOS 的 U+2318 系列 /
+ * 非 macOS 的 Ctrl 系）由 keymap 单点决定，帮助中心零平台分支。
  * ============================================================ */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore, type ModulePage } from '../store'
 import { Icon, type IconName } from '../icons'
 import { Tooltip } from './ui'
+// B0：键位表与展示串的唯一来源；禁止在本文件内再写裸修饰键符号
+import { chordText, chordsText, GROUP_ORDER, listKeybindings, type KeybindingGroup } from '../keymap'
 
 /* ============================================================
  * 类型与元数据
@@ -41,9 +50,17 @@ interface HelpSection {
   actions: HelpAction[]
 }
 
-interface ShortcutEntry {
-  keys: string
-  desc: string
+/**
+ * B0：分组标题的 i18n key 映射。
+ * 用显式 Record 而非模板串拼接 —— 分组键名与 i18n 键名解耦，
+ * 将来增删分组时 typecheck 会直接指出漏配（`KeybindingGroup` 是字面量联合）。
+ */
+const GROUP_TITLE_KEY: Record<KeybindingGroup, string> = {
+  global: 'help.shortcuts.group.global',
+  inspector: 'help.shortcuts.group.inspector',
+  help: 'help.shortcuts.group.help',
+  editor: 'help.shortcuts.group.editor',
+  region: 'help.shortcuts.group.region',
 }
 
 /* ============================================================
@@ -55,31 +72,6 @@ interface ShortcutEntry {
  * ============================================================ */
 export function HelpCenter() {
   const { t } = useTranslation()
-
-  const shortcuts: ShortcutEntry[] = [
-    { keys: '⌘K', desc: t('help.shortcuts.desc.quickAction') },
-    { keys: '⌘P', desc: t('help.shortcuts.desc.quickOpen') },
-    { keys: '⌘N', desc: t('help.shortcuts.desc.newTask') },
-    { keys: '⌘B', desc: t('help.shortcuts.desc.sidebar') },
-    { keys: '⌘J', desc: t('help.shortcuts.desc.inspector') },
-    { keys: '⌘E', desc: t('help.shortcuts.desc.preview') },
-    { keys: '⌘,', desc: t('help.shortcuts.desc.settings') },
-    { keys: '⌘?', desc: t('help.shortcuts.desc.help') },
-    { keys: '⌘/', desc: t('help.shortcuts.desc.helpAlt') },
-    { keys: '⌘⇧W', desc: t('help.shortcuts.desc.workspace') },
-    { keys: '⌘1', desc: t('help.shortcuts.desc.agents') },
-    { keys: '⌘2', desc: t('help.shortcuts.desc.skills') },
-    { keys: '⌘3', desc: t('help.shortcuts.desc.kb') },
-    { keys: '⌘4', desc: t('help.shortcuts.desc.memory') },
-    { keys: '⌘5', desc: t('help.shortcuts.desc.automations') },
-    { keys: '⌘6', desc: t('help.shortcuts.desc.settingsModule') },
-    { keys: '⌥1', desc: t('help.shortcuts.desc.inspTodos') },
-    { keys: '⌥2', desc: t('help.shortcuts.desc.inspContext') },
-    { keys: '⌥3', desc: t('help.shortcuts.desc.inspFiles') },
-    { keys: '⌥4', desc: t('help.shortcuts.desc.inspLogs') },
-    { keys: '⌥5', desc: t('help.shortcuts.desc.inspBrowser') },
-    { keys: 'Esc', desc: t('help.shortcuts.desc.esc') },
-  ]
 
   const sections = useMemo<HelpSection[]>(
     () => [
@@ -284,18 +276,29 @@ export function HelpCenter() {
   const [activeId, setActiveId] = useState<string>(sections[0]?.id ?? 'workspace')
   const contentRef = useRef<HTMLDivElement | null>(null)
 
-  // 关闭路径：Esc 由 App.tsx 统一处理
-  useEffect(() => {
-    if (!helpOpen) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setHelpOpen(false)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [helpOpen, setHelpOpen])
+  // 关闭路径：Esc 由 App.tsx 的注册表统一处理（`overlay.escape`，见 keymap/actions.ts）。
+  // B0 起本组件**不再**自行挂 keydown 监听 —— 迁移前这里有一份重复的 Escape 监听，
+  // 与 App 的 Esc 链构成两处真相（谁先生效取决于注册顺序，脆）。
+  // 详见 docs/versions/v0.31.0/04-system-design.md §5.4.1 的偏差登记。
+
+  /* ------------------------------------------------------------
+   * 快捷键总表数据源（B0）
+   *
+   * 从注册表取、按 GROUP_ORDER 分组。依赖 `helpOpen` 是**必须**的：
+   * 注册发生在 App 的 effect 里，而本组件在 App 首渲染时即已挂载
+   * （helpOpen 为假时 `return null` 早退），那一刻注册表还是空的；
+   * 面板每次打开时重算，才拿得到完整键位表。依赖 `t` 保证切语言重渲染。
+   * ------------------------------------------------------------ */
+  const shortcutGroups = useMemo(
+    () =>
+      GROUP_ORDER.map((group) => ({
+        group,
+        items: listKeybindings()
+          .filter((b) => b.group === group)
+          .map((b) => ({ id: b.id, title: t(b.titleKey), chords: chordsText(b.chord) })),
+      })).filter((sec) => sec.items.length > 0),
+    [t, helpOpen],
+  )
 
   // 打开时把滚动锚点滚回顶部
   useEffect(() => {
@@ -327,7 +330,9 @@ export function HelpCenter() {
           </span>
           <div className="min-w-0 flex-1">
             <h1 className="text-sm font-semibold text-text-primary truncate">{t('help.title')}</h1>
-            <p className="text-2xs text-text-tertiary truncate">{t('help.subtitle')}</p>
+            <p className="text-2xs text-text-tertiary truncate">
+              {t('help.subtitle', { kbd: chordText('Mod+/') })}
+            </p>
           </div>
           {/* polish-workspace-task-title-skills-context-help §Task 6.2：X 按钮紧贴右边框 */}
           <Tooltip label={t('help.closeLabel')} kbd="Esc">
@@ -407,17 +412,36 @@ export function HelpCenter() {
                 <p className="text-sm text-text-secondary leading-relaxed mb-4">
                   {t('help.shortcuts.desc')}
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                  {shortcuts.map((s) => (
-                    <div
-                      key={s.keys}
-                      className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-bg-surface border border-border-subtle"
-                    >
-                      <span className="text-xs text-text-secondary truncate">{s.desc}</span>
-                      <kbd className="inline-flex items-center justify-center min-w-[40px] h-5 px-1.5 rounded-md text-[11px] font-medium bg-bg-elevated text-text-secondary border border-border-default flex-shrink-0">
-                        {s.keys}
-                      </kbd>
-                    </div>
+                <div className="space-y-4">
+                  {shortcutGroups.map((sec) => (
+                    <section key={sec.group} data-shortcut-group={sec.group}>
+                      <h3 className="mb-1.5">
+                        <span className="text-2xs uppercase tracking-wider text-text-tertiary">
+                          {t(GROUP_TITLE_KEY[sec.group])}
+                        </span>
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {sec.items.map((s) => (
+                          <div
+                            key={s.id}
+                            data-keybinding={s.id}
+                            className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-bg-surface border border-border-subtle"
+                          >
+                            <span className="text-xs text-text-secondary truncate">{s.title}</span>
+                            <span className="flex items-center gap-1 flex-shrink-0">
+                              {s.chords.map((c) => (
+                                <kbd
+                                  key={c}
+                                  className="inline-flex items-center justify-center min-w-[40px] h-5 px-1.5 rounded-md text-[11px] font-medium bg-bg-elevated text-text-secondary border border-border-default"
+                                >
+                                  {c}
+                                </kbd>
+                              ))}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
                   ))}
                 </div>
                 <p className="mt-8 text-2xs text-text-tertiary">
@@ -493,7 +517,7 @@ function HelpActionButton({
         return
       case 'workspace':
         onClose()
-        // 工作区切换器由 TopBar 监听 topbar:open-workspace 事件（与 ⌘⇧W 同路径）
+        // 工作区切换器由 TopBar 监听 topbar:open-workspace 事件（与 Mod+Shift+W 同路径）
         window.dispatchEvent(new CustomEvent('topbar:open-workspace'))
         return
       case 'inspector': {
@@ -547,7 +571,7 @@ function HelpActionButton({
 
 /* ============================================================
  * 帮助入口按钮（挂在 Sidebar 底部 / TopBar 等位置）
- * 复用现有 'sidebar:open-help' CustomEvent 路径与 ⌘? 路径
+ * 复用现有 'sidebar:open-help' CustomEvent 路径与 Mod+/ 路径
  * ============================================================ */
 export function openHelpCenter(): void {
   window.dispatchEvent(new CustomEvent('app:open-help'))

@@ -95,6 +95,8 @@ export async function delegateAgent(
     skillIds: subSkillIds,
     modelId,
     config: subAgent.defaultConfig,
+    // v0.31.0 C2：子任务标题已是模型产物（taskDesc 来自父任务 LLM），置 'llm' 不再重生成
+    titleSource: 'llm',
   })
 
   // 标记 parentTaskId（createTask 默认 null，此处更新）

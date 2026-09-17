@@ -34,6 +34,11 @@ export default {
         'text-secondary': 'var(--text-secondary)',
         'text-tertiary': 'var(--text-tertiary)',
         'text-disabled': 'var(--text-disabled)',
+        // v0.31.0 D21：第四级文字（此前 token 未定义导致 text-text-faint 空转）
+        'text-faint': 'var(--text-faint)',
+        // v0.31.0 D21：中性填充阶梯（此前 token 未定义导致 bg-fill-* 空转）
+        'fill-secondary': 'var(--fill-secondary)',
+        'fill-tertiary': 'var(--fill-tertiary)',
         'text-inverse': 'var(--text-inverse)',
 
         // Accent 6 档（v0.13 靛紫蓝 #4F46E5）

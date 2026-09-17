@@ -20,6 +20,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../../store'
 import type { TaskProgress, TaskProgressMilestone, TaskProgressStage, TaskProgressStep } from '@shared/types/progress'
+import { isArkworkInternal } from '@shared/utils/paths'
 import type { GraphRow, GraphSnapshot } from '@shared/types/ipc'
 import { EmptyState, Tooltip } from '../ui'
 import { Icon } from '../../icons'
@@ -323,11 +324,12 @@ export function ProgressPanel() {
   const reachedMilestones = progress.milestones.filter((m) => !!m.reachedAt).length
   const totalMilestones = progress.milestones.length
 
-  /** 跳产物：优先 openPreview（浮窗体验更轻），否则回退到 setSelectedFile */
+  /** 跳产物：`.arkwork` 内部产物走只读 openPreview；工作区产物交 setSelectedFile（→ fsSlice.openDoc） */
   const openArtifact = (path: string) => {
-    // .arkwork 下的产物走 openPreview（避免 fs 面板聚焦于内部目录），
-    // 其它路径由 setSelectedFile 接管 FilesPanel 路径
-    if (path.includes('.arkwork/')) {
+    // v0.31.0 B2：判定改用共享纯函数 —— 原先硬编码 `.arkwork/` 字面量，
+    // 对「无尾斜杠的 .arkwork 路径」漏判（`.arkwork` 自身、`x/.arkwork`）。
+    // 工作区产物经 setSelectedFile → openDoc，可编辑则直接进编辑器。
+    if (isArkworkInternal(path)) {
       void openPreview(path)
     } else {
       void setSelectedFile(path)

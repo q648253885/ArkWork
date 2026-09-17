@@ -21,15 +21,24 @@ import { discardIncompletePlanItems } from './gates.js'
  * - append-only 真源不变：只写停止时刻 pump.accumulated 已确认收到的内容
  * - 写一条 L1 reasoning + 一条 status='cancelled' 的 reason step（UI 呈现「已停止」态）
  * - 内部失败静默：不掩盖原始 AbortError 向上抛出
+ *
+ * v0.31.0 B1（C-9 / 正本 G13）：**双通道留存**。
+ * @param channels.thought   叙述通道（`kind='text'`）已累计文本；语义 = content 剥离 SAY 后的剩余物
+ * @param channels.reasoning 思考通道（`kind='reasoning'`）已累计文本；模型无原生思考通道时为空串
+ *
+ * 两通道各自写入 step 的 `thought` / `reasoning`，互不覆盖 —— 此前只落 text 通道，
+ * 而真思考走 reasoning 通道，导致中断场景「连部分思考都没有」（RC-12）。
+ * 两路都为空时直接返回，不产生空 step。
  */
 export async function persistAbortedReason(
   taskId: string,
   iteration: number,
   startedAt: number,
-  text: string,
+  channels: { thought: string; reasoning: string },
 ): Promise<void> {
-  const trimmed = text.trim()
-  if (!trimmed) return
+  const trimmed = channels.thought.trim()
+  const trimmedReasoning = channels.reasoning.trim()
+  if (!trimmed && !trimmedReasoning) return
   try {
     await appendL1({
       taskId,
@@ -37,6 +46,7 @@ export async function persistAbortedReason(
       kind: 'reasoning',
       content: trimmed,
       iteration,
+      raw: trimmedReasoning ? { reasoningContent: trimmedReasoning } : undefined,
     })
     broadcastStep({
       id: genId('step'),
@@ -44,6 +54,7 @@ export async function persistAbortedReason(
       iteration,
       type: 'reason',
       thought: trimmed,
+      reasoning: trimmedReasoning || undefined,
       startedAt,
       durationMs: Date.now() - startedAt,
       status: 'cancelled',

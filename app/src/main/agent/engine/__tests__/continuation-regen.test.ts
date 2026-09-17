@@ -33,7 +33,9 @@ const TURN_END = read('../turn-end.ts')
 const LOOP = read('../loop.ts')
 const ABORT = read('../abort.ts')
 const TASK_TYPES = read('../../../../shared/types/task.ts')
-const META = read('../../../../renderer/store/meta.ts')
+// v0.31.0 B3：deriveConversation 迁至纯模块 store/derive-conversation.ts（meta.ts 转出口），
+// 本用例载体随之收敛到新文件（B1「载体收敛」先例，矩阵 §4.1 已登记）
+const META = read('../../../../renderer/store/derive-conversation.ts')
 const GRAPH_TOOLS = read('../../graph/tools.ts')
 
 /** 截取 startIter > 0 续聊分支的源码（从 `if (startIter > 0)` 到闭合） */

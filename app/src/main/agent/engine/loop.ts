@@ -46,6 +46,8 @@ import {
   type StageGate,
 } from '../../skills/builtin/react-core-skills/stage-gates.js'
 import { appendL1, listEnabledL1, listL1, totalTokens } from '../../memory/l1-working.js'
+// v0.31.0 D22：瞬时提示通道标签（技能体 vs 引擎提示，两类不得共用标签）
+import { labelEngineHint, labelSkillHint } from './hints.js'
 import { persistRawL2 } from '../../memory/l2-file.js'
 import { logger } from '../../system/logger.js'
 import { genId } from '@shared/utils/id'
@@ -337,13 +339,18 @@ export async function runReActLoop(
             `no-tool turn with unfinished work (round ${consecutiveNoToolFinal}) — injected self-heal hint`,
             task.id,
           )
-          await appendL1({
-            taskId: task.id,
-            role: 'user',
-            kind: 'user_message',
-            content: hint,
-            iteration,
-          })
+          // v0.31.0 D22（用户实测缺陷）：此处原为 appendL1 + role=user +
+          // kind=user_message（详见 l1-repair.ts 头注释）。该类别是**渲染层
+          // 判定「这是用户说的话」的唯一依据**（derive-conversation.ts 把所有
+          // 该类条目映射成对话框气泡），于是引擎自救提示被当成用户输入：
+          //   ① 用户重开任务后看到一句自己从没打过的话（本缺陷的报障现象）；
+          //   ② 该提示永久留在 L1，续聊时作为「用户的话」反复进入模型上下文。
+          // 自救提示的语义是「针对上一轮无工具调用」的一次性修正，只在下一轮有效，
+          // 因此改走 pendingSystemHint 瞬时通道（与工具达限 / 空转提示同一管道）：
+          // 只进下一轮 Reason 的尾部消息，不落 L1、不进对话、不污染上下文。
+          // 标签用 `[引擎提示]`（技能来源见下方 labelSkillHint）：本提示是引擎对
+          // 自身检测结果（清单有未完成项 / 上轮无工具调用）的说明，不是技能契约。
+          pendingSystemHint = labelEngineHint(hint)
           continue
         }
         // 模型未调用工具，且清单无未完成项、输出未被截断 → 认为是最终回复
@@ -579,8 +586,11 @@ export async function runReActLoop(
       )
 
       // v0.6.0：捕获任意一个 act 注入的渐进式披露 hint，下一轮 Reason 合并到 system prompt
+      // v0.31.0 D22：本行是通道里**唯一的技能来源**，显式打 `[Skill 指令]` 标签；
+      // 其余（工具达限 / 只读空转 / 清单未完成自愈 / 图锚点）由 reason-phase 兜底为
+      // `[引擎提示]`，两类提示不再共用一个标签。
       for (const r of actResults) {
-        if (r.additionalSystemHint) pendingSystemHint = r.additionalSystemHint
+        if (r.additionalSystemHint) pendingSystemHint = labelSkillHint(r.additionalSystemHint)
       }
 
       let lastObservationSummary = ''

@@ -1,4 +1,20 @@
 {
+  "errorBoundary": {
+    "title": "页面渲染出现异常",
+    "retry": "重试"
+  },
+  "flow": {
+    "showResult": "查看结果",
+    "hideResult": "收起",
+    "truncatedLines": "仅显示前 {{shown}} 行 · 共 {{total}} 行",
+    "truncatedResult": "结果已截断",
+    "searchTotal": "共 {{total}} 条",
+    "dryRun": "预演（不落盘）",
+    "approvalNeedsHuman": "需要人工确认",
+    "approvalReplan": "重新规划待批准",
+    "approvalConverge": "收敛确认",
+    "openFile": "点击打开文件"
+  },
   "common": {
     "cancel": "取消",
     "confirm": "确认",
@@ -284,13 +300,13 @@
       "currentModel": "当前模型",
       "expandLeft": "展开左栏",
       "collapseLeft": "折叠左栏",
-      "expandLeftAria": "展开左栏 ⌘B",
-      "collapseLeftAria": "折叠左栏 ⌘B",
+      "expandLeftAria": "展开左栏 {{kbd}}",
+      "collapseLeftAria": "折叠左栏 {{kbd}}",
       "left": "左栏",
       "expandRight": "展开右栏",
       "collapseRight": "折叠右栏",
-      "expandRightAria": "展开右栏 ⌘J",
-      "collapseRightAria": "折叠右栏 ⌘J",
+      "expandRightAria": "展开右栏 {{kbd}}",
+      "collapseRightAria": "折叠右栏 {{kbd}}",
       "right": "右栏",
       "theme": {
         "light": "浅色",
@@ -737,7 +753,7 @@
       "successRate": "成功率 {{rate}}%",
       "skillsCount": "技能 {{count}}",
       "startTask": "启动任务",
-      "edit": "编辑"
+        "edit": "编辑"
     },
     "kb": {
       "title": "知识库",
@@ -1301,8 +1317,11 @@
         "split": "分屏",
         "desktop": "桌面",
         "tablet": "平板",
-        "mobile": "手机"
-      }
+        "mobile": "手机",
+        "readonly": "只读渲染",
+        "edit": "编辑"
+      },
+      "editor": "编辑器"
     },
     "fallback": {
       "metaError": "无法读取文件元数据",
@@ -1372,19 +1391,19 @@
   "topbar": {
     "search": {
       "desc": "搜索任务、文件、Agent、命令、设置项",
-      "aria": "打开 Quick Action 搜索 ⌘K",
+      "aria": "打开 Quick Action 搜索 {{kbd}}",
       "hint": "搜索任务、文件、Agent、命令"
     },
     "settings": {
       "label": "设置",
       "desc": "模型、工作区、外观、快捷键、高级——全部配置只在这里",
-      "aria": "设置 ⌘,"
+      "aria": "设置 {{kbd}}"
     },
     "workspace": {
       "switchCap": "{{path}} ｜ 切换工作区",
       "switch": "切换工作区",
       "desc": "在哪干活：切换工作区，任务与记忆随之隔离",
-      "aria": "切换工作区 ⌘⇧W",
+      "aria": "切换工作区 {{kbd}}",
       "wsLabel": "Agent 工作区",
       "select": "选择工作区",
       "listTitle": "工作区",
@@ -1449,6 +1468,18 @@
     "rerunAria": "重新执行该任务"
   },
   "thought": {
+    "label": "思考",
+    "placeholder": {
+      "failed": "思考失败",
+      "directExec": "本轮直接执行，无思考输出",
+      "budgetExhausted": "思考占用全部输出预算，已自动重试",
+      "noChannel": "当前模型未提供思考内容"
+    },
+    "source": {
+      "native": "原生思考",
+      "content": "文本思考",
+      "none": "无来源"
+    },
     "failed": "执行失败",
     "summary": {
       "thoughtTime": "已思考 {{time}}s",
@@ -1961,7 +1992,7 @@
   },
   "help": {
     "title": "ArkWork 帮助中心",
-    "subtitle": "覆盖全部主要功能 · ⌘? 打开 / 关闭",
+    "subtitle": "覆盖全部主要功能 · {{kbd}} 打开 / 关闭",
     "closeLabel": "关闭帮助",
     "tryNow": "现在去试试",
     "privacyFooter": "隐私 · ArkWork 默认本地优先。对话、记忆、知识库索引落本地 SQLite 与文件系统，模型调用由你在设置中显式配置的 API Key 发起。",
@@ -1974,6 +2005,13 @@
     "shortcuts": {
       "title": "快捷键总表",
       "subtitle": "全局快捷键参考",
+      "group": {
+        "global": "全局",
+        "inspector": "Inspector",
+        "help": "帮助",
+        "editor": "编辑器",
+        "region": "交互区"
+      },
       "desc": {
         "quickAction": "Quick Action（搜索 / 命令 / @ 提及 / # 话题）",
         "quickOpen": "QuickOpen：按名字跳转到任务、文件、技能",
@@ -1996,6 +2034,8 @@
         "inspFiles": "Inspector：文件（Files）",
         "inspLogs": "Inspector：日志（Logs）",
         "inspBrowser": "Inspector：浏览器（Browser）",
+        "inspTerminal": "Inspector：终端（Terminal）",
+        "permissionCycle": "循环切换权限模式（表单内保留原生 Tab 跳转）",
         "esc": "按优先级关闭浮层 / ModulePage / Inspector"
       }
     },
@@ -2495,6 +2535,71 @@
       "degradedEntryNote": "以上入口将在 v0.30.1 提供；任务已按扁平清单继续执行",
       "nodeFocusHint": "已在任务面板中定位该节点",
       "failed": "操作失败，请重试"
+    }
+  },
+  "editor": {
+    "status": {
+      "lineCol": "行 {{line}}, 列 {{col}}",
+      "dirty": "未保存",
+      "saving": "保存中…",
+      "saved": "已保存",
+      "inSync": "缓冲与磁盘一致",
+      "conflict": "有冲突",
+      "readonly": "只读",
+      "lines": "{{count}} 行"
+    },
+    "refreshDirtyHint": "文件有未保存改动，请先保存再刷新",
+    "readonly": {
+      "title": "以只读打开",
+      "toast": "「{{name}}」以只读打开：{{reason}}",
+      "reason": {
+        "deleted": "文件已被删除",
+        "outsideWorkspace": "路径不在工作区内",
+        "binary": "二进制文件",
+        "tooLarge": "文件过大",
+        "permission": "缺少写权限",
+        "agentWriting": "agent 正在写入",
+        "nonUtf8": "非 UTF-8 编码"
+      },
+      "action": {
+        "reveal": "在文件夹中显示",
+        "retry": "重新探测",
+        "saveAs": "另存恢复",
+        "close": "关闭"
+      }
+    },
+    "conflict": {
+      "title": "保存冲突：磁盘上的文件在你编辑期间已被修改",
+      "desc": "ArkWork 不会自动合并——请选择保留哪一份。",
+      "toast": "磁盘上的文件在你编辑期间已被修改，保存已阻止",
+      "diff": {
+        "toggle": "对比差异",
+        "hide": "收起对比",
+        "disk": "磁盘版",
+        "mine": "我的版本",
+        "unreadable": "磁盘版内容不可解码，无法并排显示"
+      },
+      "action": {
+        "overwrite": "覆盖磁盘（用我的版本）",
+        "reload": "还原磁盘（丢弃我的改动）",
+        "later": "稍后处理"
+      },
+      "overwriteHint": "写入前会自动存入本地历史，可撤销",
+      "reloadHint": "丢弃前同样先存入本地历史"
+    },
+    "save": {
+      "action": "保存"
+    },
+    "mode": {
+      "edit": "编辑",
+      "render": "只读渲染"
+    },
+    "close": {
+      "title": "关闭 Tab 有未保存改动",
+      "desc": "{{name}} 有未保存的改动。关闭前要保存吗？",
+      "save": "保存并关闭",
+      "discard": "丢弃改动",
+      "cancel": "取消"
     }
   }
 }

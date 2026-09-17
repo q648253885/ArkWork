@@ -129,7 +129,7 @@ async function walk(
   return nodes
 }
 
-function detectLanguage(ext: string): string {
+export function detectLanguage(ext: string): string {
   const map: Record<string, string> = {
     md: 'markdown',
     markdown: 'markdown',
@@ -149,6 +149,12 @@ function detectLanguage(ext: string): string {
     sh: 'bash',
   }
   return map[ext] ?? 'text'
+}
+
+/** 从路径取扩展名后查表（v0.31.0 B2：编辑器文本读路径用；`detectLanguage` 只接受扩展名） */
+export function detectLanguageByPath(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  return detectLanguage(ext)
 }
 
 /** 图片扩展名：读取时以 base64 dataURL 返回，供右侧预览渲染（参考 GitHub / VS Code 图片查看） */

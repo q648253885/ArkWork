@@ -5,6 +5,32 @@
  * ============================================================ */
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
 import type { ArkApi, PermissionModeEvent } from '@shared/types/ipc'
+import { decodeFsError } from '@shared/utils/fs-error'
+import type { FsBatchEvent, FsErrorCode } from '@shared/types/fs'
+
+/**
+ * v0.31.0 B2：把主进程经 `throwEncodedFsError` 包装过的 FsError 还原为
+ * 带 `code` / `payload` 的 Error。
+ *
+ * 原因：`ipcRenderer.invoke` 的 reject 只会保留 Error.message，
+ * 而 §5.2 契约要求渲染层能按 `E_CONFLICT` 分支并读取 `ConflictInfo` 载荷。
+ * 本函数是 preload 侧**唯一**的非纯转发逻辑，只做载荷还原、不做类型重声明。
+ */
+async function invokeFs<T>(channel: string, ...args: unknown[]): Promise<T> {
+  try {
+    return (await ipcRenderer.invoke(channel, ...args)) as T
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const decoded = decodeFsError(message)
+    if (decoded) {
+      const out = new Error(decoded.message) as Error & { code?: FsErrorCode; payload?: unknown }
+      out.code = decoded.code
+      out.payload = decoded.payload
+      throw out
+    }
+    throw err
+  }
+}
 
 const ark: ArkApi = {
   task: {
@@ -236,6 +262,25 @@ const ark: ArkApi = {
     setArtifactsDir: (dir) => ipcRenderer.invoke('fs:set-artifacts-dir', dir),
     cleanArkworkTemp: (maxAgeDays) => ipcRenderer.invoke('fs:clean-arkwork-temp', maxAgeDays),
     getArkworkSize: () => ipcRenderer.invoke('fs:get-arkwork-size'),
+    /* ---- v0.31.0 B2：编辑器文件能力（§5.3） ---- */
+    statPath: (path) => invokeFs('fs:stat-path', path),
+    probeText: (path) => invokeFs('fs:probe-text', path),
+    readText: (path) => invokeFs('fs:read-text', path),
+    writeText: (req) => invokeFs('fs:write-text', req),
+    hashFile: (path) => invokeFs('fs:hash-file', path),
+    /* ---- v0.31.0 B5：文件能力 P1（§5.3，类型全部从 @shared/types 转发，不重声明） ---- */
+    createFile: (parentDir, name) => invokeFs('fs:create-file', { parentDir, name }),
+    createFolder: (parentDir, name) => invokeFs('fs:create-folder', { parentDir, name }),
+    move: (from, to) => invokeFs('fs:move', { from, to }),
+    listPaths: (opts) => invokeFs('fs:list-paths', opts),
+    watchStart: (opts) => invokeFs('fs:watch-start', opts),
+    watchStop: () => invokeFs('fs:watch-stop'),
+    watchStatus: () => invokeFs('fs:watch-status'),
+    onBatch: (cb) => {
+      const handler = (_e: IpcRendererEvent, ev: FsBatchEvent) => cb(ev)
+      ipcRenderer.on('fs:batch', handler)
+      return () => ipcRenderer.removeListener('fs:batch', handler)
+    },
   },
   log: {
     list: (taskId) => ipcRenderer.invoke('log:list', taskId),

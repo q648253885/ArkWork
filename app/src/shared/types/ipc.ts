@@ -38,6 +38,16 @@ import type {
   TaskNode,
   Tier,
 } from './graph'
+// v0.31.0 B2：编辑器文件能力的类型真源（shared/types/fs）
+import type {
+  FsBatchEvent,
+  ListPathsResult,
+  ReadTextResult,
+  TextProbe,
+  WatchState,
+  WriteTextRequest,
+  WriteTextResult,
+} from './fs'
 
 /** IPC 通道命名约定：{domain}:{action} */
 
@@ -86,11 +96,24 @@ export const TaskChannel = {
   ProgressClear: 'task:progress:clear',
 } as const
 
+/**
+ * v0.31.0 B1：流式增量类型（通道维度）。
+ * - `text`      = assistant content（剥离协议标记后的叙述/正文）
+ * - `reasoning` = 思考通道（原生 reasoning_content，或文本思考）
+ *
+ * 为什么与 `scope` 正交而不扩 `scope` 枚举：`scope` 回答"哪条管线"（turn / chat），
+ * `kind` 回答"哪条通道"。扩 `scope` 会让管线数 × 通道数变成枚举值的笛卡尔积
+ * （未来加"工具参数流式"就要再加 2 个 scope）；加 `kind` 则新增通道零改 `scope`。
+ */
+export type TextDeltaKind = 'text' | 'reasoning'
+
 /** v0.27.0 R1：流式文本增量负载（task:text-delta 通道；seq 单调递增，乱序由 Renderer 丢弃） */
 export interface TaskTextDeltaPayload {
   taskId: string
   /** turn = ReAct 主循环 Reason 阶段；chat = runChatOnce 快速回复 */
   scope: 'turn' | 'chat'
+  /** v0.31.0 B1 新增：区分文本通道与思考通道（渲染层缓冲 key 的第三维） */
+  kind: TextDeltaKind
   seq: number
   /** 相对上一批次的增量文本（非全量） */
   text: string
@@ -125,11 +148,21 @@ export interface TaskCreateInput {
   mcpIds?: string[]
   modelId?: string
   config?: TaskConfig
+  /**
+   * v0.31.0 C2：标题来源标记。Renderer 常规创建不传（undefined = 可被 LLM 升级）；
+   * main 端 automation 置 'user'、delegate 置 'llm'。
+   */
+  titleSource?: 'user' | 'llm'
 }
 
 export interface TaskUpdatePatch {
   id: string
   title?: string
+  /**
+   * v0.31.0 C2：标题来源标记。renameTask（用户手动改名）传 'user' 锁定；
+   * 续聊机械改名直连 update 不带本字段（保留即时反馈且不锁死 LLM 升级）。
+   */
+  titleSource?: 'user' | 'llm'
   status?: TaskStatus
   agentId?: string
   skillIds?: string[]
@@ -1107,6 +1140,38 @@ export interface ArkApi {
     cleanArkworkTemp: (maxAgeDays?: number) => Promise<FsCleanResult>
     /** v0.15.x Task 3：获取 .arkwork 目录总大小（字节） */
     getArkworkSize: () => Promise<number>
+    /* ---- v0.31.0 B2：编辑器文件能力（04-system-design §5.3） ---- */
+    /** 单路径探测（= probeText 的语义化别名） */
+    statPath: (path: string) => Promise<TextProbe>
+    /** 编码 / EOL / BOM / 只读原因 / 快速哈希探测 */
+    probeText: (path: string) => Promise<TextProbe>
+    /** 读文本 + probe —— 编辑器打开的唯一入口 */
+    readText: (path: string) => Promise<ReadTextResult>
+    /**
+     * 原子写 + CAS 冲突检测 + 编码保真。
+     * 失败时 reject 的 Error 带 `code`（`E_CONFLICT` 等）与 `payload`（ConflictInfo）——
+     * 由 shared/utils/fs-error 在 preload 侧还原（Electron 原生不保真 Error 自定义属性）。
+     */
+    writeText: (req: WriteTextRequest) => Promise<WriteTextResult>
+    /** 单文件快速哈希（与 writeText 的 revision 同口径） */
+    hashFile: (path: string) => Promise<string>
+    /* ---- v0.31.0 B5：文件能力 P1（04-system-design §5.3） ---- */
+    /** 新建文件（先落盘再打开，无 Untitled 态 —— J6），返回实际路径 */
+    createFile: (parentDir: string, name: string) => Promise<{ path: string }>
+    /** 新建文件夹，返回实际路径 */
+    createFolder: (parentDir: string, name: string) => Promise<{ path: string }>
+    /** 树内拖拽移动 / 重命名（to = 完整目标路径），返回实际路径 */
+    move: (from: string, to: string) => Promise<{ path: string }>
+    /** 扁平路径清单（QuickOpen 候选；ignore 与 chokidar 共用同一份配置） */
+    listPaths: (opts?: { root?: string; limit?: number }) => Promise<ListPathsResult>
+    /** 启动监听，返回首个快照（initial.added = 全量首快照） */
+    watchStart: (opts?: { root?: string }) => Promise<{ root: string; initial: FsBatchEvent }>
+    /** 停止监听 */
+    watchStop: () => Promise<void>
+    /** 查询监听态（失败横幅的「重试」前判定） */
+    watchStatus: () => Promise<WatchState>
+    /** 订阅变更批次；返回取消订阅函数（沿用 onAppend 的清理式签名） */
+    onBatch: (cb: (e: FsBatchEvent) => void) => () => void
   }
   log: {
     list: (taskId?: string) => Promise<LogEntry[]>

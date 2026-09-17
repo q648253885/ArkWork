@@ -16,6 +16,8 @@ import {
   type FileToolContext,
 } from './file-tool-safety.js'
 import { invalidateReadsOf } from './read-repeat-guard.js'
+// v0.31.0 B5：agent 写盘登记（chokidar 批次归因 origin='agent' 的依据；TC-WATCH-003）
+import { markAgentWrite } from '../../fs/agent-writes.js'
 import { resolveEffectiveMode } from '../session-mode.js'
 import type { SkillContext } from '../registry.js'
 
@@ -98,6 +100,8 @@ export async function fileEditor(
     }
 
     await writeFile(abs, newContent, 'utf-8')
+    // v0.31.0 B5：登记 agent 写盘（5s TTL；未登记只会降级为 external，事件不丢 —— §6.4）
+    markAgentWrite(abs)
     await logInfo('Tool', `file-editor: ${rawPath} replacements=${replacements}`, ctx.taskId)
     // v0.24.0：文件已变更，清除该路径的重复读记录（改后重读验证是合法行为）
     invalidateReadsOf(ctx as SkillContext, rawPath)

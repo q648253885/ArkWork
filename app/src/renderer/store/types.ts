@@ -36,10 +36,16 @@ import type {
   ToolConfirmRequest,
   ToolProgressEvent,
   TaskTextDeltaPayload,
+  TextDeltaKind,
   ConfirmRespondReason,
   Locale,
 } from '@shared/types/ipc'
 import type { PermissionMode, ResolvedRules } from '@shared/types/permission'
+// v0.31.0 B2：编辑器文件能力的类型真源
+import type { ConflictInfo, EditorDocMeta } from '@shared/types/fs'
+// v0.31.0 B3：交互区展示模型（层级骨架）
+import type { FlowViewMode } from '@shared/types/flow'
+import type { SaveOutcome } from '../services/editorDoc'
 import type {
   ConversationItem,
   Automation,
@@ -86,7 +92,16 @@ export interface DockPrefs {
   customized: boolean
 }
 export type ModelHealth = 'unconfigured' | 'ok' | 'missing' | 'disabled'
-export type RendererKind = 'markdown' | 'browser' | 'code' | 'image' | 'svg' | 'table' | 'fallback'
+/** v0.31.0 B2：新增 'editor' —— 语义是「这个 Tab 当前处于编辑态」（§3.5） */
+export type RendererKind =
+  | 'markdown'
+  | 'browser'
+  | 'code'
+  | 'image'
+  | 'svg'
+  | 'table'
+  | 'fallback'
+  | 'editor'
 
 export interface PreviewTab {
   id: string
@@ -110,6 +125,35 @@ export interface MinimizedCapsule {
   title: string
   icon: string
   tabCount: number
+  /** v0.31.0 C3：整窗快照 —— 最小化时留存 tabs/bounds/pinned，恢复时按此重建（修复「恢复成空窗」） */
+  snapshot: PreviewWindowState
+}
+
+/* ============================================================
+ * v0.31.0 B3 — 交互区 UI 状态（正本 interaction 07 §2.2 照引）
+ * ============================================================ */
+
+/** 单块 UI 状态（展开态需在虚拟化后存活，见 06 §6.2 L13） */
+export interface BlockUiState {
+  open: boolean
+  /** 用户是否手动干预过（04 §5.2 G6 ①；沿用 v0.30.2 的三态语义） */
+  userOpen: boolean | null
+  /** 4.2 §5.2 G6 ③：最短展示保护用的首次可见时刻 */
+  firstVisibleAt?: number
+}
+
+export interface TurnUiState { collapsed: boolean }
+
+/** RootState 的 flow 子状态（uiSlice 认领） */
+export interface FlowUiState {
+  /** 视图模式（03 §六），默认 'standard' */
+  viewMode: FlowViewMode
+  /** 全局显示思考开关（03 §6.1），默认 true */
+  showThinking: boolean
+  blockUiState: Record<string, BlockUiState>
+  turnUiState: Record<string, TurnUiState>
+  /** 滚动锚点（06 §5.2 L10） */
+  scrollAnchorByTask: Record<string, { blockId: string; offset: number }>
 }
 
 /** 工作区类型 — 关联一个真实文件夹目录 */
@@ -234,12 +278,17 @@ export interface AppState {
   // v0.7.0 F710：PreviewWindow 浮窗
   previewWindow: PreviewWindowState | null
   minimizedPreviews: MinimizedCapsule[]
-  openPreview: (path: string, opts?: { pinned?: boolean }) => Promise<void>
+  openPreview: (
+    path: string,
+    opts?: { pinned?: boolean; rendererOverride?: RendererKind },
+  ) => Promise<void>
   openPreviewUrl: (url: string) => void
   closePreview: () => void
   togglePreviewPin: () => void
   minimizePreview: () => void
   restoreMinimized: (id: string) => void
+  /** v0.31.0 C3：丢弃指定最小化窗（胶囊 ✕ = 仅移除，不恢复、不动现窗） */
+  discardMinimized: (id: string) => void
   closePreviewTab: (tabId: string) => void
   setActivePreviewTab: (tabId: string) => void
   updatePreviewBounds: (bounds: PreviewWindowState['bounds']) => void
@@ -508,12 +557,20 @@ export interface AppState {
   updateStep: (step: ReActStep) => void
 
   // ---- v0.27.0 R1：流式文本增量缓冲（渲染加速通道，非数据源） ----
-  /** key = `${taskId}:${scope}`；seq 为该流最新已收序号，text 为累计文本 */
+  /**
+   * v0.31.0 B1：key 由二维升为**三维** —— `${taskId}:${scope}:${kind}`。
+   * 此前只有 `${taskId}:${scope}`，思考与叙述会撞同一缓冲（「真思考进不了 UI」的次生因）。
+   * seq / text 语义不变；类型无需改动，仅 key 语义变更。
+   */
   streamBuffers: Record<string, { seq: number; text: string }>
   /** 收到 task:text-delta 时调用；接受顺序续写（seq===cur+1）或重启（seq===1 截断），乱序丢弃 */
   applyTextDelta: (payload: TaskTextDeltaPayload) => void
-  /** 权威内容落地后清除缓冲（scope 省略 = 清该 task 全部作用域） */
-  clearStreamBuffer: (taskId: string, scope?: 'turn' | 'chat') => void
+  /**
+   * 权威内容落地后清除缓冲。
+   * @param scope 省略 = 清该 task 全部作用域
+   * @param kind  省略 = 清该 (task, scope) 下全部通道
+   */
+  clearStreamBuffer: (taskId: string, scope?: 'turn' | 'chat', kind?: TextDeltaKind) => void
 
   // ---- v0.14.0 Task 4：按工具维度的并行 Act 进度（per-requestId 聚合） ----
   /** 当前任务在飞行的工具进度（按 requestId 索引） */
@@ -539,6 +596,39 @@ export interface AppState {
   /** 派生：当前任务的对话流 */
   conversation: ConversationItem[]
 
+  /* ============================================================
+   * v0.31.0 B2 — 文件能力（fsSlice 认领，§5.4.4）
+   * 唯一状态源：组件不得自持文件/文档副本（C-12 / §3.3 硬规则 3）
+   * 文本**不在此**（正本 J12：文本真源是 CM6 EditorState）
+   * ============================================================ */
+  root: string | null
+  /** 打开中的文档元数据（path → meta） */
+  docs: Record<string, EditorDocMeta>
+  /** 冲突中的路径 → ConflictInfo */
+  conflicts: Record<string, ConflictInfo>
+  /** 最近关闭的文档（浮窗空态用） */
+  recentlyClosed: Array<{ path: string; closedAt: number }>
+  /** 当前聚焦的文档路径 */
+  activeDocPath: string | null
+  /** 刷新文件树（B2 委托既有 refreshFiles；B5 接管为 tree） */
+  refreshTree: () => Promise<void>
+  /** 打开文档并据 `editable` 决定 Tab 是否进编辑态 */
+  openDoc: (path: string, mode?: 'preview' | 'pinned' | 'edit') => Promise<void>
+  /** 关闭文档；dirty / 保存中 → 返回 false（禁止静默丢弃，A5/A6） */
+  closeDoc: (path: string) => boolean
+  /** 丢弃改动并强制关闭（须先取得用户确认） */
+  closeDocForce: (path: string) => void
+  markDirty: (path: string, dirty: boolean) => void
+  touchDoc: (path: string) => void
+  setConflict: (path: string, c: ConflictInfo | null) => void
+  setDocViewMode: (path: string, viewMode: EditorDocMeta['viewMode']) => void
+  /** 保存文档（force = 走「覆盖磁盘」分支，跳过 CAS） */
+  saveDoc: (path: string, opts?: { force?: boolean }) => Promise<SaveOutcome>
+  /** 还原磁盘（丢弃我的改动） */
+  revertDocToDisk: (path: string) => Promise<void>
+  /** 重新探测（只读态出口）；文档 dirty 时不动 hash 基线 */
+  reprobeDoc: (path: string) => Promise<void>
+
   // ---- 文件树 ----
   files: FsNode[]
   selectedFile: string | null
@@ -546,6 +636,16 @@ export interface AppState {
   selectedFileLanguage: string
   setSelectedFile: (path: string | null) => Promise<void>
   refreshFiles: (taskId?: string) => Promise<void>
+
+  /* ============================================================
+   * v0.31.0 B3 — 交互区 flow 子状态（uiSlice 认领，正本 07 §2.2）
+   * ============================================================ */
+  flow: FlowUiState
+  setFlowViewMode: (mode: FlowViewMode) => void
+  setFlowShowThinking: (b: boolean) => void
+  /** 置位即视为用户手动干预（userOpen 三态语义） */
+  setBlockOpen: (blockId: string, open: boolean) => void
+  setTurnCollapsed: (turnId: string, collapsed: boolean) => void
 
   // ---- Logs ----
   logs: LogEntry[]

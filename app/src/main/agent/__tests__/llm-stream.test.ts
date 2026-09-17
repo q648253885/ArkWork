@@ -70,25 +70,44 @@ function makeAdapter(opts: {
 describe('createTextDeltaPump', () => {
   it('首包立即发出（seq=1，首字延迟优先）', () => {
     const sent: TaskTextDeltaPayload[] = []
-    const pump = createTextDeltaPump('t1', 'turn', (p) => sent.push(p))
+    const pump = createTextDeltaPump('t1', 'turn', 'text', (p) => sent.push(p))
     pump.push('你')
     assert.equal(sent.length, 1)
     assert.equal(sent[0].seq, 1)
     assert.equal(sent[0].taskId, 't1')
     assert.equal(sent[0].scope, 'turn')
+    // v0.31.0 B1：通道维度随载荷下发（渲染层据此分缓冲）
+    assert.equal(sent[0].kind, 'text')
     assert.equal(sent[0].text, '你')
+  })
+
+  it('v0.31.0 B1：kind 维度独立计 seq —— 同一 task/scope 的 text 与 reasoning 泵互不干扰', () => {
+    const sent: TaskTextDeltaPayload[] = []
+    const textPump = createTextDeltaPump('t1', 'turn', 'text', (p) => sent.push(p))
+    const rsnPump = createTextDeltaPump('t1', 'turn', 'reasoning', (p) => sent.push(p))
+    textPump.push('叙述')
+    rsnPump.push('思考')
+    assert.equal(sent.length, 2)
+    // 两条泵各自从 seq=1 起算（互不撞 seq，也就不会把对方判成乱序包丢弃）
+    assert.deepEqual(
+      sent.map((p) => [p.kind, p.seq, p.text]),
+      [
+        ['text', 1, '叙述'],
+        ['reasoning', 1, '思考'],
+      ],
+    )
   })
 
   it('空增量不触发发送', () => {
     const sent: TaskTextDeltaPayload[] = []
-    const pump = createTextDeltaPump('t1', 'turn', (p) => sent.push(p))
+    const pump = createTextDeltaPump('t1', 'turn', 'text', (p) => sent.push(p))
     pump.push('')
     assert.equal(sent.length, 0)
   })
 
   it('到达密集 → 长窗口（80ms）攒批合并', async () => {
     const sent: TaskTextDeltaPayload[] = []
-    const pump = createTextDeltaPump('t1', 'turn', (p) => sent.push(p))
+    const pump = createTextDeltaPump('t1', 'turn', 'text', (p) => sent.push(p))
     pump.push('a') // 立即
     await sleep(10)
     pump.push('b')
@@ -102,7 +121,7 @@ describe('createTextDeltaPump', () => {
 
   it('稀疏到达 → 短窗口（40ms）快发', async () => {
     const sent: TaskTextDeltaPayload[] = []
-    const pump = createTextDeltaPump('t1', 'turn', (p) => sent.push(p))
+    const pump = createTextDeltaPump('t1', 'turn', 'text', (p) => sent.push(p))
     pump.push('a')
     await sleep(200) // 拉开间隔 → gap ≥ 100ms
     pump.push('b')
@@ -116,7 +135,7 @@ describe('createTextDeltaPump', () => {
 
   it('flush() 立即清空 pending 并发送', async () => {
     const sent: TaskTextDeltaPayload[] = []
-    const pump = createTextDeltaPump('t1', 'chat', (p) => sent.push(p))
+    const pump = createTextDeltaPump('t1', 'chat', 'text', (p) => sent.push(p))
     pump.push('x')
     await sleep(10)
     pump.push('y')
@@ -128,7 +147,7 @@ describe('createTextDeltaPump', () => {
 
   it('accumulated 含未 flush 的 pending（中断部分落盘依据）', () => {
     const sent: TaskTextDeltaPayload[] = []
-    const pump = createTextDeltaPump('t1', 'turn', (p) => sent.push(p))
+    const pump = createTextDeltaPump('t1', 'turn', 'text', (p) => sent.push(p))
     pump.push('先想')
     pump.push('后答')
     assert.equal(pump.accumulated, '先想后答')
@@ -137,7 +156,7 @@ describe('createTextDeltaPump', () => {
 
   it('sender 抛错静默吞掉，不阻断 push/flush', () => {
     let boom = false
-    const pump = createTextDeltaPump('t1', 'turn', () => {
+    const pump = createTextDeltaPump('t1', 'turn', 'text', () => {
       boom = true
       throw new Error('renderer gone')
     })

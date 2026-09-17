@@ -78,7 +78,8 @@ export function QuickAction() {
   const files = useStore((s) => s.files)
   const createTask = useStore((s) => s.createTask)
   const setSelectedAgent = useStore((s) => s.setSelectedAgent)
-  const openPreview = useStore((s) => s.openPreview)
+  // v0.31.0 B2：打开文件走 `openDoc`（探针判定可编辑 → 编辑器 Tab）
+  const openDoc = useStore((s) => s.openDoc)
   const setQuickOpenOpen = useStore((s) => s.setQuickOpenOpen)
   const toggleLeftNav = useStore((s) => s.toggleLeftNav)
   const toggleRightDock = useStore((s) => s.toggleRightDock)
@@ -190,7 +191,7 @@ export function QuickAction() {
         hint: file.path,
         icon: 'File',
         source: 'file',
-        action: () => void openPreview(file.path),
+        action: () => void openDoc(file.path),
       })
     }
 
@@ -202,7 +203,7 @@ export function QuickAction() {
     files,
     createTask,
     setSelectedAgent,
-    openPreview,
+    openDoc,
     setQuickOpenOpen,
     toggleLeftNav,
     toggleRightDock,

@@ -19,6 +19,8 @@ import { conversationSlice } from './slices/conversationSlice'
 import { catalogSlice } from './slices/catalogSlice'
 import { marketSlice } from './slices/marketSlice'
 import { permissionSlice } from './slices/permissionSlice'
+// v0.31.0 B2：文件能力 slice（文档 / 冲突 / 最近关闭）
+import { fsSlice } from './slices/fsSlice'
 import type { AppState } from './types'
 
 export const useStore = create<AppState>((set, get, api) => ({
@@ -30,6 +32,7 @@ export const useStore = create<AppState>((set, get, api) => ({
   ...catalogSlice(set, get, api),
   ...marketSlice(set, get, api),
   ...permissionSlice(set, get, api),
+  ...fsSlice(set, get, api),
 
 
   // 初始化 — 启动时调用

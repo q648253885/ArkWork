@@ -3,6 +3,12 @@
  * 清单状态推进 / 消息与工具组装 / system 契约装配（前缀缓存稳定）/ 流式 LLM 调用
  * （completeWithStream + text-delta 泵）/ 思考预算重试 / Reactive Fallback 压缩重试 /
  * reasoning 落盘 L1 + reason step 广播 + reason_end 事件。
+ *
+ * v0.31.0 B1（交互区管道，修 RC-1 / RC-2 / RC-3 / RC-12）：
+ * - 双通道贯通：`onReasoning` 接线到独立 `reasoning` 泵（此前全仓库无消费方）
+ * - 流式期 delta 级协议剥离：`createSayStripper()` 拦下裸 `<<<SAY>>>` 标记
+ * - 原生思考独立落 step.reasoning（不改 `thought` 的既有语义，避免答复被推理链污染）
+ * - 中断双通道留存（见 abort.ts）
  */
 
 import type { Task } from '@shared/types/task'
@@ -12,6 +18,8 @@ import type { LlmCompleteResponse } from '../../llm/adapter.js'
 import { getAdapter, getModel } from '../../llm/registry.js'
 import { callLlmWithRetry, withLlmTimeout, isContextOverflowError } from '../llm-call.js'
 import { completeWithStream, createTextDeltaPump, type TextDeltaPump } from '../llm-stream.js'
+// v0.31.0 B1：流式期 delta 级协议剥离（与落定期 extractSayMarker 互补，不改最终数据）
+import { createSayStripper } from '../../llm/stream-strip.js'
 import { assembleSystemPrompt } from '../prompt/sections.js'
 import { appendL1 } from '../../memory/l1-working.js'
 import { compressMemory } from '../../ipc/memory.js'
@@ -28,6 +36,8 @@ import { markPlanItemInProgress } from '../graph/plan-sync.js'
 import { assembleMessages, assembleTools } from './messages.js'
 import { emitContextSizeReport } from './context.js'
 import { persistAbortedReason } from './abort.js'
+// v0.31.0 D22：瞬时提示通道标签（产出方自带，此处兜底）
+import { labelEngineHint } from './hints.js'
 import type { AlwaysOnContracts } from './run-setup.js'
 
 export interface ReasonPhaseArgs {
@@ -101,8 +111,16 @@ export async function runReasonPhase(
 
   // v0.20.0 缓存优化：动态 skill 指令不再拼进 system prompt（会破坏前缀缓存），
   // 改为追加到消息尾部（瞬时、不进 L1）。system 保持整轮字节稳定才能命中缓存。
+  //
+  // v0.31.0 D22：通道标签改由**产出方自带**（见 engine/hints.ts）——
+  // 本通道同时承载技能体与引擎运行期提示，此前一律套 `[Skill 指令]`，
+  // 使「清单未完成自救提示」被模型读成技能契约。此处只做兜底：产出方漏标时
+  // 补 `[引擎提示]`，保证提示不会以「用户原话」形态出现在模型上下文里。
   if (pendingSystemHint) {
-    messages = [...messages, { role: 'user', content: `[Skill 指令]\n${pendingSystemHint}` }]
+    const labeled = pendingSystemHint.startsWith('[')
+      ? pendingSystemHint
+      : labelEngineHint(pendingSystemHint)
+    messages = [...messages, { role: 'user', content: labeled }]
   }
 
   // 合并 system prompt + 人格段 + 工作区路径 + 记忆注入
@@ -142,14 +160,22 @@ export async function runReasonPhase(
   // v0.27.0 R1：统一走 completeWithStream —— 流式增量经 text-delta 泵广播给渲染层，
   // 返回值仍为聚合后的完整响应；落盘纪律不变（delta 仅渲染加速，非数据源）。
   const sendTextDelta = (p: Parameters<typeof broadcastTextDelta>[0]): void => broadcastTextDelta(p)
-  // 当前尝试的增量泵引用（abort 时读取已累计文本做部分落盘）。
+  // 当前尝试的两条增量泵引用（abort 时读取已累计文本做双通道部分落盘）。
   // 用 holder 对象：闭包内赋值 TS 不追踪，直接用 let 变量会被窄化为 never。
   const turnPumpRef: { current: TextDeltaPump | null } = { current: null }
+  const reasonPumpRef: { current: TextDeltaPump | null } = { current: null }
   const callTurnLlm = (maxTokensOverride?: number): Promise<LlmCompleteResponse> =>
     withLlmTimeout(
       (sig) => {
-        const pump = createTextDeltaPump(task.id, 'turn', sendTextDelta)
-        turnPumpRef.current = pump
+        // v0.31.0 B1（修 RC-1）：双通道分离 —— 叙述与思考各自一条泵、各自计 seq。
+        // 此前只接线 onText，`onReasoning` 全仓库无消费方 → 真思考从未进入 UI。
+        const textPump = createTextDeltaPump(task.id, 'turn', 'text', sendTextDelta)
+        const reasoningPump = createTextDeltaPump(task.id, 'turn', 'reasoning', sendTextDelta)
+        turnPumpRef.current = textPump
+        reasonPumpRef.current = reasoningPump
+        // v0.31.0 B1（修 RC-2）：流式期剥离 `<<<SAY>>>…<<<END>>>`。
+        // 此前流式缓冲装的是 content 原文（含裸标记），却被渲染成「思考中」块 —— 语义错位。
+        const stripper = createSayStripper()
         return completeWithStream(
           adapter,
           {
@@ -160,10 +186,26 @@ export async function runReasonPhase(
             maxTokens: maxTokensOverride ?? task.config.maxTokens,
             signal: sig,
           },
-          { onText: (d) => pump.push(d) },
+          {
+            onText: (d) => {
+              for (const chunk of stripper.push(d)) {
+                // 只有 text 通道入泵；say 通道在流式期不外发（落定期由 step.say 权威接管，
+                // 流式期混入任何通道都会造成落定瞬间的内容跳变）。
+                if (chunk.channel === 'text') textPump.push(chunk.text)
+              }
+            },
+            onReasoning: (d) => reasoningPump.push(d),
+          },
         ).then((resp) => {
-          // 完整响应到达前把残余攒批立即发出（权威 step 随后清空渲染缓冲）
-          pump.flush()
+          // ① 残余攒批立即发出（权威 step 随后按「取较长者」交接）
+          textPump.flush()
+          reasoningPump.flush()
+          // ② 剥离器兜底收尾：未闭合的 SAY / 半截开标记一律回退 text（正本 R5）
+          for (const chunk of stripper.finish()) {
+            if (chunk.channel === 'text') textPump.push(chunk.text)
+          }
+          textPump.flush()
+          // ③ 权威 say 仍以 extractSayMarker(resp.content) 为准（既有落定期实现，不改）
           return resp
         })
       },
@@ -206,7 +248,12 @@ export async function runReasonPhase(
     // （append-only 真源不变：写的是停止时刻已确认收到的内容），UI 呈现「已停止」态；
     // 随后向上抛给外层 catch 走 handleAbort 的 paused/cancelled 收尾。
     if (signal.aborted || (err as Error)?.name === 'AbortError') {
-      await persistAbortedReason(task.id, iteration, startedAt, turnPumpRef.current?.accumulated ?? '')
+      // v0.31.0 B1（C-9）：中断时**两个通道各自留存**部分内容 ——
+      // 此前只落 text 通道，而真思考在 reasoning 通道 → 中断场景连"部分思考"都没有（RC-12）。
+      await persistAbortedReason(task.id, iteration, startedAt, {
+        thought: turnPumpRef.current?.accumulated ?? '',
+        reasoning: reasonPumpRef.current?.accumulated ?? '',
+      })
       throw err
     }
     // v0.15.0 Task 2 SubTask 2.5 Layer 3 Reactive Fallback：
@@ -296,6 +343,8 @@ export async function runReasonPhase(
     iteration,
     type: 'reason',
     thought: response.thought,
+    // v0.31.0 B1（U6）：原生思考通道独立落 step（展示层据此判定来源徽标 native / content）
+    reasoning: response.reasoningContent,
     // v0.25.0 F4：阶段叙述（结论 + 下一步），与 thought 分离；缺省 → UI 回落旧版 hint
     say: response.say,
     action: response.action ?? undefined,
@@ -314,6 +363,8 @@ export async function runReasonPhase(
     iteration,
     thought: response.thought,
     say: response.say,
+    // v0.31.0 B1：原生思考通道随事件下发（订阅方无需再读 L1 raw）
+    reasoning: response.reasoningContent,
     action: response.action,
     tokensIn: response.tokensIn,
     tokensOut: response.tokensOut,

@@ -42,6 +42,21 @@ export interface ReActStep {
 
   // for reason
   thought?: string
+  /**
+   * v0.31.0 B1（U6 裁决）：模型**原生思考通道**（DeepSeek `reasoning_content` /
+   * Anthropic `thinking_delta`）的完整文本，作为独立字段承载。
+   *
+   * 为什么不并入 `thought`：`thought` 的既有语义是「content 剥离 SAY 后的剩余物」，
+   * 全仓库有 12 处消费者（`store/meta.ts` 的最终答复回落、`turn-end` 的 summary、
+   * session-log 的 assistant content 等）依赖该语义。把原生思考并进去会让
+   * 「最终答复」变成推理链 —— 属于静默的语义破坏。
+   *
+   * 展示层（B3 `project.ts`）据此判定来源徽标：有 `reasoning` → `source='native'`，
+   * 否则 `thought` 非空 → `'content'`，都空 → `'none'`。
+   * 落盘：L1 一直将其存于 `appendL1({ raw: { reasoningContent } })`（v0.27.0 起），
+   * 本字段只是把同一数据暴露到 step 负载供 UI 消费，append-only 不改写历史。
+   */
+  reasoning?: string
   /** v0.25.0 F4：给用户看的阶段叙述（结论 + 下一步），由模型在 reason 阶段产出；
    * 与 thought（内部思考，默认折叠）分离；缺省时 UI 回落旧版「要做什么」hint */
   say?: string
@@ -83,6 +98,14 @@ export interface ReActStep {
 
   /** UI 折叠状态 */
   expanded?: boolean
+
+  /**
+   * v0.31.0 B1（不变量②）：落定时刻的截断标记 —— 权威文本短于流式累计时为 true。
+   *
+   * 语义：`reasoning` 长度**只增不减**。当渲染层发现落定文本更短，它保留流式较长者
+   * 并置本标记，而非静默缩短（RC-3 的显式化）。消费方据此可显示「内容已截断」提示。
+   */
+  truncated?: boolean
 }
 
 /** ReAct 引擎通过 AsyncGenerator 产出的事件流 */
@@ -103,6 +126,8 @@ export type ReActEvent =
       durationMs: number
       /** v0.25.0 F4：阶段叙述（结论 + 下一步），与 thought 分离；模型未输出时为 undefined */
       say?: string
+      /** v0.31.0 B1：原生思考通道文本（DeepSeek reasoning_content / Anthropic thinking）；无原生通道时 undefined */
+      reasoning?: string
     }
   | { type: 'act_start'; iteration: number; tool: string; args: Record<string, unknown> }
   | {

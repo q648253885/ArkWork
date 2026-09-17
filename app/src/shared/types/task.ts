@@ -113,6 +113,13 @@ export interface Task {
   id: string                    // T-20260727-0042
   workspaceId: string
   title: string
+  /**
+   * v0.31.0 C2：标题来源标记（标题生成竞态协调的单一事实源）。
+   *  - undefined：占位「未命名任务」或机械截断产物，可被 LLM 生成升级
+   *  - 'user'：用户手动命名（renameTask 置入），锁定后 LLM 不再覆盖
+   *  - 'llm'：模型已生成标题，后续 run 不再重生成
+   */
+  titleSource?: 'user' | 'llm'
   status: TaskStatus
   agentId: string
   skillIds: string[]

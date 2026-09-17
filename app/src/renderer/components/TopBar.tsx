@@ -17,6 +17,8 @@ import { Icon } from '../icons'
 import { useStore } from '../store'
 import { Tooltip } from './ui'
 import { ark } from '../ipc/client'
+// v0.31.0 B0：键位提示一律经 keymap 产出，禁止在 JSX / i18n 内写裸修饰键符号
+import { chordText } from '../keymap'
 
 const isMac = ark.platform === 'darwin'
 const isWin = ark.platform === 'win32'
@@ -46,20 +48,20 @@ export function TopBar() {
       {/* 左：工作区识别区（平铺、8px 间距、常驻） */}
       <WorkspaceIdentifier />
 
-      {/* 中：⌘K 搜索 — 窗口绝对居中（不参与左右 flex 推挤） */}
+      {/* 中：Quick Action 搜索 — 窗口绝对居中（不参与左右 flex 推挤） */}
       <div
         className="topbar-search absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
         style={{ WebkitAppRegion: 'no-drag' as React.CSSProperties['WebkitAppRegion'] }}
       >
-        <Tooltip label="Quick Action" kbd="⌘K" desc={t('topbar.search.desc')}>
+        <Tooltip label="Quick Action" kbd={chordText('Mod+K')} desc={t('topbar.search.desc')}>
           <button
             onClick={() => setCmdPaletteOpen(true)}
-            aria-label={t('topbar.search.aria')}
+            aria-label={t('topbar.search.aria', { kbd: chordText('Mod+K') })}
             className="topbar-search__button flex items-center gap-2 h-9 px-3.5 rounded-full bg-bg-surface border border-border-subtle hover:border-border-default text-text-secondary hover:text-text-primary transition-colors focus-ring min-w-[280px] max-w-[440px] justify-center"
           >
             <Icon.Search width={15} height={15} aria-hidden="true" />
             <span className="topbar-search__label text-xs">{t('topbar.search.hint')}</span>
-            <span className="text-2xs text-text-tertiary font-mono ml-2" aria-hidden="true">⌘K</span>
+            <span className="text-2xs text-text-tertiary font-mono ml-2" aria-hidden="true">{chordText('Mod+K')}</span>
           </button>
         </Tooltip>
       </div>
@@ -72,12 +74,12 @@ export function TopBar() {
       >
         <Tooltip
           label={t('topbar.settings.label')}
-          kbd="⌘,"
+          kbd={chordText('Mod+,')}
           desc={t('topbar.settings.desc')}
         >
           <button
             onClick={() => openModulePage('settings')}
-            aria-label={t('topbar.settings.aria')}
+            aria-label={t('topbar.settings.aria', { kbd: chordText('Mod+,') })}
             className="h-12 w-12 flex items-center justify-center rounded-lg text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors focus-ring"
           >
             <Icon.Settings width={18} height={18} aria-hidden="true" />
@@ -134,7 +136,7 @@ function WorkspaceIdentifier() {
     return () => window.removeEventListener('mousedown', onClick)
   }, [open])
 
-  // ⌘⇧W 全局快捷键 → 打开工作区下拉
+  // Mod+Shift+W 全局快捷键 → 打开工作区下拉（和弦声明在 renderer/keymap/spec.ts）
   useEffect(() => {
     const handler = () => setOpen((v) => !v)
     window.addEventListener('topbar:open-workspace', handler)
@@ -179,14 +181,14 @@ function WorkspaceIdentifier() {
     >
       <Tooltip
         label={t('topbar.workspace.switch')}
-        kbd="⌘⇧W"
+        kbd={chordText('Mod+Shift+W')}
         desc={t('topbar.workspace.desc')}
         cap={wsCap}
       >
         <button
           onClick={() => setOpen((v) => !v)}
           style={{ WebkitAppRegion: 'no-drag' as React.CSSProperties['WebkitAppRegion'] }}
-          aria-label={t('topbar.workspace.aria')}
+          aria-label={t('topbar.workspace.aria', { kbd: chordText('Mod+Shift+W') })}
           aria-expanded={open}
           aria-haspopup="menu"
           className="workspace-identifier__button group flex items-center gap-2 h-9 pl-2.5 pr-3 rounded-lg bg-bg-surface border border-border-subtle hover:bg-bg-hover hover:border-border-default transition-colors focus-ring"

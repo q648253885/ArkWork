@@ -23,7 +23,13 @@ import { readFileSync } from 'node:fs'
 
 const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf-8')
 
-const THOUGHT = read('../ThoughtStream.tsx')
+// v0.31.0 B4 载体收敛：ThoughtStream.tsx 下线，交互区文本容器契约转写到
+// components/flow/blocks/*（SayBlock / AnswerBlock / ReasoningBlock / ToolBlock，
+// §4.1 登记表）。断言方向不变：文本可选、控件不可选。
+const SAY = read('../flow/blocks/SayBlock.tsx')
+const ANSWER = read('../flow/blocks/AnswerBlock.tsx')
+const REASON = read('../flow/blocks/ReasoningBlock.tsx')
+const TOOL = read('../flow/blocks/ToolBlock.tsx')
 const CSS = read('../../styles/globals.css')
 
 /** 取出以 selector 起始的 CSS 规则块（到首个 `}` 为止） */
@@ -36,25 +42,20 @@ function cssBlock(css: string, selector: string): string {
 }
 
 /* ============================================================
- * 一、TC-COPY-001 工具流文本容器不再整块 select-none
+ * 一、TC-COPY-001 交互区文本块容器不再整块 select-none
  * ============================================================ */
 
-test('TC-COPY-001 ThoughtStream 完成/失败分支文本容器可选中（select-text，无整块 select-none）', () => {
-  assert.match(
-    THOUGHT,
-    /className="text-xs text-text-tertiary select-text"/,
-    '完成/失败分支外层 div 应为 select-text（原为 select-none）',
-  )
-  assert.match(
-    THOUGHT,
-    /className="py-1 space-y-1 select-text"/,
-    'running 分支容器应为 select-text',
-  )
-  assert.doesNotMatch(
-    THOUGHT,
-    /select-none/,
-    'ThoughtStream 文本容器不应再有 select-none（「读取文件:{value}」行必须可选中）',
-  )
+test('TC-COPY-001 交互区各文本块容器可选中（select-text；Say/Answer 整文件无 select-none）', () => {
+  // SayBlock：叙述文本容器 select-text，整文件不得回退 select-none
+  assert.match(SAY, /select-text/, 'SayBlock 文本容器应为 select-text')
+  assert.doesNotMatch(SAY, /select-none/, 'SayBlock 不应含 select-none')
+  // AnswerBlock：streaming <pre> 与落定 Markdown 共用外层容器
+  assert.match(ANSWER, /select-text/, 'AnswerBlock 外层容器应为 select-text')
+  assert.doesNotMatch(ANSWER, /select-none/, 'AnswerBlock 不应含 select-none')
+  // ReasoningBlock：思考正文 select-text（头部行/来源徽标控件允许 select-none，F1-4）
+  assert.match(REASON, /react-reason__body[^"]*select-text/, '思考正文应为 select-text')
+  // ToolBlock：外层容器 select-text（「读取文件:{value}」意图行随容器可选中）
+  assert.match(TOOL, /px-3 py-2 select-text/, 'ToolBlock 外层容器应为 select-text')
 })
 
 /* ============================================================
@@ -88,4 +89,6 @@ test('TC-COPY-003 body 仍保持 user-select:none（不放大到全局）', () =
 test('TC-COPY-004 操作按钮 .tool-card__btn 保持 user-select:none（不误选伪文本）', () => {
   const btn = cssBlock(CSS, '.tool-card__btn {')
   assert.match(btn, /user-select:\s*none/, '.tool-card__btn 应保持 user-select:none')
+  // 源码侧锚点（B4 载体转写）：ToolBlock 控件继续 select-none（头部行 + 结果开关按钮）
+  assert.match(TOOL, /tool-card__btn[^"]*select-none/, '结果开关按钮应保留 select-none（F1-4）')
 })

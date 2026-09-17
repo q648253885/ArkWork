@@ -17,6 +17,12 @@
  * 手法：源码契约（readFileSync + 正则）—— 组件依赖 DOM，node:test 无渲染环境，
  * 与 interactive-copy.test.ts 同源。
  *
+ * v0.31.0 B1 变更（矩阵 testcases/00-cumulative-matrix.md §4.1 已逐条登记）：
+ *   - TC-THINK-001 展开态 `userOpen ?? isRunning` → `resolveReasoningOpen({...})` 解析链（+最短可见/失败保护）；
+ *   - TC-THINK-004 流式预览源 `streamText` → `streamReasoning`（读 `:turn:reasoning` 通道）；
+ *   - TC-THINK-005 清缓冲的那句 `delete` 由 slice 下沉到纯模块 `store/settle.ts`。
+ *   **三条断言方向均不变**，仅形态随 B1 契约更新。
+ *
  * 运行（cwd=app）：
  *   npx tsx --experimental-loader ./src/test/electron-mock-loader.mjs \
  *     --test src/renderer/components/__tests__/think-stream.test.ts
@@ -27,8 +33,11 @@ import { readFileSync } from 'node:fs'
 
 const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf-8')
 
-const THOUGHT = read('../ThoughtStream.tsx')
-const FLOW = read('../ConversationFlow.tsx')
+// v0.31.0 B4 载体收敛（§4.1 登记表）：ThoughtStream.tsx / ConversationFlow.tsx 下线，
+// 思考块契约转写到 flow/blocks/ReasoningBlock.tsx，流式预览契约转写到 flow/TurnList.tsx。
+// **断言方向均不变**：用户意志最高 → 流式展开 → 最短可见 → 失败必展开 → 完成后折叠。
+const THOUGHT = read('../flow/blocks/ReasoningBlock.tsx')
+const FLOW = read('../flow/TurnList.tsx')
 
 /** 截取指定函数组件的完整源码块（跳过参数列表，从函数体 `{` 开始括号配平） */
 function fnBlock(src: string, name: string): string {
@@ -49,28 +58,32 @@ function fnBlock(src: string, name: string): string {
   assert.fail(`组件 ${name} 未闭合`)
 }
 
-const THINK = fnBlock(THOUGHT, 'ThinkBlock')
-const STREAMING = fnBlock(FLOW, 'StreamingThinkBlock')
+const THINK = fnBlock(THOUGHT, 'ReasoningBlock')
 
 /* ============================================================
  * TC-THINK-001 ThinkBlock 展开态 = userOpen ?? isRunning
  * ============================================================ */
 
-test('TC-THINK-001 ThinkBlock 展开态 = userOpen ?? isRunning（运行时展开、完成后折叠）', () => {
+test('TC-THINK-001 ThinkBlock 展开态经解析链（用户意志最高 → 流式中展开 → 完成后折叠）', () => {
   assert.match(
     THINK,
     /const \[userOpen, setUserOpen\] = useState<boolean \| null>\(null\)/,
     'userOpen 应为 boolean | null（null = 未手动干预）',
   )
+  // v0.31.0 B1（C-8）：展开态由 `userOpen ?? isRunning` 升级为 resolveReasoningOpen 解析链
+  // （用户意志 → 流式 → 最短可见 1200ms → 失败 → 视图策略）。**断言方向不变**：
+  // 仍是「runtimeing 展开、完成后折叠」，只是补上了「最短可见」与「失败必展开」两条保护。
   assert.match(
     THINK,
-    /const showFull = userOpen \?\? isRunning/,
-    '展开态应为 userOpen ?? isRunning —— 运行中默认展开，完成后默认折叠',
+    /const showFull = resolveReasoningOpen\(\{[\s\S]*?userOpen,[\s\S]*?\}\)/,
+    '展开态应经 resolveReasoningOpen 解析链（不得退回裸 userOpen ?? isRunning）',
   )
+  assert.match(THINK, /streaming: isRunning === true/, '流式中默认展开（运行时展开方向保持）')
+  assert.match(THINK, /autoOpenWhenSettled: false/, '完成后默认折叠（完成后折叠方向保持）')
   assert.match(
     THINK,
-    /const isRunning = step\.status === 'running' && isActive/,
-    'isRunning 语义（running + 当前激活单元）保持',
+    /const isRunning = block\.status === 'streaming' \|\| block\.status === 'pending'/,
+    'isRunning 语义（流式/挂起中的思考块）保持',
   )
 })
 
@@ -109,31 +122,28 @@ test('TC-THINK-003 ThinkBlock 不再存在恒默认 useState(false) 的 showFull
 })
 
 /* ============================================================
- * TC-THINK-004 ConversationFlow 存在 StreamingThinkBlock（默认展开、可折叠）
+ * TC-THINK-004 TurnList 接管流式思考预览（B4 转写：StreamingThinkBlock →
+ * reasoning 通道缓冲直入投影层，运行中的思考以 streaming ReasoningBlock 呈现）
  * ============================================================ */
 
-test('TC-THINK-004 StreamingThinkBlock：react-reason 外观 + 默认展开 + 可折叠 + 接管流式预览', () => {
-  // 组件存在且默认展开（userOpen ?? true）
-  assert.match(
-    STREAMING,
-    /const showFull = userOpen \?\? true/,
-    'StreamingThinkBlock 应默认展开（userOpen ?? true）',
-  )
-  // react-reason 外观：Brain 图标 + running 态 + 闪烁点 + chevron
-  assert.match(STREAMING, /className="react-reason" data-state="running"/, '应复用 .react-reason 外观')
-  assert.match(STREAMING, /Icon\.Brain/, '应带 Brain 图标')
-  assert.match(STREAMING, /pulse-dot/, '应带闪烁点（思考中）')
-  assert.match(STREAMING, /Icon\.ChevronDown/, '应带 chevron（可折叠）')
-  // 流式预览渲染点：裸文本已被 StreamingThinkBlock 取代
+test('TC-THINK-004 TurnList：reasoning 通道缓冲直入投影层（流式默认展开由 ReasoningBlock 承担）', () => {
+  // TurnList 订阅 `:turn:reasoning` 通道并传入 projectConversation（B1 管道语义保持）
   assert.match(
     FLOW,
-    /<StreamingThinkBlock text=\{streamText\} \/>/,
-    '流式预览应渲染 StreamingThinkBlock',
+    /:turn:reasoning/,
+    'TurnList 应订阅 `${taskId}:turn:reasoning` 通道',
   )
+  assert.match(
+    FLOW,
+    /streamBuffers:\s*streamBuffer\s*\?\s*\{/,
+    '流式缓冲应注入投影层（不再有独立 StreamingThinkBlock 裸渲形态）',
+  )
+  assert.match(FLOW, /projectConversation\(/, '交互区唯一真相 = 投影层')
+  // 裸流式文本直渲形态不得回归（旧「被吞」观感来源）
   assert.doesNotMatch(
     FLOW,
-    /className="text-sm leading-6 text-text-secondary whitespace-pre-wrap break-words">\s*\{streamText\}/,
-    '裸 streamText 直渲形态应移除（旧「被吞」观感来源）',
+    /className="text-sm leading-6 text-text-secondary whitespace-pre-wrap break-words">\s*\{stream/,
+    '裸流式文本直渲形态应移除（流式预览必须经 ReasoningBlock 的解析链）',
   )
 })
 
@@ -141,11 +151,17 @@ test('TC-THINK-004 StreamingThinkBlock：react-reason 外观 + 默认展开 + �
  * TC-THINK-005 R-stream-3 保持：reason step 落地清 turn 缓冲
  * ============================================================ */
 
-test('TC-THINK-005 R-stream-3 保持：appendStep 内 reason 落地清 turn 缓冲（双份展示防护不回退）', () => {
+test('TC-THINK-005 R-stream-3 保持：reason 落地清 turn 文本缓冲（双份展示防护不回退）', () => {
   const SLICE = read('../../store/slices/conversationSlice.ts')
+  // v0.31.0 B1：落定交接逻辑抽为纯模块 `store/settle.ts`（node:test 可密闭断言），
+  // slice 退化为薄接线。断言方向不变 —— 仍锁「reason 落地必须清 turn 文本缓冲，
+  // 流式 → 权威渲染平滑交接」，只是不再要求那句 `delete` 出现在 slice 里。
   assert.match(
     SLICE,
-    /step\.type === 'reason' && s\.streamBuffers\[\`\$\{step\.taskId\}:turn\`\]/,
-    'appendStep 应在 reason step 到达时清 taskId:turn 流式缓冲（流式 → 权威渲染平滑交接）',
+    /const settled = settleReasonStep\(stepIn, s\.streamBuffers\)/,
+    'appendStep 应把流式缓冲交接给 settleReasonStep（reason 落地清缓冲）',
   )
+  const SETTLE = read('../../store/settle.ts')
+  assert.match(SETTLE, /if \(step\.type !== 'reason'\)/, 'settle 必须按 step.type === reason 分流')
+  assert.match(SETTLE, /delete nextBuffers\[kText\]/, 'reason 落地必须清 :turn:text 缓冲（双份展示防护）')
 })

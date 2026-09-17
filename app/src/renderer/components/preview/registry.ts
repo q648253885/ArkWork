@@ -19,6 +19,8 @@ import { SvgRenderer } from './renderers/SvgRenderer'
 import { TableRenderer } from './renderers/TableRenderer'
 import { BrowserRenderer } from './renderers/BrowserRenderer'
 import { FallbackRenderer } from './renderers/FallbackRenderer'
+// v0.31.0 B2：编辑器必须**懒加载**（§3.5 改动 2）——静态 import 会把 CM6 并进主 chunk
+import { LazyEditorPanel } from '../editor'
 
 export interface RendererEntry {
   component: ComponentType<Record<string, unknown>>
@@ -63,6 +65,18 @@ export const RENDERER_REGISTRY: Record<RendererKind, RendererEntry> = {
     labelKey: 'preview.registry.fallback',
     toolbarActions: ['reveal'],
   },
+  /**
+   * v0.31.0 B2（§3.5）：
+   *  - `component` **必须**是懒加载的 EditorPanel（唯一 CM6 入口）
+   *  - `toolbarActions` 增 `'save'`（保存按钮由 PreviewWindow 分发到 fsSlice.saveDoc）
+   *  - `mode-switch` = 编辑 / 只读渲染 两视图切换
+   *    （v0.31.0 C1：split 已删 —— 分屏是 markdown 等渲染器的能力）
+   */
+  editor: {
+    component: LazyEditorPanel as unknown as ComponentType<Record<string, unknown>>,
+    labelKey: 'preview.registry.editor',
+    toolbarActions: ['save', 'mode-switch', 'reveal', 'refresh'],
+  },
 }
 
 /** 各渲染器的可选视图模式（供 mode-switch / viewport 渲染分段控件） */
@@ -80,6 +94,11 @@ export const VIEW_MODES: Partial<Record<RendererKind, { value: string; labelKey:
     { value: 'desktop', labelKey: 'preview.registry.mode.desktop' },
     { value: 'tablet', labelKey: 'preview.registry.mode.tablet' },
     { value: 'mobile', labelKey: 'preview.registry.mode.mobile' },
+  ],
+  // v0.31.0 C1：编辑器两视图（split 已删，分屏归 markdown 渲染器）
+  editor: [
+    { value: 'edit', labelKey: 'preview.registry.mode.edit' },
+    { value: 'render', labelKey: 'preview.registry.mode.readonly' },
   ],
 }
 

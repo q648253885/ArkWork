@@ -14,14 +14,20 @@
  * 文本类渲染器的内容由本组件懒加载并缓存（按 tabId）；
  * 图片/兜底/浏览器渲染器自行读取文件，本组件仅透传 path/url。
  * ============================================================ */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useStore } from '../../store'
+import { useStore, detectRenderer } from '../../store'
 import type { PreviewTab, RendererKind } from '../../store'
 import { ark } from '../../ipc/client'
 import { Icon } from '../../icons'
 import { RENDERER_REGISTRY, VIEW_MODES, defaultViewMode } from './registry'
 import { Tooltip } from '../ui'
+// D20 修复：editor Tab 的只读预览 / 复制 / 导出 / 刷新需要文本来源
+import { peekInitialText } from '../../services/editorSession'
+import { getEditorHandle } from '../../services/savePipeline'
+// v0.31.0 B2：关闭保护三选一（dirty 缓冲只能由用户显式处置，A5/A6）
+import { CloseGuardPrompt } from '../editor/CloseGuardPrompt'
+import type { EditorViewMode } from '@shared/types/fs'
 
 /* ---- 常量 ---- */
 const MIN_W = 480
@@ -73,6 +79,12 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
   const setActivePreviewTab = useStore((s) => s.setActivePreviewTab)
   const updatePreviewBounds = useStore((s) => s.updatePreviewBounds)
   const pushToast = useStore((s) => s.pushToast)
+  const docs = useStore((s) => s.docs)
+  const conflicts = useStore((s) => s.conflicts)
+  const saveDoc = useStore((s) => s.saveDoc)
+  const setDocViewMode = useStore((s) => s.setDocViewMode)
+  const closeDocForce = useStore((s) => s.closeDocForce)
+  const revertDocToDisk = useStore((s) => s.revertDocToDisk)
 
   const { bounds, pinned, tabs, activeTabId } = pw
 
@@ -97,10 +109,24 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
     () => tabs.find((t) => t.id === activeTabId) ?? tabs[0] ?? null,
     [tabs, activeTabId],
   )
-  const activeRenderer: RendererKind =
-    (activeTab && rendererOverrides[activeTab.id]) ?? activeTab?.renderer ?? 'fallback'
-  const viewMode =
-    viewModes[activeTabId] ?? defaultViewMode(activeRenderer) ?? 'render'
+  // v0.31.0 B2 修复（D22 迭代）：`rendererOverrides` 对**所有** Tab 一律生效，editor 也不例外。
+  // 旧实现让 `activeTab.renderer === 'editor'` 无条件短路 —— 结果 css/code 这类
+  // 默认进编辑器的 Tab 从右上角下拉选了其他格式后毫无反应（activeRenderer 仍被
+  // 锁死在 'editor'），这正是「css 文件不能切换格式」的直接原因。
+  // 统一口径（用户裁决）：**首次打开按 detectRenderer 匹配类型，之后任何格式均可互切**；
+  // 切回 'editor' 也走同一个下拉（RENDERER_REGISTRY 已含 editor 项），编辑器永远一键可达，
+  // 不会出现旧注释担心的「切走后回不来」。文档状态（docs/dirty/viewMode）在切换期间
+  // 全程保留 —— 切格式只是换视图，不关文档。
+  const activeRenderer: RendererKind = activeTab
+    ? (rendererOverrides[activeTab.id] ?? activeTab.renderer)
+    : 'fallback'
+  const activeFilePath = activeTab?.target.kind === 'file' ? activeTab.target.path : null
+  /** v0.31.0 B2：编辑器 Tab 的文档元数据（唯一状态源 = fsSlice.docs） */
+  const activeDoc = activeFilePath ? (docs[activeFilePath] ?? null) : null
+  const isEditorTab = activeRenderer === 'editor'
+  const viewMode = isEditorTab
+    ? (activeDoc?.viewMode ?? 'edit')
+    : (viewModes[activeTabId] ?? defaultViewMode(activeRenderer) ?? 'render')
   // v0.27.0 r10-F13a：⌘E 占位入口会创建 path='' 的 file Tab；空路径视为「无内容」，
   // 走产物预览空态（F13 文案），而非 fallback 渲染器的「无法读取文件元数据」报错视图
   const isEmptyTab = !activeTab || (activeTab.target.kind === 'file' && !activeTab.target.path)
@@ -110,7 +136,10 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
     (tab: PreviewTab, force: boolean) => {
       if (tab.target.kind === 'url') return
       const kind = rendererOverrides[tab.id] ?? tab.renderer
-      if (!TEXT_RENDERERS.has(kind)) return
+      // v0.31.0 B2：编辑器 Tab 的内容读取服务于「只读渲染」视图，
+      // 因此按路径的**只读默认渲染器**判定，而不是按 'editor'（它不在 TEXT_RENDERERS 里）
+      const effective = kind === 'editor' ? detectRenderer(tab.target.path) : kind
+      if (!TEXT_RENDERERS.has(effective)) return
       const path = tab.target.path
       const existing = contentsRef.current[tab.id]
       if (
@@ -267,6 +296,12 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
   }
 
   const setViewMode = (m: string) => {
+    // v0.31.0 B2：编辑器 Tab 的视图态是**文档状态**（fsSlice），不是浮窗本地状态——
+    // 否则「切 Tab 再切回来视图模式丢失」且左右两处挂载会看到不同视图
+    if (isEditorTab) {
+      if (activeFilePath) setDocViewMode(activeFilePath, m as EditorViewMode)
+      return
+    }
     setViewModes((prev) => ({ ...prev, [activeTabId]: m }))
   }
 
@@ -277,12 +312,22 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
     activeTab && contents[activeTab.id]?.state === 'loaded'
       ? (contents[activeTab.id] as { state: 'loaded'; fc: { content: string } }).fc.content
       : null
+  /**
+   * D20：editor Tab 的文本不走浮窗 contents 缓存（它从不 loadContent），
+   * 直接取编辑器实时缓冲（getEditorHandle），宿主未挂载退回打开时初始文本。
+   * copy / export / 只读预览三者共用这一来源，保证所见即所得。
+   */
+  const activeEditorText = isEditorTab && activeFilePath
+    ? (getEditorHandle(activeFilePath)?.getText() ?? peekInitialText(activeFilePath) ?? null)
+    : null
 
   const handleCopy = async () => {
     try {
-      if (activeContent != null) await navigator.clipboard.writeText(activeContent)
+      if (activeEditorText != null) await navigator.clipboard.writeText(activeEditorText)
+      else if (activeContent != null) await navigator.clipboard.writeText(activeContent)
       else if (activePath) await navigator.clipboard.writeText(activePath)
       else if (activeUrl) await navigator.clipboard.writeText(activeUrl)
+      else return
       pushToast({ type: 'success', message: t('preview.window.toast.copied'), duration: 1500 })
     } catch {
       pushToast({ type: 'danger', message: t('preview.window.toast.copyFailed'), duration: 1500 })
@@ -290,9 +335,11 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
   }
 
   const handleExport = () => {
-    if (!activeContent && !activePath) return
+    if (!activePath && !activeContent && !activeEditorText) return
     const name = activePath ? basename(activePath) : 'preview.txt'
-    const blob = new Blob([activeContent ?? ''], { type: 'text/plain;charset=utf-8' })
+    const blob = new Blob([activeEditorText ?? activeContent ?? ''], {
+      type: 'text/plain;charset=utf-8',
+    })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -307,6 +354,21 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
 
   const handleRefresh = () => {
     if (!activeTab) return
+    // D20：editor Tab 的刷新 = 从磁盘重读（fsSlice 单一写者），不是清浮窗缓存
+    if (isEditorTab && activeFilePath) {
+      const d = docs[activeFilePath]
+      if (d?.dirty || d?.saveState === 'saving') {
+        // A5/A6：dirty 缓冲绝不静默丢弃 —— 提示先保存
+        pushToast({
+          type: 'warning',
+          message: t('editor.refreshDirtyHint'),
+          duration: 4000,
+        })
+        return
+      }
+      void revertDocToDisk(activeFilePath)
+      return
+    }
     // 清缓存后重载
     const next = { ...contentsRef.current }
     delete next[activeTab.id]
@@ -315,12 +377,92 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
     loadContent(activeTab, true)
   }
 
+  /* ---- v0.31.0 B2：保存（工具栏 save / ⌘S） ---- */
+  const handleSave = () => {
+    if (!activeFilePath) return
+    void saveDoc(activeFilePath)
+  }
+
+  /* ---- v0.31.0 B2：关闭保护（A5/A6 禁止静默丢弃） ---- */
+  const [closeGuardPaths, setCloseGuardPaths] = useState<string[]>([])
+  const pendingCloseRef = useRef<{ kind: 'tab'; tabId: string } | { kind: 'window' } | null>(null)
+
+  /** 需要关闭保护的路径（dirty / 保存中） */
+  const protectedPathsOf = (paths: Array<string | null>): string[] =>
+    paths.filter((p): p is string => {
+      if (!p) return false
+      const d = docs[p]
+      return !!d && (d.dirty || d.saveState === 'saving')
+    })
+
+  /** 关闭单个 Tab：其文档 dirty / 保存中 → 先弹三选一，绝不静默丢弃 */
+  const requestCloseTab = (tabId: string) => {
+    const tab = tabs.find((t) => t.id === tabId)
+    const path = tab?.target.kind === 'file' ? tab.target.path : null
+    const guarded = protectedPathsOf([path])
+    if (guarded.length > 0) {
+      pendingCloseRef.current = { kind: 'tab', tabId }
+      setCloseGuardPaths(guarded)
+      return
+    }
+    if (path) closeDocForce(path)
+    else closePreviewTab(tabId)
+  }
+
+  /** 关闭整个浮窗：任一路径 dirty → 同样先弹三选一 */
+  const requestCloseWindow = () => {
+    const guarded = protectedPathsOf(
+      tabs.map((t) => (t.target.kind === 'file' ? t.target.path : null)),
+    )
+    if (guarded.length > 0) {
+      pendingCloseRef.current = { kind: 'window' }
+      setCloseGuardPaths(guarded)
+      return
+    }
+    closePreview()
+  }
+
+  const resolveCloseGuard = (mode: 'save' | 'discard' | 'cancel') => {
+    const pending = pendingCloseRef.current
+    const paths = closeGuardPaths
+    pendingCloseRef.current = null
+    setCloseGuardPaths([])
+    if (mode === 'cancel' || !pending) return
+    const finish = () => {
+      if (pending.kind === 'window') closePreview()
+      else {
+        const t0 = tabs.find((t) => t.id === pending.tabId)
+        const p = t0?.target.kind === 'file' ? t0.target.path : null
+        if (p) closeDocForce(p)
+        else closePreviewTab(pending.tabId)
+      }
+    }
+    if (mode === 'discard') {
+      for (const p of paths) closeDocForce(p)
+      finish()
+      return
+    }
+    // 保存并关闭：全部保存成功才关；任一冲突/失败则保留（转入冲突流程 / 保留 dirty）
+    void (async () => {
+      for (const p of paths) {
+        const outcome = await saveDoc(p)
+        if (outcome.kind !== 'saved') return
+      }
+      finish()
+    })()
+  }
+
   const handleNewTab = () => {
     if (!activeTab) {
       pushToast({ type: 'warning', message: t('preview.window.toast.openFromFileTree'), duration: 3000 })
       return
     }
     if (activeTab.target.kind === 'file') {
+      // v0.31.0 B2 修复：file 目标现在**按路径复用 Tab**（见 store/slices/uiSlice.openPreview
+      // 与 services/previewTabs 的不变量说明）——两个 Tab 指向同一 path 会让两个
+      // CodeEditorHost 争用同一个 registerEditorHandle(path) 槽位。
+      // 因此对本按钮而言，文件目标等价于「聚焦到该文件已有的 Tab」。
+      // URL 目标仍保持「每次新建」（两个浏览器 Tab 看同一网址是有意义的）。
       void useStore.getState().openPreview(activeTab.target.path)
     } else {
       // v0.9.1：URL 标签支持复制新建（走 openPreviewUrl 同一管线）
@@ -338,6 +480,54 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
   }
 
   /* ---- 渲染内容 ---- */
+
+  /**
+   * D20：editor Tab 的只读预览（render 视图；v0.31.0 C1 起 split 已删）。
+   * 内容来源 = 编辑器实时缓冲 / 初始文本（与 renderReadOnly 的浮窗缓存无关 ——
+   * editor Tab 从不 loadContent，旧实现因此永远卡在「加载中」，
+   * 这就是「readonly / split 按钮无法使用」的直接原因）。
+   */
+  const renderEditorPreview = (path: string) => {
+    const kind = detectRenderer(path)
+    const Comp = RENDERER_REGISTRY[kind].component
+    if (kind === 'image' || kind === 'fallback') return <Comp path={path} />
+    if (kind === 'browser') return <Comp path={path} viewMode={viewMode} />
+    const text =
+      getEditorHandle(path)?.getText() ?? peekInitialText(path) ?? ''
+    if (kind === 'markdown') return <Comp content={text} viewMode="render" />
+    if (kind === 'svg') return <Comp content={text} viewMode="render" />
+    if (kind === 'table') return <Comp content={text} />
+    return <Comp content={text} language={docs[path]?.language ?? 'text'} />
+  }
+
+  /** 读只读渲染节点（分屏右栏 / 编辑器只读视图共用；编辑器自身不依赖各渲染器实现） */
+  const renderReadOnly = (path: string, tabId: string) => {    const kind = detectRenderer(path)
+    const Comp = RENDERER_REGISTRY[kind].component
+    if (kind === 'image' || kind === 'fallback') return <Comp path={path} />
+    if (kind === 'browser') return <Comp path={path} viewMode={viewMode} />
+    const tc = contents[tabId]
+    if (!tc || tc.state === 'loading') {
+      return (
+        <div className="h-full flex items-center justify-center text-text-tertiary text-xs">
+          {t('preview.window.loading')}
+        </div>
+      )
+    }
+    if (tc.state === 'error') {
+      return (
+        <div className="h-full flex items-center justify-center text-2xs text-danger px-3 text-center">
+          {tc.err}
+        </div>
+      )
+    }
+    const fc = tc.fc
+    if (kind === 'markdown') return <Comp content={fc.content} viewMode="render" />
+    if (kind === 'code') return <Comp content={fc.content} language={fc.language} />
+    if (kind === 'svg') return <Comp content={fc.content} viewMode="render" />
+    if (kind === 'table') return <Comp content={fc.content} />
+    return <Comp path={path} />
+  }
+
   const renderContent = () => {
     if (isEmptyTab) {
       return (
@@ -357,6 +547,28 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
     }
 
     const path = activeTab.target.path
+
+    // v0.31.0 B2：编辑器 Tab（唯一的 CM6 入口，组件本体懒加载）
+    // D19 修复：lazy 组件**必须**有 Suspense 边界 —— 否则首次挂载挂起时
+    // 无边界可落，React 卸载整棵树 → 整窗白屏（且全仓库此前零 Suspense）。
+    if (isEditorTab) {
+      const Comp = RENDERER_REGISTRY.editor.component
+      return (
+        <Suspense
+          fallback={
+            <div className="h-full flex items-center justify-center text-text-tertiary text-xs">
+              {t('preview.window.loading')}
+            </div>
+          }
+        >
+          <Comp
+            path={path}
+            renderPreview={viewMode === 'edit' ? undefined : renderEditorPreview(path)}
+          />
+        </Suspense>
+      )
+    }
+
     const Comp = RENDERER_REGISTRY[activeRenderer].component
 
     // 非文本类渲染器：直接传 path
@@ -490,7 +702,7 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
           <TitleBtn label={maximized ? t('preview.window.titleBtn.restore') : t('preview.window.titleBtn.maximize')} onClick={toggleMaximize}>
             <span className="text-[10px] leading-none">▢</span>
           </TitleBtn>
-          <TitleBtn label={t('preview.window.titleBtn.close')} onClick={closePreview} danger>
+          <TitleBtn label={t('preview.window.titleBtn.close')} onClick={requestCloseWindow} danger>
             <Icon.X width={16} height={16} />
           </TitleBtn>
         </div>
@@ -518,12 +730,28 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
                 >
                   {isPinned && <Icon.Star width={16} height={16} className="text-accent flex-shrink-0" />}
                   <span className={`truncate max-w-[140px] ${!isPinned ? 'italic' : ''}`}>{name}</span>
+                  {/* v0.31.0 B2：Tab 标题右侧的 dirty / 冲突徽标（原型 07） */}
+                  {tab.target.kind === 'file' && conflicts[tab.target.path] && (
+                    <Icon.Warning
+                      width={14}
+                      height={14}
+                      className="text-danger flex-shrink-0"
+                      data-tab-conflict=""
+                    />
+                  )}
+                  {tab.target.kind === 'file' && docs[tab.target.path]?.dirty && (
+                    <span
+                      className="w-1.5 h-1.5 rounded-full bg-warning flex-shrink-0"
+                      data-tab-dirty=""
+                      aria-hidden="true"
+                    />
+                  )}
                   <Tooltip label={t('preview.window.tabBar.closeTab')} desc={t('preview.window.tabBar.closeTabDesc')}>
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation()
-                        closePreviewTab(tab.id)
+                        requestCloseTab(tab.id)
                       }}
                       className="p-0.5 rounded hover:bg-bg-active text-text-tertiary hover:text-text-primary transition-colors"
                     >
@@ -548,34 +776,48 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
         onExport={handleExport}
         onReveal={handleReveal}
         onRefresh={handleRefresh}
+        onSave={handleSave}
         canExport={activeContent != null}
+        canSave={!!activeDoc?.editable && activeDoc.saveState === 'idle'}
+        dirty={activeDoc?.dirty === true}
       />
 
       {/* ===== 内容区 ===== */}
       <div className="flex-1 min-h-0 overflow-hidden bg-bg-base">{renderContent()}</div>
 
-      {/* ===== 状态栏 ===== */}
-      <div className="flex items-center gap-2 h-6 px-3 flex-shrink-0 bg-bg-surface border-t border-border-subtle">
-        <span className="text-2xs text-text-tertiary truncate flex-1 min-w-0 font-mono" title={statusInfo.left}>
-          {statusInfo.left}
-        </span>
-        <span
-          className={`text-2xs flex items-center gap-1 flex-shrink-0 ${
-            statusInfo.state === 'error'
-              ? 'text-danger'
-              : statusInfo.state === 'loaded' || statusInfo.state === 'ready'
-                ? 'text-success'
-                : 'text-text-tertiary'
-          }`}
-        >
-          {statusInfo.state === 'loaded' && <Icon.Check width={16} height={16} />}
-          {statusInfo.saved}
-        </span>
-      </div>
+      {/* ===== 状态栏（编辑器 Tab 自带更完整的状态条，此处不重复渲染） ===== */}
+      {!isEditorTab && (
+        <div className="flex items-center gap-2 h-6 px-3 flex-shrink-0 bg-bg-surface border-t border-border-subtle">
+          <span className="text-2xs text-text-tertiary truncate flex-1 min-w-0 font-mono" title={statusInfo.left}>
+            {statusInfo.left}
+          </span>
+          <span
+            className={`text-2xs flex items-center gap-1 flex-shrink-0 ${
+              statusInfo.state === 'error'
+                ? 'text-danger'
+                : statusInfo.state === 'loaded' || statusInfo.state === 'ready'
+                  ? 'text-success'
+                  : 'text-text-tertiary'
+            }`}
+          >
+            {statusInfo.state === 'loaded' && <Icon.Check width={16} height={16} />}
+            {statusInfo.saved}
+          </span>
+        </div>
+      )}
 
       </div>
       {/* ===== 缩放手柄（外层，避免被 overflow-hidden 裁剪） ===== */}
       {!maximized && <ResizeHandles onResize={startResize} />}
+      {/* ===== 关闭保护三选一（v0.31.0 B2） ===== */}
+      {closeGuardPaths.length > 0 && (
+        <CloseGuardPrompt
+          paths={closeGuardPaths}
+          onSave={() => resolveCloseGuard('save')}
+          onDiscard={() => resolveCloseGuard('discard')}
+          onCancel={() => resolveCloseGuard('cancel')}
+        />
+      )}
     </div>
   )
 }
@@ -622,7 +864,10 @@ function Toolbar({
   onExport,
   onReveal,
   onRefresh,
+  onSave,
   canExport,
+  canSave,
+  dirty,
 }: {
   actions: string[]
   renderer: RendererKind
@@ -632,13 +877,31 @@ function Toolbar({
   onExport: () => void
   onReveal: () => void
   onRefresh: () => void
+  onSave: () => void
   canExport: boolean
+  canSave: boolean
+  dirty: boolean
 }) {
   const { t } = useTranslation()
   const modes = VIEW_MODES[renderer]
   return (
     <div className="flex items-center gap-1 px-2 h-8 flex-shrink-0 bg-bg-overlay border-b border-border-subtle">
       {actions.map((act) => {
+        if (act === 'save') {
+          return (
+            <ToolBtn key={act} label={t('editor.save.action')} onClick={onSave} disabled={!canSave}>
+              <span className="relative flex items-center justify-center">
+                <Icon.Check width={16} height={16} />
+                {dirty && (
+                  <span
+                    className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-warning"
+                    aria-hidden="true"
+                  />
+                )}
+              </span>
+            </ToolBtn>
+          )
+        }
         if (act === 'mode-switch' || act === 'viewport') {
           if (!modes) return null
           return (
@@ -754,7 +1017,8 @@ function MinimizedCapsules() {
   const { t } = useTranslation()
   const minimizedPreviews = useStore((s) => s.minimizedPreviews)
   const restoreMinimized = useStore((s) => s.restoreMinimized)
-  const closePreview = useStore((s) => s.closePreview)
+  // v0.31.0 C3：胶囊 ✕ = 丢弃（仅移除）——旧「恢复+关闭」两步会误触发恢复
+  const discardMinimized = useStore((s) => s.discardMinimized)
 
   return (
     <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[55] flex items-center gap-1.5 px-2 py-1.5 bg-bg-overlay border border-border-default rounded-xl shadow-panel scale-in">
@@ -779,9 +1043,8 @@ function MinimizedCapsules() {
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation()
-                  // 恢复后立即关闭 → 等效于从最小化列表移除该胶囊
-                  restoreMinimized(c.id)
-                  closePreview()
+                  // v0.31.0 C3：仅丢弃该最小化窗（不恢复、不动现窗）
+                  discardMinimized(c.id)
                 }}
                 className="ml-0.5 w-4 h-4 flex items-center justify-center rounded text-text-tertiary hover:bg-danger hover:text-white transition-colors"
               >

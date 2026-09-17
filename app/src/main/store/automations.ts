@@ -232,6 +232,8 @@ export async function runAutomation(id: string): Promise<{ taskId: string }> {
     skillIds: agentSkillIds,
     modelId,
     automationId: automation.id,
+    // v0.31.0 C2：automation.name 是用户在自动化配置中填写的名称，锁定不被 LLM 标题覆盖
+    titleSource: 'user',
   })
 
   // 记录最近一次运行时间

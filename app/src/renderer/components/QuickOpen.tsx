@@ -3,7 +3,7 @@
  * ⌘P 文件快速切换：模糊匹配文件名，回车在 PreviewWindow 浮窗打开
  * - 输入框 + 文件列表（路径分组简显示）
  * - 键盘：↑↓ 导航 / ⏎ 打开 / Esc 关闭
- * - 选中文件后调用 store.openPreview 弹浮窗
+ * - 选中文件后调用 store.openDoc（探针判定可编辑 → 编辑器 Tab）弹浮窗
  * ============================================================ */
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -57,7 +57,9 @@ export function QuickOpen() {
   const open = useStore((s) => s.quickOpenOpen)
   const setOpen = useStore((s) => s.setQuickOpenOpen)
   const files = useStore((s) => s.files)
-  const openPreview = useStore((s) => s.openPreview)
+  // v0.31.0 B2：打开文件走 `openDoc`（探针判定可编辑 → 编辑器 Tab）；
+  // 修复前直连 openPreview，渲染器按扩展名给，编辑器永远不可达。
+  const openDoc = useStore((s) => s.openDoc)
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
 
@@ -108,14 +110,14 @@ export function QuickOpen() {
         e.preventDefault()
         const target = filtered[activeIndex]
         if (target) {
-          void openPreview(target.path)
+          void openDoc(target.path)
           setOpen(false)
         }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [open, filtered, activeIndex, openPreview, setOpen])
+  }, [open, filtered, activeIndex, openDoc, setOpen])
 
   if (!open) return null
 
@@ -162,7 +164,7 @@ export function QuickOpen() {
                   key={f.path}
                   onMouseEnter={() => setActiveIndex(idx)}
                   onClick={() => {
-                    void openPreview(f.path)
+                    void openDoc(f.path)
                     setOpen(false)
                   }}
                   className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${

@@ -324,13 +324,21 @@ export const tasksSlice: StateCreator<
         await ark.task.appendMessage(taskId, text)
         // v0.16.7+：appendMessage 内部已自动 cancel + run，renderer 不再重复调 runTask，
         // 避免与 main 进程内 fire-and-forget 的 runTask 产生竞态。
-        // polish2-workspace-name-task-title-skills-warning §Task 2：续聊路径首条消息触发自动重命名。
-        // 仅在 title 仍是占位"未命名任务"或"未命名任务 N"时覆盖，已手动重命名则保留。
-        const placeholder = /^未命名任务(\s\d+)?$/
-        if (placeholder.test(existing.title)) {
+        // v0.31.0 C2：占位标题的机械改名保留为「即时反馈」，但改为直连 update 且
+        // 不带 titleSource —— 不锁死 LLM 标题升级（runner 挂点随后会生成正式标题）。
+        // 占位判定覆盖当前语言（i18n）+ 中文遗留正则（旧数据迁移兼容）。
+        const untitledBase = i18n.t('tasks.untitled')
+        const isUntitled = existing.title === untitledBase
+          || (existing.title.startsWith(`${untitledBase} `) && /^\d+$/.test(existing.title.slice(untitledBase.length + 1)))
+          || /^未命名任务(\s\d+)?$/.test(existing.title)
+        if (isUntitled) {
           const simplified = simplifyFirstLine(text)
           if (simplified) {
-            await get().renameTask(taskId, simplified)
+            await ark.task.update({ id: taskId, title: simplified })
+            setAll((s) => ({
+              tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, title: simplified } : t)),
+              selectedTask: s.selectedTaskId === taskId ? { ...s.selectedTask!, title: simplified } : s.selectedTask,
+            }))
           }
         }
         await get().refreshTasks()
@@ -472,7 +480,8 @@ export const tasksSlice: StateCreator<
   },
   renameTask: async (id, title) => {
     try {
-      await ark.task.update({ id, title })
+      // v0.31.0 C2：手动改名置 titleSource='user'，锁定后 LLM 不再自动覆盖标题
+      await ark.task.update({ id, title, titleSource: 'user' })
       setAll((s) => ({
         tasks: s.tasks.map((t) => (t.id === id ? { ...t, title } : t)),
         selectedTask: s.selectedTaskId === id ? { ...s.selectedTask!, title } : s.selectedTask,

@@ -16,6 +16,7 @@ import {
   sanitizeInspectorOrder,
 } from '../meta'
 import { loadActiveWorkspace, loadUiState, saveUiState } from '../persist'
+import { findFileTab } from '../../services/previewTabs'
 import i18n from '../../i18n'
 import {
   applyLocaleDocument,
@@ -37,6 +38,22 @@ import type {
   RightTab,
   SettingsTab,
 } from '../types'
+
+/**
+ * v0.31.0 C3：由整窗状态构造最小化胶囊。
+ * 快照留存 tabs / activeTabId / bounds / pinned，恢复时按此重建；
+ * title/icon/tabCount 仅供胶囊条渲染。
+ */
+const capsuleOf = (pw: PreviewWindowState): MinimizedCapsule => {
+  const activeTab = pw.tabs.find((t) => t.id === pw.activeTabId)
+  return {
+    id: pw.id,
+    title: activeTab?.target.kind === 'file' ? activeTab.target.path.split('/').pop() || i18n.t('slice.ui.preview') : i18n.t('slice.ui.preview'),
+    icon: 'File',
+    tabCount: pw.tabs.length,
+    snapshot: { ...pw, tabs: [...pw.tabs] },
+  }
+}
 
 export const uiSlice: StateCreator<
   AppState,
@@ -96,6 +113,7 @@ export const uiSlice: StateCreator<
     | 'togglePreviewPin'
     | 'minimizePreview'
     | 'restoreMinimized'
+    | 'discardMinimized'
     | 'closePreviewTab'
     | 'setActivePreviewTab'
     | 'updatePreviewBounds'
@@ -123,6 +141,11 @@ export const uiSlice: StateCreator<
     | 'cycleTheme'
     | 'language'
     | 'setLanguage'
+    | 'flow'
+    | 'setFlowViewMode'
+    | 'setFlowShowThinking'
+    | 'setBlockOpen'
+    | 'setTurnCollapsed'
   >
 > = (set, get) => ({
   // v0.7.0 布局：Activity Bar + SidePanel
@@ -285,9 +308,32 @@ export const uiSlice: StateCreator<
   previewWindow: null,
   minimizedPreviews: [],
   openPreview: async (path, opts) => {
-    const renderer = detectRenderer(path)
-    const tabId = `tab-${Date.now()}`
+    // v0.31.0 B2：`rendererOverride` 让调用方（fsSlice.openDoc）决定 Tab 进编辑态还是只读渲染态。
+    // 设计依据 §3.5：RendererKind 只增 'editor'，语义是「这个 Tab 当前处于编辑态」；
+    // 是否编辑由 `EditorDocMeta.editable`（= probe.readonlyReason === null）决定。
+    const renderer = opts?.rendererOverride ?? detectRenderer(path)
+
+    // v0.31.0 B2 修复：**同一文件路径必须复用已有 Tab**（见 services/previewTabs 的不变量说明）。
+    // 修复前每次打开都 `tab-${Date.now()}` 新建 → 同路径两个 Tab 争用同一个
+    // `registerEditorHandle(path)` 槽位，出现「保存 A 写出 B 的缓冲」。
+    // 复用时**让新的 renderer 生效**：这正是「已只读打开过的文件再次走 openDoc 升级为编辑器」的通路。
     const existing = get().previewWindow
+    const dup = existing ? findFileTab(existing.tabs, path) : undefined
+    if (existing && dup) {
+      set({
+        previewWindow: {
+          ...existing,
+          tabs: existing.tabs.map((t) =>
+            // 不把已固定的 Tab 降级回 preview；只在本次要求固定时升级
+            t.id === dup.id ? { ...t, renderer, mode: opts?.pinned ? 'pinned' : t.mode } : t,
+          ),
+          activeTabId: dup.id,
+        },
+      })
+      return
+    }
+
+    const tabId = `tab-${Date.now()}`
     if (existing) {
       // 已有浮窗：添加 Tab
       const newTab: PreviewTab = {
@@ -353,14 +399,7 @@ export const uiSlice: StateCreator<
   minimizePreview: () =>
     set((s) => {
       if (!s.previewWindow) return {}
-      const pw = s.previewWindow
-      const activeTab = pw.tabs.find((t) => t.id === pw.activeTabId)
-      const capsule: MinimizedCapsule = {
-        id: pw.id,
-        title: activeTab?.target.kind === 'file' ? activeTab.target.path.split('/').pop() || i18n.t('slice.ui.preview') : i18n.t('slice.ui.preview'),
-        icon: 'File',
-        tabCount: pw.tabs.length,
-      }
+      const capsule = capsuleOf(s.previewWindow)
       return {
         previewWindow: null,
         minimizedPreviews: [...s.minimizedPreviews, capsule],
@@ -370,17 +409,19 @@ export const uiSlice: StateCreator<
     set((s) => {
       const capsule = s.minimizedPreviews.find((c) => c.id === id)
       if (!capsule) return {}
+      // v0.31.0 C3：按快照完整恢复（tabs / activeTabId / bounds / pinned）——
+      // 旧实现写死 `tabs: []`，整窗 Tab 列表在最小化时被丢弃，点胶囊只能得到空窗。
+      // 若此刻已有其他浮窗：先将其同样收进最小化列表（交换），两边都不丢。
+      const rest = s.minimizedPreviews.filter((c) => c.id !== id)
       return {
-        minimizedPreviews: s.minimizedPreviews.filter((c) => c.id !== id),
-        previewWindow: {
-          id: capsule.id,
-          bounds: { x: 120, y: 80, w: 720, h: 520 },
-          pinned: false,
-          tabs: [],
-          activeTabId: '',
-        },
+        minimizedPreviews: s.previewWindow ? [...rest, capsuleOf(s.previewWindow)] : rest,
+        previewWindow: capsule.snapshot,
       }
     }),
+  /** v0.31.0 C3：胶囊 ✕ = 丢弃该最小化窗（仅移除胶囊；不恢复、不动现窗）。
+   *  旧实现「restoreMinimized + closePreview」两步在交换语义下会误把现窗最小化。 */
+  discardMinimized: (id) =>
+    set((s) => ({ minimizedPreviews: s.minimizedPreviews.filter((c) => c.id !== id) })),
   closePreviewTab: (tabId) =>
     set((s) => {
       if (!s.previewWindow) return {}
@@ -489,4 +530,41 @@ export const uiSlice: StateCreator<
   // Command Palette（v0.16.0 F902；v0.27.0 R3 自 pickers 区归位 UI 域）
   cmdPaletteOpen: false,
   setCmdPaletteOpen: (b) => set({ cmdPaletteOpen: b }),
+
+  // ============================================================
+  // v0.31.0 B3 — 交互区 flow 子状态（正本 interaction 07 §2.2）
+  // viewMode / showThinking 持久化；block/turn 展开态会话内有效（虚拟化后仍存活）
+  // ============================================================
+  flow: {
+    viewMode: loadUiState('flow-view-mode', 'standard'),
+    showThinking: loadUiState('flow-show-thinking', true),
+    blockUiState: {},
+    turnUiState: {},
+    scrollAnchorByTask: {},
+  },
+  setFlowViewMode: (mode) => {
+    saveUiState('flow-view-mode', mode)
+    set((s) => ({ flow: { ...s.flow, viewMode: mode } }))
+  },
+  setFlowShowThinking: (b) => {
+    saveUiState('flow-show-thinking', b)
+    set((s) => ({ flow: { ...s.flow, showThinking: b } }))
+  },
+  setBlockOpen: (blockId, open) =>
+    set((s) => ({
+      flow: {
+        ...s.flow,
+        blockUiState: {
+          ...s.flow.blockUiState,
+          [blockId]: { ...(s.flow.blockUiState[blockId] ?? {}), open, userOpen: true },
+        },
+      },
+    })),
+  setTurnCollapsed: (turnId, collapsed) =>
+    set((s) => ({
+      flow: {
+        ...s.flow,
+        turnUiState: { ...s.flow.turnUiState, [turnId]: { collapsed } },
+      },
+    })),
 });

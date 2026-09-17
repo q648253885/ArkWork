@@ -47,6 +47,16 @@
   --text-tertiary: #81858C;     /* --dsw-static-neutral-bluish-600 / DSH caption */
   --text-disabled: #ADB2B8;     /* DSH caption */
   --text-inverse: #FFFFFF;
+  /* v0.31.0 D21：第四级文字（时间戳 / 计数 / 次要元信息）。
+     此前组件大量使用 text-text-faint，但 token 从未定义且未注册进
+     tailwind → class 空转、元信息继承主色，直接导致交互区「无层次」。 */
+  --text-faint: #90959C;
+
+  /* v0.31.0 D21：中性填充阶梯（代码面板 / 结果区 / 气泡底）。
+     与背景阶梯同源但独立命名——填充是「贴在卡片里的第二层」，
+     背景是「卡片本身」，二者语义不同，不得互相借用。 */
+  --fill-secondary: #EBEEF3;
+  --fill-tertiary: #DDE2EA;
 
   /* v0.21.0 品牌 — 保留紫罗兰（与 DSH 的 deepseek 蓝并行作为品牌色，
      主体交互元素改用下方的 --business-primary 业务蓝） */
@@ -183,6 +193,21 @@
   --tooltip-text: #FFFFFF;
   --tooltip-kbd-bg: rgba(255, 255, 255, 0.16);
   --tooltip-kbd-border: rgba(255, 255, 255, 0.22);
+
+  /* ============================================================
+   * v0.31.0 B2 — 编辑器语法色（6 档）
+   * CM6 主题**必须引用这些变量**（切主题零 JS：只切 <html class="dark">）
+   * 档位取自 DSH 的高对比中性 + 品牌色族，浅色底上对比度 ≥ 4.5:1
+   * ============================================================ */
+  --syn-keyword: #A21CAF;   /* 关键字 / 控制流 */
+  --syn-string:  #15803D;   /* 字符串 / 模板 */
+  --syn-number:  #B45309;   /* 数字 / 常量 */
+  --syn-comment: #64748B;   /* 注释 */
+  --syn-function: #1D4ED8;  /* 函数 / 变量名 */
+  --syn-type:    #0E7490;   /* 类型 / 类 / 标签 */
+  /* 编辑器正文行高与字号（字号单独成为 token，便于后续「编辑器字号」设置项接入） */
+  --editor-font-size: 13px;
+  --editor-font-family: var(--font-mono);
 }
 
 .dark {
@@ -215,6 +240,11 @@
   --text-tertiary: #81858C;
   --text-disabled: #54555B;
   --text-inverse: #15171C;
+  /* v0.31.0 D21：第四级文字（同 :root，见该处注释） */
+  --text-faint: #6E727A;
+  /* v0.31.0 D21：中性填充阶梯（同 :root，见该处注释） */
+  --fill-secondary: #23252C;
+  --fill-tertiary: #2B2D35;
 
   /* v0.21.0 品牌 — 深色紫罗兰 */
   --accent: #8B5CF6;
@@ -283,6 +313,16 @@
   --tooltip-text: #1D2129;
   --tooltip-kbd-bg: rgba(0, 0, 0, 0.10);
   --tooltip-kbd-border: rgba(0, 0, 0, 0.14);
+
+  /* v0.31.0 B2 — 编辑器语法色（深色） */
+  --syn-keyword: #C792EA;
+  --syn-string:  #A5D6A7;
+  --syn-number:  #FFCB6B;
+  --syn-comment: #7F848E;
+  --syn-function: #82AAFF;
+  --syn-type:    #4DD0E1;
+  --editor-font-size: 13px;
+  --editor-font-family: var(--font-mono);
 }
 
 /* ============================================================
@@ -1422,13 +1462,54 @@ textarea {
   font-size: 11px;
   color: var(--text-tertiary);
 }
+/* v0.31.0 B1（C-3）：思考来源徽标 —— 规格对齐原型 page-02 `.rbadge`
+   。原生思考用业务蓝底强调「这是模型的真推理链」，文本思考 / 无来源用中性底。 */
+.react-reason__source {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  font-weight: 500;
+  flex: 0 0 auto;
+  background: var(--bg-overlay-l2);
+  color: var(--text-tertiary);
+}
+.react-reason__source[data-source='native'] {
+  background: var(--business-primary-soft);
+  color: var(--business-primary);
+}
+/* v0.31.0 C1：折叠头行固定「思考」标签（Trae Work 式交互）——不再渲染正文首句，
+   避免折叠行与展开正文重复。弹性收缩保证右侧「徽标 + 时长 + chevron」不被挤出。 */
+.react-reason__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+.react-reason[data-state='running'] .react-reason__label {
+  color: var(--business-primary);
+  opacity: 0.85;
+}
+/* v0.31.0 B1（C-7）：空思考占位文案 —— 斜体非强调、右对齐（占据原时长位），
+   与「摘要首句」的正文色明确区分：这是解释，不是内容。 */
+.react-reason__placeholder {
+  margin-left: auto;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-tertiary);
+}
 .react-reason__body {
   margin-top: 6px;
   padding: 0 12px 0 14px;
-  line-height: 1.6;
+  line-height: 21px;
   white-space: pre-wrap;
   color: var(--text-secondary);
-  font-size: 12px;
+  /* v0.31.0 B1（C-5）：12px → 13px —— 修正「思考是最小字号」的权重倒置
+     （原型 page-02 `.rsn-body` 规格为 13px/21px）。思考是 agent 工作过程的主要证据，
+     压到最小档等于让用户无法信任 agent。 */
+  font-size: 13px;
   /* v0.30.1：展开的思考正文可选中复制 */
   user-select: text;
   -webkit-user-select: text;

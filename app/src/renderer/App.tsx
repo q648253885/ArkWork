@@ -5,24 +5,17 @@
  *   - CenterStage：任务对话（TaskHeader → PlanChecklist → Conversation → Composer）
  *   - Inspector（360px，可拖 280–480px）：诊断面板（Tools / Files / Context / Todos / Logs / Browser）
  *
- * 快捷键（v0.13.0）：
- *   ⌘K    Quick Action（四源：/ > @ #）
- *   ⌘P    快速打开（QuickOpen）
- *   ⌘N    新建任务
- *   ⌘B    折叠 / 展开 Sidebar
- *   ⌘J    折叠 / 展开 Inspector
- *   ⌘E    PreviewWindow 浮窗
- *   ⌘,    设置
- *   ⌘?    HelpCenter（Task 14 全局帮助）
- *   ⌘/    HelpCenter 备选快捷键
- *   ⌘1~6  Sidebar 能力入口直达（Agents/Skills/KB/Memory/Automations/Settings）
- *   ⌥1~5  Inspector Tab 直达（Todos/Context/Files/Logs/Browser）
- *   Esc    按优先级关闭浮层
+ * 快捷键（v0.31.0 B0 起**已中央化**）：
+ *   全部全局键位声明在 `renderer/keymap/spec.ts`，处理函数在 `renderer/keymap/actions.ts`，
+ *   本文件只负责注册与挂监听。**不要在本文件（或任何组件）里再加 keydown 判定** ——
+ *   需要新键位时改注册表，展示时用 `useChord()`。
+ *   （逐条对应关系与迁移偏差见 docs/versions/v0.31.0/04-system-design.md）
  * ============================================================ */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useStore, type InspectorTabId, type ModulePage } from './store'
-import type { PermissionMode } from '@shared/types/permission'
+import { useStore } from './store'
+// B0：键位提示一律经 keymap 产出（chordText/useChord），不得在 JSX 内写裸修饰键符号
+import { chordText, IS_MAC, registerDefaultKeybindings, runDispatch, snapshotContext } from './keymap'
 import { Icon } from './icons'
 import { Tooltip } from './components/ui'
 import { CenterStage } from './components/CenterStage'
@@ -65,172 +58,29 @@ export default function App() {
     return unsub
   }, [init, subscribeAll])
 
-  // 全局快捷键
+  // 全局快捷键（v0.31.0 B0：中央化到 renderer/keymap 注册表）
+  //
+  // 迁移前的 13 分支 if 链已逐条搬入 keymap/spec.ts（声明）与 keymap/actions.ts（处理），
+  // 此处只剩「注册一次 + 挂一个监听」，不再有任何和弦判定。
+  // 分层原因：`when` 门控、优先级消歧、平台归一都需要在同一处实现，
+  // 否则 B2 起的编辑器键位会再次回到"各组件自己 addEventListener"的老路（03-interaction §5.4 明令禁止）。
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const meta = e.metaKey || e.ctrlKey
-      const key = e.key.toLowerCase()
-      const alt = e.altKey
-
-      // Task 14：⌘? / ⌘/ — 打开 / 关闭 HelpCenter
-      // 与 ⌘, 设置并列；Esc 由组件自身处理关闭。
-      if (meta && !alt && !e.shiftKey && (key === '?' || key === '/')) {
-        e.preventDefault()
-        useStore.getState().toggleHelp()
-        return
-      }
-
-      // ⌘K — Quick Action（v0.13.0 替代 CommandPalette）
-      if (meta && key === 'k') {
-        e.preventDefault()
-        const s = useStore.getState()
-        s.setCmdPaletteOpen(!s.cmdPaletteOpen)
-        return
-      }
-
-      // ⌘P — QuickOpen（文件快速切换）
-      if (meta && key === 'p' && !e.shiftKey) {
-        e.preventDefault()
-        const s = useStore.getState()
-        s.setQuickOpenOpen(!s.quickOpenOpen)
-        return
-      }
-
-      // ⌘N — 新建任务
-      if (meta && key === 'n' && !e.shiftKey) {
-        e.preventDefault()
-        const s = useStore.getState()
-        if (s.modulePage) s.closeModulePage()
-        void s.createTask({ title: '', text: '' })
-        window.dispatchEvent(new Event('composer:focus'))
-        return
-      }
-
-      // ⌘B — 折叠 Sidebar（v0.13.0）
-      if (meta && key === 'b') {
-        e.preventDefault()
-        useStore.getState().toggleLeftNav()
-        return
-      }
-
-      // ⌘J — 折叠 Inspector（v0.13.0）
-      if (meta && key === 'j') {
-        e.preventDefault()
-        const s = useStore.getState()
-        s.toggleRightDock()
-        return
-      }
-
-      // ⌘E — 开关 PreviewWindow 浮窗
-      if (meta && key === 'e') {
-        e.preventDefault()
-        const s = useStore.getState()
-        if (s.previewWindow) s.closePreview()
-        else s.openPreview('').catch(() => { /* 占位，无害 */ })
-        return
-      }
-
-      // ⌘, — 设置页面（redesign Task 3：替代旧 Modal）
-      if (meta && key === ',') {
-        e.preventDefault()
-        const s = useStore.getState()
-        if (s.modulePage === 'settings') s.closeModulePage()
-        else s.openModulePage('settings')
-        return
-      }
-
-      // ⌘⇧W — 打开工作区切换器
-      if (meta && key === 'w' && e.shiftKey) {
-        e.preventDefault()
-        window.dispatchEvent(new CustomEvent('topbar:open-workspace'))
-        return
-      }
-
-      // redesign-workspace-navigation Task 3：⌘1~6 — Sidebar 能力入口直达
-      // （Agents / Skills / KB / Memory / Automations / Settings）
-      // 设置已迁移为 modulePage='settings'，不再打开 Modal。
-      if (meta && !alt && /^[1-6]$/.test(e.key)) {
-        e.preventDefault()
-        const s = useStore.getState()
-        const idx = Number(e.key)
-        const pages: ModulePage[] = ['agents', 'skills', 'kb', 'memory', 'automations', 'settings']
-        const page = pages[idx - 1]
-        if (page) s.openModulePage(page)
-        return
-      }
-
-      // v0.13.0：⌥1~6 Inspector 直达 → fix-workspace-task-automation-memory Task 5：⌥1~5
-      // v0.27.0 r10-F14a：终端纳入 Inspector 后扩展 ⌥6
-      // ⌥N 命中时同步展开内容面板（即使之前是折叠态）。
-      if (alt && !meta && /^[1-6]$/.test(e.key)) {
-        e.preventDefault()
-        const s = useStore.getState()
-        const idx = Number(e.key) - 1
-        const tab = s.inspectorTabOrder.filter((t) => !s.hiddenInspectorTabs.includes(t))[idx] as
-          | InspectorTabId
-          | undefined
-        if (tab) {
-          s.setInspectorTab(tab)
-          if (s.rightDockCollapsed) s.toggleRightDock()
-        }
-        return
-      }
-
-      // v0.15.0：Shift+Tab — 循环切换权限模式
-      // 表单内（input/textarea/select/contentEditable）保留原生 Shift+Tab 行为。
-      // v0.28.0（F6）：循环扩为四态（默认→自动放行→接受编辑→只读）；
-      // bypassPermissions 不参与循环 —— 只能经 Composer 下拉/设置页二次确认进入；
-      // 处于 bypass 时按 Shift+Tab 回到 default（indexOf=-1 → 0）。
-      if (e.key === 'Tab' && e.shiftKey && !(e.metaKey || e.ctrlKey || e.altKey)) {
-        const target = e.target as HTMLElement | null
-        const tag = target?.tagName
-        if (target && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable)) {
-          return
-        }
-        e.preventDefault()
-        const s = useStore.getState()
-        const ORDER: PermissionMode[] = ['default', 'autoApprove', 'acceptEdits', 'plan']
-        const next = ORDER[(ORDER.indexOf(s.permissionMode) + 1) % ORDER.length]
-        void s.setPermissionMode(next)
-        const LABELS: Record<PermissionMode, string> = {
-          default: t('app.permissionMode.default'),
-          autoApprove: t('app.permissionMode.autoApprove'),
-          acceptEdits: t('app.permissionMode.acceptEdits'),
-          plan: t('app.permissionMode.plan'),
-          bypassPermissions: t('app.permissionMode.bypass'),
-        }
-        s.pushToast({ type: 'success', message: LABELS[next], duration: 2000 })
-        return
-      }
-
-      // Escape — 按优先级关闭（设置 Modal 已下线，settings 走 modulePage 路径）
-      if (e.key === 'Escape') {
-        const s = useStore.getState()
-        // Task 14：HelpCenter 最高优先级（任何浮层之先）
-        if (s.helpOpen) { s.setHelpOpen(false); return }
-        if (s.quickOpenOpen) { s.setQuickOpenOpen(false); return }
-        if (s.cmdPaletteOpen) { s.setCmdPaletteOpen(false); return }
-        if (s.confirmDialog.open) { return }
-        if (s.pendingConfirm) { return }   // 工具确认层自处理 Esc（dismissed）
-        if (s.previewWindow) { s.closePreview(); return }
-        if (s.modulePage) { s.closeModulePage(); return }
-        // v0.14.0 Task 9：Esc 暂停/停止确认 —— 任务 running 期间按 Esc 弹出
-        // 确认（暂停/停止二选一），避免误触；弹窗已打开时再次 Esc 关闭它。
-        if (escPauseRef.current) { setEscPauseTask(null); return }
-        const runningTask = s.tasks.find((t) => t.status === 'running')
-        if (runningTask) {
-          e.preventDefault()
-          setEscPauseTask({ id: runningTask.id, title: runningTask.title })
-          return
-        }
-        if (!s.rightDockCollapsed) {
-          s.toggleRightDock()
-          return
-        }
-      }
+    const unregister = registerDefaultKeybindings({
+      // Esc 链的暂停确认弹窗是 App 组件局部态，故经宿主回调解耦（不把 React 组件塞进注册表）
+      isPauseConfirmOpen: () => escPauseRef.current !== null,
+      closePauseConfirm: () => setEscPauseTask(null),
+      openPauseConfirm: (task) => setEscPauseTask(task),
+    })
+    const handler = (e: KeyboardEvent): void => {
+      // handler 自持 preventDefault（迁移前各分支的拦截时机各不相同，统一拦会吃掉原生行为），
+      // 这里只负责送进注册表；返回值是冒泡语义，调用方无需使用。
+      runDispatch(e, snapshotContext(), IS_MAC)
     }
     window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    return () => {
+      window.removeEventListener('keydown', handler)
+      unregister()
+    }
   }, [])
 
   // Sidebar 拖拽
@@ -273,7 +123,7 @@ export default function App() {
         <PreviewWindow />
       </div>
 
-      {/* v0.13.0：QuickAction（⌘K，四源 / > @ #）取代 CommandPalette */}
+      {/* v0.13.0：QuickAction（Mod+K，四源 / > @ #）取代 CommandPalette */}
       <QuickAction />
       <QuickOpen />
 
@@ -293,7 +143,7 @@ export default function App() {
       {/* redesign-workspace-navigation Task 3：Settings Modal 已下线，
           设置改走 modulePage='settings'（ModulePage 渲染）。Task 4 将接入五分区。 */}
 
-      {/* Task 14：HelpCenter 全局帮助（⌘? / ⌘/ 触发） */}
+      {/* Task 14：HelpCenter 全局帮助（Mod+? / Mod+/ 触发） */}
       <HelpCenter />
 
       <StatusBar />
@@ -387,7 +237,7 @@ function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   }))
   return (
     <div className="collapsed-sidebar flex flex-col items-center w-16 h-full bg-bg-base border-r border-border-subtle select-none flex-shrink-0">
-      <Tooltip label={t('app.collapsed.expand')} kbd="⌘B" placement="right">
+      <Tooltip label={t('app.collapsed.expand')} kbd={chordText('Mod+B')} placement="right">
         <button
           onClick={onExpand}
           aria-label={t('app.collapsed.expand')}
@@ -396,7 +246,7 @@ function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
           <Icon.ChevronRight width={18} height={18} />
         </button>
       </Tooltip>
-      <Tooltip label={t('app.collapsed.newTask')} kbd="⌘N" placement="right">
+      <Tooltip label={t('app.collapsed.newTask')} kbd={chordText('Mod+N')} placement="right">
         <button
           onClick={() => void createTask({ title: '', text: '' })}
           className="collapsed-sidebar__new-task mt-1 w-9 h-9 flex items-center justify-center rounded-md bg-accent hover:bg-accent-hover text-text-inverse transition-colors focus-ring"
@@ -506,10 +356,14 @@ function StatusBar() {
       <div className="flex-1" />
 
       {/* v0.13.0：左右栏折叠按钮（图标 + 快捷键） */}
-      <Tooltip label={leftNavCollapsed ? t('app.status.expandLeft') : t('app.status.collapseLeft')} kbd="⌘B" delay={150}>
+      <Tooltip label={leftNavCollapsed ? t('app.status.expandLeft') : t('app.status.collapseLeft')} kbd={chordText('Mod+B')} delay={150}>
         <button
           onClick={() => toggleLeftNav()}
-          aria-label={leftNavCollapsed ? t('app.status.expandLeftAria') : t('app.status.collapseLeftAria')}
+          aria-label={
+            leftNavCollapsed
+              ? t('app.status.expandLeftAria', { kbd: chordText('Mod+B') })
+              : t('app.status.collapseLeftAria', { kbd: chordText('Mod+B') })
+          }
           className="hidden md:flex items-center gap-1 h-6 min-w-8 px-1.5 rounded hover:text-text-primary transition-colors focus-ring"
         >
           <Icon.ChevronLeft
@@ -520,7 +374,7 @@ function StatusBar() {
           <span>{t('app.status.left')}</span>
         </button>
       </Tooltip>
-      <Tooltip label={rightDockCollapsed ? t('app.status.expandRight') : t('app.status.collapseRight')} kbd="⌘J" delay={150}>
+      <Tooltip label={rightDockCollapsed ? t('app.status.expandRight') : t('app.status.collapseRight')} kbd={chordText('Mod+J')} delay={150}>
         <button
           onClick={() => toggleRightDock()}
           aria-label={rightDockCollapsed ? t('app.status.expandRightAria') : t('app.status.collapseRightAria')}
@@ -549,9 +403,9 @@ function StatusBar() {
       </Tooltip>
 
       <span className="text-border-default">│</span>
-      <Tooltip label="Quick Action" kbd="⌘K" placement="top">
+      <Tooltip label="Quick Action" kbd={chordText('Mod+K')} placement="top">
         <span className="cursor-help">
-          <span className="text-accent">⌘K</span> {t('app.status.panel')}
+          <span className="text-accent">{chordText('Mod+K')}</span> {t('app.status.panel')}
         </span>
       </Tooltip>
     </div>

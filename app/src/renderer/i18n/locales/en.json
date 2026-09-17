@@ -1,4 +1,20 @@
 {
+  "errorBoundary": {
+    "title": "Something went wrong while rendering",
+    "retry": "Retry"
+  },
+  "flow": {
+    "showResult": "View result",
+    "hideResult": "Hide",
+    "truncatedLines": "Showing first {{shown}} of {{total}} lines",
+    "truncatedResult": "Result truncated",
+    "searchTotal": "{{total}} total",
+    "dryRun": "Dry run",
+    "approvalNeedsHuman": "Needs human confirmation",
+    "approvalReplan": "Replan pending approval",
+    "approvalConverge": "Converge confirmation",
+    "openFile": "Click to open this file"
+  },
   "common": {
     "cancel": "Cancel",
     "confirm": "Confirm",
@@ -284,13 +300,13 @@
       "currentModel": "Current model",
       "expandLeft": "Expand left panel",
       "collapseLeft": "Collapse left panel",
-      "expandLeftAria": "Expand left panel ⌘B",
-      "collapseLeftAria": "Collapse left panel ⌘B",
+      "expandLeftAria": "Expand left panel {{kbd}}",
+      "collapseLeftAria": "Collapse left panel {{kbd}}",
       "left": "Left",
       "expandRight": "Expand right panel",
       "collapseRight": "Collapse right panel",
-      "expandRightAria": "Expand right panel ⌘J",
-      "collapseRightAria": "Collapse right panel ⌘J",
+      "expandRightAria": "Expand right panel {{kbd}}",
+      "collapseRightAria": "Collapse right panel {{kbd}}",
       "right": "Right",
       "theme": {
         "light": "Light",
@@ -1301,8 +1317,11 @@
         "split": "Split",
         "desktop": "Desktop",
         "tablet": "Tablet",
-        "mobile": "Mobile"
-      }
+        "mobile": "Mobile",
+        "readonly": "Read-only",
+        "edit": "Edit"
+      },
+      "editor": "Editor"
     },
     "fallback": {
       "metaError": "Unable to read file metadata",
@@ -1372,19 +1391,19 @@
   "topbar": {
     "search": {
       "desc": "Search tasks, files, agents, commands, and settings",
-      "aria": "Open Quick Action search ⌘K",
+      "aria": "Open Quick Action search {{kbd}}",
       "hint": "Search tasks, files, agents, commands"
     },
     "settings": {
       "label": "Settings",
       "desc": "Models, workspace, appearance, shortcuts, advanced—all configuration lives here",
-      "aria": "Settings ⌘,"
+      "aria": "Settings {{kbd}}"
     },
     "workspace": {
       "switchCap": "{{path}} ｜ Switch workspace",
       "switch": "Switch workspace",
       "desc": "Where you work: switch workspace, tasks and memory are isolated",
-      "aria": "Switch workspace ⌘⇧W",
+      "aria": "Switch workspace {{kbd}}",
       "wsLabel": "Agent workspace",
       "select": "Select workspace",
       "listTitle": "Workspaces",
@@ -1449,6 +1468,18 @@
     "rerunAria": "Rerun this task"
   },
   "thought": {
+    "label": "Thought",
+    "placeholder": {
+      "failed": "Thinking failed",
+      "directExec": "Ran directly this turn — no thinking output",
+      "budgetExhausted": "Thinking used the entire output budget — retried automatically",
+      "noChannel": "This model does not provide thinking content"
+    },
+    "source": {
+      "native": "Native thinking",
+      "content": "Text thinking",
+      "none": "No source"
+    },
     "failed": "Execution failed",
     "summary": {
       "thoughtTime": "Thought for {{time}}s",
@@ -1961,7 +1992,7 @@
   },
   "help": {
     "title": "ArkWork Help Center",
-    "subtitle": "Covers all major features · ⌘? to toggle",
+    "subtitle": "Covers all major features · {{kbd}} to toggle",
     "closeLabel": "Close help",
     "tryNow": "Try it now",
     "privacyFooter": "Privacy · ArkWork is local-first by default. Conversations, memory, and knowledge-base indexes live in local SQLite and the filesystem. Model calls are made with the API keys you explicitly configure in Settings.",
@@ -1974,6 +2005,13 @@
     "shortcuts": {
       "title": "Keyboard Shortcuts",
       "subtitle": "Global shortcut reference",
+      "group": {
+        "global": "Global",
+        "inspector": "Inspector",
+        "help": "Help",
+        "editor": "Editor",
+        "region": "Interaction area"
+      },
       "desc": {
         "quickAction": "Quick Action (search / commands / @ mentions / # topics)",
         "quickOpen": "QuickOpen: jump to a task, file, or skill by name",
@@ -1996,6 +2034,8 @@
         "inspFiles": "Inspector: Files",
         "inspLogs": "Inspector: Logs",
         "inspBrowser": "Inspector: Browser",
+        "inspTerminal": "Inspector: Terminal",
+        "permissionCycle": "Cycle the permission mode (native Tab inside form fields)",
         "esc": "Close overlay / ModulePage / Inspector by priority"
       }
     },
@@ -2495,6 +2535,71 @@
       "degradedEntryNote": "These entries ship in v0.30.1; the task already continues with the flat checklist",
       "nodeFocusHint": "This node is now located in the task panel",
       "failed": "Action failed, please retry"
+    }
+  },
+  "editor": {
+    "status": {
+      "lineCol": "Ln {{line}}, Col {{col}}",
+      "dirty": "Unsaved",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "inSync": "Buffer matches disk",
+      "conflict": "Conflict",
+      "readonly": "Read-only",
+      "lines": "{{count}} lines"
+    },
+    "refreshDirtyHint": "This file has unsaved changes — save it before refreshing",
+    "readonly": {
+      "title": "Opened read-only",
+      "toast": "\"{{name}}\" opened read-only: {{reason}}",
+      "reason": {
+        "deleted": "File was deleted",
+        "outsideWorkspace": "Path is outside the workspace",
+        "binary": "Binary file",
+        "tooLarge": "File too large",
+        "permission": "Missing write permission",
+        "agentWriting": "Agent is writing",
+        "nonUtf8": "Non-UTF-8 encoding"
+      },
+      "action": {
+        "reveal": "Reveal in folder",
+        "retry": "Probe again",
+        "saveAs": "Save as recovery",
+        "close": "Close"
+      }
+    },
+    "conflict": {
+      "title": "Save conflict: the file on disk changed while you were editing",
+      "desc": "ArkWork will not auto-merge — choose which version to keep.",
+      "toast": "The file on disk changed while you were editing; saving was blocked",
+      "diff": {
+        "toggle": "Compare",
+        "hide": "Hide comparison",
+        "disk": "Disk version",
+        "mine": "My version",
+        "unreadable": "The disk version is not decodable and cannot be shown side by side"
+      },
+      "action": {
+        "overwrite": "Overwrite disk (use mine)",
+        "reload": "Revert to disk (discard mine)",
+        "later": "Decide later"
+      },
+      "overwriteHint": "A local history entry is written first, so this is undoable",
+      "reloadHint": "A local history entry is written before discarding"
+    },
+    "save": {
+      "action": "Save"
+    },
+    "mode": {
+      "edit": "Edit",
+      "render": "Read-only render"
+    },
+    "close": {
+      "title": "Close tab with unsaved changes",
+      "desc": "{{name}} has unsaved changes. Save before closing?",
+      "save": "Save and close",
+      "discard": "Discard changes",
+      "cancel": "Cancel"
     }
   }
 }

@@ -122,6 +122,12 @@ export interface CreateTaskInput {
   config?: Task['config']
   /** 由自动化触发的任务来源标记（侧边栏据此显示来源图标） */
   automationId?: string
+  /**
+   * v0.31.0 C2：标题来源标记。缺省 undefined = 占位/机械产物，run 时可被
+   * LLM 生成升级；automation 创建时置 'user'（用户配置名，锁定）、
+   * delegate 子任务置 'llm'（标题已是模型产物）。
+   */
+  titleSource?: 'user' | 'llm'
 }
 
 /**
@@ -168,6 +174,8 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
     tags: [],
     starred: false,
     automationId: input.automationId,
+    // v0.31.0 C2：标题来源透传（undefined = 占位/机械产物，run 时可被 LLM 升级）
+    titleSource: input.titleSource,
   }
   await writeCollection(() => getCollection().upsert(task))
   logger.info('System', `task created: ${task.id} "${task.title}"`)
@@ -276,11 +284,19 @@ export async function appendUserMessage(taskId: string, text: string): Promise<T
     logger.warn('System', `appendUserMessage: cancelTask skipped: ${(err as Error).message}`, taskId)
   }
 
+  // v0.31.0 C2：空壳任务（「新建任务」占位创建）首条消息回填 input.text ——
+  // 仅当原 text 为空时补位，为 runner 挂点的 LLM 标题生成提供素材；
+  // 已有内容的任务不动（input.text 始终保留最初任务描述语义）。
+  const backfillInput = task.input.text.trim() === ''
+    ? { input: { ...task.input, text } }
+    : {}
+
   const updated = await updateTask(taskId, {
     status: 'pending',
     startedAt: null,
     completedAt: null,
     errorMessage: undefined,
+    ...backfillInput,
   })
   if (updated) broadcastTaskStatus(updated)
 

@@ -35,8 +35,18 @@ const rendererTodoPanelSrc = readFileSync(
   fileURLToPath(new URL('../../renderer/components/dock/TodoPanel.tsx', root)),
   'utf-8',
 )
-const rendererThoughtStreamSrc = readFileSync(
-  fileURLToPath(new URL('../../renderer/components/ThoughtStream.tsx', root)),
+// v0.31.0 B4 载体收敛：ThoughtStream.tsx 下线，ToolCard 契约转写到
+// components/flow/blocks/ToolBlock.tsx + tools/GenericCard.tsx（§4.1 登记表）
+const rendererToolBlockSrc = readFileSync(
+  fileURLToPath(new URL('../../renderer/components/flow/blocks/ToolBlock.tsx', root)),
+  'utf-8',
+)
+const rendererGenericCardSrc = readFileSync(
+  fileURLToPath(new URL('../../renderer/components/flow/tools/GenericCard.tsx', root)),
+  'utf-8',
+)
+const rendererProjectSrc = readFileSync(
+  fileURLToPath(new URL('../../renderer/flow/project.ts', root)),
   'utf-8',
 )
 const rendererConstantsSrc = readFileSync(
@@ -182,22 +192,22 @@ test('v0.18.x: TodoPanel 行内按钮按状态显示（不可用的不渲染）'
   assert.match(rendererTodoPanelSrc, /canRetry\s*=\s*st\s*===\s*['"]failed['"]/, 'canRetry 仅在 failed 状态可用')
 })
 
-/* ---------- 7-8. ThoughtStream ToolCard 契约 ---------- */
+/* ---------- 7-8. ToolCard 契约（v0.31.0 B4：载体 ThoughtStream → flow/blocks/ToolBlock + flow/tools/GenericCard） ---------- */
 
 test('v0.18.x fix: ToolCard 结果默认折叠', () => {
-  assert.match(rendererThoughtStreamSrc, /useState\(false\)/, 'resultOpen 默认应为 false')
+  assert.match(rendererToolBlockSrc, /useState\(false\)/, 'resultOpen 默认应为 false')
   // resultOpen 应被命名为 resultOpen
-  assert.match(rendererThoughtStreamSrc, /resultOpen/, '应存在 resultOpen state')
+  assert.match(rendererToolBlockSrc, /resultOpen/, '应存在 resultOpen state')
 })
 
 test('v0.18.x fix: 内容类参数（content/oldStr/newStr）按 60 字符摘要显示', () => {
-  assert.match(rendererThoughtStreamSrc, /CONTENT_ARG_KEYS/, '应定义 CONTENT_ARG_KEYS')
-  assert.match(rendererThoughtStreamSrc, /['"]content['"]/, 'CONTENT_ARG_KEYS 应含 content')
-  assert.match(rendererThoughtStreamSrc, /oldStr/, 'CONTENT_ARG_KEYS 应含 oldStr')
-  assert.match(rendererThoughtStreamSrc, /newStr/, 'CONTENT_ARG_KEYS 应含 newStr')
-  assert.match(rendererThoughtStreamSrc, /truncate\([^,]+,\s*60\s*\)/, '内容参数应截断到 60 字符')
+  assert.match(rendererGenericCardSrc, /CONTENT_ARG_KEYS/, '应定义 CONTENT_ARG_KEYS')
+  assert.match(rendererGenericCardSrc, /['"]content['"]/, 'CONTENT_ARG_KEYS 应含 content')
+  assert.match(rendererGenericCardSrc, /oldStr/, 'CONTENT_ARG_KEYS 应含 oldStr')
+  assert.match(rendererGenericCardSrc, /newStr/, 'CONTENT_ARG_KEYS 应含 newStr')
+  assert.match(rendererGenericCardSrc, /truncate\([^,]+,\s*60\s*\)/, '内容参数应截断到 60 字符')
   // 标注总字符数
-  assert.match(rendererThoughtStreamSrc, /字符/, '摘要应标注总字符数')
+  assert.match(rendererGenericCardSrc, /字符/, '摘要应标注总字符数')
 })
 
 /* ---------- 9. constants TOOL_DISPLAY 补全 ---------- */
@@ -220,24 +230,27 @@ test('v0.18.x: seed.ts 提示词明确「阶段内工具不会自动推进」', 
   assert.match(seedSrc, /todo-update/, '应保留 todo-update 显式推进入口')
 })
 
-/* ---------- 11. ThoughtStream 软失败（内部机制/门禁拦截）中性显示契约 ---------- */
+/* ---------- 11. 软失败（内部机制/门禁拦截）中性显示契约（v0.31.0 B4：载体 ThoughtStream → flow/project 投影 + ToolBlock 渲染） ---------- */
 
 test('v0.18.x fix: 内部机制/门禁拦截（softFail）用中性 guarded 样式，不红色报错', () => {
-  // 任务级失败判断应排除 softFail 步骤
+  // 任务级失败判断应排除 softFail 步骤（现居投影层 project.ts 的 act 分支与 mapToolStatus）
   assert.match(
-    rendererThoughtStreamSrc,
+    rendererProjectSrc,
     /status\s*===\s*['"]failed['"]\s*&&\s*!s\.softFail/,
     '任务级 failed 判断应排除 softFail 步骤',
   )
-  // 软失败步骤走 guarded 状态（v0.19.x 淡橙色警告，区别于红色真实报错）
-  assert.match(rendererThoughtStreamSrc, /isSoftFail/, '应计算 isSoftFail 标记')
-  assert.match(rendererThoughtStreamSrc, /['"]guarded['"]/, '软失败应映射到 guarded 状态')
+  // 软失败步骤在投影层映射为 guarded 状态（v0.19.x 淡橙色警告，区别于红色真实报错）
+  assert.match(rendererProjectSrc, /if \(s\.softFail\) return 'guarded'/, '软失败应映射到 guarded 状态')
+  assert.match(rendererToolBlockSrc, /['"]guarded['"]/, '渲染层应消费 guarded 状态')
   // 软失败图标显示橙色点而非红色 ✕
-  assert.match(rendererThoughtStreamSrc, /bg-warning/, '软失败应使用橙色状态点')
-  assert.match(rendererThoughtStreamSrc, /keyPrefix:\s*'thought'/, 'ThoughtStream 应使用 thought keyPrefix')
-  assert.match(rendererThoughtStreamSrc, /t\('guardedTitle'\)/, '软失败图标应有拦截说明 title（thought.guardedTitle，zh 语义「Agent 拦截（门禁/预算，非错误）」）')
+  assert.match(rendererToolBlockSrc, /bg-warning/, '软失败应使用橙色状态点')
+  assert.match(
+    rendererToolBlockSrc,
+    /t\('thought\.guardedTitle'\)/,
+    '软失败图标应有拦截说明（thought.guardedTitle，zh 语义「Agent 拦截（门禁/预算，非错误）」）',
+  )
   // 软失败 errorMessage 用 text-warning 而非 text-danger
-  assert.match(rendererThoughtStreamSrc, /text-warning\s+whitespace-pre-wrap/, '软失败异常信息应橙色警告显示')
+  assert.match(rendererToolBlockSrc, /text-warning\s+whitespace-pre-wrap/, '软失败异常信息应橙色警告显示')
 })
 
 /* ---------- 12. engine ask_user 校验放宽契约 ---------- */

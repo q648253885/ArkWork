@@ -137,10 +137,13 @@ export function Composer() {
   const askSuggestions = useStore((s) => s.suggestions)
   // v0.27.0 R1：生成中判定扩展——存在活跃 streamBuffer（流式增量在途，含 status
   // 尚未翻转的间隙 / chat 作用域）同样视为生成中，停止按钮与 Esc 保持可用
+  // v0.31.0 B1：缓冲 key 三维化后改为**前缀匹配**（`${tid}:`），
+  //   否则旧的 `${tid}:turn` 精确匹配会永久失配 → 停止按钮在生成中消失。
   const hasLiveStream = useStore((s) => {
     const tid = s.selectedTaskId
     if (!tid) return false
-    return `${tid}:turn` in s.streamBuffers || `${tid}:chat` in s.streamBuffers
+    const prefix = `${tid}:`
+    return Object.keys(s.streamBuffers).some((k) => k.startsWith(prefix))
   })
   const isGenerating = isRunning || hasLiveStream
 
@@ -170,7 +173,8 @@ export function Composer() {
   // v0.5.0（B2/B3/B4）：反馈与导出方法
   // v0.7.0：openRight 废弃，改用 setActiveActivity('memory') 切换 SidePanel
   const setActiveActivity = useStore((s) => s.setActiveActivity)
-  const openPreview = useStore((s) => s.openPreview)
+  // v0.31.0 B2：打开文件走 `openDoc`（探针判定可编辑 → 编辑器 Tab）
+  const openDoc = useStore((s) => s.openDoc)
   const confirm = useStore((s) => s.confirm)
   const pushToast = useStore((s) => s.pushToast)
   // v0.15.0：权限模式（chip 循环切换）
@@ -415,7 +419,8 @@ export function Composer() {
       }
       setInput(cleaned + ' ')
       // v0.7.0：文件预览走 PreviewWindow 浮窗（取代右栏）
-      void openPreview(path)
+      // v0.31.0 B2：改走 openDoc，可编辑文件直接进编辑器（原先恒只读）
+      void openDoc(path)
     } else if (item.kind === 'memory') {
       // v0.7.0：memory 项 — 在输入框插入 [memory:<id>] 标记，并提示已注入
       const tag = `[memory:${item.id}]`

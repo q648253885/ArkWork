@@ -8,6 +8,8 @@ import { deriveConversation, friendlyError } from '../meta'
 import { shortTaskId, formatUpdatedAt } from '../../types'
 import { simplifyFirstLine } from '../../utils/title'
 import type { TaskProgress } from '@shared/types/progress'
+// v0.31.0 B1：流式缓冲 key 规则与落定交接下沉到纯模块（可在 node:test 密闭断言）
+import { appendDelta, clearBuffers, settleReasonStep } from '../settle'
 import type { AppState } from '../types'
 
 export const conversationSlice: StateCreator<
@@ -52,7 +54,7 @@ export const conversationSlice: StateCreator<
 
   // ReAct Trace
   steps: [],
-  // v0.27.0 R1：流式增量缓冲（key=`${taskId}:${scope}`）
+  // v0.27.0 R1：流式增量缓冲（v0.31.0 B1 起 key=`${taskId}:${scope}:${kind}`）
   streamBuffers: {},
   // v0.14.0 Task 4：并行 Act 进度（per-requestId）
   toolProgress: {},
@@ -175,23 +177,20 @@ export const conversationSlice: StateCreator<
     setAll((s) => ({
       steps: s.steps.map((p) => (p.id === id ? { ...p, expanded: !p.expanded } : p)),
     })),
-  appendStep: (step) =>
+  appendStep: (stepIn) =>
     setAll((s) => {
+      // v0.31.0 B1（修 RC-3「落地瞬间跳变」）：落定交接逻辑全部在纯模块 `store/settle.ts`，
+      // 此处只做接线 —— 缓冲 key 规则、取较长者、清哪条通道只有一份实现。
+      const settled = settleReasonStep(stepIn, s.streamBuffers)
+      const step = settled.step
       const exists = s.steps.find((p) => p.id === step.id)
       const nextSteps = exists
         ? s.steps.map((p) => (p.id === step.id ? step : p))
         : [...s.steps, step]
-      // v0.27.0 R1：reason 步骤到达 → 权威内容已随 step 落地，清掉 turn 流式缓冲
-      // 避免「流式预览 + 权威渲染」双份展示（R-stream-3）。
-      let streamBuffers = s.streamBuffers
-      if (step.type === 'reason' && s.streamBuffers[`${step.taskId}:turn`]) {
-        streamBuffers = { ...s.streamBuffers }
-        delete streamBuffers[`${step.taskId}:turn`]
-      }
       return {
         steps: nextSteps,
         conversation: deriveConversation(s.selectedTask, nextSteps, s.memory),
-        streamBuffers,
+        streamBuffers: settled.streamBuffers,
       }
     }),
   updateStep: (step) =>
@@ -203,25 +202,17 @@ export const conversationSlice: StateCreator<
       }
     }),
 
-  // v0.27.0 R1：流式增量缓冲维护
+  // v0.27.0 R1：流式增量缓冲维护（v0.31.0 B1 起 key 三维 + 逻辑下沉纯模块）
   applyTextDelta: (payload) =>
     setAll((s) => {
-      const key = `${payload.taskId}:${payload.scope}`
-      const cur = s.streamBuffers[key]
-      // seq 规则：顺序续写（seq===cur+1）或重启（seq===1 截断上一轮残流）；
-      // 其余乱序包直接丢弃（R-stream-2）。
-      if (cur && payload.seq !== cur.seq + 1 && payload.seq !== 1) return s
-      const text =
-        payload.seq === 1 || !cur ? payload.text : cur.text + payload.text
-      return { streamBuffers: { ...s.streamBuffers, [key]: { seq: payload.seq, text } } }
+      const next = appendDelta(s.streamBuffers, payload)
+      // 乱序包 → 纯函数返回入参同一引用 → 不产生新状态（避免无谓重渲染）
+      return next === s.streamBuffers ? s : { streamBuffers: next }
     }),
-  clearStreamBuffer: (taskId, scope) =>
+  clearStreamBuffer: (taskId, scope, kind) =>
     setAll((s) => {
-      const targets = scope ? [`${taskId}:${scope}`] : [`${taskId}:turn`, `${taskId}:chat`]
-      if (!targets.some((k) => k in s.streamBuffers)) return s
-      const next = { ...s.streamBuffers }
-      for (const k of targets) delete next[k]
-      return { streamBuffers: next }
+      const next = clearBuffers(s.streamBuffers, taskId, scope, kind)
+      return next === s.streamBuffers ? s : { streamBuffers: next }
     }),
 
   // 派生对话流
@@ -244,8 +235,11 @@ export const conversationSlice: StateCreator<
         selectedFileContent: content.content,
         selectedFileLanguage: content.language,
       })
-      // v0.7.0：文件选择后弹浮窗预览（取代右栏 Tab）
-      void get().openPreview(path)
+      // v0.31.0 B2：改为走 `fsSlice.openDoc` —— 它先经 `fs:read-text` 探针判定
+      // 「可编辑 / 只读七原因」，可编辑则把 Tab 开成编辑器（§3.5 / §5.4.3）。
+      // 修复前这里直连 `openPreview`，渲染器由 `detectRenderer` 按扩展名给，
+      // 于是**任何文件都落在只读渲染器上**，编辑器永远不可达。
+      void get().openDoc(path)
     } catch (err) {
       get().pushToast({ type: 'danger', message: friendlyError(err), duration: 0 })
     }

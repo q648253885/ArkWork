@@ -54,13 +54,23 @@ import { getAdapter } from '../llm/registry.js'
 import { getTask } from '../store/tasks.js'
 // v0.29.0 F6：用户可见校验错误四语言化
 import { getUiLocale, tFor } from '../i18n/messages.js'
+// v0.31.0 D22：历史「引擎自愈提示被当成用户消息」脏数据的读时修复
+import { isEngineHintUserMessage, repairEngineHintUserMessages } from '../memory/l1-repair.js'
 
 export function registerMemoryHandlers(): void {
   ipcMain.handle('memory:list', async (_e, taskId: string) => {
     // 聚合 L1 工作记忆 + L2 压缩记忆，供记忆面板分层展示与上下文占比计量。
     // v0.16 Task 7：L2 改用压缩后的条目（compressed_summary），上下文以 compressedTokens
     // 计入，显著低于原始产物体积；meta 存 L2Memory.id 供详情查询。
-    const l1 = await listL1(taskId)
+    //
+    // v0.31.0 D22（读时修复）：先归档历史上被守卫以 kind='user_message' 落盘的
+    // 引擎自愈提示（源头已改瞬时通道，见 loop.ts）。命中时归档并广播，随后重读 L1 ——
+    // 返回的条目已带 archivedAt → 对话派生立即不再把它们显示为用户消息。
+    let l1 = await listL1(taskId)
+    if (l1.some(isEngineHintUserMessage)) {
+      await repairEngineHintUserMessages(taskId)
+      l1 = await listL1(taskId)
+    }
     const l2 = await listL2Memories(taskId)
     const l2Items: MemoryItem[] = l2.map((m) => ({
       id: m.id,

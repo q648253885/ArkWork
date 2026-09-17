@@ -12,6 +12,7 @@ import { getAgent } from '../store/agents.js'
 import { getModel } from '../store/agents.js'
 import { runReActLoop } from './engine/index.js'
 import { broadcastTaskStatus } from './events.js'
+import { maybeGenerateTaskTitle } from './task-title.js'
 import { logger } from '../system/logger.js'
 import type { Task } from '@shared/types/task'
 
@@ -85,6 +86,10 @@ export async function runTask(taskId: string): Promise<void> {
   // 调用前发生异常，catch 路径也能正确写入 failed 而不会被覆盖）。
   const updated = await updateTask(taskId, { status: 'running', startedAt: Date.now() })
   if (updated) broadcastTaskStatus(updated)
+
+  // v0.31.0 C2：fire-and-forget 生成任务标题（不阻塞主循环；内部自带
+  // titleSource 竞态保护与 20s 超时，失败静默保留原标题）。
+  void maybeGenerateTaskTitle(taskId)
 
   // generation 自增：每次 runTask 都把计数 +1，并记下本次的 startGeneration。
   // engine 内通过 stale() 检查 generations.get(taskId) === startGeneration，

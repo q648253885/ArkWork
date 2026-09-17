@@ -15,7 +15,9 @@ import { Icon } from '../icons'
 import { useStore, derivePlanItems } from '../store'
 import { Tooltip } from './ui'
 import { Composer } from './Composer'
-import { ConversationFlow } from './ConversationFlow'
+// v0.31.0 B3：交互区层级骨架（TurnList 为 flow/ 唯一入口；
+// ConversationFlow 旧组件文件保留至 B4 全量验收后下线）
+import { TurnList } from './flow'
 import { ModulePage } from './ModulePage'
 import { BugfixIsland } from './dock/BugfixIsland'
 import { STATUS_COLOR, STATUS_CHAR, STATUS_LABEL } from '../constants'
@@ -56,7 +58,8 @@ export function CenterStage() {
       <div className="flex-1 flex flex-col min-w-0 min-h-0 relative bg-bg-base overflow-hidden">
         <TaskHeader task={task} stepCount={stepCount} />
         <BugfixIsland />
-        <ConversationFlow items={conversation} />
+        {/* v0.31.0 B3：ConversationFlow → TurnList（层级骨架；旧组件保留至 B4 下线） */}
+        <TurnList />
         <Composer />
       </div>
     )
@@ -68,7 +71,8 @@ export function CenterStage() {
       {/* v0.14.0 Task 4：PlanBar 已移除 — 计划作为 PlanMessage 卡片内嵌于对话流 */}
       {/* v0.14.0 Task 11：bugfix 操作岛台 — 订阅 bugfix:progress 实时刷新 */}
       <BugfixIsland />
-      <ConversationFlow items={conversation} />
+      {/* v0.31.0 B3：ConversationFlow → TurnList（层级骨架；旧组件保留至 B4 下线） */}
+      <TurnList />
       <Composer />
     </div>
   )

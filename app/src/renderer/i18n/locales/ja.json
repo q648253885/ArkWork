@@ -1,4 +1,20 @@
 {
+  "errorBoundary": {
+    "title": "ページの描画中にエラーが発生しました",
+    "retry": "再試行"
+  },
+  "flow": {
+    "showResult": "結果を表示",
+    "hideResult": "閉じる",
+    "truncatedLines": "先頭 {{shown}} 行のみ表示（全 {{total}} 行）",
+    "truncatedResult": "結果は切り詰められました",
+    "searchTotal": "全 {{total}} 件",
+    "dryRun": "ドライラン（保存なし）",
+    "approvalNeedsHuman": "人の確認が必要",
+    "approvalReplan": "再計画の承認待ち",
+    "approvalConverge": "収束の確認",
+    "openFile": "クリックしてファイルを開く"
+  },
   "common": {
     "cancel": "キャンセル",
     "confirm": "確認",
@@ -284,13 +300,13 @@
       "currentModel": "現在のモデル",
       "expandLeft": "左パネルを展開",
       "collapseLeft": "左パネルを折りたたむ",
-      "expandLeftAria": "左パネルを展開 ⌘B",
-      "collapseLeftAria": "左パネルを折りたたむ ⌘B",
+      "expandLeftAria": "左パネルを展開 {{kbd}}",
+      "collapseLeftAria": "左パネルを折りたたむ {{kbd}}",
       "left": "左",
       "expandRight": "右パネルを展開",
       "collapseRight": "右パネルを折りたたむ",
-      "expandRightAria": "右パネルを展開 ⌘J",
-      "collapseRightAria": "右パネルを折りたたむ ⌘J",
+      "expandRightAria": "右パネルを展開 {{kbd}}",
+      "collapseRightAria": "右パネルを折りたたむ {{kbd}}",
       "right": "右",
       "theme": {
         "light": "ライト",
@@ -1301,8 +1317,11 @@
         "split": "分割",
         "desktop": "デスクトップ",
         "tablet": "タブレット",
-        "mobile": "モバイル"
-      }
+        "mobile": "モバイル",
+        "readonly": "読み取り専用",
+        "edit": "編集"
+      },
+      "editor": "エディタ"
     },
     "fallback": {
       "metaError": "ファイルのメタデータを読み込めません",
@@ -1372,19 +1391,19 @@
   "topbar": {
     "search": {
       "desc": "タスク、ファイル、エージェント、コマンド、設定を検索",
-      "aria": "Quick Action 検索を開く ⌘K",
+      "aria": "Quick Action 検索を開く {{kbd}}",
       "hint": "タスク、ファイル、エージェント、コマンドを検索"
     },
     "settings": {
       "label": "設定",
       "desc": "モデル、ワークスペース、外観、ショートカット、詳細——すべての設定はここに",
-      "aria": "設定 ⌘,"
+      "aria": "設定 {{kbd}}"
     },
     "workspace": {
       "switchCap": "{{path}} ｜ ワークスペースを切替",
       "switch": "ワークスペースを切替",
       "desc": "作業場所：ワークスペースを切り替えると、タスクとメモリが分離されます",
-      "aria": "ワークスペースを切替 ⌘⇧W",
+      "aria": "ワークスペースを切替 {{kbd}}",
       "wsLabel": "Agent ワークスペース",
       "select": "ワークスペースを選択",
       "listTitle": "ワークスペース",
@@ -1449,6 +1468,18 @@
     "rerunAria": "このタスクを再実行"
   },
   "thought": {
+    "label": "思考",
+    "placeholder": {
+      "failed": "思考に失敗しました",
+      "directExec": "今回は直接実行、思考出力なし",
+      "budgetExhausted": "思考が出力予算をすべて消費、自動再試行済み",
+      "noChannel": "このモデルは思考内容を提供しません"
+    },
+    "source": {
+      "native": "ネイティブ思考",
+      "content": "テキスト思考",
+      "none": "来源なし"
+    },
     "failed": "実行失敗",
     "summary": {
       "thoughtTime": "考え中 {{time}}s",
@@ -1961,7 +1992,7 @@
   },
   "help": {
     "title": "ArkWork ヘルプセンター",
-    "subtitle": "主要機能をすべて網羅 · ⌘? で開閉",
+    "subtitle": "主要機能をすべて網羅 · {{kbd}} で開閉",
     "closeLabel": "ヘルプを閉じる",
     "tryNow": "今すぐ試す",
     "privacyFooter": "プライバシー · ArkWork はデフォルトでローカル優先です。会話・メモリ・ナレッジベースのインデックスはローカルの SQLite とファイルシステムに保存され、モデル呼び出しは設定で明示的に構成した API キーで行われます。",
@@ -1974,6 +2005,13 @@
     "shortcuts": {
       "title": "ショートカット総覧",
       "subtitle": "グローバルショートカットの参考",
+      "group": {
+        "global": "グローバル",
+        "inspector": "Inspector",
+        "help": "ヘルプ",
+        "editor": "エディタ",
+        "region": "インタラクション領域"
+      },
       "desc": {
         "quickAction": "Quick Action（検索 / コマンド / @メンション / #トピック）",
         "quickOpen": "QuickOpen：名前でタスク・ファイル・スキルへ移動",
@@ -1996,6 +2034,8 @@
         "inspFiles": "Inspector：ファイル（Files）",
         "inspLogs": "Inspector：ログ（Logs）",
         "inspBrowser": "Inspector：ブラウザ（Browser）",
+        "inspTerminal": "Inspector：ターミナル（Terminal）",
+        "permissionCycle": "権限モードを順に切替（フォーム内はネイティブ Tab）",
         "esc": "優先順位に応じてオーバーレイ / ModulePage / Inspector を閉じる"
       }
     },
@@ -2495,6 +2535,71 @@
       "degradedEntryNote": "これらの入口は v0.30.1 で提供予定です。タスクはすでにフラットなチェックリストで続行されています",
       "nodeFocusHint": "タスクパネルで該当ノードを特定しました",
       "failed": "操作に失敗しました。再試行してください"
+    }
+  },
+  "editor": {
+    "status": {
+      "lineCol": "{{line}} 行, {{col}} 列",
+      "dirty": "未保存",
+      "saving": "保存中…",
+      "saved": "保存済み",
+      "inSync": "バッファとディスクが一致",
+      "conflict": "競合あり",
+      "readonly": "読み取り専用",
+      "lines": "{{count}} 行"
+    },
+    "refreshDirtyHint": "未保存の変更があります。先に保存してから再読み込みしてください",
+    "readonly": {
+      "title": "読み取り専用で開きました",
+      "toast": "「{{name}}」を読み取り専用で開きました: {{reason}}",
+      "reason": {
+        "deleted": "ファイルが削除されています",
+        "outsideWorkspace": "ワークスペース外のパスです",
+        "binary": "バイナリファイル",
+        "tooLarge": "ファイルが大きすぎます",
+        "permission": "書き込み権限がありません",
+        "agentWriting": "エージェントが書き込み中",
+        "nonUtf8": "非 UTF-8 エンコーディング"
+      },
+      "action": {
+        "reveal": "フォルダで表示",
+        "retry": "再検出",
+        "saveAs": "名前を付けて復元",
+        "close": "閉じる"
+      }
+    },
+    "conflict": {
+      "title": "保存競合: 編集中にディスク上のファイルが変更されました",
+      "desc": "ArkWork は自動マージしません — どちらを残すかを選択してください。",
+      "toast": "編集中にディスク上のファイルが変更されたため、保存を中止しました",
+      "diff": {
+        "toggle": "差分を比較",
+        "hide": "比較を閉じる",
+        "disk": "ディスク版",
+        "mine": "自分の版",
+        "unreadable": "ディスク版はデコードできないため並べて表示できません"
+      },
+      "action": {
+        "overwrite": "ディスクを上書き（自分の版を使用）",
+        "reload": "ディスクに戻す（自分の変更を破棄）",
+        "later": "後で処理"
+      },
+      "overwriteHint": "書き込み前にローカル履歴へ保存するため取り消せます",
+      "reloadHint": "破棄する前にもローカル履歴へ保存します"
+    },
+    "save": {
+      "action": "保存"
+    },
+    "mode": {
+      "edit": "編集",
+      "render": "読み取り専用表示"
+    },
+    "close": {
+      "title": "未保存の変更があるタブを閉じます",
+      "desc": "{{name}} に未保存の変更があります。閉じる前に保存しますか？",
+      "save": "保存して閉じる",
+      "discard": "変更を破棄",
+      "cancel": "キャンセル"
     }
   }
 }
