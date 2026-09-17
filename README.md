@@ -4,7 +4,7 @@
 
 > A local-first AI Agent workbench — making the ReAct reasoning loop **visible, controllable, and reusable**.
 
-![Version](https://img.shields.io/badge/version-v0.30.1-blueviolet) ![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
+![Version](https://img.shields.io/badge/version-v0.31.0-blueviolet) ![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
 ![ArkWork workbench — live ReAct step stream, ask\_user stage gate, and plan checklist](docs/screenshots/workbench-react-task.png)
 
@@ -12,34 +12,37 @@ In most AI products the agent is a black box: you can't debug it, can't interven
 
 **[Download](https://github.com/q648253885/ArkWork/releases)** pre-built installers (macOS Apple Silicon / Intel, Windows, Linux) — or build from source below.
 
-## What's New — v0.30.1
+## What's New — v0.31.0
 
-> **Kernel generation change (TaskGraph) + task panel** — ReAct grows from a single reasoning line into a **parallel-capable task graph**.
+> **File workbench + interaction-area hierarchy** — files turn from read-only previews into an editable workbench, and the agent's reasoning becomes a scannable three-layer stream.
 
-### v0.30.0 · TaskGraph kernel
+### v0.31.0 · File workbench
 
-- **New task kernel** — the task model becomes an **11-state machine** with invariant checks (I1–I7); a dedicated graph engine and **18 IPC channels** (up from 13), roughly 6,600 lines of kernel plus 4,150 lines of UI/IPC.
+- **Real editing (CM6 kernel)** — preview windows are now editors: type directly, save with atomic writes, resolve conflicts with a three-way prompt, and get close protection for unsaved buffers.
 
-- **Five-stage Sync** — after every act step the engine runs **projection → drift detection → hybrid write-back → gating → event evaluation**. A task can no longer be "completed" just because the model claims so — **verification must pass first**.
+- **Live file tree** — chokidar watches the workspace: when the agent writes 10 files, all 10 spots refresh by themselves; artifact-card badges, tree badges and tab dots share one state source.
 
-- **ReplanPatch as an atomic transaction** — mid-run plan changes go through **atomic patches with 4 approval levels**, with the impact surface computed before anything lands.
+- **Goto Anything** — `⌘P` with `file@symbol:line` jumps straight to the target; in-editor find, selection actions, and tree new-file / drag-and-drop round it out.
 
-- **Convergence loop** — three drift signals plus a `DriftReport` pull a wandering task back onto the main line.
+- **Artifact cards** — files written by the agent appear as cards in the conversation; click to open the floating window right at that file.
 
-- **Brand-new task panel** — task-graph visualization with 4 filters (All / Todo / In progress / Finished), bidirectionally synced with kernel state in real time.
+### v0.31.0 · Interaction area, restructured
 
-- **4 locales, 1,944 keys, identical key sets**; full regression across 53 suites green.
+- **Real reasoning, finally visible** — native `reasoning_content` / `thinking_delta` streams into the UI and persists; protocol markers are stripped at delta granularity with zero leakage.
 
-### v0.30.1 · Four-issue patch
+- **Turn → Step → Block** — intent, thinking, tool calls and results get distinct shapes, icons and colors; a six-state machine with parallel tool groups; native tooltips replaced by hover cards.
 
-| Fix | What changed |
-| --- | ------------ |
-| **Copy anything in the step stream** | Fixed the i18n placeholder syntax (`{value}` → `{{value}}`) so raw literals no longer leak; tool streams, tool-card bodies and task titles are selectable again — paste straight into an issue or your notes |
-| **Replan approval link closed** | When a run is interrupted mid-way or superseded by a new task, pending Replan patches now actually show up; Accept / Reject no longer fails with "no longer exists" |
-| **Feature completeness** | Main-process capabilities (graph default policy, etc.) are now reachable from the UI — no more buttons that only pop a toast |
-| **Task panel header redesigned** | `T1`/`T2` is no longer a mystery — the header is now **view switch + tier pill + collapse-all**, with tier labels readable in all four languages |
+- **Keyboard centralization** — every shortcut lives in a `KeybindingRegistry` (13 branches migrated with zero behavior drift) and is documented in the help center.
 
-> Verified: `typecheck` exit 0 · **60 suites / 737 cases, 0 fail** · i18n parity at **1,955 keys × 4 locales** · the packaged `build:dir` artifact boots clean.
+### v0.31.0 · User-requested refinements (C1–C3)
+
+- **C1** — editors converge to two view modes (edit / read-only render) with synchronized scrolling for markdown split view; collapsed thinking shows a fixed "Thinking" label.
+
+- **C2** — task titles are generated by the LLM from task content (≤16 chars, locked after manual rename) — no more walls of "Untitled task".
+
+- **C3** — fixed: restoring a minimized preview window no longer yields an empty window (full window snapshot + swap protection + dedicated discard).
+
+> Verified: `typecheck` exit 0 · **84 suites executed / 875 cases, 0 fail** · i18n key parity across 4 locales · packaged artifact boot-smoke clean.
 
 ## Official Website
 

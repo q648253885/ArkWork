@@ -4,7 +4,7 @@
 
 > 本地优先的 AI Agent 工作台 — 让 ReAct 推理循环**可见、可控、可复用**。
 
-![Version](https://img.shields.io/badge/version-v0.30.1-blueviolet) ![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
+![Version](https://img.shields.io/badge/version-v0.31.0-blueviolet) ![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
 ![ArkWork 工作台 — 实时 ReAct 步骤流、ask_user 阶段门禁与计划清单](docs/screenshots/workbench-react-task.png)
 
@@ -12,34 +12,37 @@
 
 **[下载](https://github.com/q648253885/ArkWork/releases)** 预编译安装包（macOS Apple Silicon / Intel、Windows、Linux），或按下方指南从源码构建。
 
-## 最新版本 — v0.30.1
+## 最新版本 — v0.31.0
 
-> **内核换代（TaskGraph）+ 任务面板** — ReAct 从「单线推理」升级为**可并行的任务图**。
+> **文件工作台 + 交互区层级重构** — 文件从「只读预览」升级为可编辑工作台，Agent 的思考过程变成可扫读的三层信息流。
 
-### v0.30.0 · TaskGraph 内核换代
+### v0.31.0 · 文件工作台
 
-- **全新任务内核** — 任务模型升级为 **11 态状态机**（含不变量校验 I1–I7），新增图谱引擎与 **18 个 IPC 频道**（原 13 个），约 6,600 行内核 + 4,150 行 UI/IPC。
+- **真编辑（CM6 内核）** — 浮窗即编辑器：直接修改、原子写保存、冲突三选一、未保存关闭保护。
 
-- **Sync 五阶段** — 每轮 Act 之后自动执行 **投影 → 漂移检测 → 混合写回 → 门控 → 事件判定**。任务不再能靠模型"口头宣称完成"结束，**必须验收通过才置完成**。
+- **文件树自动刷新** — chokidar 监听工作区：agent 写 10 个文件，10 处全部自动刷新；产物卡徽标 / 文件树徽标 / Tab 圆点三面同源。
 
-- **ReplanPatch 原子事务** — 计划中途变更走**原子补丁 + 4 级批准**，影响面先算清楚再落地。
+- **Goto Anything** — `⌘P` 输入 `文件@符号:行号` 直达目标位置；编辑器内查找、选中动作系统、文件树新建/拖拽一并到位。
 
-- **收敛环** — 漂移三信号 + `DriftReport`，跑偏的任务会被自动拉回主线。
+- **产物卡片** — agent 写入的文件以卡片出现在对话流中，点击即打开浮窗定位。
 
-- **全新任务面板** — 任务图可视化 + 4 档筛选（全部 / 待办 / 进行中 / 已结束），与内核状态实时双向同步。
+### v0.31.0 · 交互区重构
 
-- **四语言 1,944 键集完全一致**，53 套件全量回归通过。
+- **真思考终于可见** — 原生 `reasoning_content` / `thinking_delta` 完整进入交互区并落盘；协议标记按 delta 粒度剥离、零泄漏。
 
-### v0.30.1 · 四问题修复补丁
+- **Turn → Step → Block 三层架构** — 意图 / 思考 / 工具 / 结论各有独立形状 + 图标 + 颜色；六态状态机 + 并行工具组；原生 title 全部换为悬浮卡。
 
-| 修复 | 内容 |
-| --- | --- |
-| **交互区全量可复制** | 修正 i18n 占位符语法（`{value}` → `{{value}}`），不再泄露字面量；工具流、工具卡正文、任务行标题全部恢复可选中，可直接粘进 issue 或笔记 |
-| **Replan 待批准链路收口** | 任务执行中途被打断、被新任务顶替等场景下，待批准的 Replan 补丁现在会正常出现，接受 / 打回不再报「已不存在」 |
-| **功能完整性补齐** | 主进程能力（图默认策略等）下沉到界面，消除"按钮只弹提示不干活"的降级路径 |
-| **任务面板顶栏重设计** | `T1`/`T2` 不再是哑谜 — 顶栏改为**视图切换 + 档位标签 + 一键折叠**三控件，档位标签四语言可读 |
+- **键位中央化** — 全部快捷键收进 `KeybindingRegistry`（13 分支迁移零行为漂移），帮助中心可见。
 
-> 验证：`typecheck` exit 0 · 全量 **60 套件 / 737 条用例 0 fail** · i18n **1,955 键 × 4 语言** parity · 打包 `build:dir` 产物启动冒烟通过。
+### v0.31.0 · 用户裁决细化（C1–C3）
+
+- **C1** — 编辑器收敛为 编辑 / 只读渲染 两态；markdown 分屏同步滚动；思考折叠头行固定「思考」标签。
+
+- **C2** — 任务标题由大模型根据任务内容生成（≤16 字，手动改名锁定）— 任务清单不再一片「未命名任务」。
+
+- **C3** — 修复：浮窗最小化后点击胶囊恢复不再变成空窗（整窗快照 + 交换保护 + 专用丢弃）。
+
+> 验证：`typecheck` exit 0 · 全量 **84 套件执行 / 875 条用例 0 fail** · i18n 四语言键集一致 · 打包产物启动冒烟通过。
 
 ## 官方网站
 
