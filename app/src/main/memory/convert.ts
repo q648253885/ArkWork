@@ -11,7 +11,7 @@ import { writeFile, mkdir } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { getArkworkDir, getWorkspaceDir } from '../store/db.js'
 import { genId } from '@shared/utils/id'
-import { writeSkillToFolder } from '../agent/registry.js'
+import { writeSkillToFolder, listSkills } from '../agent/registry.js'
 import { markL1Distilled } from './l1-working.js'
 import { logger } from '../system/logger.js'
 import { broadcast } from '../window.js'
@@ -47,10 +47,14 @@ export async function convertToSkill(
   skillMd: string,
 ): Promise<ConvertToSkillResult> {
   const parsed = parseSkillFrontmatter(skillMd)
-  const skillId = `S-distill.${genId('s').slice(-8)}`
+  // v0.34.1：id 语义化（旧口径是 `S-distill.<8位随机>`）。
+  // 旧口径的代价已在真实数据上兑现：118 个 `S-distill.*` 目录堆在技能库里，
+  // 用户无法从 id 判断任何一个是什么，只能逐个点开 SKILL.md —— 这直接导致
+  // 「蒸馏技能」整体被当成垃圾清理。id 必须自解释。
+  const skillId = await allocateDistillSkillId(parsed.name)
   const skill: Skill = {
     id: skillId,
-    name: parsed.name || `蒸馏技能-${skillId.slice(-4)}`,
+    name: parsed.name || skillId.replace(/^S-forge\./, ''),
     description: parsed.description || '从任务经验蒸馏的可复用技能',
     namespace: 'custom',
     source: 'custom',
@@ -114,4 +118,41 @@ function parseSkillFrontmatter(md: string): { name?: string; description?: strin
     name: nameMatch?.[1]?.trim(),
     description: descMatch?.[1]?.trim(),
   }
+}
+
+/* ============================================================
+ * v0.34.1：蒸馏技能 id 分配（语义化 + 冲突避让）
+ *
+ * 规则：`S-forge.<slug>`，slug 由 frontmatter name 规范化
+ * （小写、非字母数字转连字符、合并连续连字符、去首尾、最长 48）。
+ * 已存在同名 id → 追加 `-2` / `-3` …（上限 99）；name 为空或规范化后为空
+ * → 退回 `S-forge.skill-<6 位>`（仍有语义前缀，不再是裸哈希）。
+ * ============================================================ */
+
+/** name → slug（空串表示无法规范化） */
+export function slugifySkillName(name: string | undefined): string {
+  if (!name) return ''
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 48)
+    .replace(/-$/, '')
+}
+
+export async function allocateDistillSkillId(
+  name: string | undefined,
+  existingIds?: ReadonlySet<string>,
+): Promise<string> {
+  const taken = existingIds ?? new Set((await listSkills()).map((s) => s.id))
+  const slug = slugifySkillName(name)
+  if (!slug) return `S-forge.skill-${Date.now().toString(36).slice(-6)}`
+  const base = `S-forge.${slug}`
+  if (!taken.has(base)) return base
+  for (let i = 2; i <= 99; i += 1) {
+    const next = `${base}-${i}`
+    if (!taken.has(next)) return next
+  }
+  return `${base}-${Date.now().toString(36).slice(-6)}`
 }

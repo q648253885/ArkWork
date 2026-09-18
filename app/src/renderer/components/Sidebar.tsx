@@ -560,6 +560,9 @@ export const CAPABILITY_ENTRIES: { page: ModulePage; icon: IconName; label: stri
   { page: 'memory',      icon: 'Brain',    label: 'sidebar.capability.memory',   shortcut: '⌘4' },
   { page: 'automations', icon: 'Clock',    label: 'sidebar.capability.automations', shortcut: '⌘5' },
   { page: 'settings',    icon: 'Settings', label: 'sidebar.capability.settings', shortcut: '⌘6' },
+  // v0.33.0：工作台中心（工作台 / 插件 / 诊断）—— 配置能力的一级入口。
+  // 快捷键是 ⌘7（⌘⇧K 已被编辑器 deleteLine 占用，见 keymap/spec.ts 的注记）
+  { page: 'workbench',   icon: 'Workspace', label: 'sidebar.capability.workbench', shortcut: '⌘7' },
 ]
 
 function CapabilityEntries() {

@@ -32,6 +32,7 @@ import {
   touchDoc as touchDocPure,
 } from '../../services/editorDoc'
 import { getEditorHandle, runSave } from '../../services/savePipeline'
+import { baseNameOf } from '@shared/utils/path-display'
 import { clearEditorSession, putInitialText } from '../../services/editorSession'
 import type { AppState } from '../types'
 import { isArkworkInternal } from '@shared/utils/paths'
@@ -49,7 +50,7 @@ const saveIo = {
 /** 只读原因 → i18n 键的映射已随文档语义下沉到 services/editorDoc（READONLY_REASON_KEY） */
 
 function baseName(p: string): string {
-  return p.split('/').pop() ?? p
+  return baseNameOf(p)
 }
 
 function readonlyToastMessage(doc: EditorDocMeta): string {

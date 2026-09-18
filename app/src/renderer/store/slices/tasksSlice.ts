@@ -23,6 +23,7 @@ import {
   saveWorkspaces,
 } from '../persist'
 import { shortTaskId, formatUpdatedAt } from '../../types'
+import { baseNameOf } from '@shared/utils/path-display'
 import { simplifyFirstLine } from '../../utils/title'
 import type { AppState, DockPrefs, Workspace } from '../types'
 
@@ -33,6 +34,39 @@ import type { AppState, DockPrefs, Workspace } from '../types'
  * ============================================================ */
 const OPTIMISTIC_TTL_MS = 2000
 const optimisticTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+/* ============================================================
+ * v0.34.1：对话 Markdown 正文（「复制」与「导出」的唯一真源）
+ *
+ * 两个入口此前各拼一份正文 → 一旦只改一边，用户复制出去的内容与导出存档
+ * 就会分叉。抽成纯函数后两处共用同一段文本。
+ *
+ * @returns 完整 Markdown；无选中任务或无内容时返回空串（调用方据此提示）
+ * ============================================================ */
+function buildConversationMarkdown(
+  title: string,
+  agentId: string,
+  items: AppState['conversation'],
+): string {
+  const lines: string[] = [`# ${title}`, '']
+  for (const it of items) {
+    if (it.type === 'user') {
+      lines.push('## You', '')
+      lines.push(it.text ?? '', '')
+    } else if (it.type === 'assistant') {
+      lines.push(`## @${agentId}`, '')
+      lines.push(it.text ?? '', '')
+    } else if (it.type === 'react' && it.steps) {
+      lines.push(`### ${i18n.t('slice.tasks.exportStepStream')}`, '')
+      for (const s of it.steps) {
+        lines.push(`- [${s.type}] ${s.summary || s.thought || ''}`)
+      }
+      lines.push('')
+    }
+  }
+  // 只有标题（无正文）视为「没有可复制内容」
+  return lines.length > 2 ? lines.join('\n') : ''
+}
 
 function clearOptimisticTimer(taskId: string, planItemId: string): void {
   const key = `${taskId}:${planItemId}`
@@ -73,6 +107,7 @@ export const tasksSlice: StateCreator<
     | 'resumeTask'
     | 'regenerateMessage'
     | 'exportConversation'
+    | 'copyConversation'
     | 'deleteTask'
     | 'toggleStar'
     | 'renameTask'
@@ -412,38 +447,40 @@ export const tasksSlice: StateCreator<
       get().pushToast({ type: 'danger', message: friendlyError(err), duration: 0 })
     }
   },
-  /**
-   * 导出当前任务对话为 Markdown 文件（B3，提取自 Composer）。
-   * 读 selectedTask + conversation，生成 Blob → 下载。
-   * 无选中任务时静默返回。
-   */
+  /** v0.5.0（B3）：导出当前任务对话为 Markdown 文件（提取自 Composer）。 */
   exportConversation: () => {
     const task = get().selectedTask
     if (!task) return
-    const items = get().conversation
-    const lines: string[] = [`# ${task.title}`, '']
-    for (const it of items) {
-      if (it.type === 'user') {
-        lines.push('## You', '')
-        lines.push(it.text ?? '', '')
-      } else if (it.type === 'assistant') {
-        lines.push(`## @${task.agentId}`, '')
-        lines.push(it.text ?? '', '')
-      } else if (it.type === 'react' && it.steps) {
-        lines.push(`### ${i18n.t('slice.tasks.exportStepStream')}`, '')
-        for (const s of it.steps) {
-          lines.push(`- [${s.type}] ${s.summary || s.thought || ''}`)
-        }
-        lines.push('')
-      }
-    }
-    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
+    const md = buildConversationMarkdown(task.title, task.agentId, get().conversation)
+    if (!md) return
+    const blob = new Blob([md], { type: 'text/markdown' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
     a.download = `${shortTaskId(task.id)}.md`
     a.click()
     URL.revokeObjectURL(url)
+  },
+  /**
+   * v0.34.1：把当前任务对话以**与导出完全相同的 Markdown**复制到剪贴板。
+   *
+   * 为什么与导出共用 `buildConversationMarkdown`：两个入口的正文一旦分叉，
+   * 用户「复制出来给别人看」与「导出存档」会拿到两份不同内容 —— 单一真源是
+   * 硬要求，不是顺手复用。
+   */
+  copyConversation: async () => {
+    const task = get().selectedTask
+    const md = task ? buildConversationMarkdown(task.title, task.agentId, get().conversation) : ''
+    if (!md) {
+      get().pushToast({ type: 'warning', message: i18n.t('slice.tasks.copyConversationEmpty'), duration: 3000 })
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(md)
+      get().pushToast({ type: 'success', message: i18n.t('slice.tasks.copyConversationCopied'), duration: 2000 })
+    } catch {
+      get().pushToast({ type: 'danger', message: i18n.t('slice.tasks.copyConversationFailed'), duration: 4000 })
+    }
   },
   deleteTask: async (id) => {
     try {
@@ -545,7 +582,7 @@ export const tasksSlice: StateCreator<
       const path = await window.ark.settings.pickWorkspace()
       if (!path) return // 用户取消
       // 从路径提取文件夹名作为工作区名
-      const folderName = path.split('/').pop() || i18n.t('slice.tasks.unnamedWorkspace')
+      const folderName = baseNameOf(path) || i18n.t('slice.tasks.unnamedWorkspace')
       const ws: Workspace = {
         id: `ws-${Date.now()}`,
         name: folderName,

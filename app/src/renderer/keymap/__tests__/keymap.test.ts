@@ -86,7 +86,7 @@ test('TC-KEY-001 迁移前 App.tsx 的 13 个 keydown 分支逐条落到 KEYMAP_
   }
 
   // ⑥ 键位总数出处：24 条（分支 10 / 11 各展开为 6 条，分支 1 为 2 个别名）
-  assert.equal(KEYMAP_SPEC.length, 24, 'B0 键位声明应为 24 条')
+  assert.equal(KEYMAP_SPEC.length, 25, 'B0 键位声明应为 25 条')
 })
 
 /* ============================================================

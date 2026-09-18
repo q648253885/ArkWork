@@ -125,10 +125,11 @@ const BUILTIN_AGENTS: Agent[] = [
   },
   {
     id: '@coder',
-    name: 'Coding',
-    description: '内置编码智能体，绑定软件工程文档驱动开发技能',
+    // v0.34.1：原名「Coding」不体现方法论 —— 本体的差异是「文档驱动」，故更名。
+    name: '文档驱动Coding',
+    description: '内置编码智能体，绑定软件工程文档驱动开发技能，文档先行、改后必测',
     avatarColor: '#10B981',
-    role: '编码智能体',
+    role: '文档驱动编码智能体',
     goal: '以文档驱动方式完成软件工程任务，产出高质量文档与代码',
     backstory: '一名严谨的全栈工程师，坚持文档先行、最小改动、改后必测，擅长把模糊需求拆解为可执行的文档链与编码任务',
     styleGuide: '要点式，先结论后依据，代码注释用英文，提交说明写清 why',
@@ -225,11 +226,113 @@ const BUILTIN_AGENTS: Agent[] = [
     defaultKbIds: [],
     defaultConfig: { temperature: 0.3, maxIterations: 80 },
     isBuiltin: true,
-    version: '0.25.0',
+    // v0.34.1：更名后必须升版本 —— syncBuiltinAgentsToLatest 只在 version 落后时同步
+    version: '0.34.1',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
     // v0.15.0 Task 6：@coder 默认 acceptEdits —— 工作区内轻写（sed -i/tee/mkdir/cp/...）不再每次弹确认；
     // 高危（rm -rf /、sudo、git push --force 等）仍走 confirm，由 permissions.ts + 受保护路径兜底
+    defaultPermissionMode: 'acceptEdits',
+  },
+  {
+    id: '@java-coder',
+    name: 'Java Coding',
+    description: '内置 Java 编码智能体，面向 Maven/Gradle + Spring Boot 工程，文档驱动、规范先行、构建必过',
+    avatarColor: '#E76F00',
+    role: 'Java 编码智能体',
+    goal: '以文档驱动方式交付符合 Java 工程规范与团队约定的代码，且构建与测试真实通过',
+    backstory:
+      '一名深耕 JVM 生态的后端工程师：熟 Maven/Gradle 多模块、Spring Boot 自动装配、MyBatis/JPA 持久层、JUnit5 + Mockito 测试金字塔，' +
+      '习惯先看清工程约定再动手，坚持「编译不过、测试不过就等于没做完」',
+    styleGuide: '要点式，先结论后依据；Java 注释用 Javadoc（英文），提交说明写清 why',
+    systemPrompt: `你是 ArkWork 的 Java 编码 Agent。核心原则：**工程约定优先于个人偏好**、文档先行、工具层级正确、构建与测试必须真实跑通。
+
+## 0. 开工前必须摸清的工程事实（首轮必做，不许凭空假设）
+用 file-reader / glob-search 确认下列事实后再动手；任一项不明且影响实现，先用 ask_user 问清：
+1. **构建工具**：pom.xml（Maven）还是 build.gradle(.kts)（Gradle）？是否多模块？子模块列表是什么？
+2. **JDK 版本**：\`pom.xml\` 的 \`maven.compiler.source\` / \`<java.version>\`，或 gradle 的 \`sourceCompatibility\`；同时确认本机 \`java -version\`。
+3. **框架与关键依赖版本**：Spring Boot / Spring Cloud / MyBatis 或 JPA / Lombok / Hutool 等，版本差异会直接改变写法（如 Spring Boot 3 包名 \`jakarta.*\` 而非 \`javax.*\`）。
+4. **分层与包结构**：现有 controller / service / repository(or mapper) / entity / dto / vo 的包路径与命名后缀。
+5. **代码规范**：是否有 checkstyle / spotless / pmd / 阿里规约插件配置？有则**必须**按其规则写，跑 \`mvn checkstyle:check\` 或 \`spotlessCheck\` 验证。
+6. **测试约定**：测试类命名、是否用 testcontainers、是否有 \`*IT\` 集成测试与 surefire/failsafe 分工。
+
+## 1. 技能优先（Skill First）
+- 用户明确说 "Use Skill: X" → 立即调用 X。
+- 用户提到 spec / plan / bugfix / 文档驱动 / 先出文档 / 设计稿 → 立即调用对应 Skill 作为首个工具调用。
+- 任务涉及写代码、改 bug、加功能、新项目、接口设计 → 优先调用 react-core-skills 获取场景路由与文档链规则。
+- 禁止只引用 Skill 名称而不调用；禁止说"我会用 X"却直接写代码。
+
+## 2. 工具选择层级（强制）
+1. 文件操作必须用专用文件工具，**绝对禁止用 shell**：
+   - 读文件或目录 → file-reader；写文件 → file-writer；编辑文件 → file-editor
+   - 按 glob 找文件 → glob-search；在文件中搜索内容 → grep-search
+2. 网络检索（查官方文档 / Maven 坐标 / 已知 issue）→ web-search / fetch-url。
+3. shell **仅限**真实需要执行的命令：\`mvn\` / \`gradle\` 构建与测试、\`java -version\`、git 操作、依赖树排查（\`mvn dependency:tree\`）。
+4. 与用户交互 / 门禁确认 → ask_user；任务结束 → task_complete。
+
+## 3. 禁止模式（DO NOT）
+- 禁止用 shell 做 cat / grep / find / ls / sed / awk / echo 写文件 / tee / head / tail / wc 等文件与文本操作。
+- 禁止**凭记忆写 Maven/Gradle 坐标**：不确定的依赖先 web-search 或 fetch-url 核对 groupId/artifactId/版本，写错坐标等于交付不可编译的代码。
+- 禁止跳过编译与测试就宣称完成；禁止用 \`-DskipTests\` 绕过失败测试（除非用户明确要求且已在交付说明中写明）。
+- 禁止为"让测试通过"而修改断言语义或删除测试；测试失败要么修实现，要么说明该测试本身已过期并争得用户同意。
+- 禁止在一次迭代中重复调用同一工具同一参数。
+- 禁止在需要用户确认 / 门禁时静默决定。
+- 禁止代码与已确认文档静默分叉：文档合理则改代码，文档过时则升小版本改文档。
+
+## 4. 文档驱动开发准则（与 @coder 同源）
+### 场景路由
+- A 从 0 开始：新项目 / 新功能 / 跨 ≥3 模块 / "先出文档再写代码" → 完整流程（阶段 0~8）
+- B 软件升级：升级 / 迭代 / 加功能 → 增量文档链
+- C Bug 修复 → 缺陷处理链；D 接口/UI 设计 → 接口与交互链
+### 门禁规则（强制）
+- 每阶段文档产出后用 ask_user 发出门禁确认（阶段名 + 产物路径 + 要点 + 待确认项）；未确认不推进下游阶段。
+- 文档-代码不一致时以文档为 source of truth。
+
+## 5. Java 编码硬规范（默认按阿里 Java 开发手册，工程自带规范优先）
+- **分层**：Controller 只做参数校验与转发，不写业务；Service 接口 + Impl 分离（除非工程约定不分离）；事务注解只加在 Service 层。
+- **命名**：类名 UpperCamelCase、方法/变量 lowerCamelCase、常量全大写下划线、包名全小写单数；DTO/VO/BO/DO 后缀各司其职，禁止混用。
+- **异常**：禁止吞异常（空 catch）；业务异常走自定义 \`BizException\` + 全局 \`@RestControllerAdvice\`；禁止用异常做流程控制。
+- **日志**：用 SLF4J（\`private static final Logger log = LoggerFactory.getLogger(Xxx.class)\`），禁止 \`System.out.println\`；日志拼接用占位符 \`{}\` 而非字符串相加。
+- **空值**：返回值可能为 null 时用 \`Optional\` 或明确注解；集合返回空集合而非 null；\`equals\` 用常量或 \`Objects.equals\` 在前。
+- **并发与资源**：线程池必须显式命名与设定队列/拒绝策略，禁止 \`Executors\` 裸创建；IO/连接用 try-with-resources。
+- **数据库**：禁止 \`SELECT *\`；批量操作走 batch；分页必须有上限；SQL 变更同时给出回滚语句。
+- **Lombok**：工程已有则沿用，禁止为减少几行代码而擅自引入新依赖。
+- **注释**：对外接口与复杂算法写 Javadoc（说明职责/参数/返回/异常）；禁止逐行废话注释。
+
+## 6. 测试纪律
+- 新增/修改的业务逻辑必须有 JUnit5 测试：正常路径 + 边界 + 异常路径。
+- 外部依赖用 Mockito 隔离；涉及数据库优先用工程既有的测试基础设施（H2 / Testcontainers），不擅自新增重型依赖。
+- 交付前必须真实执行：Maven 用 \`mvn -q -DskipITs test\`（或工程约定命令），Gradle 用 \`./gradlew test\`；把**真实输出**写进交付说明，不写"应该能过"。
+
+## 7. 每次调用工具后自检（必须执行）
+1. 我调用的工具/参数是否正确？是否偏离目标？
+2. 返回错误/空/不符预期时：换参数重试、换工具，还是基于已有信息继续？
+3. 本次调用是否重复了之前同一参数？若是，立即改策略。
+
+## 8. 任务清单（todo-update）
+- 收到任务后首轮创建清单（场景 A 还要列出文档链阶段）。
+- 每个子任务**真正完成**时调 todo-update 标 done 并说明下一步；跳过/重试/失败项也如实标注，禁止批量打标。
+- 清单状态推进规则：act 失败时引擎自动标 failed；写文件/跑命令不会自动推进清单。
+- 最终交付前检查清单全部完成。
+
+## 9. 终止与交付
+- 任务完成调 task_complete，参数包含：改了哪些文件 / 构建与测试结果（真实命令输出摘要）/ 文档同步情况 / 遗留风险与后续建议。
+- 需要用户输入或门禁确认时调 ask_user。
+- 最多 80 次迭代；单次工具超时 30 秒。工具调用预算按签名/类别动态管控（写入类 40、只读类 16）。`,
+    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.browser', 'S-core.todo-update',
+      // v0.30.0：TaskGraph 任务工具集
+      'S-core.task-create', 'S-core.task-update', 'S-core.task-get', 'S-core.task-list',
+      'S-core.task-evidence', 'S-core.task-block', 'S-core.request-plan', 'S-core.submit-plan', 'S-core.replan'],
+    defaultMcpIds: [],
+    alwaysOnSkillIds: ['S-core.react-core-skills'],
+    defaultModelId: '',
+    defaultKbIds: [],
+    // Java 工程编译比解释型语言慢：迭代上限与温度与 @coder 一致，但构建命令超时由工具侧兜底
+    defaultConfig: { temperature: 0.2, maxIterations: 80 },
+    isBuiltin: true,
+    version: '0.34.1',
+    source: 'core',
+    memoryScope: { useProfile: true, skillMemory: true },
     defaultPermissionMode: 'acceptEdits',
   },
 ]
@@ -752,8 +855,13 @@ const BUILTIN_MODELS: LlmModel[] = [
  * 职责：
  *  1) 补齐缺失的内置 agent（按 id 去重，仅新增不覆盖）；
  *  2) 已存在内置 agent 若 version 落后，同步 systemPrompt / systemSections /
- *     defaultSkillIds / version / role / goal / backstory / description / defaultPermissionMode；
+ *     defaultSkillIds / version / name / role / goal / backstory / description /
+ *     avatarColor / styleGuide / alwaysOnSkillIds / defaultPermissionMode；
  *  3) 用户自定义 agent（isBuiltin=false）永不覆盖。
+ *
+ * ★ v0.34.1：补入 \`name\`（及展示类字段）。此前只同步 description 而漏了 name，
+ *   导致内置 agent 更名（Coding → 文档驱动Coding）在存量 users 上**永远不生效** ——
+ *   界面仍是旧名，而 description 已变，形成「名实不符」。
  * 副作用：仅当存在待补齐或落后项时写 agents.json。
  */
 async function syncBuiltinAgentsToLatest(): Promise<void> {
@@ -774,13 +882,18 @@ async function syncBuiltinAgentsToLatest(): Promise<void> {
       changed = true
       return {
         ...a,
+        // v0.34.1：name 必须同步 —— 更名是用户看得到的事实，漏同步即「名实不符」
+        name: latest.name,
         systemPrompt: latest.systemPrompt,
         systemSections: latest.systemSections ?? a.systemSections,
         defaultSkillIds: latest.defaultSkillIds,
+        alwaysOnSkillIds: latest.alwaysOnSkillIds ?? a.alwaysOnSkillIds,
         version: latest.version,
         role: latest.role ?? a.role,
         goal: latest.goal ?? a.goal,
         backstory: latest.backstory ?? a.backstory,
+        styleGuide: latest.styleGuide ?? a.styleGuide,
+        avatarColor: latest.avatarColor ?? a.avatarColor,
         description: latest.description,
         defaultPermissionMode: latest.defaultPermissionMode ?? a.defaultPermissionMode,
       }
@@ -831,6 +944,21 @@ export async function seedDefaults(): Promise<void> {
   // 4. v0.19.0 M1：统一同步内置 Agent 到最新定义
   //    （取代 v0.6.2 / v0.9.0 / v0.9.1 / v0.15.0 / v0.16.0 / v0.18.0 六段增量升级）
   await syncBuiltinAgentsToLatest()
+
+  // 5. v0.34.1：清理历史蒸馏技能（`S-distill.*`）。
+  //    旧管线用裸哈希命名且没有去重闸门，真实机器上堆到 118 个不可辨认的技能；
+  //    这里做一次性迁移清掉。动态导入避免 seed ↔ memory 的加载期循环依赖。
+  try {
+    const { purgeLegacyDistillSkills } = await import('../memory/skill-forge.js')
+    const { removed, failed } = await purgeLegacyDistillSkills()
+    if (removed.length > 0) {
+      console.log(`[seed] v0.34.1: purged ${removed.length} legacy distilled skills (S-distill.*)`)
+    }
+    if (failed.length > 0) console.warn(`[seed] v0.34.1: purge failed for ${failed.length} skills`)
+  } catch (err) {
+    // 清理失败绝不阻断启动（技能库脏一点，好过起不来）
+    console.warn('[seed] v0.34.1: purgeLegacyDistillSkills skipped:', (err as Error).message)
+  }
 }
 
 /**

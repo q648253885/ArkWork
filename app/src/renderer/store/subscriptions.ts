@@ -400,6 +400,16 @@ export function subscribeAll(
       }),
     )
 
+    // v0.33.0：插件集合 / 启停态变化（主进程已重建 `plugin` 来源插槽）
+    // `loadProfiles` 会连带重拉 `profile:slots` —— 面板 Tab / 渲染器覆盖 /
+    // 主题覆盖三份派生量都在那条链路上，因此这里不必单独调用派生。
+    unsubs.push(
+      ark.plugin.onChanged(() => {
+        get().loadPlugins()
+        get().loadProfiles()
+      }),
+    )
+
     // v0.4.0：系统主题变化（仅当 theme==='system' 时联动 <html class>）
     unsubs.push(
       ark.theme.onSystemChange((systemTheme) => {

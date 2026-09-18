@@ -395,6 +395,7 @@
       "openSkillsPanel": "Open Skills Panel",
       "openTasksPanel": "Open Tasks Panel",
       "openAutomationsPanel": "Open Automations Panel",
+      "copyConversation": "Copy current conversation",
       "exportConversation": "Export Current Conversation",
       "openSettings": "Open Settings",
       "settingsModels": "Settings → Models",
@@ -765,11 +766,13 @@
     "abilities": {
       "tab": {
         "skills": "Skills",
-        "plugins": "Plugins"
+        "plugins": "Plugins",
+        "mcp": "MCP"
       },
       "hint": {
         "skills": "Tool capabilities from ArkWork or imported from the marketplace (SKILL.md)",
-        "plugins": "External tool capabilities connected via MCP Servers (stdio / sse)"
+        "plugins": "Capability plugins: panels, renderers, actions, home modules and themes contributed to the host (plugin.json)",
+        "mcp": "External tool capabilities connected via MCP Servers (stdio / sse)"
       }
     },
     "agents": {
@@ -1074,7 +1077,16 @@
         "integration": "Integration",
         "other": "Other"
       }
-    }
+    },
+    "badShape": "Panel data does not match the component",
+    "noComponent": "This panel declares no host component (manifest may be corrupted)",
+    "loading": "Loading panel data…",
+    "loadFailed": "Failed to load panel data",
+    "unknownError": "Unknown error",
+    "empty": "No data yet",
+    "emptyHint": "Data for \"{{component}}\" is empty. It will appear once the data source is ready.",
+    "unknownComponent": "Unknown component \"{{component}}\" (not in the host whitelist)",
+    "fromPlugin": "Provided by plugin {{id}}"
   },
   "sidebar": {
     "resizeHandle": {
@@ -1127,7 +1139,8 @@
       "memory": "Memory",
       "automations": "Automations",
       "settings": "Settings",
-      "desc": "Click to open the {{label}} page"
+      "desc": "Click to open the {{label}} page",
+      "workbench": "Workbench Center"
     },
     "help": {
       "title": "Help",
@@ -1163,7 +1176,8 @@
       "agents": "Agent CRUD, including system prompts",
       "kb": "Local file chunk indexing + full-text search",
       "memory": "L1/L2/L3/L4 four-layer memory view",
-      "settings": "Model / workspace / appearance / shortcuts / advanced"
+      "settings": "Model / workspace / appearance / shortcuts / advanced",
+      "workbench": "Profiles, plugins and assembly diagnostics"
     }
   },
   "dock": {
@@ -1334,7 +1348,8 @@
         "copied": "Copied",
         "copyFailed": "Copy failed",
         "openFromFileTree": "Open a file from the file tree to create a new tab"
-      }
+      },
+      "panelNoExternal": "A panel is not a file or URL — nothing to open externally"
     },
     "registry": {
       "markdown": "Markdown",
@@ -1456,10 +1471,11 @@
       "renameTooltip": "Double-click to rename",
       "renameTooltipDesc": "Double-click here to rename the task",
       "more": "More actions",
-      "moreDesc": "Rename / duplicate / export / delete",
+      "moreDesc": "Rename / copy / export / delete",
       "star": "Star",
       "unstar": "Unstar",
       "rename": "Rename",
+      "copy": "Copy conversation",
       "export": "Export conversation",
       "pause": "Pause task",
       "resume": "Resume task",
@@ -1472,6 +1488,12 @@
       "workspace": "Workspace: {{name}}",
       "workspaceOnly": "Workspace",
       "hint": "Select an existing task or create a new one to get started"
+    },
+    "home": {
+      "badge": "Profile home module",
+      "back": "Back to start page",
+      "pluginModuleTitle": "This home module is provided by a plugin",
+      "pluginModuleHint": "\"{{module}}\" is registered by a plugin, but plugins cannot inject UI components — it is registered only in this release (follow-up L-33-03)."
     }
   },
   "runconsole": {
@@ -1648,6 +1670,10 @@
     "close": {
       "tooltip": "Close and return to task",
       "aria": "Close {{title}} page and return to task (Esc)"
+    },
+    "workbench": {
+      "title": "Workbench Center",
+      "subtitle": "Profiles · Plugins · Diagnostics — configuration & plugin plug/unplug"
     }
   },
   "conversationflow": {
@@ -1658,7 +1684,9 @@
     "goal": "Goal",
     "completed": "{{done}}/{{total}} completed",
     "planStepAria": "Plan step {{index}}: {{text}} (status: {{status}})",
-    "steps": "Step flow"
+    "steps": "Step flow",
+    "foldedTurns": "… {{count}} earlier rounds folded (click to expand)",
+    "collapseTurns": "Collapse {{count}} earlier rounds"
   },
   "browserchrome": {
     "nav": {
@@ -1725,7 +1753,11 @@
     "restoreTabAria": "Restore tab: {{label}}",
     "expand": "Expand right panel",
     "collapse": "Collapse right panel",
-    "tabBar": "Tool window tab bar"
+    "tabBar": "Tool window tab bar",
+    "panelTabTooltip": "Plugin panel: {{label}} · {{id}}",
+    "panelTabAria": "Plugin panel {{label}}",
+    "morePluginTabs": "More plugin panels ({{count}})",
+    "morePluginTabsAria": "More plugin panels: {{count}}"
   },
   "onboarding": {
     "stepModelsTitle": "Configure AI models",
@@ -2003,7 +2035,10 @@
       "createWorkspaceFailed": "Failed to create workspace: {{error}}",
       "workspaceSwitched": "Workspace switched · memory is now isolated per task ({{name}})",
       "switchWorkspaceFailed": "Failed to switch workspace: {{error}}",
-      "exportStepStream": "Step Stream"
+      "exportStepStream": "Step Stream",
+      "copyConversationCopied": "Conversation copied to clipboard",
+      "copyConversationFailed": "Copy failed — check clipboard permission",
+      "copyConversationEmpty": "Nothing to copy in this conversation yet"
     },
     "subscriptions": {
       "taskFailedHint": "Task failed: {{error}}\n\n💡 {{hint}}",
@@ -2069,7 +2104,8 @@
         "inspBrowser": "Inspector: Browser",
         "inspTerminal": "Inspector: Terminal",
         "permissionCycle": "Cycle the permission mode (native Tab inside form fields)",
-        "esc": "Close overlay / ModulePage / Inspector by priority"
+        "esc": "Close overlay / ModulePage / Inspector by priority",
+        "workbench": "Open Workbench Center"
       }
     },
     "sections": {
@@ -2539,7 +2575,7 @@
       "acExpand": "Expand all",
       "acCollapse": "Collapse",
       "verifyLabel": "verify",
-      "coverageOk": "Coverage check passed: all {{total}} ACs are covered by nodes",
+      "coverageOk": "Coverage check passed: {{covered}}/{{total}} ACs are covered by nodes",
       "coverageMissing": "No task covers {{ids}} — add coverage first",
       "editMarkdown": "Edit as Markdown",
       "editMarkdownHint": "Editing the plan inline isn't supported yet; it ships in v0.30.1",
@@ -2722,5 +2758,175 @@
   },
   "keybind": {
     "switchProfile": "Switch workbench"
+  },
+  "vlib": {
+    "rowsTotal": "{{count}} rows",
+    "rowsWindow": "Showing {{from}}–{{to}}",
+    "mediaUnavailable": "Media unavailable",
+    "jsonTruncated": "Content truncated ({{count}} chars total)"
+  },
+  "workbench": {
+    "title": "Workbench Center",
+    "tab": {
+      "profiles": "Profiles",
+      "plugins": "Plugins",
+      "diagnostics": "Diagnostics",
+      "pluginsBadge": "{{count}} plugins failed validation"
+    },
+    "summary": "{{profiles}} profiles · {{plugins}} plugins",
+    "report": {
+      "section": {
+        "validation": "Validation issues",
+        "degraded": "Inactive capabilities",
+        "snapshot": "Assembly snapshot"
+      },
+      "noIssues": "No validation issues",
+      "errorCount": "{{count}} errors",
+      "warningCount": "{{count}} warnings",
+      "fixHint": "Suggestion: {{fix}}",
+      "noDegraded": "All capabilities are active",
+      "blocking": "Blocking",
+      "nonBlocking": "Non-blocking",
+      "notApplied": "not applied"
+    },
+    "profiles": {
+      "report": "Activation report",
+      "import": "Import profile",
+      "clone": "Clone & edit",
+      "edit": "Edit",
+      "export": "Export",
+      "exportFailed": "Export failed: profile not found",
+      "exportCopied": "manifest JSON copied to clipboard",
+      "exportClipboardFailed": "Clipboard unavailable; export failed",
+      "deleteBuiltin": "Built-in profiles cannot be deleted",
+      "deleteActive": "The active profile cannot be deleted",
+      "deleteNotFound": "Profile not found; it may already be deleted",
+      "deleted": "Deleted profile {{id}}",
+      "listTitle": "All profiles ({{count}})",
+      "sourceUser": "User",
+      "activate": "Activate",
+      "editAria": "Edit {{name}}",
+      "delete": "Delete",
+      "deleteBuiltinHint": "Built-in sample profiles cannot be deleted (clone instead)",
+      "deleteActiveHint": "The active profile cannot be deleted (switch first)",
+      "deleteAria": "Delete {{name}}"
+    },
+    "editor": {
+      "title": "Edit profile",
+      "close": "Close",
+      "builtinReadonly": "Built-in profiles are read-only — saving clones it into a user profile first.",
+      "loading": "Reading profile manifest…",
+      "loadFailed": "Failed to read the profile manifest",
+      "notFound": "Profile not found; it may already be deleted",
+      "cloneFail.not-found": "Source profile not found",
+      "cloneFail.id-exists": "The clone target id already exists",
+      "cloneFail.invalid": "Clone result failed validation",
+      "group": {
+        "base": "Basics",
+        "dockBuiltin": "Dock built-in panels",
+        "dockPanels": "Dock plugin panels",
+        "ui": "Interface",
+        "data": "Memory scope",
+        "theme": "Theme token overrides"
+      },
+      "name": "Name",
+      "version": "Version",
+      "icon": "Icon (host whitelist)",
+      "iconNone": "Follow default",
+      "description": "Description",
+      "dockBuiltinHint": "Pick and order built-in panels (order = ui.dockTabs; keep at least one)",
+      "moveUp": "Move up",
+      "remove": "Remove",
+      "noPluginPanels": "No enabled plugin panels — enable one on the Plugins tab and options appear here.",
+      "position": "Insert position",
+      "homeModule": "Home module",
+      "homeModuleNone": "None (use default start page)",
+      "homeModuleBuiltin": "Built-in modules",
+      "homeModulePlugin": "Plugin modules",
+      "composerChips": "Composer quick chips",
+      "composerChipsHint": "Comma separated, up to 5",
+      "memoryNamespace": "Memory namespace",
+      "shareCoreProfile": "Share core memory profile",
+      "themeHint": "Only existing tokens may be overridden (keys like --x-y; values limited to colors or px/rem/em/%)",
+      "addToken": "Add token",
+      "saveIssues": "Save failed validation — fix the issues below and retry",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "saveOnly": "Save only",
+      "saveAndActivate": "Save & activate",
+      "cloneAndSave": "Clone & save"
+    },
+    "import": {
+      "title": "Import profile",
+      "pickFile": "Choose a profile manifest file…",
+      "onlyJson": ".json only",
+      "or": "or",
+      "paste": "Paste manifest JSON",
+      "activateAfter": "Activate immediately after import",
+      "previewOk": "Validation passed — ready to import",
+      "previewBad": "Validation failed — fix the errors below before importing",
+      "readFailed": "Failed to read the file",
+      "jsonParseFailed": "Not valid JSON: {{detail}}",
+      "cancel": "Cancel",
+      "dryRun": "Validate",
+      "back": "Back to edit",
+      "confirm": "Import"
+    },
+    "plugins": {
+      "openDir": "Open plugins folder",
+      "rescan": "Rescan",
+      "count": "{{total}} plugins · {{on}} enabled",
+      "empty": "The plugins folder is empty",
+      "emptyHint": "A plugin is a folder containing plugin.json. Drop it in and click \"Rescan\" — no restart needed.",
+      "showSample": "Show a minimal sample",
+      "hideSample": "Hide sample",
+      "listTitle": "All plugins",
+      "sourceUser": "User",
+      "sourceBundled": "Bundled sample",
+      "sourceLocal": "Local",
+      "newPlugin": "New plugin",
+      "newPluginHint": "A plugin is a folder containing plugin.json. Here is a minimal manifest you can copy: change id and name, save it as {plugins folder}/{your-id}/plugin.json, then click \"Rescan\".",
+      "detailAria": "Expand details for {{name}}",
+      "export": "Export sample",
+      "uninstallShort": "Uninstall",
+      "toggleAria": "Enable or disable {{name}}",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "uninstall": "Uninstall (deletes the plugin folder)",
+      "uninstallBuiltinHint": "Bundled sample plugins cannot be uninstalled, only disabled",
+      "uninstallAria": "Uninstall {{name}}",
+      "exportSample": "Export manifest sample to the plugins folder",
+      "exportSampleAria": "Export a manifest sample of {{name}}",
+      "issuesTitle": "{{count}} plugins failed validation (skipped; other plugins unaffected)",
+      "issuesIsolated": "Validation failures are isolated per plugin: a broken plugin never takes down others or the app."
+    },
+    "diag": {
+      "slotsTitle": "Slot registry (9 kinds)",
+      "loading": "Reading slot registry…",
+      "colKind": "Slot",
+      "colCount": "Entries",
+      "colSources": "Sources",
+      "colPanelRef": "Panel ref",
+      "colTitle": "Title",
+      "colComponent": "Component",
+      "colDataSource": "Data source",
+      "colOrigin": "Origin",
+      "colPosition": "position",
+      "colExt": "Extension",
+      "colBuiltin": "Built-in mapping",
+      "colEffective": "Effective",
+      "expand": "Expand",
+      "collapse": "Collapse",
+      "panelsTitle": "Panel tabs ({{count}})",
+      "noPanels": "The current profile declares no panels",
+      "originProfile": "Profile",
+      "originBuiltin": "Built-in",
+      "originOverride": "Override",
+      "renderersTitle": "Renderer overrides ({{count}} overridden)",
+      "themeTitle": "Theme token overrides",
+      "noTheme": "The current profile declares no theme overrides",
+      "themeCount": "light {{light}} · dark {{dark}}",
+      "themeHint": "Only existing tokens are overridden; tokens the host removed are dropped automatically (see the activation report)."
+    }
   }
 }

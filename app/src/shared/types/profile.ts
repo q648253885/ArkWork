@@ -11,6 +11,9 @@
  * 解析、继承合并与校验等逻辑在 `shared/utils/profile-manifest.ts`（纯函数）。
  * ============================================================ */
 import type { DockTabId } from './agent.js'
+import type { AnyPanelSlotPayload, PanelSlotPayload } from './vlib.js'
+
+export type { PanelSlotPayload, AnyPanelSlotPayload }
 
 /** manifest schema 版本（为未来字段演进留升级路径） */
 export const PROFILE_SCHEMA_VERSION = '1.0'
@@ -101,16 +104,54 @@ export interface ProfileAgentDecl {
 /** UI 层声明（声明式槽位 —— D4：不允许插件注入任意 React 代码） */
 export interface ProfileUiDecl {
   /**
-   * 生效的 Dock 面板与顺序 —— 取值必须是既有六固定面板 `DockTabId` 的子集。
+   * 生效的**内置** Dock 面板与顺序 —— 取值必须是既有六固定面板 `DockTabId` 的子集。
    * 缺省（undefined）= 不改动（沿用 agent 预设）。
-   * v1 刻意**不扩 DockTabId 闭集**：用子集/重排表达垂直台差异，
-   * 零类型破坏；新增面板类型的能力归 Slot Service 后续版本（遗留 L4）。
+   * v0.33.0 起本字段**真正生效**（驱动 Inspector 的可见集与顺序，见
+   * `docs/versions/v0.33.0/04-system-design.md` §7.2）；此前因消费者
+   * `RightDock.tsx` 无挂载点而完全不生效（缺陷 D40）。
    */
   dockTabs?: DockTabId[]
-  /** 无任务时 CenterStage 优先展示的模块页 */
-  homeModule?: ProfileHomeModule
+  /**
+   * ★ v0.33.0 新增 —— **开放面板引用**（能力插件面板挂载点）。
+   * 与 `dockTabs`（闭集）的分工：`dockTabs` 表达「内置六面板的取子集与顺序」，
+   * `dockPanels` 表达「把某个面板（内置或插件贡献）插到第 N 位」。
+   * `panel` 能力的必需项缺失时阻断激活（见 activator 的 panel 解析段）。
+   */
+  dockPanels?: ProfileDockPanelDecl[]
+  /**
+   * 无任务时 CenterStage 优先展示的模块页。
+   * v0.33.0 起由闭集放宽为 `string`：六个内置模块名，或插件贡献的 `module:<id>`。
+   * 值级校验分两层：`validateReferences`（V2，warning/error）+ `projectUiLayer`
+   * （只把内置名投给 CenterStage；`module:` 引用本版只登记，见遗留 L-33-02）。
+   */
+  homeModule?: string
   /** Composer 快捷 chips（纯文本，不做 i18n key 解析） */
   composerChips?: string[]
+  /**
+   * ★ v0.33.0 新增 —— 渲染器覆盖：`{ '<ext>': '<RendererKind>' }`。
+   * 让垂直台/插件自带文件类型渲染（正本 03 §3 `ui.previewRenderers`）。
+   */
+  previewRenderers?: Record<string, string>
+  /**
+   * ★ v0.33.0 新增 —— 选中动作扩展（正本 03 §3 `ui.actionExtensions`）。
+   * v0.33.0 **只入槽登记 + 诊断可见**，消费端迁移属遗留 L-33-03。
+   */
+  actionExtensions?: string[]
+  /**
+   * ★ v0.33.0 新增 —— 主题 token 覆盖集（正本 04 §6）。
+   * **只覆盖不新增**：键必须已存在于 `:root`，值经 `isSafeTokenValue` 白名单。
+   */
+  theme?: { light?: Record<string, string>; dark?: Record<string, string> }
+}
+
+/** `ui.dockPanels[]` 元素：一个开放面板引用 */
+export interface ProfileDockPanelDecl {
+  /** v0.33.0 只支持 'inspector'（原 RightDock 宿主已删除，见缺陷 D40） */
+  slot: 'inspector'
+  /** `panel:<name>` —— 内置六面板名或插件贡献的面板 */
+  panelRef: string
+  /** 插入序；`0` = 置顶于内置六面板之前；缺省 = 追加到末尾 */
+  position?: number
 }
 
 /** 数据层声明 */
@@ -291,18 +332,111 @@ export interface ProfileValidationContext {
   baseVersion: string
   /** 已存在（同级候选）的 profile id → 供 V5 同 position 冲突检测 */
   siblingProfileIds?: string[]
+  /**
+   * ★ v0.33.0：可用面板 ref（内置六面板 + 已启用插件贡献的面板）。
+   * 供 V2 校验 `ui.dockPanels[].panelRef` 引用闭合。
+   * 缺省（`undefined`）→ **跳过该项校验**（保持既有测试构造的 ctx 可用）。
+   */
+  panels?: string[]
+  /**
+   * ★ v0.33.0：可用首页模块（六个内置模块名 + 插件贡献的 `module:<id>`）。
+   * 缺省 → 只校验内置六名（向后兼容）。
+   */
+  homeModules?: string[]
 }
 
 /* ---------- 插槽层 ---------- */
 
+/**
+ * 插槽条目来源 ★ v0.33.0 —— 决定 `resetProfileSlots()` 的清理范围。
+ *
+ * 为什么必须有这一维（缺陷 D42）：v0.32.0 的 `resetProfileSlots()` 是全清，
+ * 一旦存量注册表（渲染器 / 面板基础项）入槽，每次切换工作台都会**误删内置项**；
+ * 而全清本身是「profile 是唯一注册来源」这一已失效假设的产物。
+ */
+export type SlotSource = 'builtin' | 'profile' | 'plugin'
+
+export interface AgentSlotPayload {
+  agentId: string
+  personaText?: string
+  profileId: string
+}
+
+export interface ToolSlotPayload {
+  skillId?: string
+  mcpServer?: string
+  profileId: string
+}
+
+/** `ui.renderer` 载荷：接管一个/多个扩展名的渲染方式 */
+export interface RendererSlotPayload {
+  /** 必须是宿主 `RendererKind` 白名单成员（值级校验在 validateReferences / plugin-manifest） */
+  rendererKind: string
+  /** 小写、无点 */
+  extensions: string[]
+  /** 允许接管已被占用的扩展名（正本 04 §5） */
+  override?: boolean
+  labelKey: string
+}
+
+export interface ActionSlotPayload {
+  actionId: string
+  label: string
+  /** 出处：`builtin` / `profile:<id>` / `plugin:<id>` / `chip`（快捷 chip 走此值） */
+  origin: string
+}
+
+export interface HomeModuleSlotPayload {
+  /** 六个内置模块名，或 `module:<id>`（插件贡献） */
+  module: string
+  title?: string
+  icon?: string
+  pluginId?: string
+  profileId?: string
+}
+
+export interface ThemeSlotPayload {
+  light: Record<string, string>
+  dark: Record<string, string>
+  pluginId?: string
+  profileId?: string
+}
+
+export interface DataSlotPayload {
+  namespace: string
+  shareCore?: boolean
+  profileId: string
+}
+
+export interface AutoSlotPayload {
+  cron: string
+  taskTemplate: string
+  agent?: string
+  required?: boolean
+}
+
+/** 九类插槽的载荷联合（判别键在 `SlotEntry.kind` 上，非 payload 内部） */
+export type SlotEntryPayload =
+  | AgentSlotPayload
+  | ToolSlotPayload
+  | AnyPanelSlotPayload
+  | RendererSlotPayload
+  | ActionSlotPayload
+  | HomeModuleSlotPayload
+  | ThemeSlotPayload
+  | DataSlotPayload
+  | AutoSlotPayload
+
 export interface SlotEntry {
-  /** 插槽内唯一 id（规范 '<source>:<name>'，如 'builtin:todos'） */
+  /** 插槽内唯一 id（规范 `<kind 域>:<name>`，如 'panel:todos' / 'tool:skill:x'） */
   id: string
   kind: SlotKind
   /** i18n key 或字面量（宿主组件库是唯一消费者） */
   label: string
-  /** 各插槽自定义载荷 */
-  payload: unknown
+  /** ★ v0.33.0：来源。**可选、缺省视为 `'builtin'`**（既有测试直接构造无 source 的条目） */
+  source?: SlotSource
+  /** 各插槽自定义载荷（已由 v0.32.0 的 `unknown` 收敛为判别联合 —— 缺陷 D41 的一半） */
+  payload: SlotEntryPayload
   /** resolve 排序键（升序；缺省排最后） */
   position?: number
 }
@@ -310,6 +444,8 @@ export interface SlotEntry {
 export interface SlotQuery {
   profileId?: string
   requiredOnly?: boolean
+  /** ★ v0.33.0：按来源过滤（诊断页与插件刷新用） */
+  source?: SlotSource
 }
 
 /** 注册返回值（可逆注册 —— Cordis 模型的无重启切换前提） */

@@ -29,6 +29,10 @@ import { registerPlanItemHandlers } from './plan-items.js'
 import { registerGraphHandlers } from './graph.js'
 // v0.32.0：Workbench Profile（插件模式 · 9 个 profile:* 频道 + changed 广播）
 import { registerProfileHandlers, bootstrapProfile } from './profile.js'
+// v0.33.0：插件注册表（插件插拔能力 · 6 个 plugin:* 频道 + changed 广播）
+import { registerPluginHandlers } from './plugin.js'
+// v0.34.1：面板取数通道（http 数据源插件，如股票行情）
+import { registerPanelHandlers } from './panel.js'
 // v0.30.0 D9：安装 planItem ↔ graph 唯一桥的镜像写入广播 hook（依赖倒置注入）
 import { installPlanSync } from '../agent/graph/plan-sync.js'
 // v0.25.0 F2：WebContentsView Tab 化路由
@@ -81,6 +85,12 @@ export function registerIpcHandlers(): void {
   // v0.32.0：Workbench Profile（插件模式）
   registerProfileHandlers()
 
+  // v0.33.0：插件注册表（插件插拔能力）
+  registerPluginHandlers()
+
+  // v0.34.1：面板取数（宿主侧网络通道，规避渲染层 CORS）
+  registerPanelHandlers()
+
   logger.info('System', 'IPC handlers registered')
 }
 
@@ -88,6 +98,9 @@ export function registerIpcHandlers(): void {
  * v0.32.0：把持久化下来的工作台重新挂起来（插槽注册 + 快照补写）。
  * 必须在 IPC 注册之后、窗口创建之前独立完成 —— 它有自己的 try/catch，
  * 挂载失败只 warn 不阻断启动（用户至少还能进应用手动切换）。
+ *
+ * v0.33.0：`bootstrapProfile` 内部改走 `bootstrapActiveProfile()`，顺带刷新
+ * `plugin` 来源插槽 —— 插件插槽与 profile 成败无关，必须每次启动都重建。
  */
 export async function bootstrapIpcSideEffects(): Promise<void> {
   await bootstrapProfile()

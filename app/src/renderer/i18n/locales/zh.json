@@ -395,6 +395,7 @@
       "openSkillsPanel": "打开能力面板",
       "openTasksPanel": "打开任务面板",
       "openAutomationsPanel": "打开自动化面板",
+      "copyConversation": "复制当前对话",
       "exportConversation": "导出当前对话",
       "openSettings": "打开设置",
       "settingsModels": "设置 → 模型",
@@ -765,11 +766,13 @@
     "abilities": {
       "tab": {
         "skills": "技能",
-        "plugins": "插件"
+        "plugins": "插件",
+        "mcp": "MCP"
       },
       "hint": {
         "skills": "ArkWork 自有 / 市场导入的工具能力（SKILL.md）",
-        "plugins": "MCP Server 接入的外部工具能力（stdio / sse）"
+        "plugins": "能力插件：给宿主贡献面板、渲染器、动作、首页模块与主题（plugin.json）",
+        "mcp": "MCP Server 接入的外部工具能力（stdio / sse）"
       }
     },
     "agents": {
@@ -1074,7 +1077,16 @@
         "integration": "集成",
         "other": "其他"
       }
-    }
+    },
+    "badShape": "面板数据不满足组件要求",
+    "noComponent": "该面板未声明宿主组件（清单可能已损坏）",
+    "loading": "正在加载面板数据…",
+    "loadFailed": "面板数据加载失败",
+    "unknownError": "未知错误",
+    "empty": "暂无数据",
+    "emptyHint": "组件「{{component}}」的数据为空。数据源就绪后会自动显示。",
+    "unknownComponent": "未知组件「{{component}}」（不在宿主白名单内）",
+    "fromPlugin": "由插件 {{id}} 提供"
   },
   "sidebar": {
     "resizeHandle": {
@@ -1127,7 +1139,8 @@
       "memory": "记忆",
       "automations": "自动化",
       "settings": "设置",
-      "desc": "单击打开{{label}}页面"
+      "desc": "单击打开{{label}}页面",
+      "workbench": "工作台中心"
     },
     "help": {
       "title": "帮助",
@@ -1163,7 +1176,8 @@
       "agents": "智能体 CRUD，含系统提示词",
       "kb": "本地文件切块索引 + 全文检索",
       "memory": "L1/L2/L3/L4 四层记忆查看",
-      "settings": "模型 / 工作区 / 外观 / 快捷键 / 高级"
+      "settings": "模型 / 工作区 / 外观 / 快捷键 / 高级",
+      "workbench": "工作台、插件与装配诊断"
     }
   },
   "dock": {
@@ -1334,7 +1348,8 @@
         "copied": "已复制",
         "copyFailed": "复制失败",
         "openFromFileTree": "请从文件树打开文件以新建标签页"
-      }
+      },
+      "panelNoExternal": "面板不是文件或网址，无法在系统里打开"
     },
     "registry": {
       "markdown": "Markdown",
@@ -1460,6 +1475,7 @@
       "star": "收藏",
       "unstar": "取消收藏",
       "rename": "重命名",
+      "copy": "复制对话",
       "export": "导出对话",
       "pause": "暂停任务",
       "resume": "恢复任务",
@@ -1472,6 +1488,12 @@
       "workspace": "工作区：{{name}}",
       "workspaceOnly": "工作区",
       "hint": "选择已有任务或新建任务开始"
+    },
+    "home": {
+      "badge": "工作台首页模块",
+      "back": "回到起始页",
+      "pluginModuleTitle": "该首页模块由插件提供",
+      "pluginModuleHint": "「{{module}}」由插件登记，但插件不能注入界面组件 —— 本版仅登记不渲染（遗留 L-33-03）。"
     }
   },
   "runconsole": {
@@ -1648,6 +1670,10 @@
     "close": {
       "tooltip": "关闭并返回任务",
       "aria": "关闭{{title}}页面，返回任务（Esc）"
+    },
+    "workbench": {
+      "title": "工作台中心",
+      "subtitle": "工作台 · 插件 · 诊断 —— 配置能力与插件插拔"
     }
   },
   "conversationflow": {
@@ -1658,7 +1684,9 @@
     "goal": "目标",
     "completed": "{{done}}/{{total}} 完成",
     "planStepAria": "计划步骤 {{index}}：{{text}}（状态：{{status}}）",
-    "steps": "步骤流"
+    "steps": "步骤流",
+    "foldedTurns": "… 已折叠 {{count}} 轮（点击展开）",
+    "collapseTurns": "收起前 {{count}} 轮"
   },
   "browserchrome": {
     "nav": {
@@ -1725,7 +1753,11 @@
     "restoreTabAria": "恢复标签：{{label}}",
     "expand": "展开右栏",
     "collapse": "折叠右栏",
-    "tabBar": "工具窗口标签栏"
+    "tabBar": "工具窗口标签栏",
+    "panelTabTooltip": "来自插件的面板：{{label}} · {{id}}",
+    "panelTabAria": "插件面板 {{label}}",
+    "morePluginTabs": "更多插件面板（{{count}}）",
+    "morePluginTabsAria": "更多插件面板：{{count}} 个"
   },
   "onboarding": {
     "stepModelsTitle": "配置 AI 模型",
@@ -2003,7 +2035,10 @@
       "createWorkspaceFailed": "创建工作区失败：{{error}}",
       "workspaceSwitched": "已切换工作区 · 记忆已随任务隔离（{{name}}）",
       "switchWorkspaceFailed": "切换工作区失败：{{error}}",
-      "exportStepStream": "步骤流"
+      "exportStepStream": "步骤流",
+      "copyConversationCopied": "对话已复制到剪贴板",
+      "copyConversationFailed": "复制失败，请检查剪贴板权限",
+      "copyConversationEmpty": "当前对话没有可复制的内容"
     },
     "subscriptions": {
       "taskFailedHint": "任务失败：{{error}}\n\n💡 {{hint}}",
@@ -2069,7 +2104,8 @@
         "inspBrowser": "Inspector：浏览器（Browser）",
         "inspTerminal": "Inspector：终端（Terminal）",
         "permissionCycle": "循环切换权限模式（表单内保留原生 Tab 跳转）",
-        "esc": "按优先级关闭浮层 / ModulePage / Inspector"
+        "esc": "按优先级关闭浮层 / ModulePage / Inspector",
+        "workbench": "打开工作台中心"
       }
     },
     "sections": {
@@ -2722,5 +2758,175 @@
   },
   "keybind": {
     "switchProfile": "切换工作台"
+  },
+  "vlib": {
+    "rowsTotal": "共 {{count}} 行",
+    "rowsWindow": "当前 {{from}}–{{to}}",
+    "mediaUnavailable": "媒体不可用",
+    "jsonTruncated": "内容超长，已截断（共 {{count}} 字符）"
+  },
+  "workbench": {
+    "title": "工作台中心",
+    "tab": {
+      "profiles": "工作台",
+      "plugins": "插件",
+      "diagnostics": "诊断",
+      "pluginsBadge": "{{count}} 个插件校验失败"
+    },
+    "summary": "{{profiles}} 个工作台 · {{plugins}} 个插件",
+    "report": {
+      "section": {
+        "validation": "校验问题",
+        "degraded": "未生效能力",
+        "snapshot": "装配快照"
+      },
+      "noIssues": "没有校验问题",
+      "errorCount": "{{count}} 个错误",
+      "warningCount": "{{count}} 个警告",
+      "fixHint": "建议：{{fix}}",
+      "noDegraded": "全部能力已生效",
+      "blocking": "阻断",
+      "nonBlocking": "不阻断",
+      "notApplied": "未生效"
+    },
+    "profiles": {
+      "report": "激活报告",
+      "import": "导入工作台",
+      "clone": "克隆并编辑",
+      "edit": "编辑",
+      "export": "导出",
+      "exportFailed": "导出失败：工作台不存在",
+      "exportCopied": "manifest JSON 已复制到剪贴板",
+      "exportClipboardFailed": "无法访问剪贴板，导出失败",
+      "deleteBuiltin": "内置工作台不可删除",
+      "deleteActive": "生效中的工作台不可删除",
+      "deleteNotFound": "工作台不存在，可能已被删除",
+      "deleted": "已删除工作台 {{id}}",
+      "listTitle": "全部工作台（{{count}}）",
+      "sourceUser": "用户",
+      "activate": "激活",
+      "editAria": "编辑 {{name}}",
+      "delete": "删除",
+      "deleteBuiltinHint": "内置示例工作台不可删除（可克隆后修改）",
+      "deleteActiveHint": "生效中的工作台不可删除（先切换到其他台）",
+      "deleteAria": "删除 {{name}}"
+    },
+    "editor": {
+      "title": "编辑工作台",
+      "close": "关闭",
+      "builtinReadonly": "内置工作台只读 —— 保存时会先克隆为用户工作台再应用修改。",
+      "loading": "正在读取工作台清单…",
+      "loadFailed": "读取工作台清单失败",
+      "notFound": "工作台不存在，可能已被删除",
+      "cloneFail.not-found": "源工作台不存在",
+      "cloneFail.id-exists": "克隆目标 id 已存在",
+      "cloneFail.invalid": "克隆结果未通过校验",
+      "group": {
+        "base": "基础",
+        "dockBuiltin": "Dock 内置面板",
+        "dockPanels": "Dock 插件面板",
+        "ui": "界面",
+        "data": "记忆域",
+        "theme": "主题 token 覆盖"
+      },
+      "name": "名称",
+      "version": "版本",
+      "icon": "图标（宿主白名单）",
+      "iconNone": "跟随默认",
+      "description": "描述",
+      "dockBuiltinHint": "勾选并排序内置面板（顺序即 ui.dockTabs；至少保留 1 个）",
+      "moveUp": "上移",
+      "remove": "移除",
+      "noPluginPanels": "没有已启用的插件面板 —— 到「插件」页启用后这里会出现可选项。",
+      "position": "插入位置",
+      "homeModule": "首页模块",
+      "homeModuleNone": "不设置（用默认起始页）",
+      "homeModuleBuiltin": "内置模块",
+      "homeModulePlugin": "插件模块",
+      "composerChips": "Composer 快捷 chips",
+      "composerChipsHint": "逗号分隔，最多 5 个",
+      "memoryNamespace": "记忆命名空间",
+      "shareCoreProfile": "共享核心记忆画像",
+      "themeHint": "只允许覆盖已存在的 token（键形如 --x-y；值只允许颜色或 px/rem/em/%）",
+      "addToken": "添加 token",
+      "saveIssues": "保存未通过校验 —— 请修正下列问题后重试",
+      "cancel": "取消",
+      "saving": "保存中…",
+      "saveOnly": "仅保存",
+      "saveAndActivate": "保存并激活",
+      "cloneAndSave": "克隆并保存"
+    },
+    "import": {
+      "title": "导入工作台",
+      "pickFile": "选择工作台清单文件…",
+      "onlyJson": "仅 .json",
+      "or": "或",
+      "paste": "粘贴 manifest JSON",
+      "activateAfter": "导入成功后立即激活",
+      "previewOk": "校验通过，可导入",
+      "previewBad": "校验未通过 —— 修正下列错误后再导入",
+      "readFailed": "文件读取失败",
+      "jsonParseFailed": "不是合法 JSON：{{detail}}",
+      "cancel": "取消",
+      "dryRun": "校验",
+      "back": "返回修改",
+      "confirm": "确认导入"
+    },
+    "plugins": {
+      "openDir": "打开插件目录",
+      "rescan": "重新扫描",
+      "count": "{{total}} 个插件 · {{on}} 个启用",
+      "empty": "插件目录是空的",
+      "emptyHint": "插件是一个含 plugin.json 的文件夹，放进去再点「重新扫描」即可生效，无需重启。",
+      "showSample": "看一个最小样例",
+      "hideSample": "收起样例",
+      "listTitle": "全部插件",
+      "sourceUser": "用户",
+      "sourceBundled": "随包示例",
+      "sourceLocal": "本地",
+      "newPlugin": "新建插件",
+      "newPluginHint": "插件是一个含 plugin.json 的文件夹。下面是可直接复制的最小清单：改掉 id 与 name，存成 {插件目录}/{你的id}/plugin.json，再点「重新扫描」即可生效。",
+      "detailAria": "展开 {{name}} 的详情",
+      "export": "导出样例",
+      "uninstallShort": "卸载",
+      "toggleAria": "启用或禁用 {{name}}",
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "uninstall": "卸载（删除插件目录）",
+      "uninstallBuiltinHint": "随包示例插件不可卸载，只能禁用",
+      "uninstallAria": "卸载 {{name}}",
+      "exportSample": "导出清单样例到插件目录",
+      "exportSampleAria": "导出 {{name}} 的清单样例",
+      "issuesTitle": "{{count}} 个插件校验失败（已跳过，不影响其他插件）",
+      "issuesIsolated": "校验失败是逐插件隔离的：坏插件不会拖垮其他插件，也不会阻断启动。"
+    },
+    "diag": {
+      "slotsTitle": "插槽实况（九类）",
+      "loading": "正在读取插槽注册表…",
+      "colKind": "插槽",
+      "colCount": "注册量",
+      "colSources": "来源分布",
+      "colPanelRef": "面板 ref",
+      "colTitle": "标题",
+      "colComponent": "组件",
+      "colDataSource": "数据源",
+      "colOrigin": "来源",
+      "colPosition": "position",
+      "colExt": "扩展名",
+      "colBuiltin": "内置映射",
+      "colEffective": "实际生效",
+      "expand": "展开明细",
+      "collapse": "收起",
+      "panelsTitle": "面板 Tab（{{count}}）",
+      "noPanels": "当前工作台没有声明任何面板",
+      "originProfile": "工作台",
+      "originBuiltin": "内置",
+      "originOverride": "覆盖",
+      "renderersTitle": "渲染器覆盖表（{{count}} 项被覆盖）",
+      "themeTitle": "主题 token 覆盖实况",
+      "noTheme": "当前工作台没有声明主题覆盖",
+      "themeCount": "light {{light}} 项 · dark {{dark}} 项",
+      "themeHint": "只覆盖已存在 token；宿主已删除的 token 会被自动丢弃（见激活报告）。"
+    }
   }
 }

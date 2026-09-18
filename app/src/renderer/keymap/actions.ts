@@ -143,6 +143,8 @@ export function createHandlers(host: KeymapHost): Record<KeymapId, KeyHandler> {
     'module.goto.memory': gotoModule('memory'),
     'module.goto.automations': gotoModule('automations'),
     'module.goto.settings': gotoModule('settings'),
+    // v0.33.0：工作台中心（工作台 / 插件 / 诊断）
+    'module.goto.workbench': gotoModule('workbench'),
 
     /* ---- App.tsx:165（分支 11）Inspector Tab 直达 ----
      * 序号取自 `inspectorTabOrder` 过滤掉隐藏项后的第 N 项（**不是**硬编码 tab 名），

@@ -374,10 +374,33 @@ const ark: ArkApi = {
     import: (args) => ipcRenderer.invoke('profile:import', args),
     delete: (args) => ipcRenderer.invoke('profile:delete', args),
     slots: () => ipcRenderer.invoke('profile:slots'),
+    // v0.33.0：配置能力
+    importFile: (args) => ipcRenderer.invoke('profile:import-file', args),
+    update: (args) => ipcRenderer.invoke('profile:update', args),
+    clone: (args) => ipcRenderer.invoke('profile:clone', args),
+    export: (args) => ipcRenderer.invoke('profile:export', args),
+    pickFile: () => ipcRenderer.invoke('profile:pick-file'),
     onChanged: (cb) => {
       const handler = (_e: IpcRendererEvent, payload: Parameters<typeof cb>[0]) => cb(payload)
       ipcRenderer.on('profile:changed', handler)
       return () => ipcRenderer.removeListener('profile:changed', handler)
+    },
+  },
+  // v0.33.0：插件注册表（插件插拔能力）
+  panel: {
+    fetch: (req) => ipcRenderer.invoke('panel:fetch', req),
+  },
+  plugin: {
+    list: () => ipcRenderer.invoke('plugin:list'),
+    setEnabled: (args) => ipcRenderer.invoke('plugin:set-enabled', args),
+    uninstall: (args) => ipcRenderer.invoke('plugin:uninstall', args),
+    rescan: () => ipcRenderer.invoke('plugin:rescan'),
+    openDir: () => ipcRenderer.invoke('plugin:open-dir'),
+    exportSample: (args) => ipcRenderer.invoke('plugin:export-sample', args),
+    onChanged: (cb) => {
+      const handler = (_e: IpcRendererEvent, payload: Parameters<typeof cb>[0]) => cb(payload)
+      ipcRenderer.on('plugin:changed', handler)
+      return () => ipcRenderer.removeListener('plugin:changed', handler)
     },
   },
   // v0.4.0：主题（同步原生界面 + 监听系统主题变化）

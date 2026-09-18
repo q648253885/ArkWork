@@ -24,10 +24,18 @@ import { cleanTitle, isPlaceholderTitleIn } from './task-title-clean.js'
 
 export { cleanTitle, isPlaceholderTitleIn }
 
-/** 生成超时（毫秒）：标题生成是低优先级旁路，超时即放弃 */
-const TITLE_TIMEOUT_MS = 20_000
-/** 送给模型的素材上限（字符） */
+/** 生成超时（毫秒）：标题生成是低优先级旁路，超时即放弃。
+ * v0.34.x 实测：45s。20s 会被小模型冷启动（首次加载 1GB 进显存）直接吃掉，
+ * 真机 qwen3.5:0.8b 首任务标题必然 'Request was aborted'。 */
+const TITLE_TIMEOUT_MS = 45_000
+/**
+ * 送给模型的素材上限（字符）
+ * v0.34.x 修正：32 → 512。思考模型（qwen3.5 等）会先输出 `<think>` 思考再给
+ * 标题，32 token 全被思考吃光 → finish=length、content 空 → 标题永远生成失败
+ * （用户实测日志：'model returned empty/unusable output'）。
+ */
 const MATERIAL_MAX_CHARS = 500
+const TITLE_MAX_TOKENS = 512
 
 const TITLE_SYSTEM_PROMPT = [
   '你是任务命名助手。根据用户给出的任务描述，生成一个简短、具体的任务标题。',
@@ -82,16 +90,28 @@ export async function maybeGenerateTaskTitle(taskId: string): Promise<void> {
     const timer = setTimeout(() => controller.abort(), TITLE_TIMEOUT_MS)
     try {
       const adapter = await getAdapter(task.modelId)
-      const resp = await adapter.complete({
+      // v0.34.x：空输出补试一次（思考模型偶发把预算吃满/端点毛刺 → content 空）
+      let resp = await adapter.complete({
         system: TITLE_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: material.slice(0, MATERIAL_MAX_CHARS) }],
         temperature: 0.2,
-        maxTokens: 32,
+        maxTokens: TITLE_MAX_TOKENS,
         signal: controller.signal,
       })
       // content 优先（思考模型的 thought 是推理过程，content 才是标题）
-      const raw = resp.content?.trim() || resp.thought || ''
-      const title = cleanTitle(raw)
+      let raw = resp.content?.trim() || resp.thought || ''
+      let title = cleanTitle(raw)
+      if (!title) {
+        resp = await adapter.complete({
+          system: TITLE_SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: material.slice(0, MATERIAL_MAX_CHARS) }],
+          temperature: 0.2,
+          maxTokens: TITLE_MAX_TOKENS,
+          signal: controller.signal,
+        })
+        raw = resp.content?.trim() || resp.thought || ''
+        title = cleanTitle(raw)
+      }
       if (!title) {
         logger.debug('Agent', 'task title: model returned empty/unusable output', taskId)
         return

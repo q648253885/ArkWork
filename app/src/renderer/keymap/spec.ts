@@ -137,6 +137,17 @@ export const KEYMAP_SPEC = [
     titleKey: 'help.shortcuts.desc.settingsModule',
     group: 'global',
   },
+  /* ---------- v0.33.0：Mod+7 工作台中心 ----------
+   * ⚠️ 原计划用 `Mod+Shift+K`，但它已被 B2 编辑器的 `editor.deleteLine` 占用
+   * （RESERVED_CHORDS 有案可查）—— 设计文档 §9.4 的「未占用」判定有误，落码时修正。
+   * `Mod+1~6` 顺延到 7，语义与整组一致且无 macOS 系统冲突（Ctrl+数字 1~9 与 Cmd+G 系统占用均不涉及）。 */
+  {
+    id: 'module.goto.workbench',
+    chord: 'Mod+7',
+    priority: 0,
+    titleKey: 'help.shortcuts.desc.workbench',
+    group: 'global',
+  },
 
   /* ---------- 分支 11：Alt+1~6 Inspector 直达 ----------
    * 第 6 项（终端）迁移前**有实现但帮助表漏列** —— 本版补上，属显示修正而非行为变更。 */
@@ -298,7 +309,7 @@ export const MIGRATED_BRANCHES: readonly { branch: number; before: string; ids: 
   { branch: 9, before: 'meta && key==="w" && shift', ids: ['workspace.switcher'] },
   {
     branch: 10,
-    before: 'meta && !alt && /^[1-6]$/',
+    before: 'meta && !alt && /^[1-7]$/',
     ids: [
       'module.goto.agents',
       'module.goto.skills',
@@ -306,6 +317,7 @@ export const MIGRATED_BRANCHES: readonly { branch: number; before: string; ids: 
       'module.goto.memory',
       'module.goto.automations',
       'module.goto.settings',
+      'module.goto.workbench',
     ],
   },
   {

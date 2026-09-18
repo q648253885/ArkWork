@@ -22,6 +22,7 @@ import { listRawL2 } from './l2-file.js'
 import { getAdapter } from '../llm/registry.js'
 import { logger } from '../system/logger.js'
 import { discoverSkills } from '../agent/skill-discovery.js'
+import { deleteSkillFolder, invalidateSkillCache, listSkills } from '../agent/registry.js'
 import { convertToSkill } from './convert.js'
 import type { Skill } from '@shared/types/agent'
 
@@ -212,14 +213,122 @@ function extractJsonObject(s: string): string | null {
  * ============================================================ */
 
 /**
- * 五项完整性校验：
+ * v0.34.1 起为八项（原五项 + 三项新闸门）。
+ *
+ * 为什么补这三项 —— 真实数据的教训：本机技能库里堆了 **118 个 `S-distill.*`**，
+ * 内容高度同类（systematic-troubleshooting / generic-troubleshooting /
+ * error-pattern-diagnosis ×N），还有一条正文是「无法从空对话中提炼技能」。
+ * 旧五项只查「格式对不对」，不查「值不值得存在」，于是每个任务都蒸出一个
+ * 新技能，格式全部合法 → 全部注册。格式闸门拦不住**语义垃圾**。
+ *
  *  1 frontmatter-valid   name/description 合法
  *  2 body-nonempty       指令体非空且 ≥200 字（最小信息量）
  *  3 structure-complete  含「适用场景 + 步骤/检查清单」两要素（结构性校验）
  *  4 discoverable        经 skill-discovery 扫描可被发现
- *  5 no-conflict         id/name 与现有技能不冲突
+ *  5 no-conflict         id/name 与现有技能**完全同名**
+ *  6 no-near-duplicate   与现有技能**近似重复**（词元 Jaccard ≥ 阈值）—— 治本项
+ *  7 not-generic         不是「无领域特异性的通用流程」（已有通用流程，不必再蒸）
+ *  8 no-refusal          正文不是拒答/凑数文本（LLM 说"没法提炼"时不许注册）
+ *  9 forge-budget        蒸馏技能总量未超上限（防止技能库被自动写入淹没）
  */
-export async function verifySkillIntegrity(skillMd: string, workspaceDir?: string): Promise<SkillIntegrityReport> {
+/* ============================================================
+ * v0.34.1：语义闸门的三把尺子（纯函数，零 IO，可穷尽单测）
+ * ============================================================ */
+
+/** 近似重复判定阈值（词元 Jaccard） */
+export const DUPLICATE_JACCARD_THRESHOLD = 0.6
+
+/** 蒸馏技能总量上限（超出即不再自动注册 —— 技能库不能被自动写入淹没） */
+export const MAX_DISTILLED_SKILLS = 12
+
+/**
+ * 词元化：拉丁词（≥2 字符）+ 中文二元字组。
+ * 中文不能按空格切，二字组是成本最低且足够用的近似。
+ */
+export function normalizeTokens(text: string): Set<string> {
+  const out = new Set<string>()
+  const lower = text.toLowerCase()
+  for (const w of lower.match(/[a-z0-9]{2,}/g) ?? []) out.add(w)
+  for (const run of lower.match(/[\u4e00-\u9fff]+/g) ?? []) {
+    if (run.length === 1) {
+      out.add(run)
+      continue
+    }
+    for (let i = 0; i < run.length - 1; i += 1) out.add(run.slice(i, i + 2))
+  }
+  return out
+}
+
+/** Jaccard 相似度（空集与空集记 0 —— 无信息量不算相似） */
+export function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0
+  let inter = 0
+  for (const t of a) if (b.has(t)) inter += 1
+  const union = a.size + b.size - inter
+  return union === 0 ? 0 : inter / union
+}
+
+/**「通用流程」特征词：命中即说明这份技能没有领域特异性 */
+const GENERIC_HINTS = [
+  'troubleshooting', '排错', '排查', '通用', 'generic', 'systematic',
+  '问题定位', '诊断流程', 'debug流程', 'error-pattern', '问题分析',
+]
+
+/**
+ * 是否为「无领域特异性的通用流程」。
+ *
+ * 判定：name/description 命中通用特征词，且正文里**没有**任何具体技术锚点
+ * （工具名 / 文件扩展名 / 框架名 / 命令）。宿主已有通用排错流程，这类技能
+ * 蒸出来就是噪音 —— 真实数据里 118 个蒸馏技能大半是这一类。
+ */
+export function isGenericDistill(name: string, description: string, body: string): boolean {
+  const head = `${name} ${description}`.toLowerCase()
+  if (!GENERIC_HINTS.some((h) => head.includes(h.toLowerCase()))) return false
+  // 有具体技术锚点 → 确实是某个领域的排错流程，放行
+  const hasAnchor =
+    /\.[a-z]{2,5}\b/.test(body) ||                          // 文件扩展名 / 域名
+    /\b(mvn|gradle|npm|pnpm|yarn|git|docker|kubectl|curl|ssh)\b/i.test(body) ||
+    /[a-z][a-z0-9-]*\.(ts|tsx|js|jsx|py|java|go|rs|json|ya?ml|toml)\b/i.test(body) ||
+    /(spring|react|vue|electron|next\.js|django|flask|fastapi|redis|kafka|mysql|postgres)/i.test(body)
+  return !hasAnchor
+}
+
+/** 拒答 / 凑数文本特征：LLM 说"没法提炼"时，正文不该被当成技能注册 */
+const REFUSAL_PATTERNS = [
+  /无法(从|根据)?[^。\n]{0,12}提炼/,
+  /无法(从|根据)?[^。\n]{0,12}生成/,
+  /请提供(具体|更多|相关)/,
+  /(我|本模型)?(不能|无法)(胜任|完成|生成)/,
+  /no (enough )?(information|context) to/i,
+  /cannot (create|generate) a skill/i,
+]
+
+export function looksLikeRefusal(body: string): boolean {
+  return REFUSAL_PATTERNS.some((re) => re.test(body))
+}
+
+/** 校验时可注入的「现有技能」条目（避免校验结果依赖真实磁盘状态） */
+export interface IntegrityExistingSkill {
+  id: string
+  name?: string
+  description?: string
+  tags?: string[]
+}
+
+export interface IntegrityOptions {
+  /** 分层扫描的根目录（缺省 process.cwd()） */
+  workspaceDir?: string
+  /**
+   * 现有技能清单。**给了就不扫磁盘** —— 校验结果必须与「这台机器上恰好装了什么」
+   * 无关，否则单测在装了 118 个历史技能的机器上会假红。
+   */
+  existing?: IntegrityExistingSkill[]
+}
+
+export async function verifySkillIntegrity(
+  skillMd: string,
+  opts?: string | IntegrityOptions,
+): Promise<SkillIntegrityReport> {
   const checks: SkillIntegrityReport['checks'] = []
 
   // 1. frontmatter 合法
@@ -260,24 +369,94 @@ export async function verifySkillIntegrity(skillMd: string, workspaceDir?: strin
   // 5. 不冲突（与现有技能 name/id 比较）
   let noConflict = true
   let conflictDetail = '无冲突'
+  // 6. 近似重复（同一份「语义」换个名字再蒸一遍 —— 118 个垃圾技能的主因）
+  let noNearDup = true
+  let dupDetail = '无近似重复'
+  // 9. 蒸馏技能总量预算
+  let withinBudget = true
+  let budgetDetail = `蒸馏技能 0/${MAX_DISTILLED_SKILLS}`
+  const ctx: IntegrityOptions = typeof opts === 'string' ? { workspaceDir: opts } : (opts ?? {})
   if (fm.name) {
     try {
-      const existing = await discoverSkills(workspaceDir ?? process.cwd())
+      const existing = ctx.existing ?? (await discoverSkills(ctx.workspaceDir ?? process.cwd()))
       const dup = existing.find((s) => s.id === fm.name || s.name === fm.name)
       if (dup) {
         noConflict = false
         conflictDetail = `与现有技能冲突：${dup.id} / ${dup.name}`
       }
+
+      // —— 6. 近似重复：只与「同为蒸馏产物」的技能比（内置技能不该挡住蒸馏）——
+      const forged = existing.filter(
+        (s) => (s.tags ?? []).includes('distilled') || s.id.startsWith('S-forge.') || s.id.startsWith('S-distill.'),
+      )
+      // 只比 name + description：判断「同一个技能换了个名字」靠的是**概念同一性**，
+      // 把正文算进来会被长文本稀释（两个都讲 nginx 的技能相似度反而更低），
+      // 实测会让去重闸门形同虚设（v0.34.1 单测 TC-FORGE-002 把守）。
+      const mine = normalizeTokens(`${fm.name} ${fm.description ?? ''}`)
+      let worst = 0
+      let worstName = ''
+      for (const s of forged) {
+        const sim = jaccard(mine, normalizeTokens(`${s.id} ${s.name ?? ''} ${s.description ?? ''}`))
+        if (sim > worst) {
+          worst = sim
+          worstName = s.id
+        }
+      }
+      if (worst >= DUPLICATE_JACCARD_THRESHOLD) {
+        noNearDup = false
+        dupDetail = `与已蒸馏技能「${worstName}」相似度 ${worst.toFixed(2)} ≥ ${DUPLICATE_JACCARD_THRESHOLD}`
+      } else if (worst > 0) {
+        dupDetail = `最相似「${worstName}」相似度 ${worst.toFixed(2)}`
+      }
+
+      // —— 9. 预算 ——
+      if (forged.length >= MAX_DISTILLED_SKILLS) {
+        withinBudget = false
+        budgetDetail = `蒸馏技能已达上限 ${forged.length}/${MAX_DISTILLED_SKILLS}`
+      } else {
+        budgetDetail = `蒸馏技能 ${forged.length}/${MAX_DISTILLED_SKILLS}`
+      }
     } catch (err) {
-      // discovery 失败不阻塞校验（保留其他四项）
+      // discovery 失败不阻塞校验（保留其他各项）
       logger.warn('Memory', `discoverSkills failed during integrity check: ${(err as Error).message}`)
       conflictDetail = `discover 失败：${(err as Error).message}`
+      dupDetail = 'discover 失败，未比对'
+      budgetDetail = 'discover 失败，未统计'
     }
   }
   checks.push({
     id: 'no-conflict',
     pass: noConflict,
     detail: conflictDetail,
+  })
+  checks.push({
+    id: 'no-near-duplicate',
+    pass: noNearDup,
+    detail: dupDetail,
+  })
+
+  // 7. 不是「无领域特异性的通用流程」
+  const generic = isGenericDistill(fm.name ?? '', fm.description ?? '', body)
+  checks.push({
+    id: 'not-generic',
+    pass: !generic,
+    detail: generic
+      ? '通用流程（无技术锚点）—— 宿主已有通用排错流程，蒸馏此类技能只增噪音'
+      : '具备领域特异性或无通用特征词',
+  })
+
+  // 8. 正文不是拒答文本
+  const refusal = looksLikeRefusal(body)
+  checks.push({
+    id: 'no-refusal',
+    pass: !refusal,
+    detail: refusal ? '正文为拒答/凑数文本（模型表示无法提炼）' : '正文非拒答文本',
+  })
+
+  checks.push({
+    id: 'forge-budget',
+    pass: withinBudget,
+    detail: budgetDetail,
   })
 
   return { pass: checks.every((c) => c.pass), checks }
@@ -415,6 +594,51 @@ export async function runForSkillForge(taskId: string, modelId: string): Promise
       quarantinePath: qf,
     }
   }
+}
+
+/* ============================================================
+ * v0.34.1：历史蒸馏技能清理（一次性迁移 + 手动清理共用）
+ *
+ * 背景：v0.8.0–v0.24.x 的蒸馏管线用 `S-distill.<8位随机>` 作 id，且没有
+ * 去重闸门 → 真实用户机器上累积了 118 个内容高度同类的技能目录，用户
+ * 完全无法辨认，最终只能整体当垃圾清掉。
+ *
+ * 本函数负责把这批历史产物清掉（**只清 `S-distill.` 前缀**，不动
+ * `S-forge.` 与用户自建技能），并写一条可查日志。
+ * 幂等：没有匹配项时返回空数组、不写任何东西。
+ * ============================================================ */
+export const LEGACY_DISTILL_PREFIX = 'S-distill.'
+
+export async function purgeLegacyDistillSkills(): Promise<{ removed: string[]; failed: string[] }> {
+  const removed: string[] = []
+  const failed: string[] = []
+  let all: Awaited<ReturnType<typeof listSkills>> = []
+  try {
+    all = await listSkills()
+  } catch (err) {
+    logger.warn('Memory', `purgeLegacyDistillSkills: listSkills 失败：${(err as Error).message}`)
+    return { removed, failed }
+  }
+  for (const s of all) {
+    if (!s.id.startsWith(LEGACY_DISTILL_PREFIX)) continue
+    try {
+      await deleteSkillFolder(s.id)
+      removed.push(s.id)
+    } catch (err) {
+      failed.push(`${s.id}: ${(err as Error).message}`)
+    }
+  }
+  if (removed.length > 0) {
+    invalidateSkillCache()
+    logger.info(
+      'Memory',
+      `[skill-forge] 已清理历史蒸馏技能 ${removed.length} 个（S-distill.*，命名不可辨认且内容高度同类）`,
+    )
+  }
+  if (failed.length > 0) {
+    logger.warn('Memory', `[skill-forge] 清理失败 ${failed.length} 个：${failed.join('；')}`)
+  }
+  return { removed, failed }
 }
 
 /* ============================================================

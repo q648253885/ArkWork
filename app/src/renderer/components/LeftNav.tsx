@@ -125,6 +125,8 @@ function ModuleRow({
     // redesign-workspace-navigation Task 3：settings 已加入 ModulePage 联合类型。
     // LeftNav 实际不再挂载（被 Sidebar CapabilityEntries 替代），此处仅为通过 typecheck。
     settings: t('leftnav.descriptions.settings'),
+    // v0.33.0：workbench（工作台中心）同理 —— 入口在 Sidebar 的能力区
+    workbench: t('leftnav.descriptions.workbench'),
   }
 
   return (

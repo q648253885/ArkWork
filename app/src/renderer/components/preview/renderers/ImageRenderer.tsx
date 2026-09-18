@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next'
 import { ark } from '../../../ipc/client'
 import { Icon } from '../../../icons'
 import { useStore } from '../../../store'
+import { baseNameOf } from '@shared/utils/path-display'
 
 interface ImageRendererProps {
   path: string
@@ -130,13 +131,13 @@ export function ImageRenderer({ path }: ImageRendererProps) {
           fit ? (
             <img
               src={src}
-              alt={path.split('/').pop() ?? t('preview.image.alt')}
+              alt={baseNameOf(path) || t('preview.image.alt')}
               className="max-w-full max-h-full object-contain rounded-lg shadow-panel"
             />
           ) : (
             <img
               src={src}
-              alt={path.split('/').pop() ?? t('preview.image.alt')}
+              alt={baseNameOf(path) || t('preview.image.alt')}
               style={{ width: `${zoom}%`, height: 'auto', imageRendering: zoom >= 200 ? 'pixelated' : 'auto' }}
               className="rounded-lg shadow-panel"
             />

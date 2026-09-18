@@ -25,11 +25,27 @@ import type {
   CompositionSnapshot,
   Degradation,
   ProfileSummary,
+  SlotEntry,
+  SlotKind,
 } from '@shared/types/profile'
-import type { AppState, ModulePage } from '../types'
+import type { PanelTab } from '@shared/utils/panel-model'
+import type { ThemeTokens } from '@shared/utils/theme-tokens'
+import type { AppState } from '../types'
 // v0.32.0：视图投影是纯函数，独立成模块以便 node:test 密闭覆盖
-import { projectUiLayer } from '../../utils/profile-view'
-export { projectUiLayer, blockingDegradations, warningCount } from '../../utils/profile-view'
+import {
+  deriveFromSlots,
+  projectUiLayer,
+  EMPTY_DERIVATIONS,
+  type SlotDerivations,
+} from '../../utils/profile-view'
+export {
+  projectUiLayer,
+  blockingDegradations,
+  warningCount,
+  deriveFromSlots,
+  isHomeModuleValue,
+  EMPTY_DERIVATIONS,
+} from '../../utils/profile-view'
 
 export interface ProfileState {
   /** 全部可安装工作台（含内置与用户导入） */
@@ -45,18 +61,29 @@ export interface ProfileState {
   profileBusy: boolean
   profileLoaded: boolean
 
-  /* 派生（只读）—— 由 applyProfileToView 落地 */
+  /* 派生（只读）—— 由 applyProfileToView / applySlotDerivations 落地 */
   /** profile 声明的 Dock 面板顺序；null = 不覆盖（沿用用户/智能体偏好） */
   profileDockTabs: DockTabId[] | null
-  /** profile 声明的无任务首页模块页；null = 不覆盖 */
-  profileHomeModule: ModulePage | null
+  /** profile 声明的无任务首页模块；null = 不覆盖。v0.33.0 起为 `string`（开放引用） */
+  profileHomeModule: string | null
   /** profile 声明的 Composer chips */
   profileComposerChips: string[]
+  /** v0.33.0：可渲染面板 Tab（来自插槽，顺序真源 = manifest position） */
+  profilePanels: PanelTab[]
+  /** v0.33.0：扩展名 → 渲染器覆盖表 */
+  rendererOverrides: Record<string, string>
+  /** v0.33.0：token 覆盖表 */
+  themeOverrides: ThemeTokens
 
   loadProfiles: () => Promise<void>
   switchProfile: (id: string) => Promise<boolean>
   /** 把快照里的 ui 层投影到视图字段（纯 set，不发 IPC） */
   applyProfileToView: (snapshot: CompositionSnapshot | null) => void
+  /**
+   * v0.33.0：把**插槽明细**派生为面板 / 渲染器覆盖 / 主题三份数据。
+   * 与 `applyProfileToView` 的分工见 `utils/profile-view.ts` 的模块注释。
+   */
+  applySlotDerivations: (slots: Partial<Record<SlotKind, SlotEntry[]>>) => void
   /** 订阅主进程广播（App 挂载时调一次） */
   subscribeProfileChanges: () => () => void
 }
@@ -73,10 +100,18 @@ export const profileSlice: StateCreator<AppState, [], [], ProfileState> = (set, 
   profileDockTabs: null,
   profileHomeModule: null,
   profileComposerChips: [],
+  profilePanels: EMPTY_DERIVATIONS.panels,
+  rendererOverrides: EMPTY_DERIVATIONS.rendererOverrides,
+  themeOverrides: EMPTY_DERIVATIONS.theme,
 
   loadProfiles: async () => {
     try {
-      const [list, active] = await Promise.all([ark.profile.list(), ark.profile.getActive()])
+      const [list, active, slots] = await Promise.all([
+        ark.profile.list(),
+        ark.profile.getActive(),
+        // v0.33.0：插槽是本版真正被消费的数据体（面板 / 覆盖 / 主题）
+        ark.profile.slots(),
+      ])
       const snapshot = active.snapshot
       set({
         profiles: Array.isArray(list) ? list : [],
@@ -86,6 +121,7 @@ export const profileSlice: StateCreator<AppState, [], [], ProfileState> = (set, 
         profileLoaded: true,
       })
       get().applyProfileToView(snapshot ?? null)
+      get().applySlotDerivations(slots ?? {})
     } catch (err) {
       // 列表读不出来不算致命：留空列表，UI 显示「未知工作台」而非整页崩
       console.error('[profile] loadProfiles failed:', err)
@@ -118,6 +154,12 @@ export const profileSlice: StateCreator<AppState, [], [], ProfileState> = (set, 
         profiles: get().profiles.map((p) => ({ ...p, active: p.id === report.profileId })),
       })
       get().applyProfileToView(snapshot)
+      // 插槽已随激活重建 → 必须重新拉（否则面板 Tab 停留在上一台）
+      try {
+        get().applySlotDerivations((await ark.profile.slots()) ?? {})
+      } catch (err) {
+        console.error('[profile] slots refresh failed:', err)
+      }
       const degradedCount = snapshot?.degraded.length ?? 0
       if (degradedCount > 0) {
         get().pushToast({
@@ -137,6 +179,15 @@ export const profileSlice: StateCreator<AppState, [], [], ProfileState> = (set, 
   applyProfileToView: (snapshot) => {
     const { dockTabs, homeModule, composerChips } = projectUiLayer(snapshot)
     set({ profileDockTabs: dockTabs, profileHomeModule: homeModule, profileComposerChips: composerChips })
+  },
+
+  applySlotDerivations: (slots) => {
+    const next: SlotDerivations = deriveFromSlots(slots)
+    set({
+      profilePanels: next.panels,
+      rendererOverrides: next.rendererOverrides,
+      themeOverrides: next.theme,
+    })
   },
 
   subscribeProfileChanges: () => {

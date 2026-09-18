@@ -112,6 +112,8 @@ import {
 import { safeSlice, emitEvent, emitProgress } from './broadcast.js'
 import { emitContextSizeReport } from './context.js'
 import { buildFallbackAskUserQuestion, markRunningPlanItemFailed, discardIncompletePlanItems, isProductiveTool, decidePlanAdvance, emitPlanStatus, sealGraphForTaskOutcome, reopenGraphForTaskRun } from './gates.js'
+// v0.34.0（D52）：零产出轮终局守卫（小模型空转 ≤6 轮即优雅暂停）
+import { isStalledRound, planSignature, advanceStallCounter, isStallTerminal, MAX_STALLED_ROUNDS } from './stall.js'
 import { tryGeneratePlan, generatePlan } from './plan.js'
 import { findPlanItemForStage } from './plan-parser.js'
 import { applyStageGateAdvance } from '../graph/plan-sync.js'
@@ -190,6 +192,31 @@ function getToolCallKey(tool: string, args: unknown): string {
 // v0.9.x：shell 写入命令特征（命中即视为产出性操作，清零只读停滞计数）
 const WRITE_COMMAND_RE = /mkdir|tee|\bcp\b|\bmv\b|\becho\b|cat\s*>|>|\$\s*\(/i
 
+/**
+ * v0.34.x（D52）：零产出终局的优雅暂停（Act 路径与无工具分支共用）。
+ * 与 maxIter 超限同一形态：paused + ask_user，把「模型能力不足」交给用户决策；
+ * 刻意**不封图**、不标清单失败（暂停可恢复，见 D36）。
+ */
+async function pauseForStalledRounds(task: Task, iteration: number, rounds: number): Promise<void> {
+  const question = tFor(getUiLocale(), 'askUser.stalledQuestion', { count: rounds })
+  logger.warn('Agent', `${rounds} consecutive stalled rounds — paused for user decision`, task.id)
+  await emitEvent(task.id, { type: 'max_iterations_reached', iteration })
+  await emitEvent(task.id, {
+    type: 'ask_user',
+    iteration,
+    question,
+    suggestions: [
+      { label: tFor(getUiLocale(), 'suggest.resumeRun.label'), description: tFor(getUiLocale(), 'suggest.resumeRun.desc') },
+      { label: tFor(getUiLocale(), 'suggest.finishHere.label'), description: tFor(getUiLocale(), 'suggest.finishHere.desc') },
+    ],
+  })
+  await updateTask(task.id, {
+    status: 'paused',
+    pendingAskUser: { question, askedAt: Date.now() },
+  })
+  broadcastTaskStatus({ ...task, status: 'paused' })
+}
+
 export async function runReActLoop(
   opts: RunOptions,
 ): Promise<void> {
@@ -232,6 +259,12 @@ export async function runReActLoop(
   // 上限见 turn-end.MAX_COMPLETE_REFUSALS —— 超限后接受完成，但剩余项会被收成 cancelled，
   // 保证「任务终态 ↔ 清单」自洽（不会把「已完成 + 4 条待执行」留在界面上）。
   let completeRefusals = 0
+  // v0.34.0（D52）：连续「零产出轮」计数 —— 判定见 stall.ts。
+  // 用户实测：小模型每轮都成功调只读工具、内容全空，既有保护（无工具调用 /
+  // 同签名 / 只读提示）一个都不触发，直到 maxIterations=200（≈100 分钟）。
+  let consecutiveStalledRounds = 0
+  // v0.34.x：上一轮叙述签名（freshNarrative 的重复检测基准）
+  let prevNarrativeSig = ''
 
   // 标记任务为 running
   await updateTask(task.id, { status: 'running', startedAt: Date.now() })
@@ -311,6 +344,19 @@ export async function runReActLoop(
       // 字段）时把"还要继续跑"误判为最终答复 → 任务被提前置 done / 清单被提前勾完。
       const action = response.action
       const pendingActions = collectActionsForIteration(response)
+      // v0.34.x：本轮叙述是否「翻新」（非空且与上一轮不同）—— 探索类任务的
+      // 只读探索每轮有新发现，不能算零产出（D52 误杀修正，见 stall.ts）。
+      // 叙述签名优先级：thought（content 正文）> reasoning（原生思考）——
+      // 真机 qwen3.5:9b 实测：探索阶段叙述**全走 reasoning 通道**、content 恒空
+      // （每轮 100 tokens 思考 + 读新文件），只看 thought 会再次误杀；
+      // 而 0.8b 空转案例的 reasoning 每轮雷同（≤19 tokens 复读）或全空，仍拦得住。
+      // 只在签名非空时更新基准：空轮不清基准，重复检测始终对上一条真叙述进行。
+      const thoughtTrim = (response.thought ?? '').trim()
+      const reasoningTrim = (response.reasoningContent ?? '').trim()
+      const narrativeSig = thoughtTrim || reasoningTrim
+      const freshNarrative = !!(narrativeSig && narrativeSig !== prevNarrativeSig)
+      if (narrativeSig) prevNarrativeSig = narrativeSig
+
       // v0.19.x：提前计算每个 action 对应的 toolCallId（与 Act 阶段口径一致），
       // 供 task_complete / ask_user 分支补写"跳过"observation。否则多 action 时
       // 只写控制动作的 observation，其余 assistant tool_calls 悬空，每轮触发
@@ -362,6 +408,22 @@ export async function runReActLoop(
           // 标签用 `[引擎提示]`（技能来源见下方 labelSkillHint）：本提示是引擎对
           // 自身检测结果（清单有未完成项 / 上轮无工具调用）的说明，不是技能契约。
           pendingSystemHint = labelEngineHint(hint)
+          // v0.34.x（D52 补口）：无工具分支此前不推进零产出计数 —— 空响应/纯文字
+          // 回合会在这里无限循环（提示注入 → 继续空转 → 再提示），qwen3.5:9b
+          // @ Ollama 实测连烧 100+ 轮直到 maxIterations。此处与 Act 路径同口径：
+          // 有 say 叙述视为有产出（归零），否则计一次零产出，达阈值走优雅暂停。
+          const stalledNoTool = isStalledRound({
+            hasToolCall: false,
+            allReadonly: true,
+            hasSayOutput: !!(response.say && response.say.trim()),
+            hasNewThought: freshNarrative,
+            planProgressed: false,
+          })
+          consecutiveStalledRounds = advanceStallCounter(consecutiveStalledRounds, stalledNoTool)
+          if (isStallTerminal(consecutiveStalledRounds)) {
+            await pauseForStalledRounds(task, iteration, MAX_STALLED_ROUNDS)
+            return
+          }
           continue
         }
         // 模型未调用工具，且清单无未完成项、输出未被截断 → 认为是最终回复
@@ -436,6 +498,8 @@ export async function runReActLoop(
       // 我们按"工具维度"并行执行，但每条 act 仍写入独立 ReActStep 并
       // 通过单一 `task:progress` 通道聚合回流，保证 UI 不漂移。
       const actStartedAt = Date.now()
+      // v0.34.0（D52）：Act 前的清单签名 —— 用于判定「本轮是否产生实质进展」
+      const planSigBefore = planSignature(task.planItems)
       const actions = collectActionsForIteration(response)
       const groupId = genId('group')
       // polish4 §A2 + §D1.1 + §D1.2：每个 action 独立 id，并入 toolCallBudget
@@ -842,6 +906,43 @@ export async function runReActLoop(
           pendingSystemHint = `你已经连续探索 ${consecutiveReadOnly} 轮仍未开始产出。若工作区为空或与任务无关，请立即用 shell mkdir 创建项目目录并开始实现；若已有足够信息，直接开始执行。`
           consecutiveReadOnly = 0  // 避免下一轮重复注入
         }
+      }
+
+      /* ---------- v0.34.0（D52）：零产出轮终局守卫 ----------
+       * 用户实测：小模型每轮都成功调用只读工具（file-reader，2ms）、内容全空、
+       * 清单纹丝不动，既有保护（无工具调用 / 同签名 / 只读提示）一个都不触发，
+       * 一直空转到 maxIterations=200（≈100 分钟）才暂停。
+       * 本守卫是**正交维度**：不管调没调工具，只看这一轮「有没有实质进展」；
+       * 连续 MAX_STALLED_ROUNDS 轮零产出 → 与 maxIter 超限同一条优雅暂停路径
+       * （paused + ask_user），把「模型能力不足」的事实交给用户判断。 */
+      const stalledRound = isStalledRound({
+        hasToolCall: actions.length > 0,
+        allReadonly:
+          actions.length > 0 &&
+          actions.every((a) =>
+            a.tool === 'shell'
+              ? !WRITE_COMMAND_RE.test(String((a.args as Record<string, unknown>)?.command ?? ''))
+              : READONLY_TOOLS.has(a.tool),
+          ),
+        hasSayOutput: !!(response.say && response.say.trim()),
+        hasNewThought: freshNarrative,
+        planProgressed: planSignature(task.planItems) !== planSigBefore,
+      })
+      if (stalledRound) {
+        consecutiveStalledRounds = advanceStallCounter(consecutiveStalledRounds, true)
+        logger.warn(
+          'Agent',
+          `stalled round ${consecutiveStalledRounds}/${MAX_STALLED_ROUNDS} (no progress: tools=${actions.map((a) => a.tool).join(',') || 'none'})`,
+          task.id,
+        )
+        if (isStallTerminal(consecutiveStalledRounds)) {
+          // v0.34.x：暂停收尾抽至 pauseForStalledRounds（无工具分支同源共用）
+          await pauseForStalledRounds(task, iteration, MAX_STALLED_ROUNDS)
+          return
+        }
+      } else {
+        // 有实质进展 → 一次即归零（不累计历史空转）
+        consecutiveStalledRounds = advanceStallCounter(consecutiveStalledRounds, false)
       }
 
       // v0.6.0（F12）：异步写 checkpoint（fire-and-forget，不阻塞主循环）

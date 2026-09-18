@@ -11,6 +11,7 @@ import { ark } from '../../../ipc/client'
 import { Icon } from '../../../icons'
 import { useStore } from '../../../store'
 import type { FileContent } from '@shared/types/ipc'
+import { baseNameOf } from '@shared/utils/path-display'
 
 interface FallbackRendererProps {
   path: string
@@ -23,7 +24,7 @@ function formatSize(bytes: number): string {
 }
 
 function extOf(path: string): string {
-  const base = path.split('/').pop() ?? path
+  const base = baseNameOf(path)
   const i = base.lastIndexOf('.')
   return i >= 0 ? base.slice(i + 1).toUpperCase() : '—'
 }
@@ -51,7 +52,7 @@ export function FallbackRenderer({ path }: FallbackRendererProps) {
     }
   }, [path])
 
-  const fileName = path.split('/').pop() ?? path
+  const fileName = baseNameOf(path)
 
   return (
     <div className="h-full overflow-auto flex items-center justify-center p-6 bg-bg-surface">

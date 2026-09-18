@@ -19,6 +19,7 @@ import { loadActiveWorkspace, loadUiState, saveUiState } from '../persist'
 // v0.32.0：折叠切换语义（纯函数；缺陷 D33 的唯一修正点）
 import { applyUserFoldToggle } from '@shared/utils/flow-fold'
 import { findFileTab } from '../../services/previewTabs'
+import { baseNameOf } from '@shared/utils/path-display'
 import i18n from '../../i18n'
 import {
   applyLocaleDocument,
@@ -50,7 +51,7 @@ const capsuleOf = (pw: PreviewWindowState): MinimizedCapsule => {
   const activeTab = pw.tabs.find((t) => t.id === pw.activeTabId)
   return {
     id: pw.id,
-    title: activeTab?.target.kind === 'file' ? activeTab.target.path.split('/').pop() || i18n.t('slice.ui.preview') : i18n.t('slice.ui.preview'),
+    title: activeTab?.target.kind === 'file' ? baseNameOf(activeTab.target.path) || i18n.t('slice.ui.preview') : i18n.t('slice.ui.preview'),
     icon: 'File',
     tabCount: pw.tabs.length,
     snapshot: { ...pw, tabs: [...pw.tabs] },
@@ -111,6 +112,7 @@ export const uiSlice: StateCreator<
     | 'minimizedPreviews'
     | 'openPreview'
     | 'openPreviewUrl'
+    | 'openPanelPreview'
     | 'closePreview'
     | 'togglePreviewPin'
     | 'minimizePreview'
@@ -391,6 +393,60 @@ export const uiSlice: StateCreator<
           pinned: false,
           tabs: [tab],
           activeTabId: tabId,
+        },
+      }
+    }),
+  /**
+   * v0.34.1：把插件面板打开到浮窗。
+   *
+   * 为什么要有这条路径：面板此前只能住在右侧侧边栏，而侧边栏宽度有限 ——
+   * K 线、完整行情表这类「要看全」的内容在 300px 里没法读。浮窗是既有的
+   * 可拖拽可缩放容器，让它承载面板 = 零新增 UI 范式。
+   *
+   * 面板标题不在这里硬编码：取渲染层当前面板 Tab 全集里的 title；
+   * 取不到就用 ref 兜底（浮窗会显示「面板不可用」，而不是空白）。
+   */
+  openPanelPreview: (
+    panelRefs: string[],
+    params?: Record<string, unknown>,
+  ) =>
+    set((s) => {
+      const tabsOf = (seq: number): PreviewTab[] =>
+        (panelRefs ?? []).map((ref: string, i: number) => {
+          // profilePanels 是「当前面板 Tab 全集」（内置 ∪ profile ∪ 插件贡献）
+          const known = (s.profilePanels ?? []).find((t) => t.ref === ref)
+          return {
+            id: `tab-${seq}-${i}`,
+            target: {
+              kind: 'panel' as const,
+              panelRef: ref,
+              title: known?.title ?? ref,
+              params,
+            },
+            renderer: 'fallback' as const,
+            mode: 'preview' as const,
+          }
+        })
+      const seq = Date.now()
+      const created = tabsOf(seq)
+      if (created.length === 0) return {}
+      if (s.previewWindow) {
+        return {
+          previewWindow: {
+            ...s.previewWindow,
+            tabs: [...s.previewWindow.tabs, ...created],
+            activeTabId: created[0]!.id,
+          },
+        }
+      }
+      return {
+        previewWindow: {
+          id: `pw-${seq}`,
+          // 面板内容比文件预览更宽：默认给大一点，避免 K 线挤在一起
+          bounds: { x: 100, y: 70, w: 860, h: 620 },
+          pinned: false,
+          tabs: created,
+          activeTabId: created[0]!.id,
         },
       }
     }),

@@ -9,10 +9,10 @@
  *
  * 设计文档：docs/versions/v0.14.0/01-information-architecture.md §5
  * ============================================================ */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Icon } from '../icons'
-import { useStore, derivePlanItems } from '../store'
+import { useStore, derivePlanItems, type ModulePage as ModulePageId } from '../store'
 import { Tooltip } from './ui'
 import { Composer } from './Composer'
 // v0.31.0 B3：交互区层级骨架（TurnList 为 flow/ 唯一入口；
@@ -30,6 +30,8 @@ export function CenterStage() {
   const conversation = useStore((s) => s.conversation)
   const modulePage = useStore((s) => s.modulePage)
   const steps = useStore((s) => s.steps)
+  // v0.33.0：无任务首屏 = profile 声明的首页模块（内置模块名 或 `module:<id>`）
+  const profileHomeModule = useStore((s) => s.profileHomeModule)
   const task = tasks.find((t) => t.id === selectedTaskId)
 
   // v0.9.0 F900 §3.2：模块页模式 → 整页切换
@@ -38,6 +40,9 @@ export function CenterStage() {
   }
 
   if (!task) {
+    // v0.33.0：声明了首页模块就用它当首屏；否则维持原有的打招呼页。
+    // 首屏不是「陷阱」—— ProfileHomeStage 自带回到起始页的出口。
+    if (profileHomeModule) return <ProfileHomeStage homeModule={profileHomeModule} />
     return <ConversationGreeting />
   }
 
@@ -107,6 +112,11 @@ function TaskHeader({
   // TaskHeader 不再查询 selectedModelId / models / modelHealth。
   const exportConversation = () => {
     useStore.getState().exportConversation()
+  }
+
+  // v0.34.1：对话区此前只有「导出」，复制整段对话得先导出再打开 —— 补复制入口。
+  const copyConversation = () => {
+    void useStore.getState().copyConversation()
   }
 
   const commitRename = () => {
@@ -184,6 +194,10 @@ function TaskHeader({
                 <MenuItem
                   label={t('centerstage.header.rename')}
                   onClick={() => { setMenuOpen(false); setTitleDraft(task.title); setRenaming(true) }}
+                />
+                <MenuItem
+                  label={t('centerstage.header.copy')}
+                  onClick={() => { setMenuOpen(false); copyConversation() }}
                 />
                 <MenuItem
                   label={t('centerstage.header.export')}
@@ -347,6 +361,81 @@ function ProfileChips() {
           {chip}
         </button>
       ))}
+    </div>
+  )
+}
+
+/* ============================================================
+ * v0.33.0 — ProfileHomeStage（无任务首屏 = 工作台声明的首页模块）
+ * 设计文档：docs/versions/v0.33.0/04-system-design.md §10.2 #15
+ *
+ * 三种取值（值级分流，manifest 来自磁盘）：
+ *  · 内置模块名（automations / skills / agents / kb / memory / settings）
+ *      → 直接渲染对应 `ModulePage`（复用既有整页实现，不重复造轮子）
+ *  · `module:<id>`（插件贡献的首页模块）
+ *      → **诚实占位**：插件只能贡献标题与图标，**不能注入组件**（D4），
+ *        因此本版没有可渲染的宿主组件。这里明说「仅登记未渲染」并指向遗留项，
+ *        绝不静默白屏。
+ *  · 其它非法值 → 视为未设置，回落 `ConversationGreeting`
+ *
+ * 出口纪律：首屏不是陷阱 —— 顶部常驻一条「回到起始页」的返回条，
+ * 用户随时能回到打招呼页与 Composer。
+ * ============================================================ */
+const BUILTIN_HOME_MODULES = ['automations', 'skills', 'agents', 'kb', 'memory', 'settings'] as const
+
+export function ProfileHomeStage({ homeModule }: { homeModule: string }) {
+  const { t } = useTranslation()
+  const [showGreeting, setShowGreeting] = useState(false)
+
+  // 换台/换首页模块 → 重置本地视图态（避免上一个模块的选择残留）
+  useEffect(() => setShowGreeting(false), [homeModule])
+
+  if (showGreeting) return <ConversationGreeting />
+
+  const isBuiltin = (BUILTIN_HOME_MODULES as readonly string[]).includes(homeModule)
+  if (!isBuiltin && !/^module:[\w.-]+$/.test(homeModule)) {
+    // 非法值：与「未设置」同义（V2 已在装配期报过 error，这里不再重复抱怨）
+    return <ConversationGreeting />
+  }
+
+  const backBar = (
+    <div className="flex items-center gap-2 h-9 px-3 border-b border-border-subtle flex-shrink-0 bg-bg-base">
+      <Icon.Workspace width={13} height={13} className="text-accent flex-shrink-0" aria-hidden />
+      <span className="text-2xs text-text-tertiary truncate">{t('centerstage.home.badge')}</span>
+      <span className="text-2xs text-text-faint font-mono truncate">{homeModule}</span>
+      <div className="flex-1" />
+      <button
+        type="button"
+        onClick={() => setShowGreeting(true)}
+        className="text-2xs text-text-secondary hover:text-text-primary hover:underline focus-ring"
+      >
+        {t('centerstage.home.back')}
+      </button>
+    </div>
+  )
+
+  if (isBuiltin) {
+    return (
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-bg-base">
+        {backBar}
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <ModulePage page={homeModule as ModulePageId} />
+        </div>
+      </div>
+    )
+  }
+
+  // 插件贡献的首页模块：只登记不渲染（见上方注释）
+  return (
+    <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-bg-base">
+      {backBar}
+      <div className="flex-1 flex flex-col items-center justify-center gap-2 px-6 text-center">
+        <Icon.Plug width={22} height={22} className="text-text-faint" aria-hidden />
+        <div className="text-sm text-text-secondary">{t('centerstage.home.pluginModuleTitle')}</div>
+        <div className="text-xs text-text-faint max-w-[380px]">
+          {t('centerstage.home.pluginModuleHint', { module: homeModule })}
+        </div>
+      </div>
     </div>
   )
 }

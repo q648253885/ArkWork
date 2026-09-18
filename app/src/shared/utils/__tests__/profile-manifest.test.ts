@@ -110,11 +110,48 @@ test('TC-PMF-006 ui.dockTabs 取值越界 → error（D4：不许拿未知面板
   assert.ok(issue.message.includes('stock-quote'))
 })
 
-test('TC-PMF-007 ui.homeModule 必须在白名单内', () => {
-  const bad = parseManifest(baseRaw({ ui: { homeModule: 'portfolio' } }), 'user')
-  assert.ok(bad.issues.some((i) => i.level === 'error' && i.path === '$.ui.homeModule'))
-  const good = parseManifest(baseRaw({ ui: { homeModule: 'kb' } }), 'user')
-  assert.equal(good.profile?.ui.homeModule, 'kb')
+test('TC-PMF-007 ui.homeModule 结构放宽：解析期只校验类型，取值交由引用期（V1/V2 分工）', () => {
+  // v0.33.0 起 homeModule 从「闭集白名单」放宽为 string：内置名 或 'module:<id>'。
+  // 分工纪律：V1 只管「是不是非空字符串」，取值合法性一律由 V2 判定 ——
+  // 否则插件模块永远无法被 profile 引用（闭集天然排斥外部贡献）。
+  const widened = parseManifest(baseRaw({ ui: { homeModule: 'portfolio' } }), 'user')
+  assert.equal(
+    widened.issues.filter((i) => i.level === 'error' && i.path === '$.ui.homeModule').length,
+    0,
+    '解析期不得再对取值报错（那是 V2 的职责）',
+  )
+  assert.equal(widened.profile?.ui.homeModule, 'portfolio')
+  assert.equal(must(baseRaw({ ui: { homeModule: 'kb' } })).ui.homeModule, 'kb')
+
+  // 类型错仍然在 V1 被拦下（放宽的是取值，不是类型）
+  const badType = parseManifest(baseRaw({ ui: { homeModule: 42 } }), 'user')
+  assert.ok(badType.issues.some((i) => i.level === 'error' && i.path === '$.ui.homeModule'))
+
+  // 通道一 · V2 无 homeModules 上下文（未接插件体系）：
+  //   内置名放行 / 'module:<id>' 放行 / 其余 → error
+  const pBuiltin = must(baseRaw({ ui: { homeModule: 'kb' } }))
+  assert.equal(validateReferences(pBuiltin, CTX).some((i) => i.path === '$.ui.homeModule'), false, '内置名不得被 V2 判错')
+  const pMod = must(baseRaw({ ui: { homeModule: 'module:watchlist' } }))
+  assert.equal(
+    validateReferences(pMod, CTX).some((i) => i.path === '$.ui.homeModule'),
+    false,
+    'module: 开放引用不得被判错（TC-PACT-027 的另一侧）',
+  )
+  const pGhost = must(baseRaw({ ui: { homeModule: 'portfolio' } }))
+  const e = validateReferences(pGhost, CTX).find((i) => i.path === '$.ui.homeModule')
+  assert.ok(e && e.level === 'error' && e.rule === 'V2', '非内置且非 module: 的裸名必须报 error')
+
+  // 通道二 · V2 有 homeModules 上下文（插件体系已接线）：
+  //   已注册模块无 issue / 未注册只降级 warning（绝不阻断装配）
+  const ctxKnown: ProfileValidationContext = { ...CTX, homeModules: ['module:watchlist'] }
+  assert.equal(
+    validateReferences(pMod, ctxKnown).some((i) => i.path === '$.ui.homeModule'),
+    false,
+    '已注册模块不得产生任何 issue',
+  )
+  const missing = must(baseRaw({ ui: { homeModule: 'module:ghost' } }))
+  const w = validateReferences(missing, ctxKnown).find((i) => i.path === '$.ui.homeModule')
+  assert.ok(w && w.level === 'warning', '未注册模块只降级提示，绝不阻断装配')
 })
 
 test('TC-PMF-008 automation.cron 必须五段式（面向用户的明确错误）', () => {
@@ -291,4 +328,156 @@ test('TC-PMF-020 diffSnapshots 产出人话差异行（可追溯的前提）', (
   assert.ok(lines.some((l) => l.includes('wb.a → wb.b')))
   assert.ok(lines.some((l) => l.startsWith('agents:') && l.includes('@y')))
   assert.deepEqual(diffSnapshots(null, null), [])
+})
+
+/* ============================================================
+ * v0.33.0 追加（TC-PMF-021..033）
+ * V1 解析新 ui 字段 + V2 引用闭合扩展 + V5 冲突落地
+ * ============================================================ */
+
+/** 带面板上下文的 V2 校验 ctx（激活器实际传入形态：裸名 + panel: 前缀双写法） */
+const PANEL_CTX: ProfileValidationContext = {
+  ...CTX,
+  panels: ['panel:watchlist', 'watchlist', 'panel:files', 'files'],
+}
+
+test('TC-PMF-021 parseManifest 解析 ui.dockPanels（slot/panelRef/position 三字段齐全）', () => {
+  const p = must(baseRaw({
+    ui: { dockPanels: [{ slot: 'inspector', panelRef: 'panel:watchlist', position: 2 }, { slot: 'inspector', panelRef: 'panel:files' }] },
+  }))
+  assert.equal(p.ui.dockPanels?.length, 2)
+  assert.deepEqual(p.ui.dockPanels?.[0], { slot: 'inspector', panelRef: 'panel:watchlist', position: 2 })
+  assert.equal(p.ui.dockPanels?.[1]?.position, undefined, 'position 缺省 = 追加末尾')
+})
+
+test('TC-PMF-022 parseManifest 解析 ui.theme.light / .dark', () => {
+  const p = must(baseRaw({ ui: { theme: { light: { '--accent': '#3b82f6' }, dark: { '--accent': '#60a5fa' } } } }))
+  assert.deepEqual(p.ui.theme, { light: { '--accent': '#3b82f6' }, dark: { '--accent': '#60a5fa' } })
+  // 非字符串值被 V1 丢弃（合法性在 V2 判）
+  const loose = must(baseRaw({ ui: { theme: { light: { '--a': '#fff', '--b': 42 } } } }))
+  assert.deepEqual(loose.ui.theme, { light: { '--a': '#fff' }, dark: {} })
+})
+
+test('TC-PMF-023 parseManifest 解析 ui.previewRenderers（Record<string,string>）', () => {
+  const p = must(baseRaw({ ui: { previewRenderers: { kchart: 'table', md: 'code' } } }))
+  assert.deepEqual(p.ui.previewRenderers, { kchart: 'table', md: 'code' })
+  // 非法键被拦
+  const bad = parseManifest(baseRaw({ ui: { previewRenderers: { 'K.CHART': 'table' } } }), 'user')
+  assert.ok(
+    bad.issues.some((i) => i.level === 'error' && String(i.path).includes('previewRenderers') && String(i.path).includes('K.CHART')),
+    JSON.stringify(bad.issues),
+  )
+})
+
+test('TC-PMF-024 parseManifest 解析 ui.homeModule 为 module:<id>（不被闭集拒绝）', () => {
+  const p = must(baseRaw({ ui: { homeModule: 'module:market-overview' } }))
+  assert.equal(p.ui.homeModule, 'module:market-overview')
+  const builtin = must(baseRaw({ ui: { homeModule: 'kb' } }))
+  assert.equal(builtin.ui.homeModule, 'kb')
+})
+
+test('TC-PMF-025 V2：dockPanels[].panelRef 不在可用面板集 → **warning（非阻断）**，path 指向下标', () => {
+  const p = must(baseRaw({ ui: { dockPanels: [{ slot: 'inspector', panelRef: 'panel:ghost', position: 0 }] } }))
+  const hit = validateReferences(p, PANEL_CTX).find((i) => i.path === '$.ui.dockPanels[0].panelRef')
+  assert.ok(hit, '未命中面板必须报 issue（不得静默）')
+  // v0.34.0（D55）：由 error 改为 warning —— 面板由**用户可随时关闭的可选插件**提供，
+  // 报 error 会让整个台切不过去（配置陷阱）。与 composeProfile 的
+  // 「ui 层降级（非阻断）」语义（TC-PACT-017）对齐。
+  assert.equal(hit!.level, 'warning', '必须是非阻断级：可选插件未启用不该让整台激活失败')
+  assert.match(hit!.message, /不显示/)
+  // 已命中的不报
+  const ok = must(baseRaw({ ui: { dockPanels: [{ slot: 'inspector', panelRef: 'panel:watchlist' }] } }))
+  assert.equal(validateReferences(ok, PANEL_CTX).some((i) => String(i.path).includes('dockPanels')), false)
+})
+
+test('TC-PMF-026 dockPanels[].slot 不是 inspector → error（解析期 V1 拦下）', () => {
+  const r = parseManifest(baseRaw({ ui: { dockPanels: [{ slot: 'sidebar', panelRef: 'panel:x' }] } }), 'user')
+  assert.ok(r.issues.some((i) => i.level === 'error' && String(i.path).includes('slot')))
+  // 且该元素不进入内存形态（slot 目前只有 inspector）
+  assert.equal((r.profile?.ui.dockPanels ?? []).length, 0)
+})
+
+test('TC-PMF-027 V2：previewRenderers 值不在 RendererKind 白名单 → error', () => {
+  const p = must(baseRaw({ ui: { previewRenderers: { kchart: '3d' } } }))
+  const hit = validateReferences(p, PANEL_CTX).find((i) => i.path === '$.ui.previewRenderers.kchart')
+  assert.ok(hit)
+  assert.equal(hit!.level, 'error')
+  const ok = must(baseRaw({ ui: { previewRenderers: { kchart: 'table' } } }))
+  assert.equal(validateReferences(ok, PANEL_CTX).some((i) => String(i.path).includes('previewRenderers')), false)
+})
+
+test('TC-PMF-028 V2：theme token 键非法 → error；值非法 → error（各一条）', () => {
+  const p = must(baseRaw({ ui: { theme: { light: { 'accent': '#fff', '--accent': 'url(x)' } } } }))
+  const issues = validateReferences(p, PANEL_CTX).filter((i) => String(i.path).startsWith('$.ui.theme.'))
+  assert.equal(issues.length, 2)
+  assert.ok(issues.every((i) => i.level === 'error'))
+})
+
+test('TC-PMF-029 V5 落地：两个面板同 position → error，消息同时点出两个面板', () => {
+  const p = must(baseRaw({
+    ui: {
+      dockPanels: [
+        { slot: 'inspector', panelRef: 'panel:watchlist', position: 1 },
+        { slot: 'inspector', panelRef: 'panel:files', position: 1 },
+      ],
+    },
+  }))
+  const hit = validateReferences(p, PANEL_CTX).find((i) => i.rule === 'V5' && i.path === '$.ui.dockPanels')
+  assert.ok(hit, '同 position 冲突必须报 V5')
+  assert.equal(hit!.level, 'error')
+  assert.ok(hit!.message.includes('panel:watchlist') && hit!.message.includes('panel:files'))
+  assert.ok(hit!.message.includes('父包或本包'), '合并后无法区分来源 → 提示语必须说明')
+})
+
+test('TC-PMF-030 previewRenderers 合并语义：ui 层浅覆盖，child 整体接管（无冲突可报）', () => {
+  // 实现决策：previewRenderers 是 Record（同对象内键天然唯一），继承合并采用
+  // 「child 有值即整体覆盖」—— 因此「同扩展名冲突」在 manifest 层不可构造。
+  // 这条把守的是该决策本身：合并后 child 的表完整生效，parent 的键不残留。
+  const parent = must(baseRaw({ id: 'wb.parent', ui: { previewRenderers: { kchart: 'table', extra: 'code' } } }))
+  const child = must(baseRaw({ id: 'wb.child', extends: 'wb.parent', ui: { previewRenderers: { kchart: 'svg' } } }))
+  const merged = mergeProfile(parent, child)
+  assert.deepEqual(merged.ui.previewRenderers, { kchart: 'svg' })
+  assert.equal(validateReferences(merged, PANEL_CTX).some((i) => String(i.path).includes('previewRenderers')), false)
+})
+
+test('TC-PMF-031 V5：单台内 dockPanels 同 panelRef 重复声明 → error', () => {
+  const p = must(baseRaw({
+    ui: {
+      dockPanels: [
+        { slot: 'inspector', panelRef: 'panel:watchlist', position: 1 },
+        { slot: 'inspector', panelRef: 'panel:watchlist', position: 2 },
+      ],
+    },
+  }))
+  const issues = validateReferences(p, PANEL_CTX).filter((i) => i.rule === 'V5')
+  assert.ok(issues.length >= 1, '同 position 或同 ref 至少命中一条 V5')
+  assert.ok(issues.every((i) => i.level === 'error'))
+})
+
+test('TC-PMF-032 合法新字段组合 → 零 error 零 warning（不误报）', () => {
+  const raw = baseRaw({
+    capabilities: [{ type: 'panel', ref: 'panel:watchlist', required: false }],
+    ui: {
+      dockPanels: [{ slot: 'inspector', panelRef: 'panel:watchlist', position: 0 }],
+      homeModule: 'module:market-overview',
+      previewRenderers: { kchart: 'table' },
+      theme: { light: { '--accent': '#3b82f6' }, dark: { '--accent': '#60a5fa' } },
+    },
+  })
+  const p = must(raw)
+  const issues = validateReferences(p, PANEL_CTX)
+  assert.deepEqual(issues, JSON.parse(JSON.stringify(issues)), '可序列化（无 undefined 悬挂）')
+  assert.equal(issues.filter((i) => i.level === 'error' || i.level === 'warning').length, 0, `不应有任何 error/warning：${JSON.stringify(issues)}`)
+})
+
+test('TC-PMF-033 回归：v0.32.1 合法 manifest（无新字段）→ 校验行为不变', () => {
+  // 内置工作台不含任何 v0.33.0 新字段 —— 校验必须零 error（旧行为回归）
+  for (const raw of Object.values(RAW_BUILTIN_MANIFESTS) as Record<string, unknown>[]) {
+    const r = parseManifest(raw, 'builtin')
+    const errs = r.issues.filter((i) => i.level === 'error')
+    assert.equal(errs.length, 0, `${String((raw as { id?: string }).id)} 不应有 error：${JSON.stringify(errs)}`)
+    assert.ok(r.profile)
+    const refs = validateReferences(r.profile!, CTX)
+    assert.equal(refs.filter((i) => i.level === 'error').length, 0)
+  }
 })

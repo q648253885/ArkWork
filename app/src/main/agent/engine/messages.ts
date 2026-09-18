@@ -184,6 +184,21 @@ export async function assembleMessages(
 
   let dropped = 0
 
+  // v0.34.x（问候循环修复）：历史降噪三则。
+  // 实测根因（T-20260918-4c1l4h，qwen3.5:9b）：① 引擎每轮迭代都写一条 plan_status
+  // 进 L1，全量回放后单任务可达 30+ 条「[清单状态…]/[NOW]…」噪声块，把真正的
+  // 用户指令淹没（小模型被历史带偏，对「帮我分析一下整个工作区」回复问候语）；
+  // ② 计划被中断后全部条目收为 cancelled（死计划），却仍以「请严格按此计划执行」
+  // 注入——诱导模型执行与新指令无关的陈旧步骤；③ 空 assistant 回合（content 空
+  // 且无 toolCalls）被回放，进一步诱导模型继续产出空内容。
+  // 对策：plan / plan_status / skill_instruction 只注入**最新一条**；死计划整体
+  // 静默；空 assistant 回合丢弃。判定逻辑抽为纯函数（真值表可穷尽单测）。
+  const dedup = decideHistoryDedup(items, task.planItems)
+  // plan_status 改为「摘出历史位置、只保留最新一条、置于消息列表末尾」——
+  // 引擎清单状态是每轮重写的最新权威快照，放在末尾最接近当前决策点；
+  // 同时不破坏中间 assistant/tool 段的 append-only 前缀（缓存友好）。
+  let planStatusTail: LlmMessage | undefined
+
   for (let idx = 0; idx < items.length; idx++) {
     const m = items[idx]
     if (m.archivedAt) continue
@@ -191,29 +206,38 @@ export async function assembleMessages(
     // v0.19.1：计划生成阶段排除历史 plan / plan_status，避免 LLM 复述旧清单状态
     // 生成出「已更新清单第 N 项…当前清单…」这类噪声项。
     if (opts?.excludePlanContext && (m.kind === 'plan' || m.kind === 'plan_status')) continue
+    // plan_status 按 kind 匹配（不区分 role）：v0.30 图路径写入 role='user' +
+    // kind='plan_status'，旧扁平路径为 role='assistant'。两形态统一走最新一条 +
+    // 置尾 + 死计划静默的降噪管道（原「回放全部」是问候循环的噪声源之一）。
+    if (m.kind === 'plan_status') {
+      if (!dedup.planDead && idx === dedup.lastPlanStatusIdx) {
+        planStatusTail = {
+          role: 'user',
+          content: `[清单状态 — 引擎独立判断（不是 LLM 自报），你必须以此为准]\n${m.content}`,
+        }
+      }
+      continue
+    }
     if (m.role === 'user') {
       messages.push({ role: 'user', content: m.content })
     } else if (m.role === 'assistant' && m.kind === 'plan') {
       // v0.17.3：计划清单注入为 user 消息，让 LLM 在后续 Reason 轮次能看到自己生成的计划。
       // 此前 kind='plan' 不匹配任何分支被静默丢弃，导致 LLM 生成计划后"忘记"计划内容，
       // 执行动作与计划完全脱节。对齐 Claude Code TodoWrite 把清单注入每轮推理的做法。
+      // v0.34.x：只注入最新一条快照；死计划（全部终态）不注入——对已收口计划说
+      // 「严格按此执行」会诱导模型跑偏到与新指令无关的陈旧步骤。
+      if (dedup.planDead || idx !== dedup.lastPlanIdx) continue
       messages.push({
         role: 'user',
         content: `[计划清单 — 请严格按此计划执行，每步完成后继续下一步]\n${m.content}`,
-      })
-    } else if (m.role === 'assistant' && m.kind === 'plan_status') {
-      // v0.17.6：引擎独立判断的清单状态（结构化），覆盖文本版 system prompt 注入。
-      // 每轮 act 后引擎会写入一条 plan_status（kind='plan_status'），LLM 必须读取此处的
-      // 机器判断结果，而不是从自己上轮的记忆里拼凑。结构化字段：
-      //   { items: [{i, text, status, engineDecision, reason}], runningIndex, doneCount }
-      messages.push({
-        role: 'user',
-        content: `[清单状态 — 引擎独立判断（不是 LLM 自报），你必须以此为准]\n${m.content}`,
       })
     } else if (m.role === 'assistant' && m.kind === 'skill_instruction') {
       // v0.25.0 F1：on-demand 技能指令体（持续生效至任务结束，与 plan_status 同管道）。
       // 注入为独立 user 消息，让 LLM 在后续 Reason 轮次能持续看到准则型指令
       // （之前 pendingSystemHint 一轮清空 → 门禁遗漏；现以 L1 持久化 + 装载时最新一条去重）。
+      // v0.34.x：注释声称的「最新一条去重」此前并未实现（每次装载全量回放），
+      // 现补齐——同任务多次装载技能时只保留最新指令体。
+      if (idx !== dedup.lastSkillInstructionIdx) continue
       messages.push({
         role: 'user',
         content: `[技能指令 — 已加载，持续生效至任务结束]\n${m.content}`,
@@ -280,6 +304,10 @@ export async function assembleMessages(
           : thinkingMode
             ? ''
             : undefined
+      // v0.34.x：哑回合不回放 —— content 空且无 toolCalls 的 assistant 条目
+      // （典型：小模型思考预算耗尽的空产出，L1 实测单任务可达上百条）回放只会
+      // 诱导模型继续输出空内容。带 toolCalls 的空 content 不受影响（工具配对必需）。
+      if (!toolCalls && typeof m.content === 'string' && !m.content.trim()) continue
       messages.push({
         role: 'assistant',
         content: m.content,
@@ -316,6 +344,8 @@ export async function assembleMessages(
   if (dropped > 0) {
     logger.warn('Agent', `dropped ${dropped} tool responses (no matching toolCall)`, task.id)
   }
+  // v0.34.x：清单状态快照置尾（最新一条）——见循环前的降噪注释
+  if (planStatusTail) messages.push(planStatusTail)
   // v0.23.2 缓存修复：移除每轮滑动的 applyMicroCompact。
   // 旧逻辑每迭代把"3 轮前"的完整工具结果原地替换为占位符 → 相邻两次请求的前缀
   // 在倒数第 3 轮处分叉，尾部全量内容永不命中前缀缓存（实测命中率 ~50%）。
@@ -327,6 +357,52 @@ export async function assembleMessages(
   // 未补写 observation）会在消息序列里留下带 tool_calls 却无配对 tool 响应的 assistant
   // 消息，OpenAI 兼容服务端会 400 "insufficient tool messages following tool_calls message"。
   return reconcileToolCalls(messages)
+}
+
+/* ------------------------------------------------------------
+ * v0.34.x（问候循环修复）— 历史降噪判定（纯函数）
+ *
+ * 与 stall.ts（D52）同一抽取纪律：判定逻辑抽成真值表可穷举的纯函数，
+ * 与「怎么用判定」的装配接线分离 —— 防止「判定全对、接线接错」照样全绿
+ * （v0.32.1 D38-a 教训）。
+ * ------------------------------------------------------------ */
+
+export interface HistoryDedupDecision {
+  /** 最后一条 plan 快照在 items 中的下标（-1 = 无） */
+  lastPlanIdx: number
+  /** 最后一条 plan_status 在 items 中的下标（-1 = 无） */
+  lastPlanStatusIdx: number
+  /** 最后一条 skill_instruction 在 items 中的下标（-1 = 无） */
+  lastSkillInstructionIdx: number
+  /**
+   * 死计划：task.planItems 非空且全部处于终态（无 pending/running）。
+   * 死计划不注入计划清单与清单状态 —— 对已收口计划说「严格按此执行」
+   * 会诱导模型执行与新指令无关的陈旧步骤（问候循环根因之二）。
+   * planItems 为空/未定义时不算死（老任务可能只有 plan 快照无结构化镜像，
+   * 保持既有注入行为）。
+   */
+  planDead: boolean
+}
+
+export function decideHistoryDedup(
+  items: ReadonlyArray<{ kind?: string; archivedAt?: unknown }>,
+  planItems: ReadonlyArray<{ status: string }> | undefined,
+): HistoryDedupDecision {
+  let lastPlanIdx = -1
+  let lastPlanStatusIdx = -1
+  let lastSkillInstructionIdx = -1
+  for (let i = 0; i < items.length; i++) {
+    const m = items[i]
+    if (!m || m.archivedAt) continue
+    if (m.kind === 'plan') lastPlanIdx = i
+    else if (m.kind === 'plan_status') lastPlanStatusIdx = i
+    else if (m.kind === 'skill_instruction') lastSkillInstructionIdx = i
+  }
+  const hasActionable = (planItems ?? []).some(
+    (p) => p.status === 'pending' || p.status === 'running',
+  )
+  const planDead = (planItems?.length ?? 0) > 0 && !hasActionable
+  return { lastPlanIdx, lastPlanStatusIdx, lastSkillInstructionIdx, planDead }
 }
 
 /**

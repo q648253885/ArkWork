@@ -34,6 +34,8 @@ export const SECTION_ORDER = {
   profileContext: 180,
   workspace: 200,
   memory: 300,
+  // v0.33.1 W1：SAY 阶段叙述协议（静态；在 plan-constraint 之前）
+  narrationProtocol: 490,
   planConstraint: 500,
 } as const
 
@@ -150,6 +152,14 @@ registerPromptSection({
   // v0.20.0 起为纯静态指令：不含每轮变化的进度列表（动态进度由 plan_status 独立消息承载）。
   build: async (ctx) => {
     if (!ctx.planItems || ctx.planItems.length === 0) return null
+    // v0.34.x（问候循环修复）：死计划（全部条目已收口，无 pending/running）不再注入
+    // 执行约束 —— 对已收口计划要求「严格按此执行」会诱导模型跑偏到与新指令无关的
+    // 陈旧步骤（实测：任务被中断收口后，新消息仍被旧计划约束拉走）。与
+    // messages.assembleMessages 的 planDead 静默同口径。
+    const hasActionable = ctx.planItems.some(
+      (p) => p.status === 'pending' || p.status === 'running',
+    )
+    if (!hasActionable) return null
     return (
       '## 计划执行约束\n' +
       '你已生成了计划清单，必须严格按此计划执行（当前进度见对话中的「清单状态」消息）。\n' +
@@ -160,6 +170,27 @@ registerPromptSection({
       '若发现计划本身需调整，先用 ask_user 向用户确认。'
     )
   },
+})
+
+registerPromptSection({
+  id: 'narration-protocol',
+  order: SECTION_ORDER.narrationProtocol,
+  slot: { kind: 'system' },
+  stability: 'static',
+  owner: 'core',
+  maxTokens: 220,
+  required: false,
+  // ★ v0.33.1 W1：SAY 阶段叙述协议此前只有解析端（say-marker / stream-strip），
+  // 提示词从未要求模型输出 —— 靠模型自觉，OpenAI 协议接 qwen3 等模型从不输出，
+  // 交互区便没有「本轮结论 + 下一步」。
+  build: async () =>
+    '## 阶段叙述协议（每轮必须遵守）\n' +
+    '每次回复（包括将要调用工具的回复）的正文**末尾**，用以下固定标记输出一段给用户看的阶段叙述：\n' +
+    '<<<SAY>>>\n' +
+    '（1~3 句：本轮得出的结论 + 下一步要做的事情。例如："已确认项目为 Vite + React 结构；接下来读取 src/ 入口文件确认依赖关系。"）\n' +
+    '<<<END>>>\n' +
+    '标记必须成对出现，叙述写在标记之间；标记之外不要复述这段内容。这段叙述会展示给用户，' +
+    '因此要用人话总结，不要写代码或路径细节。',
 })
 
 /* ---------- always-on 常驻技能段（运行期 extras） ---------- */

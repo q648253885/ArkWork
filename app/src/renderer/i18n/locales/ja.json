@@ -395,6 +395,7 @@
       "openSkillsPanel": "スキルパネルを開く",
       "openTasksPanel": "タスクパネルを開く",
       "openAutomationsPanel": "オートメーションパネルを開く",
+      "copyConversation": "現在の会話をコピー",
       "exportConversation": "現在の会話をエクスポート",
       "openSettings": "設定を開く",
       "settingsModels": "設定 → モデル",
@@ -765,11 +766,13 @@
     "abilities": {
       "tab": {
         "skills": "スキル",
-        "plugins": "プラグイン"
+        "plugins": "プラグイン",
+        "mcp": "MCP"
       },
       "hint": {
         "skills": "ArkWork 独自・マーケットから導入したツール機能（SKILL.md）",
-        "plugins": "MCP Server 経由で接続した外部ツール機能（stdio / sse）"
+        "plugins": "能力プラグイン：ホストにパネル・レンダラー・アクション・ホームモジュール・テーマを提供（plugin.json）",
+        "mcp": "MCP Server 経由で接続した外部ツール機能（stdio / sse）"
       }
     },
     "agents": {
@@ -1074,7 +1077,16 @@
         "integration": "統合",
         "other": "その他"
       }
-    }
+    },
+    "badShape": "パネルデータがコンポーネントの要件を満たしていません",
+    "noComponent": "このパネルはホストコンポーネントを宣言していません（マニフェストが壊れている可能性）",
+    "loading": "パネルデータを読み込み中…",
+    "loadFailed": "パネルデータの読み込みに失敗しました",
+    "unknownError": "不明なエラー",
+    "empty": "データがありません",
+    "emptyHint": "「{{component}}」のデータが空です。データソースの準備ができ次第表示されます。",
+    "unknownComponent": "不明なコンポーネント「{{component}}」（ホストのホワイトリスト外）",
+    "fromPlugin": "プラグイン {{id}} が提供"
   },
   "sidebar": {
     "resizeHandle": {
@@ -1127,7 +1139,8 @@
       "memory": "メモリ",
       "automations": "自動化",
       "settings": "設定",
-      "desc": "クリックで{{label}}ページを開きます"
+      "desc": "クリックで{{label}}ページを開きます",
+      "workbench": "ワークベンチセンター"
     },
     "help": {
       "title": "ヘルプ",
@@ -1163,7 +1176,8 @@
       "agents": "エージェントの CRUD（システムプロンプト含む）",
       "kb": "ローカルファイルのチャンク索引 + 全文検索",
       "memory": "L1/L2/L3/L4 の 4 層メモリ表示",
-      "settings": "モデル / ワークスペース / 外観 / ショートカット / 詳細設定"
+      "settings": "モデル / ワークスペース / 外観 / ショートカット / 詳細設定",
+      "workbench": "プロファイル・プラグイン・アセンブリ診断"
     }
   },
   "dock": {
@@ -1334,7 +1348,8 @@
         "copied": "コピーしました",
         "copyFailed": "コピーに失敗",
         "openFromFileTree": "ファイルツリーからファイルを開いてタブを新規作成してください"
-      }
+      },
+      "panelNoExternal": "パネルはファイルでも URL でもないため、外部で開けません"
     },
     "registry": {
       "markdown": "Markdown",
@@ -1456,10 +1471,11 @@
       "renameTooltip": "ダブルクリックで名前を変更",
       "renameTooltipDesc": "ここをダブルクリックしてタスク名を変更",
       "more": "その他の操作",
-      "moreDesc": "名前を変更 / 複製 / エクスポート / 削除",
+      "moreDesc": "名前を変更 / コピー / エクスポート / 削除",
       "star": "お気に入り",
       "unstar": "お気に入り解除",
       "rename": "名前を変更",
+      "copy": "会話をコピー",
       "export": "会話をエクスポート",
       "pause": "タスクを一時停止",
       "resume": "タスクを再開",
@@ -1472,6 +1488,12 @@
       "workspace": "ワークスペース：{{name}}",
       "workspaceOnly": "ワークスペース",
       "hint": "既存のタスクを選択するか、新しいタスクを作成して開始してください"
+    },
+    "home": {
+      "badge": "プロファイルのホームモジュール",
+      "back": "スタートページに戻る",
+      "pluginModuleTitle": "このホームモジュールはプラグイン提供です",
+      "pluginModuleHint": "「{{module}}」はプラグインが登録しましたが、プラグインは UI コンポーネントを注入できません — 本リリースでは登録のみで未描画（L-33-03）。"
     }
   },
   "runconsole": {
@@ -1648,6 +1670,10 @@
     "close": {
       "tooltip": "閉じてタスクに戻る",
       "aria": "{{title}}ページを閉じてタスクに戻る（Esc）"
+    },
+    "workbench": {
+      "title": "ワークベンチセンター",
+      "subtitle": "プロファイル・プラグイン・診断 — 設定とプラグイン着脱"
     }
   },
   "conversationflow": {
@@ -1658,7 +1684,9 @@
     "goal": "目標",
     "completed": "{{done}}/{{total}} 完了",
     "planStepAria": "計画ステップ {{index}}：{{text}}（状態：{{status}}）",
-    "steps": "ステップフロー"
+    "steps": "ステップフロー",
+    "foldedTurns": "… 以前の {{count}} ラウンドを折りたたみました（クリックで展開）",
+    "collapseTurns": "以前の {{count}} ラウンドを折りたたむ"
   },
   "browserchrome": {
     "nav": {
@@ -1725,7 +1753,11 @@
     "restoreTabAria": "タブを復元：{{label}}",
     "expand": "右パネルを展開",
     "collapse": "右パネルを折りたたむ",
-    "tabBar": "ツールウィンドウタブバー"
+    "tabBar": "ツールウィンドウタブバー",
+    "panelTabTooltip": "プラグインのパネル: {{label}} · {{id}}",
+    "panelTabAria": "プラグインパネル {{label}}",
+    "morePluginTabs": "その他のプラグインパネル（{{count}}）",
+    "morePluginTabsAria": "その他のプラグインパネル: {{count}} 件"
   },
   "onboarding": {
     "stepModelsTitle": "AIモデルを設定",
@@ -2003,7 +2035,10 @@
       "createWorkspaceFailed": "ワークスペースの作成に失敗しました：{{error}}",
       "workspaceSwitched": "ワークスペースを切り替えました ・ 記憶はタスクごとに分離されます（{{name}}）",
       "switchWorkspaceFailed": "ワークスペースの切り替えに失敗しました：{{error}}",
-      "exportStepStream": "ステップフロー"
+      "exportStepStream": "ステップフロー",
+      "copyConversationCopied": "会話をクリップボードにコピーしました",
+      "copyConversationFailed": "コピーに失敗しました。クリップボードの権限を確認してください",
+      "copyConversationEmpty": "この会話にはコピーできる内容がありません"
     },
     "subscriptions": {
       "taskFailedHint": "タスクが失敗しました：{{error}}\n\n💡 {{hint}}",
@@ -2069,7 +2104,8 @@
         "inspBrowser": "Inspector：ブラウザ（Browser）",
         "inspTerminal": "Inspector：ターミナル（Terminal）",
         "permissionCycle": "権限モードを順に切替（フォーム内はネイティブ Tab）",
-        "esc": "優先順位に応じてオーバーレイ / ModulePage / Inspector を閉じる"
+        "esc": "優先順位に応じてオーバーレイ / ModulePage / Inspector を閉じる",
+        "workbench": "ワークベンチセンターを開く"
       }
     },
     "sections": {
@@ -2539,7 +2575,7 @@
       "acExpand": "すべて展開",
       "acCollapse": "折りたたむ",
       "verifyLabel": "検証",
-      "coverageOk": "カバレッジ検査合格：{{total}} 件の AC すべてにノードが対応",
+      "coverageOk": "カバレッジ検査合格：{{covered}}/{{total}} 件の AC にノードが対応",
       "coverageMissing": "{{ids}} をカバーするタスクがありません。先に追加してください",
       "editMarkdown": "Markdown として編集",
       "editMarkdownHint": "計画のオンライン編集は未対応、v0.30.1 で提供予定",
@@ -2722,5 +2758,175 @@
   },
   "keybind": {
     "switchProfile": "ワークベンチを切り替え"
+  },
+  "vlib": {
+    "rowsTotal": "全 {{count}} 行",
+    "rowsWindow": "表示 {{from}}–{{to}}",
+    "mediaUnavailable": "メディアを表示できません",
+    "jsonTruncated": "内容が長すぎるため切り詰めました（全 {{count}} 文字）"
+  },
+  "workbench": {
+    "title": "ワークベンチセンター",
+    "tab": {
+      "profiles": "プロファイル",
+      "plugins": "プラグイン",
+      "diagnostics": "診断",
+      "pluginsBadge": "{{count}} 件のプラグインが検証に失敗"
+    },
+    "summary": "プロファイル {{profiles}} · プラグイン {{plugins}}",
+    "report": {
+      "section": {
+        "validation": "検証結果",
+        "degraded": "未適用の能力",
+        "snapshot": "アセンブリスナップショット"
+      },
+      "noIssues": "検証上の問題はありません",
+      "errorCount": "エラー {{count}} 件",
+      "warningCount": "警告 {{count}} 件",
+      "fixHint": "提案: {{fix}}",
+      "noDegraded": "すべての能力が有効です",
+      "blocking": "ブロッキング",
+      "nonBlocking": "非ブロッキング",
+      "notApplied": "未適用"
+    },
+    "profiles": {
+      "report": "アクティベーションレポート",
+      "import": "プロファイルをインポート",
+      "clone": "複製して編集",
+      "edit": "編集",
+      "export": "エクスポート",
+      "exportFailed": "エクスポート失敗：プロファイルが見つかりません",
+      "exportCopied": "manifest JSON をクリップボードにコピーしました",
+      "exportClipboardFailed": "クリップボードにアクセスできず、エクスポートに失敗しました",
+      "deleteBuiltin": "組み込みプロファイルは削除できません",
+      "deleteActive": "使用中のプロファイルは削除できません",
+      "deleteNotFound": "プロファイルが見つかりません。削除済みの可能性があります",
+      "deleted": "プロファイル {{id}} を削除しました",
+      "listTitle": "すべてのプロファイル（{{count}}）",
+      "sourceUser": "ユーザー",
+      "activate": "アクティブ化",
+      "editAria": "{{name}} を編集",
+      "delete": "削除",
+      "deleteBuiltinHint": "組み込みサンプルプロファイルは削除できません（複製してから編集）",
+      "deleteActiveHint": "使用中のプロファイルは削除できません（先に切り替えてください）",
+      "deleteAria": "{{name}} を削除"
+    },
+    "editor": {
+      "title": "プロファイルを編集",
+      "close": "閉じる",
+      "builtinReadonly": "組み込みプロファイルは読み取り専用 — 保存時にユーザープロファイルへ複製してから適用します。",
+      "loading": "マニフェストを読み込み中…",
+      "loadFailed": "マニフェストの読み込みに失敗しました",
+      "notFound": "プロファイルが見つかりません。削除済みの可能性があります",
+      "cloneFail.not-found": "ソースプロファイルが見つかりません",
+      "cloneFail.id-exists": "複製先の id は既に存在します",
+      "cloneFail.invalid": "複製結果が検証を通過しませんでした",
+      "group": {
+        "base": "基本",
+        "dockBuiltin": "Dock 組み込みパネル",
+        "dockPanels": "Dock プラグインパネル",
+        "ui": "インターフェース",
+        "data": "メモリスコープ",
+        "theme": "テーマトークンの上書き"
+      },
+      "name": "名前",
+      "version": "バージョン",
+      "icon": "アイコン（ホストのホワイトリスト）",
+      "iconNone": "デフォルトに従う",
+      "description": "説明",
+      "dockBuiltinHint": "組み込みパネルを選択して並べ替え（順序 = ui.dockTabs、最低 1 つ）",
+      "moveUp": "上へ",
+      "remove": "削除",
+      "noPluginPanels": "有効なプラグインパネルがありません — 「プラグイン」タブで有効化するとここに表示されます。",
+      "position": "挿入位置",
+      "homeModule": "ホームモジュール",
+      "homeModuleNone": "設定しない（既定のスタートページ）",
+      "homeModuleBuiltin": "組み込みモジュール",
+      "homeModulePlugin": "プラグインモジュール",
+      "composerChips": "Composer クイックチップ",
+      "composerChipsHint": "カンマ区切り・最大 5 個",
+      "memoryNamespace": "メモリ名前空間",
+      "shareCoreProfile": "コアメモリプロファイルを共有",
+      "themeHint": "既存トークンの上書きのみ（キーは --x-y 形式、値は色または px/rem/em/%）",
+      "addToken": "トークンを追加",
+      "saveIssues": "保存が検証を通過しませんでした — 以下を修正して再試行",
+      "cancel": "キャンセル",
+      "saving": "保存中…",
+      "saveOnly": "保存のみ",
+      "saveAndActivate": "保存してアクティブ化",
+      "cloneAndSave": "複製して保存"
+    },
+    "import": {
+      "title": "プロファイルをインポート",
+      "pickFile": "プロファイルのマニフェストファイルを選択…",
+      "onlyJson": ".json のみ",
+      "or": "または",
+      "paste": "manifest JSON を貼り付け",
+      "activateAfter": "インポート後にすぐアクティブ化",
+      "previewOk": "検証を通過 — インポートできます",
+      "previewBad": "検証に失敗 — 以下を修正してからインポートしてください",
+      "readFailed": "ファイルの読み取りに失敗しました",
+      "jsonParseFailed": "不正な JSON です: {{detail}}",
+      "cancel": "キャンセル",
+      "dryRun": "検証",
+      "back": "編集に戻る",
+      "confirm": "インポート"
+    },
+    "plugins": {
+      "openDir": "プラグインフォルダを開く",
+      "rescan": "再スキャン",
+      "count": "プラグイン {{total}} · 有効 {{on}}",
+      "empty": "プラグインフォルダは空です",
+      "emptyHint": "プラグインは plugin.json を含むフォルダです。入れて「再スキャン」を押すだけで有効になります（再起動不要）。",
+      "showSample": "最小サンプルを見る",
+      "hideSample": "サンプルを閉じる",
+      "listTitle": "すべてのプラグイン",
+      "sourceUser": "ユーザー",
+      "sourceBundled": "同梱サンプル",
+      "sourceLocal": "ローカル",
+      "newPlugin": "新規プラグイン",
+      "newPluginHint": "プラグインは plugin.json を含むフォルダです。以下はそのまま使える最小マニフェスト：id と name を変えて {プラグインフォルダ}/{id}/plugin.json として保存し、「再スキャン」を押してください。",
+      "detailAria": "{{name}} の詳細を展開",
+      "export": "サンプル書き出し",
+      "uninstallShort": "削除",
+      "toggleAria": "{{name}} を有効/無効にする",
+      "enabled": "有効",
+      "disabled": "無効",
+      "uninstall": "アンインストール（フォルダを削除）",
+      "uninstallBuiltinHint": "同梱サンプルプラグインは削除できず、無効化のみ可能です",
+      "uninstallAria": "{{name}} をアンインストール",
+      "exportSample": "マニフェストサンプルをプラグインフォルダへ書き出す",
+      "exportSampleAria": "{{name}} のマニフェストサンプルを書き出す",
+      "issuesTitle": "{{count}} 件のプラグインが検証に失敗（スキップ、他への影響なし）",
+      "issuesIsolated": "検証失敗はプラグイン単位で隔離されます：壊れたプラグインが他や起動を壊すことはありません。"
+    },
+    "diag": {
+      "slotsTitle": "スロット実況（9 種）",
+      "loading": "スロットレジストリを読み込み中…",
+      "colKind": "スロット",
+      "colCount": "登録数",
+      "colSources": "ソース分布",
+      "colPanelRef": "パネル ref",
+      "colTitle": "タイトル",
+      "colComponent": "コンポーネント",
+      "colDataSource": "データソース",
+      "colOrigin": "ソース",
+      "colPosition": "position",
+      "colExt": "拡張子",
+      "colBuiltin": "組み込みマッピング",
+      "colEffective": "実際の値",
+      "expand": "詳細を展開",
+      "collapse": "折りたたむ",
+      "panelsTitle": "パネルタブ（{{count}}）",
+      "noPanels": "現在のプロファイルはパネルを宣言していません",
+      "originProfile": "プロファイル",
+      "originBuiltin": "組み込み",
+      "originOverride": "オーバーライド",
+      "renderersTitle": "レンダラーオーバーライド（{{count}} 件上書き）",
+      "themeTitle": "テーマトークン上書きの実況",
+      "noTheme": "現在のプロファイルはテーマ上書きを宣言していません",
+      "themeCount": "light {{light}} 項 · dark {{dark}} 項",
+      "themeHint": "既存トークンの上書きのみ。ホストが削除したトークンは自動的に除外されます（アクティベーションレポート参照）。"
+    }
   }
 }

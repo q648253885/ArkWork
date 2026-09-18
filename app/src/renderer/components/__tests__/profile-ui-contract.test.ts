@@ -12,7 +12,8 @@
  * ============================================================ */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 const R = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf-8')
 /** 去注释后的源码（避免注释里的示例串被误判为真实代码） */
@@ -123,16 +124,6 @@ test('TC-PUI-008 切换失败不得改写视图态（事务性在 UI 侧的镜�
   assert.match(body, /pushToast/, '失败必须给用户可感知反馈')
 })
 
-test('TC-PUI-009 profile 的 dockTabs 是视图层覆盖，绝不回写 dockPrefs（不毁用户偏好）', () => {
-  const dock = CODE(`${APP}/src/renderer/components/RightDock.tsx`)
-  assert.match(dock, /profileDockTabs \?\? dockTabs/)
-  // profile 覆盖点之后的 400 字符内不许出现写回（既有的用户自定义入口在更后面，属另一条语义）
-  const at = dock.indexOf('profileDockTabs ?? dockTabs')
-  assert.ok(at >= 0)
-  assert.ok(!/setDockPrefs/.test(dock.slice(at, at + 400)), '不得在覆盖点附近反向写回偏好')
-  const slice = CODE(`${APP}/src/renderer/store/slices/profileSlice.ts`)
-  assert.ok(!/setDockPrefs/.test(slice), 'profileSlice 不得触碰 dockPrefs')
-})
 
 test('TC-PUI-010 工具集联动只加不减：assembleTools 并入 profile 技能而非替换', () => {
   const src = CODE(`${APP}/src/main/agent/engine/messages.ts`)
@@ -150,9 +141,9 @@ test('TC-PUI-011 缺陷 D34 防回潮：启动挂载必须每次真重挂（插�
   assert.ok(start >= 0, '未找到 bootstrapProfile')
   const body = src.slice(start)
 
-  assert.match(body, /await activateProfile\(id\)/, '启动挂载必须无条件调用 activateProfile')
+  assert.match(body, /await bootstrapActiveProfile\(\)/, '启动挂载必须无条件调用 bootstrapActiveProfile（v0.33.0：内置插槽+装配+插件刷新三步收敛）')
   // 早退形态一网打尽：任何在 activateProfile 之前的 return
-  const beforeCall = body.slice(0, body.indexOf('await activateProfile(id)'))
+  const beforeCall = body.slice(0, body.indexOf('await bootstrapActiveProfile()'))
   assert.ok(
     !/\breturn\b/.test(beforeCall),
     'activateProfile 之前不得出现任何 return —— 早退即 D34 回归',
@@ -166,11 +157,104 @@ test('TC-PUI-011 缺陷 D34 防回潮：启动挂载必须每次真重挂（插�
 })
 
 test('TC-PUI-012 装配器必须自带清槽，否则重入式重挂会撞 id 唯一约束', () => {
-  // bootstrapProfile 之所以能无条件重挂，全靠 activateProfile 提交段先 reset 再注册。
-  // 若这条前提被删掉，D34 的修复会立刻变成「第二次启动直接 throw」的启动崩溃。
+  // bootstrapProfile 之所以能无条件重挂，全靠提交段「先按来源清、再注册」（v0.33.0
+  // 起收敛进 applyProfileSlots）。若这条前提被删掉，D34 的修复会立刻变成
+  // 「第二次启动直接 throw」的启动崩溃。回滚段同理，必须复用同一入口。
   const act = CODE(`${APP}/src/main/profile/activator.ts`)
-  const i = act.indexOf('resetProfileSlots()')
-  assert.ok(i >= 0, '装配器必须调用 resetProfileSlots')
-  const reg = act.indexOf('registerSlot(s.kind, s)', i)
+  const fnStart = act.indexOf('export function applyProfileSlots')
+  assert.ok(fnStart >= 0, '装配器必须保留 applyProfileSlots 作为唯一清槽+注册入口')
+  const body = act.slice(fnStart, act.indexOf('\n}', fnStart))
+  const i = body.indexOf('resetProfileSlots(')
+  assert.ok(i >= 0, 'applyProfileSlots 必须按来源清槽（resetProfileSlots）')
+  assert.match(body.slice(i, i + 40), /resetProfileSlots\(\s*'profile'\s*\)/, '清槽必须限定 profile 来源，不能连内置/插件一起清（D42）')
+  const reg = body.indexOf('registerSlot(s.kind, s', i)
   assert.ok(reg > i, '必须先清槽、后重注册（顺序反了会抛「同 kind 下 id 已存在」）')
+  // 提交段与回滚段都必须走同一入口，杜绝「只清一处」的半修
+  assert.equal(
+    (act.match(/applyProfileSlots\(/g) ?? []).length >= 3,
+    true,
+    '提交段 / 回滚段 / 定义处都必须经过 applyProfileSlots',
+  )
+})
+
+/* ============================================================
+ * v0.33.0 追加（TC-PUI-009 改写 + TC-PUI-013..020）
+ * ============================================================ */
+
+test('TC-PUI-009（v0.33.0 改写）profile 的 Tab 顺序是视图层覆盖，绝不回写偏好', () => {
+  // RightDock 已删除（TC-PUI-013），覆盖点收敛进 Inspector：
+  // 内置 Tab 顺序仍来自用户偏好，面板 Tab 插入点只认 manifest position。
+  const ins = CODE(`${APP}/src/renderer/components/Inspector.tsx`)
+  assert.match(ins, /profilePanels/, 'Inspector 必须消费 profilePanels（面板 Tab）')
+  const slice = CODE(`${APP}/src/renderer/store/slices/profileSlice.ts`)
+  assert.ok(!/setDockPrefs/.test(slice), 'profileSlice 不得触碰 dockPrefs（用户拖拽偏好不被覆盖）')
+})
+
+test('TC-PUI-013 RightDock.tsx 文件不存在（死组件已清理，不得复活）', () => {
+  const { existsSync } = await0()
+  assert.equal(existsSync(new URL(`${APP}/src/renderer/components/RightDock.tsx`, import.meta.url)), false)
+})
+
+/** existsSync 的小助手（避免顶部再 import 一个用不到的分支） */
+function await0() {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return { existsSync: (u: URL) => { try { return R0(u) } catch { return false } } }
+}
+function R0(u: URL): string {
+  // readFileSync 抛错 = 不存在
+  return readFileSync(u, 'utf-8')
+}
+
+test('TC-PUI-014 App.tsx 渲染 Inspector（消费方必须在渲染树中）', () => {
+  const app = CODE(`${APP}/src/renderer/App.tsx`)
+  assert.match(app, /<Inspector/)
+})
+
+test('TC-PUI-015 Inspector 面板 Tab 顺序走 mergePanelOrder（顺序真源唯一）', () => {
+  const ins = CODE(`${APP}/src/renderer/components/Inspector.tsx`)
+  assert.match(ins, /mergePanelOrder\(/, '最终 Tab 序必须经 mergePanelOrder 合成')
+  // 内置六 Tab 顺序来自用户偏好（inspectorTabOrder 过滤隐藏项），面板插入点只认 profilePanels
+  assert.match(ins, /builtinTabsOf\(visibleBuiltin\)/, 'base 必须是用户偏好管辖的内置序')
+  assert.match(ins, /profilePanels/, 'panels 必须来自插槽派生的 profilePanels')
+})
+
+test('TC-PUI-016 面板 Tab 不参与拖拽（顺序真源 = manifest position）', () => {
+  const ins = CODE(`${APP}/src/renderer/components/Inspector.tsx`)
+  // 实现为「只有内置 Tab 才可拖拽」——比字面 draggable={false} 更强
+  assert.match(ins, /draggable\s*=\s*builtin/, 'draggable 必须收敛在内置 Tab（面板禁拖）')
+})
+
+test('TC-PUI-017 CenterStage 无任务分支读取 profileHomeModule（首页模块真生效）', () => {
+  const cs = CODE(`${APP}/src/renderer/components/CenterStage.tsx`)
+  assert.match(cs, /profileHomeModule/, '无任务首屏必须消费 profileHomeModule')
+})
+
+test('TC-PUI-018 profileSlice 调用 ark.profile.slots() 并落 store（插槽消费链路存在）', () => {
+  const slice = CODE(`${APP}/src/renderer/store/slices/profileSlice.ts`)
+  assert.match(slice, /ark\.profile\.slots\(\)/, '必须从主进程拉插槽快照')
+  assert.match(slice, /deriveFromSlots/, '插槽快照必须经纯函数派生（panels/renderer/theme）')
+})
+
+test('TC-PUI-019 主题覆盖在 App 层落地（applyResolvedTheme + 清理对称）', () => {
+  const app = CODE(`${APP}/src/renderer/App.tsx`)
+  assert.match(app, /applyResolvedTheme/, '必须经 profile-theme 的落地函数（含存在性过滤）')
+  assert.match(app, /clearThemeOverride/, 'effect 清理必须对称（先清上次写的键）')
+  assert.match(app, /themeOverrides/, '覆盖表必须来自 store（不得组件自持副本）')
+})
+
+test('TC-PUI-020 全仓零 import RightDock（含表述清理）', () => {
+  const walk = (dir: URL): URL[] => {
+    const out: URL[] = []
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const u = new URL(`${e.name}${e.isDirectory() ? '/' : ''}`, dir)
+      if (e.isDirectory()) out.push(...walk(u))
+      else if (/\.(tsx?|jsx?)$/.test(e.name)) out.push(u)
+    }
+    return out
+  }
+  const root = new URL(`${APP}/src/renderer/`, import.meta.url)
+  for (const f of walk(root)) {
+    const src = R(fileURLToPath(f))
+    assert.ok(!/from\s+'[^']*RightDock'/.test(src), `${f.pathname} 不得再 import RightDock`)
+  }
 })

@@ -20,6 +20,7 @@ import { useStore, detectRenderer } from '../../store'
 import type { PreviewTab, RendererKind } from '../../store'
 import { ark } from '../../ipc/client'
 import { Icon } from '../../icons'
+import { baseNameOf } from '@shared/utils/path-display'
 import { RENDERER_REGISTRY, VIEW_MODES, defaultViewMode } from './registry'
 import { Tooltip } from '../ui'
 // D20 修复：editor Tab 的只读预览 / 复制 / 导出 / 刷新需要文本来源
@@ -27,6 +28,7 @@ import { peekInitialText } from '../../services/editorSession'
 import { getEditorHandle } from '../../services/savePipeline'
 // v0.31.0 B2：关闭保护三选一（dirty 缓冲只能由用户显式处置，A5/A6）
 import { CloseGuardPrompt } from '../editor/CloseGuardPrompt'
+import { PanelHost } from '../vlib/PanelHost'
 import type { EditorViewMode } from '@shared/types/fs'
 
 /* ---- 常量 ---- */
@@ -47,7 +49,7 @@ function formatSize(bytes: number): string {
 }
 
 function basename(p: string): string {
-  return p.split('/').pop() ?? p
+  return baseNameOf(p)
 }
 
 function extOf(p: string): string {
@@ -66,6 +68,43 @@ export function PreviewWindow() {
       {minimizedPreviews.length > 0 && <MinimizedCapsules />}
     </>
   )
+}
+
+/* ============================================================
+ * v0.34.1：浮窗里的面板宿主
+ *
+ * 面板此前只住在右侧侧边栏（约 300px）—— K 线、完整行情表在那点宽度里
+ * 根本读不了。浮窗是既有的可拖拽可缩放容器，让它承载 PanelHost 即可。
+ *
+ * 三态（与 PanelHost 的四态对齐，但浮窗不复用 EmptyState 的紧凑排版）：
+ *   · 面板 ref 在当前 Tab 全集里解析不到 → 明确说「面板不可用」（不空白）
+ *   · 解析到 → 交给 PanelHost（loading / empty / error / ready 由它负责）
+ * ============================================================ */
+function PanelFloatHost({
+  panelRef,
+  title,
+  params,
+}: {
+  panelRef: string
+  title: string
+  params?: Record<string, unknown>
+}) {
+  const profilePanels = useStore((s) => s.profilePanels)
+  const tab = useMemo(
+    () => (profilePanels ?? []).find((t) => t.ref === panelRef) ?? null,
+    [profilePanels, panelRef],
+  )
+  if (!tab) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-2 text-text-tertiary">
+        <Icon.Warning width={22} height={22} />
+        <div className="text-xs">{panelRef}</div>
+        <div className="text-2xs text-text-faint">该面板已不可用（插件可能被禁用或卸载）</div>
+      </div>
+    )
+  }
+  // params 参与 URL 模板替换 —— 面板本身不知道自己被谁打开
+  return <PanelHost tab={{ ...tab, title: title || tab.title, params }} />
 }
 
 /* ============================================================
@@ -134,7 +173,8 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
   /* ---- 文本类内容懒加载 ---- */
   const loadContent = useCallback(
     (tab: PreviewTab, force: boolean) => {
-      if (tab.target.kind === 'url') return
+      // v0.34.1：panel Tab 的数据在面板自己的数据源里，不读文件
+      if (tab.target.kind === 'url' || tab.target.kind === 'panel') return
       const kind = rendererOverrides[tab.id] ?? tab.renderer
       // v0.31.0 B2：编辑器 Tab 的内容读取服务于「只读渲染」视图，
       // 因此按路径的**只读默认渲染器**判定，而不是按 'editor'（它不在 TEXT_RENDERERS 里）
@@ -457,6 +497,11 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
       pushToast({ type: 'warning', message: t('preview.window.toast.openFromFileTree'), duration: 3000 })
       return
     }
+    if (activeTab.target.kind === 'panel') {
+      // 面板不是文件也不是网址，「在外部打开」没有意义 —— 如实说明，不做假动作
+      pushToast({ type: 'warning', message: t('preview.window.panelNoExternal'), duration: 2600 })
+      return
+    }
     if (activeTab.target.kind === 'file') {
       // v0.31.0 B2 修复：file 目标现在**按路径复用 Tab**（见 store/slices/uiSlice.openPreview
       // 与 services/previewTabs 的不变量说明）——两个 Tab 指向同一 path 会让两个
@@ -540,6 +585,17 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
       )
     }
 
+    // v0.34.1：面板 Tab（浮窗承载插件面板 —— 侧边栏太窄，K 线/完整行情要在浮窗里看）
+    if (activeTab.target.kind === 'panel') {
+      return (
+        <PanelFloatHost
+          panelRef={activeTab.target.panelRef}
+          title={activeTab.target.title}
+          params={activeTab.target.params}
+        />
+      )
+    }
+
     // URL 标签：强制浏览器渲染
     if (activeTab.target.kind === 'url') {
       const Comp = RENDERER_REGISTRY.browser.component
@@ -617,6 +673,9 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
     if (activeTab.target.kind === 'url') {
       return { left: activeTab.target.url, saved: t('preview.window.status.ready'), state: 'ready' as const }
     }
+    if (activeTab.target.kind === 'panel') {
+      return { left: activeTab.target.panelRef, saved: activeTab.target.title, state: 'ready' as const }
+    }
     const path = activeTab.target.path
     const typeLabel = t(RENDERER_REGISTRY[activeRenderer].labelKey)
     if (tc?.state === 'loaded') {
@@ -635,7 +694,9 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
     ? t('preview.window.empty.title')
     : activeTab.target.kind === 'file'
       ? basename(activeTab.target.path)
-      : activeTab.target.url
+      : activeTab.target.kind === 'panel'
+        ? activeTab.target.title
+        : activeTab.target.url
 
   const entry = RENDERER_REGISTRY[activeRenderer]
   const showTabBar = tabs.length >= 2
@@ -715,7 +776,11 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
             const isActive = tab.id === activeTabId
             const isPinned = tab.mode === 'pinned' || pinnedTabs.has(tab.id)
             const name =
-              tab.target.kind === 'file' ? basename(tab.target.path) : tab.target.url
+              tab.target.kind === 'file'
+                ? basename(tab.target.path)
+                : tab.target.kind === 'panel'
+                  ? tab.target.title
+                  : tab.target.url
             return (
               <Tooltip label={name} desc={t('preview.window.tabBar.tip')}>
                 <div

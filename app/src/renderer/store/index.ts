@@ -23,6 +23,8 @@ import { permissionSlice } from './slices/permissionSlice'
 import { fsSlice } from './slices/fsSlice'
 // v0.32.0：Workbench Profile（插件模式）
 import { profileSlice } from './slices/profileSlice'
+// v0.33.0：插件注册表（插件插拔能力）
+import { pluginSlice } from './slices/pluginSlice'
 import type { AppState } from './types'
 
 export const useStore = create<AppState>((set, get, api) => ({
@@ -36,6 +38,7 @@ export const useStore = create<AppState>((set, get, api) => ({
   ...permissionSlice(set, get, api),
   ...fsSlice(set, get, api),
   ...profileSlice(set, get, api),
+  ...pluginSlice(set, get, api),
 
 
   // 初始化 — 启动时调用
@@ -91,6 +94,8 @@ export const useStore = create<AppState>((set, get, api) => ({
       // v0.32.0：加载 Workbench Profile（工作台列表 + 当前快照 + UI 投影）
       // 失败不影响启动：ProfileSwitcher 显示「未知工作台」，其余功能照常
       void get().loadProfiles()
+      // v0.33.0：加载插件注册表（插件插拔能力。失败同样不阻断启动）
+      void get().loadPlugins()
       await get().refreshCatalog()
       await get().refreshTasks()
       // Task 9：从主进程缓存恢复任务进度（页面切换 / 重启后保持进度不丢）
@@ -144,6 +149,7 @@ export type {
   ModulePage,
   SettingsTab,
   InspectorTabId,
+  InspectorTabRef,
   DockPrefs,
   ModelHealth,
   RendererKind,

@@ -22,10 +22,12 @@
  * 带 layer / ref / reason / blocking 四要素，由 UI 逐条可见。
  * ============================================================ */
 import { MAX_EXTENDS_DEPTH, detectExtendsCycle, extendsDepthOf, mergeProfile, parseManifest, refResolves, refTail, stableHash, toReport, validateReferences } from '@shared/utils/profile-manifest'
+import { DOCK_TAB_TO_INSPECTOR } from '@shared/utils/panel-model'
 import {
   type ActivationReport,
   type CompositionSnapshot,
   type Degradation,
+  type PanelSlotPayload,
   type ProfileValidationContext,
   type SlotEntry,
   type SnapshotTool,
@@ -37,8 +39,9 @@ import { listSkills } from '../agent/registry.js'
 import { logger } from '../system/logger.js'
 import { getActiveProfileId, getLastSnapshot, getProfile, listProfiles, saveLastSnapshot, setActiveProfileId } from './store.js'
 import { ensureMemoryNamespace, namespaceSnapshotEntries } from './namespace.js'
+import { BASE_NAMESPACE, builtinRendererSlotEntries } from './builtins.js'
 import { registerSlot, resetProfileSlots, slotStats } from './slots.js'
-import { BASE_NAMESPACE } from './builtins.js'
+import { availableHomeModules, availablePanelRefs, pluginPanelPayloads, refreshPluginSlots } from '../plugins/registry.js'
 
 /* ---------- 底座版本（V6） ---------- */
 
@@ -168,14 +171,36 @@ export async function probeBaseInventory(): Promise<BaseInventory> {
   return { skills, mcpServers, baseVersion: versionResolver() }
 }
 
-export function toValidationContext(inv: BaseInventory, siblingProfileIds?: string[]): ProfileValidationContext {
+export function toValidationContext(
+  inv: BaseInventory,
+  siblingProfileIds?: string[],
+  extra?: { panels?: string[]; homeModules?: string[] },
+): ProfileValidationContext {
   return {
     skills: inv.skills,
     mcpServers: inv.mcpServers,
     baseVersion: inv.baseVersion,
     siblingProfileIds,
+    ...(extra?.panels !== undefined ? { panels: extra.panels } : {}),
+    ...(extra?.homeModules !== undefined ? { homeModules: extra.homeModules } : {}),
   }
 }
+
+/**
+ * 面板解析上下文（★ v0.33.0）。
+ *
+ * 缺陷 D43 的修复核心：v0.32.0 的 `capabilities[].type === 'panel'` **恒降级**
+ * （硬编码「v1 只登记不挂载」），导致声明 required 面板的工作台永远激活不了。
+ * 现在由插件注册表提供事实源：命中 → 不降级；未命中 → 按 required 阻断/降级。
+ */
+export interface ComposePanels {
+  /** `panel:<name>` → 插件贡献的面板载荷 */
+  payloads: Map<string, PanelSlotPayload>
+  /** 全部可用面板 ref（含内置六面板的裸名与 `panel:` 形式） */
+  available: Set<string>
+}
+
+const EMPTY_PANELS: ComposePanels = { payloads: new Map(), available: new Set() }
 
 /* ---------- 五层装配 ---------- */
 
@@ -189,6 +214,7 @@ export function composeProfile(
   profile: WorkbenchProfile,
   inv: BaseInventory,
   nsApplied: boolean,
+  panels: ComposePanels = EMPTY_PANELS,
 ): ComposeResult {
   const degraded: Degradation[] = []
   const slots: SlotEntry[] = []
@@ -207,6 +233,7 @@ export function composeProfile(
       id: `agent:${a.id}`,
       kind: 'agent',
       label: a.name,
+      source: 'profile',
       payload: { agentId: a.id, personaText: a.personaText, profileId: profile.id },
     })
   }
@@ -233,7 +260,7 @@ export function composeProfile(
     }
     return { kind: 'skill' as const, ref: tail, found, required: meta.required }
   })
-  // mcp 能力（v1：连接已由 mcp 模块管理，这里只登记 + 降级核实）
+  // mcp 能力（连接已由 mcp 模块管理，这里只登记 + 降级核实）
   for (const c of profile.capabilities) {
     if (c.type !== 'mcp') continue
     const tail = refTail(c.ref)
@@ -251,16 +278,24 @@ export function composeProfile(
       id: `tool:mcp:${tail}`,
       kind: 'tool',
       label: tail,
+      source: 'profile',
       payload: { mcpServer: tail, profileId: profile.id },
     })
   }
-  // panel 能力：v1 只登记不挂载（宿主垂直组件库未开放 → 一律降级，绝不假装生效）
+  /* --- panel 能力：★ v0.33.0 真解析（缺陷 D43） ---
+   * v0.32.0 此处无条件 push 一条「只登记不挂载」降级 → 声明 required 面板的台
+   * 永远激活不了。现在查插件面板注册表：命中即视为已就绪（是否**显示**由
+   * `ui.dockPanels` 决定），未命中才按 required 决定阻断/降级。 */
   for (const c of profile.capabilities) {
     if (c.type !== 'panel') continue
+    const ref = c.ref.includes(':') ? c.ref : `panel:${c.ref}`
+    if (panels.available.has(ref) || panels.available.has(refTail(c.ref))) {
+      continue
+    }
     degraded.push({
       layer: 'ui',
       ref: refTail(c.ref),
-      reason: '面板插件在 v1 只登记不挂载（宿主垂直组件库尚未开放）',
+      reason: '面板未安装或未启用（在工作台中心的「插件」页启用提供该面板的插件）',
       blocking: c.required === true,
     })
   }
@@ -269,16 +304,25 @@ export function composeProfile(
       id: `tool:skill:${s}`,
       kind: 'tool',
       label: s,
+      source: 'profile',
       payload: { skillId: s, profileId: profile.id },
     })
   }
 
   /* --- ui 层 --- */
+  const themeTokens = profile.ui.theme ?? {}
+  const previewRenderers = Object.entries(profile.ui.previewRenderers ?? {})
+  const actionExts = profile.ui.actionExtensions ?? []
   const ui: SnapshotUi[] = [
     {
       slot: 'ui.dockTabs',
       value: (profile.ui.dockTabs ?? []).join(','),
       applied: (profile.ui.dockTabs ?? []).length > 0,
+    },
+    {
+      slot: 'ui.dockPanels',
+      value: (profile.ui.dockPanels ?? []).map((d) => d.panelRef).join(','),
+      applied: (profile.ui.dockPanels ?? []).length > 0,
     },
     { slot: 'ui.homeModule', value: profile.ui.homeModule ?? '', applied: Boolean(profile.ui.homeModule) },
     {
@@ -286,21 +330,131 @@ export function composeProfile(
       value: (profile.ui.composerChips ?? []).join(','),
       applied: (profile.ui.composerChips ?? []).length > 0,
     },
+    {
+      slot: 'ui.theme',
+      value: [...Object.keys(themeTokens.light ?? {}), ...Object.keys(themeTokens.dark ?? {})].join(','),
+      applied: Object.keys(themeTokens.light ?? {}).length + Object.keys(themeTokens.dark ?? {}).length > 0,
+    },
+    {
+      slot: 'ui.previewRenderers',
+      value: previewRenderers.map(([k, v]) => `${k}=${v}`).join(','),
+      applied: previewRenderers.length > 0,
+    },
+    {
+      slot: 'ui.actionExtensions',
+      value: actionExts.join(','),
+      applied: actionExts.length > 0,
+    },
   ]
-  for (const t of profile.ui.dockTabs ?? []) {
-    slots.push({ id: `ui.panel:${t}`, kind: 'ui.panel', label: t, payload: { tabId: t, profileId: profile.id } })
+
+  /* --- ui.panel：内置面板（来自 dockTabs）+ 开放面板（来自 dockPanels） ---
+   * 去重：同一 panelRef 只产一条（dockPanels 的存在使内置项不必重复） */
+  const panelRefsDone = new Set<string>()
+  const pushPanelEntry = (ref: string, position: number | undefined): void => {
+    if (panelRefsDone.has(ref)) return
+    const normalized = ref.includes(':') ? ref : `panel:${ref}`
+    if (panelRefsDone.has(normalized)) return
+
+    const builtinDock = (Object.entries(DOCK_TAB_TO_INSPECTOR) as Array<[string, string]>).find(
+      ([dockId]) => `panel:${dockId}` === normalized || dockId === ref,
+    )
+    if (builtinDock) {
+      panelRefsDone.add(ref)
+      panelRefsDone.add(normalized)
+      slots.push({
+        id: normalized,
+        kind: 'ui.panel',
+        label: builtinDock[1],
+        source: 'profile',
+        ...(position !== undefined ? { position } : {}),
+        payload: { panelRef: normalized, title: builtinDock[1], builtin: true },
+      })
+      return
+    }
+
+    const payload = panels.payloads.get(normalized)
+    if (payload) {
+      panelRefsDone.add(ref)
+      panelRefsDone.add(normalized)
+      slots.push({
+        id: normalized,
+        kind: 'ui.panel',
+        label: payload.title,
+        source: 'profile',
+        ...(position !== undefined ? { position } : {}),
+        payload: { ...payload, profileId: profile.id },
+      })
+      return
+    }
+
+    // 未命中 → 降级（不产条目）；`required` 语义由 capabilities 负责，
+    // `dockPanels` 里的缺失一律非阻断（用户可在编辑器里删掉这一项）
+    degraded.push({
+      layer: 'ui',
+      ref: refTail(normalized),
+      reason: '面板未安装或未启用（在工作台中心的「插件」页启用提供该面板的插件）',
+      blocking: false,
+    })
   }
+
+  for (const t of profile.ui.dockTabs ?? []) pushPanelEntry(t, undefined)
+  for (const d of profile.ui.dockPanels ?? []) pushPanelEntry(d.panelRef, d.position)
+
+  /* --- ui.homeModule --- */
   if (profile.ui.homeModule) {
     slots.push({
-      id: `ui.homeModule:${profile.ui.homeModule}`,
+      id: `homeModule:${profile.ui.homeModule}`,
       kind: 'ui.homeModule',
       label: profile.ui.homeModule,
+      source: 'profile',
       payload: { module: profile.ui.homeModule, profileId: profile.id },
     })
   }
+
+  /* --- ui.action：chips 与动作扩展分开登记（缺陷 D45：语义不再污染） --- */
   ;(profile.ui.composerChips ?? []).forEach((chip, i) => {
-    slots.push({ id: `ui.action:chip:${i}`, kind: 'ui.action', label: chip, payload: { chip, profileId: profile.id }, position: 100 + i })
+    slots.push({
+      id: `action:chip:${i}`,
+      kind: 'ui.action',
+      label: chip,
+      source: 'profile',
+      position: 100 + i,
+      payload: { actionId: `chip:${i}`, label: chip, origin: 'chip' },
+    })
   })
+  actionExts.forEach((a, i) => {
+    slots.push({
+      id: `action:${a}`,
+      kind: 'ui.action',
+      label: a,
+      source: 'profile',
+      position: 200 + i,
+      payload: { actionId: a, label: a, origin: `profile:${profile.id}` },
+    })
+  })
+
+  /* --- ui.renderer：previewRenderers 覆盖声明（每个扩展名一条） --- */
+  previewRenderers.forEach(([ext, kind], i) => {
+    slots.push({
+      id: `renderer:${ext}`,
+      kind: 'ui.renderer',
+      label: ext,
+      source: 'profile',
+      position: 1000 + i,
+      payload: { rendererKind: kind, extensions: [ext], override: true, labelKey: `preview.registry.${kind}` },
+    })
+  })
+
+  /* --- ui.theme：token 覆盖（空集不产条目 —— 避免无谓的样式重算） --- */
+  if (Object.keys(themeTokens.light ?? {}).length + Object.keys(themeTokens.dark ?? {}).length > 0) {
+    slots.push({
+      id: `theme:${profile.id}`,
+      kind: 'ui.theme',
+      label: profile.name,
+      source: 'profile',
+      payload: { light: themeTokens.light ?? {}, dark: themeTokens.dark ?? {}, profileId: profile.id },
+    })
+  }
 
   /* --- data 层 --- */
   const ns = profile.data.memoryNamespace || BASE_NAMESPACE
@@ -312,18 +466,31 @@ export function composeProfile(
   if (!nsApplied) {
     degraded.push({ layer: 'data', ref: ns, reason: '记忆命名空间目录未就绪', blocking: false })
   }
-  slots.push({ id: `data:ns:${ns}`, kind: 'data', label: ns, payload: { namespace: ns, profileId: profile.id } })
+  slots.push({
+    id: `data:ns:${ns}`,
+    kind: 'data',
+    label: ns,
+    source: 'profile',
+    payload: { namespace: ns, shareCore: profile.data.shareCoreProfile !== false, profileId: profile.id },
+  })
 
-  /* --- auto 层（v1 只登记不注册 → 遗留 L5） --- */
+  /* --- auto 层（本版只登记不注册 → 遗留 L-33-07） --- */
   const auto = profile.automation.map((a) => ({ cron: a.cron, taskTemplate: a.taskTemplate, agent: a.agent, registered: false as const }))
   for (const a of profile.automation) {
+    const required = (a as { required?: boolean }).required === true
     degraded.push({
       layer: 'auto',
       ref: a.cron,
-      reason: '定时任务在 v1 只登记不注册（automation 模块尚未开放 profile 来源）',
+      reason: '定时任务本版只登记不注册（automation 模块尚未开放 profile 来源）',
       blocking: false,
     })
-    slots.push({ id: `auto:${a.cron}`, kind: 'auto', label: a.cron, payload: { cron: a.cron, profileId: profile.id } })
+    slots.push({
+      id: `auto:${a.cron}`,
+      kind: 'auto',
+      label: a.cron,
+      source: 'profile',
+      payload: { cron: a.cron, taskTemplate: a.taskTemplate, agent: a.agent, required },
+    })
   }
 
   return {
@@ -372,9 +539,18 @@ export async function activateProfile(id: string): Promise<ActivationReport> {
   const profile = flattenChain(chain)
   const structuralIssues = [...chainIssues, ...validatePureStructure(profile)]
 
-  // 3) 引用闭合（V2/V4/V5/V6）
+  // 3) 引用闭合（V2/V4/V5/V6）—— 事实源：底座存货 + 插件注册表
   const inv = await probeBaseInventory()
-  const refIssues = validateReferences(profile, toValidationContext(inv, all.map((p) => p.id)))
+  const [panelMap, panelRefs, homeModules] = await Promise.all([
+    pluginPanelPayloads(),
+    availablePanelRefs(),
+    availableHomeModules(),
+  ])
+  const panelsCtx: ComposePanels = { payloads: panelMap, available: new Set(panelRefs) }
+  const refIssues = validateReferences(
+    profile,
+    toValidationContext(inv, all.map((p) => p.id), { panels: panelRefs, homeModules }),
+  )
   const issues = [...structuralIssues, ...refIssues]
   const validation = toReport(id, issues)
 
@@ -399,7 +575,7 @@ export async function activateProfile(id: string): Promise<ActivationReport> {
     nsApplied = false
     logger.warn('System', `[profile] ns ensure failed: ${String(err)}`)
   }
-  const composed = composeProfile(profile, inv, nsApplied)
+  const composed = composeProfile(profile, inv, nsApplied, panelsCtx)
 
   // 5) required 缺失 → 阻断（required 语义：宁可激活失败，也不半死）
   const blockers = composed.degraded.filter((d) => d.blocking)
@@ -417,11 +593,10 @@ export async function activateProfile(id: string): Promise<ActivationReport> {
     }
   }
 
-  // 6) 提交：清槽 → 重注册 → 落盘（任一步失败都要回滚）
+  // 6) 提交：清 profile 来源 → 重注册 → 落盘（任一步失败都要回滚）
   const prevSnapshot = await getLastSnapshot()
   try {
-    resetProfileSlots()
-    for (const s of composed.slots) registerSlot(s.kind, s)
+    applyProfileSlots(composed.slots)
     await saveLastSnapshot(composed.snapshot)
     await setActiveProfileId(profile.id, composed.snapshot)
     logger.info(
@@ -444,10 +619,14 @@ export async function activateProfile(id: string): Promise<ActivationReport> {
     try {
       const prev = await getProfile(stillActive)
       if (prev) {
-        resetProfileSlots()
         const prevInv = await probeBaseInventory()
-        const prevComposed = composeProfile(prev, prevInv, true)
-        for (const s of prevComposed.slots) registerSlot(s.kind, s)
+        const prevPanelMap = await pluginPanelPayloads()
+        const prevPanelRefs = await availablePanelRefs()
+        const prevComposed = composeProfile(prev, prevInv, true, {
+          payloads: prevPanelMap,
+          available: new Set(prevPanelRefs),
+        })
+        applyProfileSlots(prevComposed.slots)
         await saveLastSnapshot(prevSnapshot ?? prevComposed.snapshot)
         await setActiveProfileId(prev.id, prevSnapshot ?? prevComposed.snapshot)
         rollbackNote = `已回滚到 ${prev.id}`
@@ -497,10 +676,81 @@ function validatePureStructure(p: WorkbenchProfile): ValidationIssue[] {
   return issues
 }
 
-/** 启动期：把持久化下来的 activeProfileId 重新挂起来（幂等） */
+/* ============================================================
+ * 插槽提交与内置登记（★ v0.33.0）
+ * ============================================================ */
+
+/**
+ * 把一份装配快照的条目落到插槽表：**只清 `profile` 来源**（缺陷 D42）。
+ *
+ * 为什么逐条 try/catch 而不是整体失败：单个条目注册冲突（例如插件已占用同 id）
+ * 不该让整次切换失败 —— 失败项由调用方日志可见，其余条目照常生效，
+ * 这与「部分激活不阻塞」的既有精神一致。
+ */
+export function applyProfileSlots(entries: SlotEntry[]): number {
+  resetProfileSlots('profile')
+  let n = 0
+  for (const s of entries) {
+    try {
+      registerSlot(s.kind, s, 'profile')
+      n += 1
+    } catch (err) {
+      logger.warn('System', `[profile] 插槽注册失败（${s.kind} ${s.id}）：${String(err)}`)
+    }
+  }
+  return n
+}
+
+let builtinSlotsInstalled = false
+
+/**
+ * 登记**内置**插槽条目（来源 `builtin`）。
+ *
+ * 幂等：重复调用直接返回（`registerSlot` 对同来源同 id 会 throw —— 那是「启动期
+ * 编程错误」的守卫，不该被幂等性要求破坏）。启动期在 `bootstrapActiveProfile`
+ * 里调一次即可；测试可先 `resetProfileSlots()` 再调。
+ */
+export function ensureBuiltinSlots(): number {
+  if (builtinSlotsInstalled) return 0
+  const entries = builtinRendererSlotEntries()
+  let n = 0
+  for (const e of entries) {
+    try {
+      registerSlot(e.kind, e, 'builtin')
+      n += 1
+    } catch (err) {
+      logger.warn('System', `[profile] 内置插槽注册失败（${e.kind} ${e.id}）：${String(err)}`)
+    }
+  }
+  builtinSlotsInstalled = true
+  logger.info('System', `[profile] 内置插槽登记：${n} 条（ui.renderer）`)
+  return n
+}
+
+/** 测试用：重置「内置已登记」标记（配合 `resetProfileSlots()`） */
+export function resetBuiltinSlotFlag(): void {
+  builtinSlotsInstalled = false
+}
+
+/**
+ * 启动期：把持久化下来的 activeProfileId 重新挂起来（幂等）。
+ *
+ * 顺序固定（`04-system-design.md` §4.4）：
+ *   ① 内置插槽（builtin 来源）
+ *   ② 装配当前 profile（profile 来源）
+ *   ③ 插件贡献（plugin 来源）
+ * 三者来源隔离，顺序固定的意义只是**消除不确定性**。
+ */
 export async function bootstrapActiveProfile(): Promise<ActivationReport> {
+  ensureBuiltinSlots()
   const id = await getActiveProfileId()
-  return activateProfile(id)
+  const report = await activateProfile(id)
+  try {
+    await refreshPluginSlots()
+  } catch (err) {
+    logger.warn('System', `[profile] 插件插槽刷新失败：${String(err)}`)
+  }
+  return report
 }
 
 /** 可观测性：当前插槽注册量（诊断面板 / 测试用） */

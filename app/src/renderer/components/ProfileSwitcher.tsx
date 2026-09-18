@@ -16,8 +16,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Icon, type IconName } from '../icons'
-import { useStore } from '../store'
+import { useStore, type ModulePage } from '../store'
 import { Tooltip } from './ui'
+import { PROFILE_HOME_MODULES } from '@shared/types/profile'
 
 /** 图标查表：manifest 里是字符串，宿主只认自己的键 */
 function profileIcon(name?: string) {
@@ -218,13 +219,16 @@ export function ProfileSwitcher() {
             </div>
           )}
 
-          {/* 该台声明的首页模块入口（无任务时的稳定落点） */}
-          {profileHomeModule && (
+          {/* 该台声明的首页模块入口（无任务时的稳定落点）。
+              v0.33.0：homeModule 放宽为开放引用（内置名 或 `module:<id>`），
+              但 `openModulePage` 只认内置模块页 —— 插件模块由 CenterStage 直接渲染，
+              这里不为它提供跳转入口（避免点了跳到空白页）。 */}
+          {profileHomeModule && (PROFILE_HOME_MODULES as readonly string[]).includes(profileHomeModule) && (
             <button
               type="button"
               onClick={() => {
                 setOpen(false)
-                openModulePage(profileHomeModule)
+                openModulePage(profileHomeModule as ModulePage)
               }}
               className="profile-switcher__home w-full text-left px-3 py-2 text-2xs text-text-secondary hover:bg-bg-hover border-t border-border-subtle"
             >

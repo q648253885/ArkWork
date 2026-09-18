@@ -19,6 +19,8 @@ import type { FlowTurn } from '@shared/types/flow'
 import { TurnView } from './TurnView'
 import { SuggestionCards } from '../SuggestionCards'
 import { PlanApprovalCard } from '../graph/PlanApprovalCard'
+// v0.34.0（D52）：轮次折叠（空转时交互区不再无限增高）
+import { foldTurnRange } from '../../utils/turn-fold'
 
 export function TurnList() {
   const { t } = useTranslation()
@@ -26,6 +28,8 @@ export function TurnList() {
   const [atBottom, setAtBottom] = useState(true)
   // v0.13.0：用户不在底部时累计新消息数；点击归零并滚底
   const [unreadCount, setUnreadCount] = useState(0)
+  // v0.34.0（D52）：轮次折叠展开态（本地 UI 状态，不落盘）
+  const [foldExpanded, setFoldExpanded] = useState(false)
   const lastSeenCountRef = useRef<number>(0)
 
   const selectedTaskId = useStore((s) => s.selectedTaskId)
@@ -156,8 +160,13 @@ export function TurnList() {
   useEffect(() => {
     lastSeenCountRef.current = items.length
     setUnreadCount(0)
+    // v0.34.0（D52）：切任务同时收回折叠展开态
+    setFoldExpanded(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId])
+
+  // v0.34.0（D52）：轮次折叠 —— 超过阈值只渲染最近 N 轮（见 utils/turn-fold）
+  const fold = foldTurnRange(turns.length, foldExpanded)
 
   const isRunning = task?.status === 'running'
 
@@ -178,14 +187,39 @@ export function TurnList() {
         )}
 
         {/* 轮序列（投影层唯一真相） */}
-        {turns.map((turn, idx) => (
-          <TurnView
-            key={turn.id}
-            turn={turn}
-            isLast={idx === turns.length - 1}
-            showActivity={isRunning && idx === turns.length - 1}
-          />
-        ))}
+        {/* v0.34.0（D52）：超过阈值只渲染最近 N 轮，更早的折叠为摘要条 ——
+            空转场景下交互区不再无限增高（用户实测「距离持续增长」） */}
+        {fold.hiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setFoldExpanded(true)}
+            className="w-full text-center text-xs text-text-tertiary hover:text-text-primary py-1.5 rounded-md hover:bg-bg-hover transition-colors"
+            data-testid="turn-fold-bar"
+          >
+            {t('conversationflow.foldedTurns', { count: fold.hiddenCount })}
+          </button>
+        )}
+        {fold.hiddenCount > 0 && foldExpanded && (
+          <button
+            type="button"
+            onClick={() => setFoldExpanded(false)}
+            className="w-full text-center text-xs text-text-tertiary hover:text-text-primary py-1.5 rounded-md hover:bg-bg-hover transition-colors"
+            data-testid="turn-fold-bar-collapse"
+          >
+            {t('conversationflow.collapseTurns', { count: fold.hiddenCount })}
+          </button>
+        )}
+        {turns.slice(fold.startIndex).map((turn, idx) => {
+          const absoluteIdx = fold.startIndex + idx
+          return (
+            <TurnView
+              key={turn.id}
+              turn={turn}
+              isLast={absoluteIdx === turns.length - 1}
+              showActivity={isRunning && absoluteIdx === turns.length - 1}
+            />
+          )
+        })}
 
         {/* Task 4：建议卡片（完成态兜底；ask_user 归 Composer 的 AskUserGate） */}
         {!isRunning && !askUserQuestion && suggestions.length > 0 && (

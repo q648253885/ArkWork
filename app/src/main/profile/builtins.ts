@@ -18,10 +18,42 @@
  * 避免「内置走特殊通道、校验被绕过」。
  * ============================================================ */
 import { parseManifest } from '@shared/utils/profile-manifest'
-import type { WorkbenchProfile } from '@shared/types/profile'
+import { BUILTIN_EXT_RENDERER } from '@shared/utils/renderer-ext'
+import { RENDERER_KIND_WHITELIST } from '@shared/types/vlib'
+import type { SlotEntry, WorkbenchProfile } from '@shared/types/profile'
 
 /** 底座默认命名空间（v0.30.x 既有单空间记忆的归属） */
 export const BASE_NAMESPACE = 'default'
+
+/**
+ * ★ v0.33.0：内置渲染器登记 —— 8 条 `ui.renderer`（7 渲染器 + editor）。
+ *
+ * 为什么内置渲染器要**入槽**（正本 04 §2「存量迁移第一批」）：
+ *  - 插件接管扩展名的判定需要「内置占用了哪些扩展名」这个事实，入槽即成为可查数据；
+ *  - 渲染侧的覆盖表（`rendererOverrides`）由此表 + profile/plugin 声明合成，
+ *    `detectRenderer` 不再硬编码（迁移期行为不变，见 renderer-ext.ts 的对齐纪律）。
+ *
+ * 来源恒为 `builtin`：`resetProfileSlots('profile'|'plugin')` 不会误删它们（缺陷 D42）。
+ */
+export function builtinRendererSlotEntries(): SlotEntry[] {
+  const byKind: Record<string, string[]> = {}
+  for (const [ext, kind] of Object.entries(BUILTIN_EXT_RENDERER)) {
+    ;(byKind[kind] ??= []).push(ext)
+  }
+  return RENDERER_KIND_WHITELIST.map((kind, i) => ({
+    id: `renderer:${kind}`,
+    kind: 'ui.renderer' as const,
+    label: kind,
+    source: 'builtin' as const,
+    position: i,
+    payload: {
+      rendererKind: kind,
+      extensions: (byKind[kind] ?? []).slice().sort(),
+      override: false,
+      labelKey: `preview.registry.${kind}`,
+    },
+  }))
+}
 
 const RAW_BUILTINS: Array<Record<string, unknown>> = [
   /* ---------- 通用工作台：底座等价形态 ---------- */
@@ -78,6 +110,15 @@ const RAW_BUILTINS: Array<Record<string, unknown>> = [
     ],
     ui: {
       dockTabs: ['files', 'terminal', 'todos', 'context', 'browser'],
+      // v0.34.0（D55）：**原来这里挂了一个演示用的 `dockPanels`**
+      // （`panel:workbench-guide`，由内置示例插件贡献）。
+      // 与 P4 的「示例插件改为默认禁用」直接冲突 —— 内置台引用了可选内容，
+      // 用户关掉示例插件后这个台就装配失败。
+      // 纪律：**内置台不得依赖可选插件**。面板插拔机制改由
+      // 「能力 → 插件」的示例插件 + 工作台编辑器里的面板选择器演示
+      // （用户主动开启示例插件后即可把它勾进任何台）。
+      // v0.33.0：主题 token 覆盖（**只覆盖不新增**）—— 代码台圆角更方正
+      theme: { light: { '--r-lg': '4px', '--r-md': '2px' }, dark: { '--r-lg': '4px', '--r-md': '2px' } },
       composerChips: ['继续任务', '修 bug', '写测试'],
     },
     data: { memoryNamespace: 'coding', shareCoreProfile: true },
@@ -107,6 +148,8 @@ const RAW_BUILTINS: Array<Record<string, unknown>> = [
     capabilities: [{ type: 'skill', ref: 'skill:S-core.kb-search', required: false }],
     ui: {
       dockTabs: ['context', 'files', 'todos', 'browser'],
+      // v0.34.0（D55）：同 wb.coding —— 原挂 `panel:runtime-metrics`（示例插件贡献），
+      // 与「示例插件默认禁用」冲突；内置台不得依赖可选插件，已移除。
       homeModule: 'kb',
       composerChips: ['找资料', '写综述', '列未知区'],
     },

@@ -5,12 +5,14 @@
  * 将右侧功能面板注册为独立 widget，按智能体的 enabledSidebarWidgetIds
  * 组合显示。组合维度：
  *   - 可用工具集 → defaultSkillIds（影响 ReAct 工具集）
- *   - 右侧面板   → enabledSidebarWidgetIds（影响 RightDock 暴露的面板）
+ *   - 右侧面板   → enabledSidebarWidgetIds（**v0.33.0 起只影响 AgentEditor
+ *                  的勾选清单与 Inspector 内置 Tab 的可见性**；原 RightDock
+ *                  宿主自 v0.17.0 起就不存在，已于 v0.33.0 删除）
  * 本注册表不参与 ReAct 循环（engine/runner 不变）。
  *
- * dockTabId：映射到现有 DockTabId 的 widget 才会作为 RightDock Tab 渲染；
- * 无 dockTabId 的 widget 为「已注册扩展点」（记忆中心 / 功能日志 / 浮窗预览），
- * 当前在模块页 / Inspector / 浮窗中消费，未来可提升为 Dock Tab。
+ * dockTabId：v0.33.0 起**不再**驱动右侧渲染（那是 `ui.panel` 插槽 + Inspector
+ * 的职责）。保留该字段仅用于与既有的 `AGENT_DOCK_PRESETS` / `DOCK_TAB_META`
+ * 保持数据一致，避免智能体编辑器出现两套 Tab 概念。
  * ============================================================ */
 import type { ComponentType } from 'react'
 import type { Agent, DockTabId } from '@shared/types/agent'
@@ -157,22 +159,18 @@ export function getEnabledWidgets(agent: Agent | undefined | null): SidebarWidge
   return SIDEBAR_WIDGETS.filter((w) => set.has(w.widgetId))
 }
 
-/** 返回某智能体启用且映射到 Dock Tab 的 DockTabId 集合（RightDock 过滤用） */
-export function getEnabledDockTabIds(agent: Agent | undefined | null): Set<DockTabId> {
-  const out = new Set<DockTabId>()
-  for (const w of getEnabledWidgets(agent)) {
-    if (w.dockTabId) out.add(w.dockTabId)
-  }
-  return out
-}
-
-/** DockTabId → widget 查询表（RightDock 渲染面板用，替代硬编码 switch） */
-export const DOCK_TAB_WIDGET: Partial<Record<DockTabId, SidebarWidget>> = SIDEBAR_WIDGETS
-  .filter((w): w is SidebarWidget & { dockTabId: DockTabId } => w.dockTabId !== undefined)
-  .reduce((acc, w) => {
-    acc[w.dockTabId] = w
-    return acc
-  }, {} as Partial<Record<DockTabId, SidebarWidget>>)
+/* ============================================================
+ * v0.33.0：此处曾导出 `getEnabledDockTabIds` / `DOCK_TAB_WIDGET`
+ * （v0.9.0 F905 的 RightDock 渲染用），随 RightDock.tsx 一并删除。
+ *
+ * 删除理由（缺陷 D40 / 纪律 1）：RightDock 自 v0.17.0 起**没有任何挂载点**，
+ * 这两个导出只服务于那个死组件；保留 = 保留一个「看起来像挂点」的陷阱
+ * （后来者会以为右侧面板仍由 DockTabId 驱动，而实际是 Inspector 的
+ *  `InspectorTabId` + `ui.panel` 插槽）。**不得复活。**
+ *
+ * 仍在使用的是：`SIDEBAR_WIDGETS` / `getEnabledWidgets`（AgentEditor 勾选）
+ * 与 `catalogSlice` 用的 `AGENT_DOCK_PRESETS` / `DOCK_TAB_META`。
+ * ============================================================ */
 
 /* ============================================================
  * 扩展点：小说写作场景（novel-writing）

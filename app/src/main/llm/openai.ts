@@ -13,6 +13,7 @@ import type {
   LlmTool,
 } from './adapter.js'
 import { extractSayMarker } from './say-marker.js'
+import { createThinkStripper, stripThinkBlocks } from './think-strip.js'
 import type { ReActAction } from '@shared/types/react'
 
 export interface OpenAIOptions {
@@ -23,6 +24,48 @@ export interface OpenAIOptions {
   /** 用于显示的适配器名 */
   name?: string
   provider?: 'openai' | 'ollama' | 'custom-openai'
+}
+
+/**
+ * ★ v0.33.1 W1：思考开启参数注入（用户实测：OpenAI 协议接 qwen3 无思考过程）。
+ *
+ * qwen3 / DeepSeek 等思考模型在 OpenAI 兼容端点上的思考开关**没有统一标准**：
+ *  - vLLM / SGLang：`chat_template_kwargs: { enable_thinking: true }`
+ *  - DashScope 兼容模式：顶层 `enable_thinking: true`
+ * 两者同时注入（不识别未知参数的端点由 400 降级路径兜底）。
+ * **只对非官方 provider 注入** —— OpenAI 官方对未知顶层参数会 400，
+ * 且官方模型的思考开关走 `reasoning_effort`（本产品暂不暴露）。
+ */
+export function thinkingExtrasFor(provider: OpenAIOptions['provider']): Record<string, unknown> {
+  if (provider === 'openai' || !provider) return {}
+  return { enable_thinking: true, chat_template_kwargs: { enable_thinking: true } }
+}
+
+/** 降级判定：端点不认注入的思考参数（各端点报错文案不一，按关键词宽匹配） */
+export function isThinkingParamError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /enable_thinking|chat_template_kwargs|unrecognized|unknown.*(argument|parameter|field)|unexpected.*keyword|invalid.*request/i.test(
+    msg,
+  )
+}
+
+/**
+ * v0.34.x 多协议思考字段归一化（导出仅为可测性）：
+ * OpenAI 兼容生态的思考字段**没有统一标准** ——
+ *  - DeepSeek / 多数网关 / LM Studio：`reasoning_content`
+ *  - Ollama（≥0.9 OpenAI 兼容）/ OpenRouter：`reasoning`
+ * 只读其一时，另一形态的思考会被**静默丢弃**（L1 raw 缺思考、下一轮无法原样传回，
+ * 客户端要求回传时还会 400）。顺序：reasoning_content 优先（生态更广），两者都取首
+ * 个非空字符串。
+ */
+export function pickReasoningField(src: unknown): string | undefined {
+  if (!src || typeof src !== 'object') return undefined
+  const raw = src as Record<string, unknown>
+  for (const key of ['reasoning_content', 'reasoning'] as const) {
+    const v = raw[key]
+    if (typeof v === 'string' && v) return v
+  }
+  return undefined
 }
 
 /**
@@ -68,24 +111,57 @@ export class OpenAIAdapter implements LlmAdapter {
 
     const tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined = req.tools?.map(toOpenAITool)
 
-    const completion = await this.client.chat.completions.create(
-      {
-        model,
-        messages,
-        tools: tools as OpenAI.Chat.Completions.ChatCompletionTool[] | undefined,
-        tool_choice: tools ? 'auto' : undefined,
-        temperature: req.temperature ?? 0.5,
-        max_tokens: req.maxTokens,
-      },
-      { signal: req.signal },
-    )
+    const extras = thinkingExtrasFor(this.provider)
+    let completion: OpenAI.Chat.Completions.ChatCompletion
+    try {
+      completion = await this.client.chat.completions.create(
+        {
+          model,
+          messages,
+          tools: tools as OpenAI.Chat.Completions.ChatCompletionTool[] | undefined,
+          tool_choice: tools ? 'auto' : undefined,
+          temperature: req.temperature ?? 0.5,
+          max_tokens: req.maxTokens,
+          ...extras,
+        },
+        { signal: req.signal },
+      )
+    } catch (err) {
+      if (Object.keys(extras).length > 0 && isThinkingParamError(err)) {
+        // 端点不认思考参数 → 去掉重试一次（宁可无思考参数也不能让请求挂掉）
+        completion = await this.client.chat.completions.create(
+          {
+            model,
+            messages,
+            tools: tools as OpenAI.Chat.Completions.ChatCompletionTool[] | undefined,
+            tool_choice: tools ? 'auto' : undefined,
+            temperature: req.temperature ?? 0.5,
+            max_tokens: req.maxTokens,
+          },
+          { signal: req.signal },
+        )
+      } else {
+        throw err
+      }
+    }
 
     const choice = completion.choices[0]
     const message = choice.message
-    const content = message.content ?? ''
+    let content = message.content ?? ''
     const toolCalls = message.tool_calls ?? []
     // DeepSeek/o1 等思考模型返回的 reasoning_content，需原样传回
-    const reasoningContent = (message as unknown as Record<string, unknown>).reasoning_content as string | undefined
+    // v0.34.x：多协议归一化 —— Ollama(≥0.9)/OpenRouter 用 `reasoning` 字段，一并识别
+    let reasoningContent = pickReasoningField(message)
+
+    // ★ W1：`<think>` 内嵌思考剥离（llama.cpp / Ollama 等端点把思考混在 content 里）
+    // v0.34.x 修正：stripThinkBlocks 对「空 body 的 think 对」（`<think>\n\n</think>`，
+    // qwen3.5 空转实测形态）返回 think=''，此前 `if (think)` 为假导致**不剥离** ——
+    // 裸标签泄漏进 content，回合被误判为「有内容」空转。改为按 null 判「无标签」。
+    const { think, rest } = stripThinkBlocks(content)
+    if (think !== null) {
+      content = rest
+      if (think) reasoningContent = reasoningContent ? `${reasoningContent}\n${think}` : think
+    }
 
     // v0.20.0：提取缓存命中统计（DeepSeek / MiniMax 等 OpenAI 兼容端点）
     const cache = extractCacheUsage(completion.usage)
@@ -132,15 +208,22 @@ export class OpenAIAdapter implements LlmAdapter {
       max_tokens: req.maxTokens,
     }
 
+    // ★ W1：思考参数注入（与 complete 同源）；不认参数的端点 400 → 去参重试
+    const extras = thinkingExtrasFor(this.provider)
     let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
     try {
       stream = await this.client.chat.completions.create(
-        { ...baseParams, stream: true, stream_options: { include_usage: true } },
+        { ...baseParams, ...extras, stream: true, stream_options: { include_usage: true } },
         { signal: req.signal },
       )
     } catch (err) {
-      if (err instanceof Error && err.message.includes('stream_options')) {
-        stream = await this.client.chat.completions.create({ ...baseParams, stream: true }, { signal: req.signal })
+      if (Object.keys(extras).length > 0 && isThinkingParamError(err)) {
+        stream = await this.client.chat.completions.create(
+          { ...baseParams, stream: true, stream_options: { include_usage: true } },
+          { signal: req.signal },
+        )
+      } else if (err instanceof Error && err.message.includes('stream_options')) {
+        stream = await this.client.chat.completions.create({ ...baseParams, ...extras, stream: true }, { signal: req.signal })
       } else {
         throw err
       }
@@ -148,6 +231,8 @@ export class OpenAIAdapter implements LlmAdapter {
 
     let content = ''
     let reasoning = ''
+    // ★ W1：`<think>` 内嵌思考的流式分流（think → reasoning 通道，正文 → content）
+    const thinkStripper = createThinkStripper()
     let finishReason: string | null | undefined
     let usage: OpenAI.Completions.CompletionUsage | undefined
     // 按 index 聚合分片到达的 tool_calls（name/arguments 可能拆成多段）
@@ -159,12 +244,22 @@ export class OpenAIAdapter implements LlmAdapter {
       if (!choice) continue
       const delta = choice.delta as ((typeof choice.delta) & { reasoning_content?: string }) | undefined
       if (delta?.content) {
-        content += delta.content
-        handlers.onText(delta.content)
+        const split = thinkStripper.push(delta.content)
+        if (split.text) {
+          content += split.text
+          handlers.onText(split.text)
+        }
+        if (split.think) {
+          reasoning += split.think
+          handlers.onReasoning?.(split.think)
+        }
       }
-      if (delta?.reasoning_content) {
-        reasoning += delta.reasoning_content
-        handlers.onReasoning?.(delta.reasoning_content)
+      // v0.34.x：多协议归一化 —— `reasoning_content`（DeepSeek 系）与
+      // `reasoning`（Ollama/OpenRouter 系）两种增量字段都识别
+      const reasoningDelta = pickReasoningField(delta)
+      if (reasoningDelta) {
+        reasoning += reasoningDelta
+        handlers.onReasoning?.(reasoningDelta)
       }
       for (const tc of delta?.tool_calls ?? []) {
         while (rawCalls.length <= tc.index) rawCalls.push({ id: '', function: { name: '', arguments: '' } })
@@ -174,6 +269,17 @@ export class OpenAIAdapter implements LlmAdapter {
         if (tc.function?.arguments) slot.function.arguments += tc.function.arguments
       }
       if (choice.finish_reason) finishReason = choice.finish_reason
+    }
+
+    // 流结束：把滞留字符按当前态交还（THINK 未闭合 → 归思考）
+    const tail = thinkStripper.finish()
+    if (tail.text) {
+      content += tail.text
+      handlers.onText(tail.text)
+    }
+    if (tail.think) {
+      reasoning += tail.think
+      handlers.onReasoning?.(tail.think)
     }
 
     const parsed = parseOpenAIToolCalls(rawCalls)

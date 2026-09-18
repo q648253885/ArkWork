@@ -11,6 +11,7 @@ import type { ReActStep } from '@shared/types/react'
 import type { MemoryItem } from '@shared/types/memory'
 import type { ConversationItem } from '@shared/types/conversation'
 import type { DockPrefs, InspectorTabId, ModelHealth, RendererKind } from './types'
+import { detectRendererKind } from '@shared/utils/renderer-ext'
 import i18n from '../i18n'
 
 /* ============================================================
@@ -237,17 +238,12 @@ export function classifyLlmError(rawErr: string): string | null {
  *   - theme==='system' && system==='light'→ resolved='light'
  * ============================================================ */
 
-/** v0.7.0 F711：根据文件扩展名检测渲染器类型 */
-export function detectRenderer(path: string): RendererKind {
-  const ext = path.split('.').pop()?.toLowerCase() ?? ''
-  if (ext === 'md' || ext === 'markdown') return 'markdown'
-  if (ext === 'html' || ext === 'htm') return 'browser'
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp'].includes(ext)) return 'image'
-  if (ext === 'svg') return 'svg'
-  if (ext === 'csv' || ext === 'tsv') return 'table'
-  // v0.9.1：补 txt/log/xml 等纯文本扩展（此前 .txt 落入 fallback「不支持的预览类型」）
-  if (['ts', 'tsx', 'js', 'jsx', 'py', 'json', 'css', 'scss', 'less', 'go', 'rs', 'java', 'kt', 'swift', 'rb', 'php', 'c', 'cpp', 'h', 'hpp', 'cs', 'vue', 'svelte', 'yaml', 'yml', 'toml', 'ini', 'sh', 'bash', 'zsh', 'sql', 'dockerfile', 'makefile', 'lua', 'r', 'dart', 'txt', 'log', 'xml', 'text', 'cfg', 'conf', 'env', 'properties', 'gitignore', 'editorconfig'].includes(ext)) return 'code'
-  return 'fallback'
+/** v0.7.0 F711：根据文件扩展名检测渲染器类型
+ * v0.33.0：实现迁往 `@shared/utils/renderer-ext`（纯函数，可密闭单测），
+ * 并支持**覆盖表**（profile 的 `previewRenderers` ∪ 插件 renderer 贡献）。
+ * 无覆盖时与 v0.32.1 逐位一致（回归用例把守）。 */
+export function detectRenderer(path: string, overrides?: Record<string, string> | null): RendererKind {
+  return detectRendererKind(path, overrides)
 }
 export function applyThemeClass(theme: ThemeMode, systemTheme: ResolvedTheme): ResolvedTheme {
   const resolved: ResolvedTheme =

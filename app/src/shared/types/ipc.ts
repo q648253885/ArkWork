@@ -33,6 +33,8 @@ import type {
   ValidationReport,
   WorkbenchProfile,
 } from './profile'
+// v0.33.0：插件包（插件插拔能力的载荷类型）
+import type { PluginSummary } from './plugin'
 // v0.30.0：TaskGraph（任务面板 IPC 的载荷类型）
 import type {
   GraphResult,
@@ -654,8 +656,32 @@ export const ProfileChannel = {
   Import: 'profile:import',
   Delete: 'profile:delete',
   Slots: 'profile:slots',
+  /* ---- v0.33.0：配置能力（导入文件 / 编辑 / 克隆 / 导出 / 选文件） ---- */
+  ImportFile: 'profile:import-file',
+  Update: 'profile:update',
+  Clone: 'profile:clone',
+  Export: 'profile:export',
+  PickFile: 'profile:pick-file',
   /** main → renderer：工作台切换完成（含被拒的激活） */
   Changed: 'profile:changed',
+} as const
+
+/**
+ * v0.33.0：插件注册表通道（插件插拔能力）。
+ *
+ * 六条 invoke + 一条广播。纪律：**失败不抛**，一律返回带原因的结果对象；
+ * 启停/卸载后由 main 重建 `plugin` 来源插槽并广播 `plugin:changed`，
+ * renderer 免重启刷新（`refreshPluginSlots()` 是唯一重建入口）。
+ */
+export const PluginChannel = {
+  List: 'plugin:list',
+  SetEnabled: 'plugin:set-enabled',
+  Uninstall: 'plugin:uninstall',
+  Rescan: 'plugin:rescan',
+  OpenDir: 'plugin:open-dir',
+  ExportSample: 'plugin:export-sample',
+  /** main → renderer：插件集合或启停态发生变化（插槽已重建） */
+  Changed: 'plugin:changed',
 } as const
 
 /** v0.4.0：主题三态（浅色 / 深色 / 跟随系统） */
@@ -1258,8 +1284,67 @@ export interface ArkApi {
     delete: (args: { id: string }) => Promise<{ ok: boolean; reason?: 'builtin' | 'active' | 'not-found' }>
     /** 当前插槽注册明细（诊断 / 可观测性） */
     slots: () => Promise<Record<SlotKind, SlotEntry[]>>
+    /* ---- v0.33.0：配置能力 ---- */
+    /** 从磁盘上的 `*.json` 导入（只接受绝对路径，main 侧校验存在性 + 扩展名） */
+    importFile: (args: { path: string; activate?: boolean }) => Promise<{ ok: boolean; report?: ActivationReport; issues: ValidationReport['issues'] }>
+    /** 增量更新一个已有工作台（内置台会被拒 → 需先克隆） */
+    update: (args: { id: string; patch: Record<string, unknown> }) => Promise<{ ok: boolean; report?: ActivationReport; issues: ValidationReport['issues']; reason?: 'builtin' | 'not-found' | 'invalid' }>
+    /** 克隆（内置台 → 用户台是主路径；新 id 冲突会被拒） */
+    clone: (args: { fromId: string; newId: string; newName?: string }) => Promise<{ ok: boolean; profile?: WorkbenchProfile; issues: ValidationReport['issues']; reason?: 'not-found' | 'id-exists' | 'invalid' }>
+    /** 导出为 JSON（不给 targetPath 时只返回字面量，由 renderer 决定落盘与否） */
+    export: (args: { id: string; targetPath?: string }) => Promise<{ ok: boolean; path?: string; json: string; reason?: 'not-found' | 'invalid-path' | 'write-failed' }>
+    /**
+     * 弹出原生文件选择器（只在 main 侧可用；返回 null 表示用户取消）。
+     *
+     * 顺带回传**已解析的 JSON**，让 renderer 能走真正的干跑（`profile:validate`）
+     * 而不必自己读盘 —— renderer 始终不接触任意文件路径。
+     * `error` 非空表示读盘/解析失败（此时 `raw` 为 undefined）。
+     */
+    pickFile: () => Promise<{ path: string | null; raw?: unknown; error?: string }>
     /** 订阅工作台切换事件（任一窗口切换后广播） */
     onChanged: (cb: (payload: { profileId: string; ok: boolean }) => void) => () => void
+  }
+  /**
+   * v0.33.0：插件注册表（插件插拔能力）。
+   *
+   * 纪律：启停/卸载**必须即时生效** —— main 侧重建 `plugin` 来源插槽后广播
+   * `plugin:changed`，renderer 免重启刷新。内置示例插件**可禁用不可卸载**。
+   */
+  /** v0.34.1：面板取数（宿主主进程发起，规避渲染层 CORS） */
+  panel: {
+    /**
+     * 取一份网络数据给面板用。只支持 http/https；响应体上限 2MB；超时由宿主夹取。
+     * 失败**返回原因**而不是抛错 —— 面板要把它显示成人话。
+     */
+    fetch: (req: {
+      url: string
+      method?: 'GET' | 'POST'
+      headers?: Record<string, string>
+      response?: 'json' | 'text'
+      timeoutMs?: number
+    }) => Promise<{
+      ok: boolean
+      status?: number
+      json?: unknown
+      text?: string
+      error?: string
+    }>
+  },
+  plugin: {
+    /** 全部插件（内置 ∪ 用户目录），含启停态与校验问题 */
+    list: () => Promise<PluginSummary[]>
+    /** 启停（内置插件允许禁用；禁用后其插槽条目立即消失） */
+    setEnabled: (args: { id: string; enabled: boolean }) => Promise<{ ok: boolean; reason?: string }>
+    /** 卸载用户插件（内置插件会被拒） */
+    uninstall: (args: { id: string }) => Promise<{ ok: boolean; reason?: string }>
+    /** 重新扫描插件目录（文件系统外部改动后手动刷新） */
+    rescan: () => Promise<PluginSummary[]>
+    /** 在系统文件管理器中打开插件目录（给用户放插件用） */
+    openDir: () => Promise<{ ok: boolean; path: string }>
+    /** 导出一个内置示例插件到用户目录（脚手架，P1） */
+    exportSample: (args: { id: string }) => Promise<{ ok: boolean; path?: string; reason?: string }>
+    /** 订阅插件集合变化（启停/卸载/重扫后广播） */
+    onChanged: (cb: (payload: { pluginId: string }) => void) => () => void
   }
   /** v0.4.0：主题（同步原生界面 + 监听系统主题变化） */
   theme: {

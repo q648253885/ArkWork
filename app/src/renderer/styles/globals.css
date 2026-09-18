@@ -539,8 +539,7 @@ html.perf-lite .tool-card[data-state='running']::after {
 }
 html.perf-lite .turn-status {
   animation: none !important;
-  background-position: 0 0 !important;
-  background-size: 100% 100% !important;
+  opacity: 1 !important;
 }
 html.perf-lite .stream-caret {
   animation: none !important;
@@ -1267,25 +1266,29 @@ html.perf-lite .stream-caret {
   overflow: hidden;
   transition: border-color var(--dur-fast) var(--ease-out);
 }
-/* DSH 风格：运行态 shimmer 横扫（与 ThinkingRow 共享动效） */
+/* DSH 风格：运行态 shimmer 横扫（与 ThinkingRow 共享动效）
+   ★ v0.33.1 W2：left 位移逐帧触发 layout+paint（Windows 上卡死）→
+   改 transform: translateX（自身百分比：条宽 30% 卡宽，-110% → 370%
+   恰好完整横扫），走合成器线程，零重排零重绘。 */
 .tool-card[data-state="running"]::after {
   content: '';
   position: absolute;
   inset-block: 0;
   left: 0;
-  width: 300px;
+  width: 30%;
   background: linear-gradient(
     90deg,
     transparent 0%,
     color-mix(in srgb, var(--bg-base) 60%, transparent) 55%,
     transparent 100%
   );
+  transform: translateX(-110%);
   animation: dsh-row-sweep 2.6s ease-out infinite;
   pointer-events: none;
 }
 @keyframes dsh-row-sweep {
-  0% { left: -300px; }
-  90%, 100% { left: 100%; }
+  0% { transform: translateX(-110%); }
+  90%, 100% { transform: translateX(370%); }
 }
 @media (prefers-reduced-motion: reduce) {
   .tool-card[data-state="running"]::after { animation: none; }
@@ -1610,19 +1613,20 @@ html.perf-lite .flow-fold__body {
 }
 .react-reason[data-state="running"]::before { background: var(--business-primary); }
 .react-reason[data-state="failed"]::before  { background: var(--danger); }
-/* DSH 风格：running 态 shimmer 横扫 */
+/* DSH 风格：running 态 shimmer 横扫（v0.33.1 W2：同 tool-card 改 transform 横扫） */
 .react-reason[data-state="running"]::after {
   content: '';
   position: absolute;
   inset-block: 0;
   left: 0;
-  width: 300px;
+  width: 30%;
   background: linear-gradient(
     90deg,
     transparent 0%,
     color-mix(in srgb, var(--bg-base) 60%, transparent) 55%,
     transparent 100%
   );
+  transform: translateX(-110%);
   animation: dsh-row-sweep 2.6s ease-out infinite;
   pointer-events: none;
 }
@@ -2016,6 +2020,14 @@ html.perf-lite .flow-fold__body {
   white-space: nowrap;
   letter-spacing: 0.01em;
   line-height: 14px;
+  /* v0.34.0（D54）：插件面板标签是**第三方输入**（贡献者写的 title），
+     长度不可控 —— 不给上限就会溢出 44px 栏宽并顶乱相邻标签。
+     JS 侧 `guardLabel` 已按 8 字符截断，这里是纯 CSS 的第二道闸：
+     即使 JS 防线被绕过（如未来放开长度限制），也不会撑破布局。
+     注意：是 max-width 而非固定 width —— 短标签（"文件"）仍居中自然宽度。 */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .inspector-toolbar > span {
   display: block;
@@ -2150,43 +2162,35 @@ html.perf-lite .flow-fold__body {
 
 /* ============================================================
  * v0.22.0 — DSH ChatView .turnStatus（运行中 shimmer 文本）
- * 业务蓝渐变 + 横向背景滑动，1.8s 循环
+ * ★ v0.33.1 W2：Windows 实测 background-position 逐帧重绘（整行文本
+ *   paint）在 Windows 上极卡且经常冻结 → 改为「静态渐变 + opacity 呼吸」。
+ * ★ v0.34.0 D53：渐变底（background-clip:text）导致**文字自身深浅不均**，
+ *   用户实测「看不清蓝色内容」。改为**纯色 + 整体呼吸** —— 文字颜色恒定，
+ *   只有整体透明度在 0.55↔1 之间呼吸，可读性与动效兼得。
+ *   纪律：本规则禁止出现 background-clip:text / background-position
+ *   （D50 卡顿 + D53 可读性双回归点，由 token 契约用例把守）。
  * ============================================================ */
 .turn-status {
   display: inline-flex;
   align-items: center;
-  /* v0.23.2 fix：固定 height 26px + background-clip:text 时，换行的第二行
-     超出盒子的字形没有渐变背景可剪裁 → 只露出两行交叠的中间条。
-     改 min-height 让盒子随换行撑高，渐变覆盖全部行。 */
+  /* v0.23.2 fix：固定 height 26px 时换行的第二行字形会被裁切。
+     改 min-height 让盒子随换行撑高。 */
   min-height: 26px;
   height: auto;
   font-size: 14px;
   line-height: 22px;
   font-weight: 500;
-  background: linear-gradient(
-    90deg,
-    var(--business-primary) 0%,
-    var(--business-primary) 40%,
-    var(--business-primary-soft) 50%,
-    var(--business-primary) 60%,
-    var(--business-primary) 100%
-  );
-  background-position: 100% 0;
-  background-size: 250% 100%;
-  background-clip: text;
-  color: transparent;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: dsh-turn-status-shimmer 1.8s linear infinite;
+  color: var(--business-primary);
+  animation: dsh-turn-status-breath 1.8s ease-in-out infinite;
 }
-@keyframes dsh-turn-status-shimmer {
-  to { background-position: 0 0; }
+@keyframes dsh-turn-status-breath {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .turn-status {
     animation: none;
-    background-position: 0 0;
-    background-size: 100% 100%;
+    opacity: 1;
   }
 }
 

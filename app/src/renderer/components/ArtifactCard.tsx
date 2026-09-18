@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
 import { ark } from '../ipc/client'
 import { Icon } from '../icons'
+import { baseNameOf } from '@shared/utils/path-display'
 
 export interface Artifact {
   path: string
@@ -31,7 +32,7 @@ function formatSize(bytes: number): string {
 }
 
 function basename(p: string): string {
-  return p.split('/').pop() ?? p
+  return baseNameOf(p)
 }
 
 /* 类型 → 图标/标签（对齐 RendererKind 语义；label 为 i18n key，全部使用项目 Icon 组件，无 emoji） */

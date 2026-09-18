@@ -19,6 +19,8 @@ import type {
   ToolPresenter,
   ToolResultView,
 } from '../../../shared/types/tool-present.js'
+// v0.33.1 W3：Windows 路径展示归一（basename/缩短，分隔符兼容 / 与 \）
+import { shortPathOf } from '../../../shared/utils/path-display.js'
 
 /* ---------- 防御式取值（呈现层永不抛出） ---------- */
 
@@ -94,7 +96,8 @@ const PRESENTERS: PresenterEntry[] = [
         const offset = asNum(a.offset) ?? 0
         return {
           card: 'generic',
-          title: `读取 ${path}`,
+          // 展示用缩短路径（Windows 反斜杠长路径直出会把卡片撑爆）；locations 保留全路径供预览跳转
+          title: `读取 ${shortPathOf(path)}`,
           kind: 'read',
           locations: [{ path, line: offset > 0 ? offset : undefined }],
           rawInput: args,
@@ -112,7 +115,7 @@ const PRESENTERS: PresenterEntry[] = [
         if (lines) {
           return {
             card: 'read',
-            summary: `${path} · ${lines.length} 行`,
+            summary: `${shortPathOf(path)} · ${lines.length} 行`,
             path,
             offset: asNum(r.offset) ?? 0,
             lines,
@@ -125,7 +128,7 @@ const PRESENTERS: PresenterEntry[] = [
           const all = content.split('\n')
           return {
             card: 'read',
-            summary: `${path} · ${content.length} 字符`,
+            summary: `${shortPathOf(path)} · ${content.length} 字符`,
             path,
             offset: 0,
             lines: all.slice(0, 400).map((text, i) => ({ number: i + 1, text })),
@@ -133,7 +136,7 @@ const PRESENTERS: PresenterEntry[] = [
             truncated: all.length > 400,
           }
         }
-        return { card: 'generic', summary: asStr(r.summary) || `${path} 已读取` }
+        return { card: 'generic', summary: asStr(r.summary) || `${shortPathOf(path)} 已读取` }
       },
     },
   },
@@ -149,7 +152,7 @@ const PRESENTERS: PresenterEntry[] = [
         const content = asStr(a.content)
         return {
           card: 'write',
-          title: `写入 ${path}`,
+          title: `写入 ${shortPathOf(path)}`,
           kind: 'edit',
           changes: [computeChanges(path, null, content)],
           locations: [{ path }],
@@ -163,7 +166,7 @@ const PRESENTERS: PresenterEntry[] = [
         if (err) return { card: 'generic', summary: err, isError: true }
         return {
           card: 'write',
-          summary: asStr(r.summary) || `${path} 已写入`,
+          summary: asStr(r.summary) || `${shortPathOf(path)} 已写入`,
           changes: [computeChanges(path, null, asStr(a.content))],
           dryRun: r.dryRun === true,
         }
@@ -181,7 +184,7 @@ const PRESENTERS: PresenterEntry[] = [
         const path = asStr(a.path)
         return {
           card: 'write',
-          title: `编辑 ${path}`,
+          title: `编辑 ${shortPathOf(path)}`,
           kind: 'edit',
           changes: [computeChanges(path, asStr(a.oldStr), asStr(a.newStr))],
           locations: [{ path }],
@@ -196,7 +199,7 @@ const PRESENTERS: PresenterEntry[] = [
         const replacements = asNum(r.replacements) ?? 0
         return {
           card: 'write',
-          summary: `已编辑 ${path} · ${replacements} 处替换`,
+          summary: `已编辑 ${shortPathOf(path)} · ${replacements} 处替换`,
           changes: [computeChanges(path, asStr(a.oldStr), asStr(a.newStr))],
         }
       },

@@ -9,6 +9,7 @@
  * ============================================================ */
 import { useTranslation } from 'react-i18next'
 import { Icon } from '../../icons'
+import { baseNameOf } from '@shared/utils/path-display'
 
 export interface CloseGuardPromptProps {
   /** 有未保存改动的文件路径列表 */
@@ -21,7 +22,7 @@ export interface CloseGuardPromptProps {
 export function CloseGuardPrompt({ paths, onSave, onDiscard, onCancel }: CloseGuardPromptProps) {
   const { t } = useTranslation()
   const first = paths[0] ?? ''
-  const name = first.split('/').pop() ?? first
+  const name = baseNameOf(first)
 
   return (
     <div

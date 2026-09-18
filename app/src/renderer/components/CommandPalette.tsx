@@ -122,6 +122,7 @@ export function CommandPalette() {
   const storeFiles = useStore((s) => s.files)
   const createTask = useStore((s) => s.createTask)
   const exportConversation = useStore((s) => s.exportConversation)
+  const copyConversation = useStore((s) => s.copyConversation)
 
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
@@ -267,6 +268,13 @@ export function CommandPalette() {
         action: () => setSelectedActivity('automations'),
       },
       {
+        id: 'copy-conversation',
+        label: t('palette.command.copyConversation'),
+        icon: 'Copy',
+        section: 'command',
+        action: () => void copyConversation(),
+      },
+      {
         id: 'export-conversation',
         label: t('palette.command.exportConversation'),
         icon: 'Download',
@@ -341,7 +349,7 @@ export function CommandPalette() {
       // 文件
       ...fileItems,
     ] as PaletteItem[]
-  }, [storeTasks, storeAgents, storeSkills, storeFiles, selectTask, setSelectedAgent, setSelectedActivity, toggleLeftNav, toggleRightDock, openModulePage, closeModulePage, setSettingsOpen, setSettingsTab, setQuickOpenOpen, openPreview, createTask, exportConversation, i18n.language])
+  }, [storeTasks, storeAgents, storeSkills, storeFiles, selectTask, setSelectedAgent, setSelectedActivity, toggleLeftNav, toggleRightDock, openModulePage, closeModulePage, setSettingsOpen, setSettingsTab, setQuickOpenOpen, openPreview, createTask, exportConversation, copyConversation, i18n.language])
 
   // 根据前缀过滤 + 模糊评分排序
   const filtered = useMemo(() => {

@@ -300,10 +300,29 @@ test('v0.18.0 seed.ts: 不再含强制 todo-update 文案', () => {
   assert.match(seedSrc, /也调\s*todo-update/, '应保留 todo-update 作为显式推进入口')
 })
 
-test('v0.25.0 seed.ts: 内置 Agent 升级到 0.25.0', () => {
-  // BUILTIN_AGENTS 的 version 字段应含 0.25.0
-  const matches = seedSrc.match(/version:\s*['"]0\.25\.0['"]/g)
-  assert.ok(matches && matches.length >= 2, `@default + @coder 都应保持 0.25.0（实际 ${matches?.length ?? 0}）`)
+test('v0.25.0 seed.ts: 内置 Agent 带 version 字段（升级判定真源）', () => {
+  // version 是 syncBuiltinAgentsToLatest 判定「是否落后」的唯一依据。
+  // v0.34.1 起 @coder 升到 0.34.1（更名必须升版本才会同步），因此这里不再钉死
+  // 具体版本号，只钉「每个内置 agent 都有语义化版本」。
+  const versions = seedSrc.match(/version:\s*['"](\d+\.\d+\.\d+)['"]/g) ?? []
+  assert.ok(versions.length >= 2, `内置 Agent 都应带 version（实际 ${versions.length}）`)
+})
+
+test('v0.34.1 seed.ts: 内置 Agent 更名后必须同步 name（否则存量用户「名实不符」）', () => {
+  // 教训：此前 syncBuiltinAgentsToLatest 同步了 description 却漏了 name ——
+  // 内置 agent 更名（Coding → 文档驱动Coding）在存量机器上永远不生效，
+  // 界面是旧名、描述是新的。name 必须进同步清单。
+  const fn = seedSrc.slice(seedSrc.indexOf('async function syncBuiltinAgentsToLatest'))
+  const body = fn.slice(0, fn.indexOf('\n}'))
+  assert.match(body, /name:\s*latest\.name/, '同步清单必须包含 name')
+  assert.match(body, /systemPrompt:\s*latest\.systemPrompt/)
+  assert.match(body, /version:\s*latest\.version/, 'version 必须同步，否则下次仍判定为落后')
+})
+
+test('v0.34.1 seed.ts: 内置 Agent 含 @java-coder（Java 编码智能体）', () => {
+  assert.match(seedSrc, /id:\s*'@java-coder'/, '应内置 Java 编码智能体')
+  assert.match(seedSrc, /name:\s*'Java Coding'/)
+  assert.match(seedSrc, /name:\s*'文档驱动Coding'/, '@coder 应更名为「文档驱动Coding」')
 })
 
 test('v0.19.0 seed.ts: 使用 syncBuiltinAgentsToLatest 统一同步', () => {

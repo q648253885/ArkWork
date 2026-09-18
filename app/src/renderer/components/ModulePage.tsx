@@ -20,6 +20,8 @@ import { MemoryPanel } from './panels/MemoryPanel'
 import { AgentsPanel } from './panels/AgentsPanel'
 import { AbilitiesPanel } from './panels/AbilitiesPanel'
 import { SettingsContent } from './SettingsContent'
+// v0.33.0：工作台中心（工作台 / 插件 / 诊断）
+import { WorkbenchCenter } from './workbench/WorkbenchCenter'
 
 import type { TFunction } from 'i18next'
 
@@ -36,6 +38,9 @@ function getModuleMeta(t: TFunction): Record<
     kb:          { title: t('modulepage.kb.title'), subtitle: t('modulepage.kb.subtitle'),              icon: 'Book',  shortcut: '⌘3' },
     memory:      { title: t('modulepage.memory.title'),   subtitle: t('modulepage.memory.subtitle'),               icon: 'Brain', shortcut: '⌘4' },
     settings:    { title: t('modulepage.settings.title'),   subtitle: t('modulepage.settings.subtitle'), icon: 'Settings', shortcut: '⌘,' },
+    // v0.33.0：工作台中心（工作台 / 插件 / 诊断三子页）—— 配置能力的宿主页。
+    // 快捷键是 ⌘7（⌘⇧K 已被编辑器 deleteLine 占用，见 keymap/spec.ts 的注记）
+    workbench:   { title: t('modulepage.workbench.title'), subtitle: t('modulepage.workbench.subtitle'), icon: 'Workspace', shortcut: '⌘7' },
   }
 }
 
@@ -144,6 +149,10 @@ function ModuleBody({ page }: { page: ModulePageId }) {
       // redesign-workspace-navigation Task 4：设置页面化 — 直接渲染正文，
       // 不再依赖 SettingsDialog 的 role=dialog / backdrop / modal。
       return <SettingsContent />
+    // v0.33.0：工作台中心（容器自带三个子页签；外层不再包 p-6 与 max-w，
+    // 由 WorkbenchCenter 自己控制内边距与宽度）
+    case 'workbench':
+      return <WorkbenchCenter />
     default:
       return null
   }

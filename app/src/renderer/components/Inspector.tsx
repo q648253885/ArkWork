@@ -1,31 +1,74 @@
 /* ============================================================
- * ArkWork — Inspector (fix-workspace-task-automation-memory Task 5 / IntelliJ-style tool window bar)
- * 右栏为最右侧垂直工具窗口栏：
- * - 标签固定 Todos / Context / Files / Logs / Browser / Terminal 顺序（独立 tools 已并入 ContextPanel）
- * - 标签栏始终贴在窗口最右边（即使内容折叠也常驻）
- * - 当前标签用左侧 accent 指示条 + 图标 + 文字表达选中态
- * - 内容面板在标签栏左侧展开，宽 280–480px 可拖
- * - 点击非激活标签 → 展开/切换；再次点击激活标签 → 仅折叠内容
- * - Browser 标签不可隐藏，保证可访问
- * - ⌥1~6 快捷键激活并展开对应标签（todos/context/files/logs/browser/terminal）
- * 设计文档：specs/fix-workspace-task-automation-memory §合并后的右侧工具窗口
+ * ArkWork — Inspector（右栏工具窗口栏 · v0.33.0 面板宿主化）
+ * 设计文档：docs/versions/v0.33.0/04-system-design.md §7.2
+ *           docs/versions/v0.33.0/03-interaction.md §「Inspector 面板 Tab 规格」
+ *
+ * 结构（自 IntelliJ 式垂直工具窗口栏演进）：
+ *  - 标签栏常驻窗口最右；内容面板在其左侧展开，宽 280–480px 可拖
+ *  - 内置六 Tab：Todos / Context / Files / Logs / Browser / Terminal
+ *  - ★ v0.33.0：**工作台与插件贡献的面板**（`ui.panel` 插槽）并入同一标签栏
+ *  - 点击非激活标签 → 展开/切换；再次点击激活标签 → 仅折叠内容
+ *  - Browser 不可隐藏（保证可访问）
+ *  - ⌥1~6 快捷键激活并展开对应内置标签
+ *
+ * ★ v0.33.0 三条新纪律（对齐 04-system-design.md §12）：
+ *  ① **顺序真源唯一 = manifest `position`**（`mergePanelOrder`）—— 用户偏好只
+ *     管辖内置六 Tab 的相对顺序，面板插入点只认 manifest，不引入第二真源；
+ *  ② **面板 Tab 不可拖拽、不可隐藏** —— 它不属于用户偏好域（同上）；
+ *  ③ **归属可见** —— 面板 Tab 的 title 来自贡献者，`PanelHost` 再标出插件 id。
  * ============================================================ */
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useStore, INSPECTOR_TAB_META, type InspectorTabId } from '../store'
+import { useStore, INSPECTOR_TAB_META, DEFAULT_INSPECTOR_TAB, type InspectorTabId, type InspectorTabRef } from '../store'
 import { Icon, type IconName } from '../icons'
 import { Tooltip } from './ui'
 import { FilesPanel } from './panels/FilesPanel'
 import { ContextPanel } from './dock/ContextPanel'
 import { BrowserPanel } from './dock/BrowserPanel'
-import { TodoPanel } from './dock/TodoPanel'
-// v0.30.0：任务面板（内部在无图时回落 TodoPanel）
 import { TaskPanel } from './dock/TaskPanel'
 import { LogsView } from './right/LogsView'
 // v0.27.0 r10-F14a：终端（输出查看器）纳入 Inspector —— 原 RightDock 宿主无挂载点
 import { TerminalPanel } from './dock/TerminalPanel'
+// v0.33.0：面板宿主（工作台 / 插件贡献的 ui.panel 插槽）
+import { PanelHost } from './vlib/PanelHost'
+import {
+  builtinTabsOf,
+  mergePanelOrder,
+  isPanelTabRef,
+  INSPECTOR_TAB_REFS,
+  type PanelTab,
+} from '@shared/utils/panel-model'
+// v0.34.0（D54）：插件面板溢出收纳 —— 竖排栏插件名称不超过 3 个
+import { splitPluginTabs, MAX_VISIBLE_PLUGIN_TABS } from '../utils/plugin-tab-overflow'
+// v0.34.0（D54）：展示名防御（未解析模板串 + 超长名）—— 竖排栏与面板宿主共用同一真源
+import { guardLabel } from '../utils/label-guard'
 
 const TOOL_BAR_WIDTH = 44 // 垂直标签栏宽度（保持紧凑、足够容纳 16px 图标 + 文字）
+
+/**
+ * v0.34.0（D54）：展示层防御（真源在 `utils/label-guard.ts`，此处转出便于既有调用点与测试复用）。
+ * 竖排栏用 `guardLabel`（模板防御 + 8 字符截断）。
+ */
+export { guardLabel }
+
+/** 内置 Tab 的内容分支（六项穷尽；面板走 PanelHost） */
+function BuiltinBody({ tab }: { tab: InspectorTabId }) {
+  switch (tab) {
+    case 'todos':
+      return <TaskPanel />
+    case 'context':
+      return <ContextPanel />
+    case 'files':
+      return <FilesPanel />
+    case 'logs':
+      return <LogsView />
+    case 'terminal':
+      return <TerminalPanel />
+    // Browser 单独处理（必须始终挂载，见下方说明）
+    case 'browser':
+      return null
+  }
+}
 
 export function Inspector() {
   const { t } = useTranslation()
@@ -40,17 +83,56 @@ export function Inspector() {
   const setInspectorTabOrder = useStore((s) => s.setInspectorTabOrder)
   const hideInspectorTab = useStore((s) => s.hideInspectorTab)
   const restoreInspectorTab = useStore((s) => s.restoreInspectorTab)
+  // v0.33.0：工作台 / 插件贡献的面板（来自 profile:slots 的 ui.panel 条目）
+  const profilePanels = useStore((s) => s.profilePanels)
 
-  // 标签点击状态机（Task 9：修复「折叠后再次点击无法弹起」回归）：
-  // - 折叠态：点击任意标签（含当前激活标签）→ 展开对应面板（无延迟失焦）
-  // - 展开态：点击当前激活标签 → 折叠内容面板（标签栏保留）
-  // - 展开态：点击非激活标签 → 仅切换内容面板
+  const isBuiltin = useCallback((ref: string): ref is InspectorTabId => {
+    return (INSPECTOR_TAB_REFS as readonly string[]).includes(ref)
+  }, [])
+
+  /* ---------- Tab 序列：内置（用户顺序）× 面板（manifest position） ---------- */
+  const visibleBuiltin = useMemo(
+    () => inspectorTabOrder.filter((t) => !hiddenInspectorTabs.includes(t)),
+    [inspectorTabOrder, hiddenInspectorTabs],
+  )
+  const tabs: PanelTab[] = useMemo(
+    () => mergePanelOrder(builtinTabsOf(visibleBuiltin), profilePanels),
+    [visibleBuiltin, profilePanels],
+  )
+  /* v0.34.0（D54）：插件面板可见上限 —— 内置全留，插件只留前 3 个，其余进「更多」弹层 */
+  const { visible: railTabs, hidden: overflowTabList } = useMemo(() => splitPluginTabs(tabs), [tabs])
+  const [overflowOpen, setOverflowOpen] = useState(false)
+  useEffect(() => {
+    if (!overflowOpen) return
+    const close = () => setOverflowOpen(false)
+    // 点击任意处关闭（capture 阶段，避免被内部点击 stopPropagation 拦掉）
+    window.addEventListener('mousedown', close)
+    window.addEventListener('keydown', close)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('keydown', close)
+    }
+  }, [overflowOpen])
+
+  /** 当前 Tab 的展示元信息（内置取 i18n，面板取贡献者标题） */
+  const currentTab = useMemo(() => tabs.find((x) => x.ref === inspectorTab) ?? null, [tabs, inspectorTab])
+  const currentLabel = currentTab
+    ? currentTab.builtin
+      ? t(currentTab.title)
+      : currentTab.title
+    : t(INSPECTOR_TAB_META[DEFAULT_INSPECTOR_TAB].label)
+
+  /* ---------- 标签点击状态机（Task 9：修复「折叠后再次点击无法弹起」回归） ----------
+   * - 折叠态：点击任意标签（含当前激活标签）→ 展开对应面板（无延迟失焦）
+   * - 展开态：点击当前激活标签 → 折叠内容面板（标签栏保留）
+   * - 展开态：点击非激活标签 → 仅切换内容面板 */
   const handleTabClick = useCallback(
-    (tab: InspectorTabId) => {
+    (tab: string) => {
+      const ref = tab as InspectorTabRef
       if (rightDockCollapsed) {
         // 折叠态优先展开：即使点的是当前激活标签，也必须弹起，
         // 否则会落入「tab === inspectorTab && collapsed → 无操作」的死区
-        setInspectorTab(tab)
+        setInspectorTab(ref)
         toggleRightDock()
         return
       }
@@ -60,7 +142,7 @@ export function Inspector() {
         return
       }
       // 展开态点击非激活标签 → 切换内容，不折叠
-      setInspectorTab(tab)
+      setInspectorTab(ref)
     },
     [inspectorTab, rightDockCollapsed, setInspectorTab, toggleRightDock],
   )
@@ -84,12 +166,10 @@ export function Inspector() {
     [rightDockWidth, setRightDockWidth],
   )
 
-  // v0.17.0 F13：Tab 拖动重排 + 拖出隐藏
+  /* ---------- v0.17.0 F13：Tab 拖动重排 + 拖出隐藏（**仅内置**） ---------- */
   const [dragOverTab, setDragOverTab] = useState<InspectorTabId | null>(null)
   const draggedRef = useRef<InspectorTabId | null>(null)
   const didDropRef = useRef(false)
-
-  const visibleTabs = inspectorTabOrder.filter((t) => !hiddenInspectorTabs.includes(t))
 
   const handleDragStart = useCallback((e: React.DragEvent, tab: InspectorTabId) => {
     draggedRef.current = tab
@@ -98,15 +178,12 @@ export function Inspector() {
     e.dataTransfer.setData('text/plain', tab)
   }, [])
 
-  const handleDragOver = useCallback(
-    (e: React.DragEvent, tab: InspectorTabId) => {
-      if (!draggedRef.current || draggedRef.current === tab) return
-      e.preventDefault()
-      e.dataTransfer.dropEffect = 'move'
-      setDragOverTab(tab)
-    },
-    [],
-  )
+  const handleDragOver = useCallback((e: React.DragEvent, tab: InspectorTabId) => {
+    if (!draggedRef.current || draggedRef.current === tab) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDragOverTab(tab)
+  }, [])
 
   const handleDrop = useCallback(
     (e: React.DragEvent, tab: InspectorTabId) => {
@@ -148,7 +225,7 @@ export function Inspector() {
       <div
         id={`inspector-panel-${inspectorTab}`}
         role="tabpanel"
-        aria-label={t(INSPECTOR_TAB_META[inspectorTab].label)}
+        aria-label={currentLabel}
         aria-hidden={rightDockCollapsed}
         className="responsive-inspector-panel relative flex flex-col h-full bg-bg-base border-l border-border-subtle flex-shrink-0"
         style={{
@@ -201,12 +278,10 @@ export function Inspector() {
             >
               <BrowserPanel />
             </div>
-            {inspectorTab === 'todos' && <TaskPanel />}
-            {inspectorTab === 'context' && <ContextPanel />}
-            {inspectorTab === 'files' && <FilesPanel />}
-            {inspectorTab === 'logs' && <LogsView />}
-        {/* v0.27.0 r10-F14a：终端（输出查看器）—— F14 文案宿主，原 RightDock 无挂载点 */}
-        {inspectorTab === 'terminal' && <TerminalPanel />}
+            {/* 内置面板：按 ref 分支渲染 */}
+            {isBuiltin(inspectorTab) && inspectorTab !== 'browser' && <BuiltinBody tab={inspectorTab} />}
+            {/* v0.33.0：工作台 / 插件贡献的面板（四态渲染 + 组件白名单） */}
+            {!isBuiltin(inspectorTab) && currentTab && !currentTab.builtin && <PanelHost tab={currentTab} />}
           </div>
         </div>
       </div>
@@ -219,29 +294,48 @@ export function Inspector() {
         className="inspector-toolbar"
         style={{ width: TOOL_BAR_WIDTH }}
       >
-        {visibleTabs.map((tab) => {
-          const meta = INSPECTOR_TAB_META[tab]
-          const active = tab === inspectorTab
-          const TabIcon = Icon[meta.icon as IconName] ?? Icon.Dot
-          const isDragOver = dragOverTab === tab
+        {railTabs.map((tab) => {
+          const builtin = tab.builtin
+          const meta = builtin ? INSPECTOR_TAB_META[tab.ref as InspectorTabId] : null
+          const label = builtin && meta ? t(meta.label) : tab.title
+          // v0.34.0（D54）：竖排栏展示名强制截断（含未解析模板串的情况），
+          // tooltip / aria 仍用完整的 label，信息不丢
+          const railLabel = builtin && meta ? label : guardLabel(label)
+          const iconName = builtin && meta ? meta.icon : (tab.icon ?? 'Plug')
+          const TabIcon = Icon[iconName as IconName] ?? Icon.Dot
+          const active = tab.ref === inspectorTab
+          const isDragOver = dragOverTab === tab.ref
+          // 面板 Tab 不参与拖拽重排/隐藏（纪律 ②）
+          const draggable = builtin && isBuiltin(tab.ref)
           return (
-            <Tooltip key={tab} label={t(meta.label)} kbd={meta.shortcut} placement="left" delay={150}>
+            <Tooltip
+              key={tab.ref}
+              label={tab.pluginId ? t('inspector.panelTabTooltip', { label, id: tab.pluginId }) : label}
+              kbd={meta?.shortcut}
+              placement="left"
+              delay={150}
+            >
               <button
                 role="tab"
                 aria-selected={active}
                 aria-expanded={active && !rightDockCollapsed}
-                aria-controls={`inspector-panel-${tab}`}
+                aria-controls={`inspector-panel-${tab.ref}`}
                 data-active={active}
-                aria-label={t('inspector.tabAria', { label: t(meta.label), kbd: meta.shortcut })}
-                onClick={() => handleTabClick(tab)}
-                draggable
-                onDragStart={(e) => handleDragStart(e, tab)}
-                onDragOver={(e) => handleDragOver(e, tab)}
-                onDrop={(e) => handleDrop(e, tab)}
-                onDragEnd={handleDragEnd}
+                data-panel-tab={isPanelTabRef(tab.ref) ? 'true' : undefined}
+                aria-label={
+                  meta
+                    ? t('inspector.tabAria', { label, kbd: meta.shortcut })
+                    : t('inspector.panelTabAria', { label })
+                }
+                onClick={() => handleTabClick(tab.ref)}
+                draggable={draggable}
+                onDragStart={draggable ? (e) => handleDragStart(e, tab.ref as InspectorTabId) : undefined}
+                onDragOver={draggable ? (e) => handleDragOver(e, tab.ref as InspectorTabId) : undefined}
+                onDrop={draggable ? (e) => handleDrop(e, tab.ref as InspectorTabId) : undefined}
+                onDragEnd={draggable ? handleDragEnd : undefined}
                 className="inspector-toolbar__item"
                 style={{
-                  cursor: 'grab',
+                  cursor: draggable ? 'grab' : 'pointer',
                   ...(isDragOver
                     ? { outline: '1px dashed var(--accent)', outlineOffset: '-2px' }
                     : null),
@@ -249,13 +343,67 @@ export function Inspector() {
               >
                 <span className="inspector-toolbar__indicator" aria-hidden="true" />
                 <TabIcon width={16} height={16} aria-hidden="true" className="flex-shrink-0" />
-                <span className="inspector-toolbar__label">{t(meta.label)}</span>
+                <span className="inspector-toolbar__label">{railLabel}</span>
               </button>
             </Tooltip>
           )
         })}
 
-        {/* v0.17.0 F13：已隐藏区 — 被拖出的 Tab 收纳于此，点击恢复 */}
+        {/* v0.34.0（D54）：插件面板溢出收纳 —— 超过 3 个时其余收进「更多」弹层 */}
+        {overflowTabList.length > 0 && (
+          <div className="relative mt-1 pt-2 border-t border-border-subtle px-1">
+            <Tooltip
+              label={t('inspector.morePluginTabs', { count: overflowTabList.length })}
+              placement="left"
+              delay={150}
+            >
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={overflowOpen}
+                aria-label={t('inspector.morePluginTabsAria', { count: overflowTabList.length })}
+                onClick={() => setOverflowOpen((v) => !v)}
+                className="w-full flex items-center justify-center h-9 rounded-sm text-text-tertiary hover:text-text-primary hover:bg-bg-hover transition-all focus-ring"
+                data-testid="inspector-more-plugin-tabs"
+              >
+                <Icon.MoreHorizontal width={14} height={14} aria-hidden="true" />
+              </button>
+            </Tooltip>
+            {overflowOpen && (
+              <div
+                role="menu"
+                aria-label={t('inspector.morePluginTabsAria', { count: overflowTabList.length })}
+                data-testid="inspector-plugin-tabs-menu"
+                className="absolute right-full top-0 mr-1 z-50 min-w-[160px] max-w-[240px] rounded-md border border-border-subtle bg-bg-overlay shadow-panel py-1"
+              >
+                {overflowTabList.map((tab) => {
+                  const TabIcon = Icon[(tab.icon ?? 'Plug') as IconName] ?? Icon.Dot
+                  const active = tab.ref === inspectorTab
+                  return (
+                    <button
+                      key={tab.ref}
+                      type="button"
+                      role="menuitem"
+                      data-active={active}
+                      onClick={() => {
+                        setInspectorTab(tab.ref as InspectorTabRef)
+                        if (rightDockCollapsed) toggleRightDock()
+                        setOverflowOpen(false)
+                      }}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
+                    >
+                      <TabIcon width={14} height={14} aria-hidden="true" className="flex-shrink-0" />
+                      <span className="truncate">{tab.title}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* v0.17.0 F13：已隐藏区 — 被拖出的**内置** Tab 收纳于此，点击恢复。
+            v0.33.0：面板 Tab 不参与隐藏，因此这里天然只列内置。 */}
         {hiddenInspectorTabs.length > 0 && (
           <div
             className="mt-1 pt-2 border-t border-border-subtle flex flex-col gap-1 px-1"

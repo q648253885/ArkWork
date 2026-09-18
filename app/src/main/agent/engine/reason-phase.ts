@@ -226,6 +226,20 @@ export async function runReasonPhase(
   try {
     response = await callLlmWithRetry(() => callTurnLlm(), signal)
 
+    // v0.34.x 多协议空响应防御（用户实测 qwen3.5:9b @ Ollama，多协议复测）：
+    // 端点偶发返回「全空回合」—— content/thought/actions 全空（只吐一对空
+    // `<think></think>`、网关毛刺、流被无声掐断后 D35 归 interrupted 等）。
+    // 若原样放行会烧掉一个迭代并进入无工具守卫的提示注入循环，实测连烧
+    // 100+ 轮。此处最多补试 2 次（瞬时毛刺就地消化）；finish=length 交给
+    // 下方专用重试（提额 8192），不在此消耗补试次数。
+    if (response.finishReason !== 'length' && !signal.aborted && isIncompleteLlmResponse(response)) {
+      for (let emptyRetry = 1; emptyRetry <= 2; emptyRetry++) {
+        logger.warn('Agent', `empty LLM response (no content/thought/action) — empty-retry ${emptyRetry}/2`, task.id)
+        response = await callLlmWithRetry(() => callTurnLlm(), signal)
+        if (signal.aborted || response.finishReason === 'length' || !isIncompleteLlmResponse(response)) break
+      }
+    }
+
     // v0.15.0 Task 5：思考模型输出预算被思考耗尽（finish=length + content 空 + 无 tool action）
     // → 提高 maxTokens 到 8192 重试一次；仍空则注入占位答复，避免任务静默 done 且无内容。
     if (

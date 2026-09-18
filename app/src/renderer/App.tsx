@@ -31,6 +31,8 @@ import { PreviewWindow } from './components/preview/PreviewWindow'
 import { QuickOpen } from './components/QuickOpen'
 import { HelpCenter } from './components/HelpCenter'
 import { ToolConfirmLayer } from './components/ToolConfirmLayer'
+// v0.33.0：工作台主题覆盖（只覆盖已存在 token，见 utils/profile-theme.ts 的纪律）
+import { applyResolvedTheme, clearThemeOverride } from './utils/profile-theme'
 
 export default function App() {
   const { t } = useTranslation()
@@ -57,6 +59,17 @@ export default function App() {
     const unsub = subscribeAll()
     return unsub
   }, [init, subscribeAll])
+
+  // v0.33.0：工作台主题覆盖的落地与回滚。
+  // 依赖 = 覆盖表 + 当前主题：任何一个变化都「先清上次写的键、再写新值」；
+  // 卸载时清全部（App 卸载即页面销毁，这里主要是 React StrictMode 双挂载下的对称性）。
+  // 细节纪律见 `utils/profile-theme.ts`（removeProperty 而非置空串）。
+  const themeOverrides = useStore((s) => s.themeOverrides)
+  const resolvedTheme = useStore((s) => s.resolvedTheme)
+  useEffect(() => {
+    const { applied } = applyResolvedTheme(themeOverrides, resolvedTheme === 'dark')
+    return () => clearThemeOverride(Object.keys(applied))
+  }, [themeOverrides, resolvedTheme])
 
   // 全局快捷键（v0.31.0 B0：中央化到 renderer/keymap 注册表）
   //

@@ -19,6 +19,7 @@ import {
   type ProfileAgentDecl,
   type ProfileAutoDecl,
   type ProfileCapabilityDecl,
+  type ProfileDockPanelDecl,
   type ProfileRequirements,
   type ProfileSource,
   type ProfileUiDecl,
@@ -26,6 +27,8 @@ import {
   type ValidationIssue,
   type WorkbenchProfile,
 } from '@shared/types/profile'
+import { isRendererKind } from '@shared/types/vlib'
+import { sanitizeThemeTokens } from './theme-tokens.js'
 
 /** 继承链深度上限（= 允许的 extends 跳数；链长即认知负担） */
 export const MAX_EXTENDS_DEPTH = 2
@@ -288,20 +291,106 @@ export function parseManifest(raw: unknown, source: ProfileSource): ParseResult 
         ui.dockTabs = tabs.filter((t) => (PROFILE_DOCK_TABS as readonly string[]).includes(t)) as DockTabIdList
       }
     }
-    if (raw.ui.homeModule !== undefined) {
-      if (!isStr(raw.ui.homeModule) || !(PROFILE_HOME_MODULES as readonly string[]).includes(raw.ui.homeModule)) {
-        issues.push(
-          issue('V1', 'error', '$.ui.homeModule', `homeModule 取值不合法：${String(raw.ui.homeModule)}`, `可选：${PROFILE_HOME_MODULES.join(' / ')}`),
-        )
+
+    /* ---- ★ v0.33.0：ui.dockPanels（开放面板引用） ---- */
+    if (raw.ui.dockPanels !== undefined) {
+      if (!Array.isArray(raw.ui.dockPanels)) {
+        issues.push(issue('V1', 'warning', '$.ui.dockPanels', 'dockPanels 应为数组，已忽略'))
       } else {
-        ui.homeModule = raw.ui.homeModule as ProfileUiDecl['homeModule']
+        const out: ProfileDockPanelDecl[] = []
+        raw.ui.dockPanels.forEach((d, i) => {
+          const p = `$.ui.dockPanels[${i}]`
+          if (!isObj(d)) {
+            issues.push(issue('V1', 'error', p, '数组元素必须是对象'))
+            return
+          }
+          if (d.slot !== 'inspector') {
+            issues.push(issue('V1', 'error', `${p}.slot`, `slot 目前只支持 "inspector"（收到 ${JSON.stringify(d.slot)}）`, '改为 "inspector"'))
+          }
+          if (!isStr(d.panelRef)) {
+            issues.push(issue('V1', 'error', `${p}.panelRef`, 'panelRef 必填，形如 "panel:watchlist"', '例如 "panel:watchlist"'))
+          }
+          let position: number | undefined
+          if (d.position !== undefined) {
+            if (typeof d.position !== 'number' || !Number.isInteger(d.position) || d.position < 0) {
+              issues.push(issue('V1', 'error', `${p}.position`, 'position 必须是非负整数（0 = 置顶于内置面板之前）', '例如 2'))
+            } else {
+              position = d.position
+            }
+          }
+          if (d.slot === 'inspector' && isStr(d.panelRef)) {
+            out.push({ slot: 'inspector', panelRef: d.panelRef, position })
+          }
+        })
+        if (out.length > 0) ui.dockPanels = out
       }
     }
+
+    /* ---- ui.homeModule：v0.33.0 起放宽为 string（内置名 或 'module:<id>'） ---- */
+    if (raw.ui.homeModule !== undefined) {
+      if (!isStr(raw.ui.homeModule)) {
+        issues.push(issue('V1', 'error', '$.ui.homeModule', 'homeModule 必须是非空字符串', `内置可选：${PROFILE_HOME_MODULES.join(' / ')}；插件模块写 "module:<id>"`))
+      } else {
+        ui.homeModule = raw.ui.homeModule
+      }
+    }
+
     if (raw.ui.composerChips !== undefined) {
       if (!Array.isArray(raw.ui.composerChips)) {
         issues.push(issue('V1', 'warning', '$.ui.composerChips', 'composerChips 应为字符串数组，已忽略'))
       } else {
         ui.composerChips = raw.ui.composerChips.filter(isStr).slice(0, 8)
+      }
+    }
+
+    /* ---- ★ v0.33.0：ui.previewRenderers ---- */
+    if (raw.ui.previewRenderers !== undefined) {
+      if (!isObj(raw.ui.previewRenderers)) {
+        issues.push(issue('V1', 'warning', '$.ui.previewRenderers', 'previewRenderers 应为对象（{ "<ext>": "<RendererKind>" }），已忽略'))
+      } else {
+        const out: Record<string, string> = {}
+        for (const [k, v] of Object.entries(raw.ui.previewRenderers)) {
+          const p = `$.ui.previewRenderers.${k}`
+          if (!/^[a-z0-9]+$/.test(k)) {
+            issues.push(issue('V1', 'error', p, `扩展名键 "${k}" 必须全小写字母数字且不含点`, '例如 "kchart"'))
+            continue
+          }
+          if (!isStr(v)) {
+            issues.push(issue('V1', 'error', p, '渲染器类型必须是非空字符串', '例如 "table"'))
+            continue
+          }
+          out[k] = v
+        }
+        if (Object.keys(out).length > 0) ui.previewRenderers = out
+      }
+    }
+
+    /* ---- ★ v0.33.0：ui.actionExtensions（只登记） ---- */
+    if (raw.ui.actionExtensions !== undefined) {
+      if (!Array.isArray(raw.ui.actionExtensions)) {
+        issues.push(issue('V1', 'warning', '$.ui.actionExtensions', 'actionExtensions 应为字符串数组，已忽略'))
+      } else {
+        const out = raw.ui.actionExtensions.filter(isStr)
+        if (out.length > 0) ui.actionExtensions = out
+      }
+    }
+
+    /* ---- ★ v0.33.0：ui.theme（结构在 V1、合法性在 V2 —— 见 validateReferences） ---- */
+    if (raw.ui.theme !== undefined) {
+      if (!isObj(raw.ui.theme)) {
+        issues.push(issue('V1', 'warning', '$.ui.theme', 'theme 应为对象（{ light, dark }），已忽略'))
+      } else {
+        const out: { light: Record<string, string>; dark: Record<string, string> } = { light: {}, dark: {} }
+        for (const g of ['light', 'dark'] as const) {
+          const grp = raw.ui.theme[g]
+          if (grp === undefined) continue
+          if (!isObj(grp)) {
+            issues.push(issue('V1', 'warning', `$.ui.theme.${g}`, `${g} 应为对象，已忽略`))
+            continue
+          }
+          for (const [k, v] of Object.entries(grp)) if (typeof v === 'string') out[g][k] = v
+        }
+        if (Object.keys(out.light).length > 0 || Object.keys(out.dark).length > 0) ui.theme = out
       }
     }
   }
@@ -480,9 +569,26 @@ export function validateReferences(
   profile.capabilities.forEach((c, i) => {
     const p = `$.capabilities[${i}].ref`
     if (c.type === 'panel') {
-      issues.push(
-        issue('V2', 'warning', p, `面板插件 ${c.ref} 在 v1 只登记不挂载（宿主垂直组件库尚未开放）`, '该能力不会生效，激活报告会记为降级'),
-      )
+      // ★ v0.33.0：面板能力**真解析**（缺陷 D43 —— 此前恒报「只登记不挂载」，
+      // 导致声明 required 面板的工作台永远激活不了）。
+      // `ctx.panels === undefined` 时无法判定 → 跳过（保持既有单测构造的 ctx 可用）。
+      if (ctx.panels === undefined) {
+        issues.push(
+          issue('V2', 'warning', p, `未提供面板清单，跳过「${c.ref}」的引用闭合校验`, '由激活器传入 panels 上下文即可校验'),
+        )
+        return
+      }
+      if (!refResolves(c.ref, ctx.panels)) {
+        if (c.required) {
+          issues.push(
+            issue('V2', 'error', p, `必需面板 ${c.ref} 未安装或未启用`, `去工作台中心的「插件」页启用提供该面板的插件，或把 required 改为 false`),
+          )
+        } else {
+          issues.push(
+            issue('V2', 'warning', p, `面板 ${c.ref} 未安装或未启用（非必需）`, '将走「部分激活」：该面板不出现并记入激活报告'),
+          )
+        }
+      }
       return
     }
     const pool = c.type === 'mcp' ? ctx.mcpServers : ctx.skills
@@ -498,6 +604,78 @@ export function validateReferences(
         )
       }
     }
+  })
+
+  /* ============================================================
+   * ★ v0.33.0：V2 扩展 —— ui 层的引用闭合
+   * ============================================================ */
+
+  // ---- V2 · ui.dockPanels[].panelRef 必须能解析 ----
+  const dockPanels = profile.ui.dockPanels ?? []
+  if (ctx.panels !== undefined) {
+    dockPanels.forEach((d, i) => {
+      if (!refResolves(d.panelRef, ctx.panels!)) {
+        issues.push(
+          issue(
+            'V2',
+            // v0.34.0（D55）：原为 error（**硬阻断激活**）—— 这是两层语义不一致：
+            // `composeProfile` 对同一情形是「ui 层降级（非阻断）」（TC-PACT-017 明确断言），
+            // 而激活入口却因 error 直接 `ok:false` 拒绝整个台。
+            // 真实后果（Windows/本机实测）：插件是可**由用户随时关掉**的可选项，
+            // 一旦某个 profile 引用了它的面板，用户关掉插件后该台就**切不过去**了 ——
+            // 引用闭合的严格性换来的是「配置陷阱」，不是安全性。
+            // 现降为 warning：照常激活 + 该面板不产出条目 + 记入 degraded（「不静默半死」）。
+            'warning',
+            `$.ui.dockPanels[${i}].panelRef`,
+            `面板 ${d.panelRef} 未安装或未启用 —— 该面板将不显示（其余装配照常）`,
+            '到「能力 → 插件」启用提供该面板的插件；或从 dockPanels 里删掉这一项',
+          ),
+        )
+      }
+    })
+  }
+
+  // ---- V2 · ui.previewRenderers 的值必须是合法 RendererKind ----
+  for (const [ext, kind] of Object.entries(profile.ui.previewRenderers ?? {})) {
+    if (!isRendererKind(kind)) {
+      issues.push(
+        issue('V2', 'error', `$.ui.previewRenderers.${ext}`, `未知渲染器类型「${kind}」`, '取值见宿主渲染器白名单（markdown / code / table / …）'),
+      )
+    }
+  }
+
+  // ---- V2 · ui.theme token 合法性（只覆盖不新增） ----
+  if (profile.ui.theme) {
+    const { rejected } = sanitizeThemeTokens(profile.ui.theme)
+    for (const r of rejected) {
+      issues.push(
+        issue('V2', 'error', `$.ui.theme.${r.group}.${r.key}`, `主题 token 不合法：${r.reason}`, '键必须形如 --x-y，值只允许颜色或 px/rem/em/%'),
+      )
+    }
+  }
+
+  // ---- V2 · ui.homeModule 必须是内置模块名或已注册的 module: 引用 ----
+  if (profile.ui.homeModule) {
+    const builtinOk = (PROFILE_HOME_MODULES as readonly string[]).includes(profile.ui.homeModule)
+    if (!builtinOk) {
+      const known = ctx.homeModules
+      if (known !== undefined && !refResolves(profile.ui.homeModule, known)) {
+        issues.push(
+          issue('V2', 'warning', '$.ui.homeModule', `首页模块 ${profile.ui.homeModule} 未注册`, '启用提供该模块的插件，或改用内置模块名'),
+        )
+      } else if (known === undefined && !/^module:[\w.-]+$/.test(profile.ui.homeModule)) {
+        issues.push(
+          issue('V2', 'error', '$.ui.homeModule', `homeModule 取值不合法：${profile.ui.homeModule}`, `内置可选：${PROFILE_HOME_MODULES.join(' / ')}；插件模块写 "module:<id>"`),
+        )
+      }
+    }
+  }
+
+  // ---- V2 · ui.actionExtensions（v0.33.0 只入槽登记，消费端未接线 → 只给提示） ----
+  ;(profile.ui.actionExtensions ?? []).forEach((a, i) => {
+    issues.push(
+      issue('V2', 'warning', `$.ui.actionExtensions[${i}]`, `动作扩展 ${a} 已登记但本版消费端未接线`, '该动作暂不会出现在任何 UI；见遗留 L-33-03'),
+    )
   })
 
   // ---- V4 内部闭合：automation.agent ⊆ agents ----
@@ -522,6 +700,49 @@ export function validateReferences(
   if (chips.length > 0 && chips.some((c) => c.length > 24)) {
     issues.push(issue('V1', 'warning', '$.ui.composerChips', 'composerChips 单项超过 24 字，界面会被撑破', '缩短文案'))
   }
+
+  /* ============================================================
+   * ★ v0.33.0：V5 落地 —— 合并后的面板位次与渲染器扩展名冲突
+   *
+   * 注意：这里收到的是**合并后**的 profile（继承链已展开），因此
+   * 「两个来源」表现为两个 panelRef —— 无法再区分父子包，故错误消息
+   * 同时提示「可能在父包或本包」，把判断权交回用户。
+   * ============================================================ */
+
+  // ---- V5 · 同 slot 同 position 的面板 ----
+  const byPosition = new Map<number, string[]>()
+  for (const d of profile.ui.dockPanels ?? []) {
+    if (d.position === undefined) continue
+    const arr = byPosition.get(d.position) ?? []
+    arr.push(d.panelRef)
+    byPosition.set(d.position, arr)
+  }
+  for (const [pos, refs] of byPosition) {
+    if (refs.length > 1) {
+      issues.push(
+        issue(
+          'V5',
+          'error',
+          '$.ui.dockPanels',
+          `position ${pos} 上有多个面板：${refs.join(' / ')}（两个来源可能在父包或本包）`,
+          '给其中一个改一个不同的 position（面板插槽位次必须唯一）',
+        ),
+      )
+    }
+  }
+
+  // ---- V5 · 同一 panelRef 重复声明 ----
+  const refSeen = new Map<string, number>()
+  ;(profile.ui.dockPanels ?? []).forEach((d, i) => {
+    const prev = refSeen.get(d.panelRef)
+    if (prev !== undefined) {
+      issues.push(
+        issue('V5', 'error', `$.ui.dockPanels[${i}].panelRef`, `面板 ${d.panelRef} 重复声明（与第 ${prev + 1} 项冲突）`, '同一面板只能声明一次'),
+      )
+    } else {
+      refSeen.set(d.panelRef, i)
+    }
+  })
 
   // ---- V5 能力去重（同 type:ref 只允许一次）----
   const seen = new Map<string, number>()

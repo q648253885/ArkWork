@@ -53,6 +53,12 @@ import type { ConflictInfo, EditorDocMeta } from '@shared/types/fs'
 // v0.31.0 B3：交互区展示模型（层级骨架）
 import type { FlowViewMode } from '@shared/types/flow'
 import type { SaveOutcome } from '../services/editorDoc'
+// v0.33.0：面板 Tab（来自 shared 纯函数层，保证与 main 侧同一套归一规则）
+import type { PanelTab } from '@shared/utils/panel-model'
+import type { SlotEntry, SlotKind } from '@shared/types/profile'
+import type { PluginSummary } from '@shared/types/plugin'
+import type { ThemeTokens } from '@shared/utils/theme-tokens'
+import type { RendererKindName } from '@shared/types/vlib'
 import type {
   ConversationItem,
   Automation,
@@ -77,7 +83,9 @@ export type PickerKind = 'agent' | 'skill' | 'mcp' | 'model'
  *    当前 Task 3 由 Sidebar 单击直达触发；Task 4 将在 ModulePage.tsx 中
  *    接入 Settings 五分区内容渲染。当前 ModuleBody 对 'settings' 返回
  *    占位引导，与 Task 4 工作面不冲突。 */
-export type ModulePage = 'automations' | 'skills' | 'agents' | 'kb' | 'memory' | 'settings'
+/** v0.33.0：新增 'workbench' —— 工作台中心（工作台 / 插件 / 诊断三子页）。
+ * 它是配置能力的宿主页，由 `components/workbench/WorkbenchCenter.tsx` 渲染。 */
+export type ModulePage = 'automations' | 'skills' | 'agents' | 'kb' | 'memory' | 'settings' | 'workbench'
 
 /** v0.11.0 F1102：设置弹窗 Tab（模型 / 工作区 / 知识库 / 外观 / 快捷键 / 高级）
  * Task 8：新增 'knowledge' Tab — 全局知识库开关（SettingsContent KnowledgeSection）。 */
@@ -92,6 +100,16 @@ export type SettingsTab = 'models' | 'workspace' | 'knowledge' | 'appearance' | 
  */
 export type InspectorTabId = 'todos' | 'context' | 'files' | 'logs' | 'browser' | 'terminal'
 
+/**
+ * v0.33.0：Inspector Tab 的**运行时引用**。
+ *
+ * 内置六项用 `InspectorTabId`；插件/工作台声明贡献的面板用 `panel:<name>`。
+ * 类型上是宽联合（模板字面量），值级校验由 `shared/utils/panel-model.ts` 的
+ * `isPanelTabRef` / `panelRefToInspectorTab` 负责 —— manifest 来自磁盘，
+ * 不能只靠类型把守。
+ */
+export type InspectorTabRef = InspectorTabId | `panel:${string}`
+
 export interface DockPrefs {
   tabs: DockTabId[]
   defaultTab: DockTabId
@@ -100,19 +118,25 @@ export interface DockPrefs {
 }
 export type ModelHealth = 'unconfigured' | 'ok' | 'missing' | 'disabled'
 /** v0.31.0 B2：新增 'editor' —— 语义是「这个 Tab 当前处于编辑态」（§3.5） */
-export type RendererKind =
-  | 'markdown'
-  | 'browser'
-  | 'code'
-  | 'image'
-  | 'svg'
-  | 'table'
-  | 'fallback'
-  | 'editor'
+/**
+ * v0.33.0：`RendererKind` 改为**派生**自 shared 的 `RENDERER_KIND_WHITELIST`
+ * （唯一真源）—— 插件清单校验（VP4）与 profile 校验（V2）都在纯函数层按值
+ * 判定合法性，纯函数层不能 import renderer 类型，因此白名单必须放在 shared。
+ * 这里保留原名导出，消费者零改动。
+ */
+export type RendererKind = RendererKindName
+export type { RendererKindName }
 
 export interface PreviewTab {
   id: string
-  target: { kind: 'file'; path: string } | { kind: 'url'; url: string }
+  /**
+   * v0.34.1：浮窗承载**插件面板**（此前浮窗只认 file / url）。
+   * `params` 参与面板 URL 的 `{{key}}` 替换 —— 行点击打开个股详情靠它。
+   */
+  target:
+    | { kind: 'file'; path: string }
+    | { kind: 'url'; url: string }
+    | { kind: 'panel'; panelRef: string; title: string; params?: Record<string, unknown> }
   renderer: RendererKind
   mode: 'preview' | 'pinned'
   viewMode?: string
@@ -263,9 +287,13 @@ export interface AppState {
   // ============================================================
   // fix-workspace-task-automation-memory Task 5 — Inspector（五固定 Tab，默认 Todos）
   // ============================================================
-  /** Inspector 当前选中 Tab（固定 5 个之一：todos / context / files / logs / browser） */
-  inspectorTab: InspectorTabId
-  setInspectorTab: (t: InspectorTabId) => void
+  /**
+   * Inspector 当前选中 Tab。
+   * v0.33.0 起类型放宽为 `InspectorTabRef` —— 面板 Tab（`panel:<name>`）与
+   * 内置六项共用同一字段；面板消失（插件被禁用）时由 `uiSlice` 回落内置默认。
+   */
+  inspectorTab: InspectorTabRef
+  setInspectorTab: (t: InspectorTabRef) => void
   /** v0.17.0 F13：可见 Tab 顺序（用户可拖动重排，持久化） */
   inspectorTabOrder: InspectorTabId[]
   /** v0.17.0 F13：被拖出隐藏的 Tab（收纳于工具栏底部「已隐藏」区） */
@@ -291,6 +319,14 @@ export interface AppState {
     opts?: { pinned?: boolean; rendererOverride?: RendererKind },
   ) => Promise<void>
   openPreviewUrl: (url: string) => void
+  /**
+   * v0.34.1：把插件面板打开到浮窗（可一次多个 → 多个 Tab）。
+   * 面板 ref 必须能在当前面板 Tab 全集里解析到，否则浮窗显示「面板不可用」。
+   */
+  openPanelPreview: (
+    panelRefs: string[],
+    params?: Record<string, unknown>,
+  ) => void
   closePreview: () => void
   togglePreviewPin: () => void
   minimizePreview: () => void
@@ -382,6 +418,8 @@ export interface AppState {
   regenerateMessage: (taskId: string, iteration: number) => Promise<void>
   /** v0.5.0（B3）：导出当前任务对话为 Markdown 文件（提取自 Composer） */
   exportConversation: () => void
+  /** v0.34.1：把当前任务对话以与导出相同的 Markdown 复制到剪贴板 */
+  copyConversation: () => Promise<void>
   /** v0.3.1：删除任务（后端 deleteTask 已存在，补前端接入） */
   deleteTask: (id: string) => Promise<void>
   /** v0.3.1：切换收藏（后端 setTaskStarred 已存在） */
@@ -700,14 +738,40 @@ export interface AppState {
   profileLoaded: boolean
   /** profile 声明的 Dock 面板顺序；null = 不覆盖用户/智能体偏好 */
   profileDockTabs: DockTabId[] | null
-  /** profile 声明的无任务首页模块页；null = 不覆盖 */
-  profileHomeModule: ModulePage | null
+  /** profile 声明的无任务首页模块页；null = 不覆盖。
+   * v0.33.0 起放宽为 `string`：内置六名 或 `module:<id>`（插件贡献的首页模块）。 */
+  profileHomeModule: string | null
   /** profile 声明的 Composer chips（点击后填入草稿） */
   profileComposerChips: string[]
+  /**
+   * v0.33.0：可渲染的面板 Tab（来自 `profile:slots` 的 `ui.panel` 条目）。
+   * 消费者是 `Inspector.tsx`；顺序真源是 manifest 的 `position`。
+   */
+  profilePanels: PanelTab[]
+  /** v0.33.0：扩展名 → 渲染器（profile 的 `previewRenderers` ∪ 插件 renderer 贡献） */
+  rendererOverrides: Record<string, string>
+  /** v0.33.0：token 覆盖（只覆盖已存在 token，见 theme-tokens.ts 的白名单） */
+  themeOverrides: ThemeTokens
   loadProfiles: () => Promise<void>
   switchProfile: (id: string) => Promise<boolean>
   applyProfileToView: (snapshot: CompositionSnapshot | null) => void
+  applySlotDerivations: (slots: Partial<Record<SlotKind, SlotEntry[]>>) => void
   subscribeProfileChanges: () => () => void
+
+  /* ============================================================
+   * v0.33.0：插件注册表（插件插拔能力）
+   * 字段与行为定义见 `slices/pluginSlice.ts` 的 `PluginState`。
+   * ============================================================ */
+  plugins: PluginSummary[]
+  pluginsLoaded: boolean
+  pluginsBusy: boolean
+  loadPlugins: () => Promise<void>
+  setPluginEnabled: (id: string, enabled: boolean) => Promise<boolean>
+  uninstallPlugin: (id: string) => Promise<boolean>
+  rescanPlugins: () => Promise<void>
+  openPluginsDir: () => Promise<void>
+  exportPluginSample: (id: string) => Promise<void>
+  subscribePluginChanges: () => () => void
 
   // ---- 初始化 ----
   init: () => Promise<void>
