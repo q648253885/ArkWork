@@ -11,6 +11,7 @@ import { getTask, updateTask, listRunningTasks } from '../store/tasks.js'
 import { getAgent } from '../store/agents.js'
 import { getModel } from '../store/agents.js'
 import { runReActLoop } from './engine/index.js'
+import { sealGraphForTaskOutcome } from './engine/gates.js'
 import { broadcastTaskStatus } from './events.js'
 import { maybeGenerateTaskTitle } from './task-title.js'
 import { logger } from '../system/logger.js'
@@ -119,6 +120,16 @@ export async function runTask(taskId: string): Promise<void> {
         return
       }
       const message = (err as Error).message
+      // v0.32.1（缺陷 D36）：**兜底收口**。
+      // runReActLoop 自身的 try/catch 已覆盖绝大多数失败路径（并已封图），
+      // 但异常若从它的 catch 块内部再次抛出（如 handleAbort / 收口本身出错），
+      // 就只能落到这里。收口是幂等的（无变更即不落盘），因此这层重复调用
+      // 只为「绝不留下 task=failed 而 graph=in_progress 的残留」，无额外代价。
+      try {
+        await sealGraphForTaskOutcome(task, 'failed', `run 异常终止：${message.slice(0, 120)}`)
+      } catch {
+        /* 收口失败不阻断终态写入 */
+      }
       const failed = await updateTask(taskId, {
         status: 'failed',
         completedAt: Date.now(),
@@ -160,6 +171,13 @@ export async function cancelTask(
   if (opts.transient) return
   const updated = await updateTask(taskId, { status: 'cancelled', completedAt: Date.now() })
   if (updated) broadcastTaskStatus(updated)
+  // v0.32.1（缺陷 D36）：取消同样是**任务终态**，图级 status 必须跟着收口。
+  //
+  // 循环在跑时由 abort.ts 的 cancelled 分支封口；但**没在跑的**任务（如 paused 状态
+  // 被取消）没有任何人封口 → 任务 cancelled、图仍 `in_progress`，面板显示「进行中」。
+  // 收口幂等：已在跑的场景下这里先封一次，循环随后的收口成为无操作。
+  // （「取消后又被继续」不会因此失真 —— 新一轮启动会 reopen 图，见 loop.ts。）
+  if (updated) await sealGraphForTaskOutcome(updated, 'cancelled', '任务已取消')
 }
 
 export function isTaskRunning(taskId: string): boolean {
@@ -207,6 +225,9 @@ export async function reconcileOrphanRunning(): Promise<void> {
         errorMessage: 'reconcile_orphan_running: 进程崩溃或异常退出，任务状态已修正',
       })
       if (updated) broadcastTaskStatus(updated)
+      // v0.32.1（缺陷 D36）：崩溃重启修正孤儿任务时同样要封图 —— 否则重启后
+      // 任务列表显示「失败」，任务面板里那张图却还挂着「进行中」。
+      if (updated) await sealGraphForTaskOutcome(updated, 'failed', '进程异常退出，孤儿任务已修正')
       logger.warn('Agent', `reconcile: orphan running ${task.id} → failed`, task.id)
     } catch (err) {
       logger.warn('Agent', `reconcile fix failed for ${task.id}: ${(err as Error).message}`)

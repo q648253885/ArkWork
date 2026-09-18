@@ -9,12 +9,13 @@ import type { ReActAction } from '@shared/types/react'
 import type { Agent } from '@shared/types/agent'
 import type { LlmCompleteResponse } from '../../llm/adapter.js'
 import { logger } from '../../system/logger.js'
-import { updateTask } from '../../store/tasks.js'
+import { updateTask, getTask } from '../../store/tasks.js'
 import { broadcastTaskStatus } from '../events.js'
 import { emitEvent, emitProgress, safeSlice } from './broadcast.js'
 import { appendPairedControlObservations } from './act.js'
 import { runDoneMemoryHooks } from './memory-hooks.js'
-import { buildFallbackAskUserQuestion } from './gates.js'
+import { buildFallbackAskUserQuestion, sealGraphForTaskOutcome, discardIncompletePlanItems } from './gates.js'
+import { unfinishedTaskNodes } from '../graph/migrate.js'
 import { continueTurnIfInjected } from './abort.js'
 // v0.30.0：完成语义（Sync · S3 Write + S4 Gate）—— 用"验收通过"替代"模型宣称"
 import { syncModelClaim } from '../graph/sync.js'
@@ -27,6 +28,67 @@ export interface TurnEndCtx {
   modelId: string
 }
 
+/**
+ * v0.32.1（缺陷 D39）：`task_complete` 前的**未完成项守卫**每轮 run 允许的拒绝次数。
+ *
+ * 为什么需要拒绝而不是直接接受：任务要标 `done`、清单里却留着 4 条 `ready`
+ * （从未执行）—— 用户在任务面板看到的是「已完成的任务 + 4 条待执行」，与 D36 同源的
+ * 另一种「任务态 ↔ 清单态不一致」。这与 v0.28.1 在「无工具调用」分支的既有裁决同向
+ * （清单有未完成项时**不静默收尾**，先让模型自处）。
+ *
+ * 为什么必须**有上限**：模型可能反复坚持「已完成」。超过上限后接受完成，
+ * 但要求清单与终态自洽 —— 剩余项收成 `cancelled`（附原因），而不是把矛盾留在界面上。
+ */
+export const MAX_COMPLETE_REFUSALS = 2
+
+/**
+ * v0.32.1（缺陷 D39）：拒绝一次 `task_complete` —— 补配对 observation + 一条指令性
+ * user message，告诉模型「清单还有哪些项没终态」以及它的两个选择。
+ *
+ * 与 `verifyTrigger` 的处理方式完全同构（同样要补配对 observation，否则 assistant 的
+ * tool_calls 悬空，下次 assembleMessages 重建消息时服务端会 400）。
+ */
+async function refuseCompletionForLeftovers(args: {
+  taskId: string
+  iteration: number
+  pendingActions: ReActAction[]
+  pendingActionIds: string[]
+  leftovers: ReadonlyArray<{ key?: string; id: string; status: string; title?: string }>
+  priorRefusals: number
+}): Promise<void> {
+  const { taskId, iteration, pendingActions, pendingActionIds, leftovers, priorRefusals } = args
+  const list = leftovers
+    .map((n) => `  · ${n.key ?? n.id}（${n.status}）${(n.title ?? '').slice(0, 40)}`)
+    .join('\n')
+  await appendPairedControlObservations({
+    taskId,
+    iteration,
+    actions: pendingActions,
+    actionIds: pendingActionIds,
+    controlTool: 'task_complete',
+    controlContent: `[task_complete] 已受理，但任务清单仍有 ${leftovers.length} 项未收口`,
+    skipPrefix: '[skipped] 等待清单收口，跳过：',
+  })
+  await appendL1({
+    taskId,
+    role: 'user',
+    kind: 'user_message',
+    iteration,
+    content:
+      `[unfinished-plan] 任务清单仍有 ${leftovers.length} 项没有终态，因此**不能**判定完成：\n` +
+      `${list}\n` +
+      `请二选一（不要重复调用 task_complete，它不会让未执行的项变成完成）：\n` +
+      `  ① 继续调用工具把这些项做完；或\n` +
+      `  ② 若确认它们已无需执行，用 todo-update 把它们显式标记为 cancelled（或 skipped），` +
+      `说明理由，然后再调用 task_complete。`,
+  })
+  logger.info(
+    'Agent',
+    `task_complete 被拦截：清单仍有 ${leftovers.length} 项未收口（第 ${priorRefusals + 1}/${MAX_COMPLETE_REFUSALS} 次）`,
+    taskId,
+  )
+}
+
 export async function finishViaTaskComplete(
   ctx: TurnEndCtx,
   action: ReActAction,
@@ -34,6 +96,8 @@ export async function finishViaTaskComplete(
   pendingActions: ReActAction[],
   pendingActionIds: string[],
   iteration: number,
+  /** 本轮 run 内已被拒绝的次数（由 loop.ts 维护；缺省 0 —— 单次调用语义不变） */
+  priorRefusals = 0,
 ): Promise<boolean> {
   const { task, agent, modelId } = ctx
 
@@ -92,6 +156,65 @@ export async function finishViaTaskComplete(
     if (claim.gateError) {
       logger.info('Agent', `task_complete 被门禁拒绝：${claim.gateError.message}`, task.id)
     }
+
+    // ============================================================
+    // v0.32.1（缺陷 D39）：**完成前守卫** —— 清单还有未收口项时不静默收尾。
+    //
+    // 真实环境实测形态（模型自建 10 项计划 → 执行 3 项 → 取消 3 项 → 直接 task_complete）：
+    //   任务 `done` ✅ ｜ 图 `completed` ✅ ｜ **清单里 4 项仍是 `ready`（从未执行）** ❌
+    // 用户在任务面板看到「已完成的任务 + 4 条待执行」，无从判断这些项到底做没做。
+    //
+    // 策略（与 v0.28.1 在「无工具调用」分支的既有裁决同向）：
+    //   ① 前 MAX_COMPLETE_REFUSALS 次 → **拒绝收尾**，把未完成项列给模型，要求其二选一：
+    //      继续执行，或显式用 `todo-update` 标记取消/跳过（留下「这是模型主动不做」的痕迹）；
+    //   ② 超过上限仍坚持 → 接受完成，但**必须让清单与终态自洽**：剩余项收成 `cancelled`
+    //      （附原因 + 告警日志），而不是把矛盾留在界面上。
+    // ============================================================
+    const leftovers = claim.graph ? unfinishedTaskNodes(claim.graph) : []
+    if (leftovers.length > 0) {
+      if (priorRefusals < MAX_COMPLETE_REFUSALS) {
+        await refuseCompletionForLeftovers({
+          taskId: task.id,
+          iteration,
+          pendingActions,
+          pendingActionIds,
+          leftovers,
+          priorRefusals,
+        })
+        return true // 不结束任务，回到循环顶部让模型自处
+      }
+      logger.warn(
+        'Agent',
+        `task_complete 连续 ${priorRefusals} 次被拒后仍坚持完成：把剩余 ${leftovers.length} 项收为 cancelled` +
+          `（${leftovers.map((n) => n.key ?? n.id).join(', ')}）`,
+        task.id,
+      )
+      await discardIncompletePlanItems(task, '任务完成：模型坚持收尾，剩余未执行项收为 cancelled')
+    }
+  } else {
+    // 无图任务（tier 0/1）：同一守卫，判据换成扁平清单 —— 必须**读一次最新的**
+    // planItems（内存里的 task 对象可能在若干轮 todo-update 之后已过期）。
+    const fresh = await getTask(task.id)
+    const pending = (fresh?.planItems ?? []).filter((p) => p.status === 'running' || p.status === 'pending')
+    if (pending.length > 0) {
+      if (priorRefusals < MAX_COMPLETE_REFUSALS) {
+        await refuseCompletionForLeftovers({
+          taskId: task.id,
+          iteration,
+          pendingActions,
+          pendingActionIds,
+          leftovers: pending.map((p) => ({ id: p.id, status: p.status, title: p.text })),
+          priorRefusals,
+        })
+        return true
+      }
+      logger.warn(
+        'Agent',
+        `task_complete 连续 ${priorRefusals} 次被拒后仍坚持完成：把剩余 ${pending.length} 项收为 cancelled`,
+        task.id,
+      )
+      await discardIncompletePlanItems(task, '任务完成：模型坚持收尾，剩余未执行项收为 cancelled')
+    }
   }
 
   // v0.14.0 修复：task_complete 由模型以 tool_calls 形式触发，但本分支直接完成
@@ -120,6 +243,21 @@ export async function finishViaTaskComplete(
           .slice(0, 4)
       : undefined,
   })
+  // v0.32.1（缺陷 D36 成功路径补齐）：**task_complete 工具分支同样必须封图级 status**。
+  //
+  // 为什么这条一度漏掉：D36 的收口只在 loop.ts 的「无工具调用且清单已清空」成功分支挂了点
+  // （见 loop.ts 的 `sealGraphForTaskOutcome(task, 'completed')`），而**更常见的成功路径**
+  // 恰恰是模型显式调用 `task_complete` 工具 —— 它走的是本函数，于是：
+  //
+  //   任务 `done` ✅ ｜ 节点全终态 ✅ ｜ 图 `status` **仍是 `in_progress`** ❌
+  //
+  // 真实环境实测即此形状（task=done、7/10 done + 3 cancelled、graph.status=in_progress），
+  // 任务面板会一直显示「进行中」。
+  //
+  // 顺序：**先封图、再写任务终态** —— 这样 UI 收到 `task:status=done` 的那一刻，
+  // 图侧已经是自洽的终态，不会出现「任务已完成、清单还在跑」的一帧。
+  // 收口本身失败不抛（只告警），因此不会连带阻塞任务完成。
+  await sealGraphForTaskOutcome(task, 'completed', '任务完成（task_complete）')
   await updateTask(task.id, { status: 'done', completedAt: Date.now() })
   broadcastTaskStatus({ ...task, status: 'done', completedAt: Date.now() })
   // Task 9：task_complete 工具分支同样推进到完成态

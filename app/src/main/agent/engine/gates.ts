@@ -53,7 +53,7 @@ import { describeAction } from '@shared/utils/action-description'
 import { createHash } from 'node:crypto'
 import { updateTask, getTask } from '../../store/tasks.js'
 // v0.30.0 D9：planItem ↔ graph 唯一桥（有图任务写图，无图任务保持 v0.29 直写）
-import { markRunningFailed, cancelIncomplete } from '../graph/plan-sync.js'
+import { markRunningFailed, cancelIncomplete, sealGraphForOutcome, sealGraphOnSuccess, reopenGraphForRun } from '../graph/plan-sync.js'
 import { getAgent } from '../../store/agents.js'
 import {
   broadcastStep,
@@ -191,6 +191,70 @@ export async function discardIncompletePlanItems(task: Task, reason: string): Pr
         reason,
       },
     ])
+  }
+}
+
+/**
+ * v0.32.1（缺陷 D35）：**回合收口** —— 任务以一个终态结束时，把图级 `status` 封到该终态。
+ *
+ * 为什么必须单独有这一步：节点收口（`markRunningPlanItemFailed` /
+ * `discardIncompletePlanItems`）只管**节点**，而 `graph.status` 是**另一份数据**，
+ * 在 v0.32.1 之前**没有任何生产代码写过它**（`sealGraphAtTurnEnd` 是死代码）。
+ * 于是任务终态时会出现这组自相矛盾的状态：
+ *
+ *   任务 `failed`  ✅ ｜ 节点 `failed`  ✅ ｜ 图 `status` **仍是 `in_progress`** ❌
+ *
+ * 用户看到的就是「刚开始执行就直接失败了，任务清单却纹丝不动、还显示在进行中」。
+ *
+ * 三种 outcome 的收口范围见 `sealGraphAtTurnEnd`：
+ *  - `'failed'`    → 在途节点（+ 在途为空时的兜底排队项）→ failed；
+ *  - `'cancelled'` → 所有非终态非 goal 节点 → cancelled；
+ *  - `'completed'` → 不动节点，只封图级 status → completed。
+ *
+ * **失败不抛**：收口失败只告警，绝不牵连任务本身的终态写入（沿用 `persist` 的既有
+ * 纪律 —— 落盘失败不该让用户的任务状态卡住）。
+ *
+ * **无图任务（`!task.graphId`）直接返回** —— tier 0/1 没有图级 status 这一层概念。
+ */
+export async function sealGraphForTaskOutcome(
+  task: Task,
+  outcome: 'failed' | 'cancelled' | 'completed',
+  reason: string,
+): Promise<void> {
+  if (!task.graphId) return
+  const ctx = { taskId: task.id, graphId: task.graphId }
+  const res =
+    outcome === 'completed' ? await sealGraphOnSuccess(ctx, reason) : await sealGraphForOutcome(ctx, outcome, reason)
+  if (!res.ok) {
+    logger.warn(
+      'Agent',
+      `[plan-sync] 回合收口 ${outcome} 未完成（不改任务终态）：${res.error?.message ?? '未知原因'}`,
+      task.id,
+    )
+  }
+}
+
+/**
+ * v0.32.1（缺陷 D36 配套）：**新一轮执行开始时的图重开** —— 与
+ * `sealGraphForTaskOutcome` 互为逆操作，由 `engine/loop.ts` 在把任务标为
+ * `running` 之后调用。
+ *
+ * 为什么需要它：收口是单向的，而任务可以被继续（`done` 后继续对话、`failed` /
+ * `cancelled` 后重试）。若重开缺位，续聊会出现「任务在跑、图显示已完成」的
+ * 反向自相矛盾 —— 与 D36 同源。**只改图级 status，不动节点**；
+ * 幂等（已是 `in_progress` 时不落盘不广播）；**失败不抛**（只告警，绝不牵连任务启动）。
+ *
+ * 无图任务（tier 0/1）直接返回。
+ */
+export async function reopenGraphForTaskRun(task: Task, reason: string): Promise<void> {
+  if (!task.graphId) return
+  const res = await reopenGraphForRun({ taskId: task.id, graphId: task.graphId }, reason)
+  if (!res.ok) {
+    logger.warn(
+      'Agent',
+      `[plan-sync] 新一轮图重开未完成（不影响执行）：${res.error?.message ?? '未知原因'}`,
+      task.id,
+    )
   }
 }
 

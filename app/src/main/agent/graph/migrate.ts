@@ -288,36 +288,119 @@ export function migrateToGraph(input: MigrateInput): TaskGraph | null {
   return graph
 }
 
+/** 终态集合（到达后不再被收口改写；与 `@shared/types/graph` 的 TERMINAL_STATUSES
+ *  同名但**多含 `failed`** —— 对「取消」而言已被判失败的节点应保留失败信息，
+ *  不该被改写成 `cancelled`。此定义与 `plan-sync.ts` 的 `NON_TERMINAL` 互为补集。） */
+const SEAL_TERMINAL: ReadonlySet<NodeStatus> = new Set<NodeStatus>(['completed', 'cancelled', 'failed'])
+
+/** 节点是否处于「正在被引擎执行」的在途态 */
+function isInFlight(node: TaskNode): boolean {
+  return node.status === 'in_progress' || node.status === 'verifying'
+}
+
+/** 节点是否还「没轮到执行」（排队/待批/待办），供 failed 兜底挑选 */
+function isQueued(node: TaskNode): boolean {
+  return node.layer !== 'goal' && !SEAL_TERMINAL.has(node.status)
+}
+
+/** 稳定顺序：先按 createdAt，再按 key —— 不依赖对象键插入顺序 */
+function byQueueOrder(a: TaskNode, b: TaskNode): number {
+  // `key` 是可选的（图 schema 允许无 key 节点），缺省时按空串参与比较。
+  return a.createdAt - b.createdAt || (a.key ?? '').localeCompare(b.key ?? '')
+}
+
 /**
- * 任务失败/取消时，把图中所有在途节点收敛到终态。
+ * v0.32.1（缺陷 D39）：列出**尚未收口**的 task 层节点（按执行顺序稳定排序）。
+ *
+ * 用途：模型调用 `task_complete` 时的**完成前守卫** —— 任务要标 `done`，清单里
+ * 却还留着没执行的项，用户在任务面板上看到的就是「已完成的任务 + 4 条待执行」。
+ * 这与 D36 是同一类矛盾（任务态 ↔ 清单态不一致），只是发生在成功路径上。
+ *
+ * 判据：`layer !== 'goal'`（goal 是汇总节点，不参与执行）且 status 不属于
+ * `SEAL_TERMINAL`（`completed` / `cancelled` / `failed`）。
+ *
+ * 纯函数：只读入参，不修改。
+ */
+export function unfinishedTaskNodes(graph: TaskGraph): TaskNode[] {
+  return Object.values(graph.nodes)
+    .filter((n) => n.layer !== 'goal' && !SEAL_TERMINAL.has(n.status))
+    .sort(byQueueOrder)
+}
+
+/**
+ * 任务终结时，把图收口到一个自洽状态：**节点收到终态 + 图级 status 封口**。
  *
  * 对应 v0.29 的 `markRunningPlanItemFailed` + `discardIncompletePlanItems`，
  * 但改为操作图（镜像由 saveGraph 自动重算）。
  *
+ * 三种 outcome 的收口范围（**注意三者语义不同，不要合并**）：
+ *
+ *  | outcome | 节点收口范围 | 图级 status |
+ *  |---|---|---|
+ *  | `failed` | `in_progress` / `verifying`（在途）；**若在途为空则兜底收第一个排队项** | → `failed` |
+ *  | `cancelled` | 所有非终态非 goal 节点（在途 + 排队 + 待批 + 待办） | → `cancelled` |
+ *  | `completed` | **不动任何节点**（成功路径的前提就是清单已完成） | → `completed` |
+ *
  * @param graph   当前图（不修改入参）
- * @param outcome 'failed' 只处理在途节点；'cancelled' 同理，区别只在目标状态
  * @returns 变更后的图 + 被改动的节点 id 列表
  */
 export function sealGraphAtTurnEnd(
   graph: TaskGraph,
-  outcome: 'failed' | 'cancelled',
+  outcome: 'failed' | 'cancelled' | 'completed',
   reason: string,
 ): { graph: TaskGraph; changedIds: string[] } {
+  const now = Date.now()
+  const all = Object.values(graph.nodes)
+
+  // ---- 先定「收谁」----
+  //
+  // 三种 outcome 的挑选规则集中在这里，循环只负责改写。
+  let targets: TaskNode[]
+  if (outcome === 'completed') {
+    // 成功路径：节点状态由 `decidePlanAdvance` / stage-gate 在过程中逐项推进，
+    // 到此处清单应已全部完成。本函数**不做兜底**（不会把在途项抹成完成）——
+    // 「有在途项却走到成功路径」是引擎状态不一致，该被暴露而不是被掩盖。
+    targets = []
+  } else if (outcome === 'failed') {
+    targets = all.filter(isInFlight)
+    if (targets.length === 0) {
+      // ⚠️ 缺陷 D36（v0.32.1）：**在途为空时的兜底**。
+      //
+      // v0.29 的无图分支 `markRunningPlanItemFailed` 是「先找 running，找不到就找
+      // 第一个 pending 标 failed」；v0.30.0 图化后这里只剩 `in_progress` 一个判据，
+      // 兜底丢了。而兜底恰恰覆盖最常见的失败场景：
+      //
+      //   `plan generation failed` → 写兜底单步清单（status=`pending`）→
+      //   `migrateToGraph` 把 `pending` 映射成 `ready`（migrate.ts:mapPlanItemStatusToNodeStatus）
+      //   → ReAct 立刻失败 → 本函数找不到 in_progress → **`ok: true` 静默返回**。
+      //
+      // 实测后果：任务 `failed`、清单纹丝不动（用户报障「刚开始执行就直接失败了，
+      // 而后没有立刻修复任务清单」）。修法即把兜底找回来，且与无图分支同口径
+      // ——**只收一个**（最早的那个），其余排队项保持 `ready`（「还没轮到执行」
+      // 是准确信息，不该被连坐抹掉，见 TC-SYNC-006）。
+      const queued = all.filter(isQueued).sort(byQueueOrder)
+      targets = queued.length > 0 ? [queued[0]] : []
+    }
+  } else {
+    // 取消：所有未完成的都收（与 `plan-sync.ts:cancelIncomplete` 完全同口径）。
+    // goal 层是这棵树的汇总节点，不入 victims。
+    targets = all.filter(isQueued)
+  }
+
+  const targetIds = new Set(targets.map((n) => n.id))
+
+  // ---- 再改写 ----
   const nodes: Record<string, TaskNode> = {}
   const changedIds: string[] = []
-  const now = Date.now()
-
   for (const [id, node] of Object.entries(graph.nodes)) {
-    const inFlight = node.status === 'in_progress' || node.status === 'verifying'
-    const waiting = node.status === 'needs_human' || node.status === 'ready' || node.status === 'blocked'
-    if (outcome === 'failed' ? inFlight : inFlight || waiting) {
+    if (targetIds.has(id)) {
       nodes[id] = {
         ...node,
-        status: outcome,
+        status: outcome === 'completed' ? node.status : outcome,
         updatedAt: now,
         revision: node.revision + 1,
         lastError: outcome === 'failed' ? reason : node.lastError,
-        notes: [node.notes, `任务${outcome === 'failed' ? '失败' : '取消'}：${reason}`]
+        notes: [node.notes, `任务${outcome === 'failed' ? '失败' : outcome === 'cancelled' ? '取消' : '完成'}：${reason}`]
           .filter(Boolean)
           .join('\n'),
         blockingQuestion: undefined,
@@ -330,9 +413,27 @@ export function sealGraphAtTurnEnd(
     }
   }
 
-  if (changedIds.length === 0) return { graph, changedIds }
+  // ---- 最后封口图级 status（缺陷 D35 的核心修正）----
+  //
+  //  ① **图级 status 必须封口，且与节点收口解耦**。
+  //     原实现是 `if (changedIds.length === 0) return { graph, changedIds }`，
+  //     把「有没有在途节点」当成了「要不要封口图」的前提。于是「没有任何
+  //     in_progress / verifying 节点」时，图级 status 永远留在 in_progress ——
+  //     而这恰恰是最常见的一种：`markRunningPlanItemFailed` 已经先把在途项标成
+  //     failed，随后再 seal 就找不到在途节点了。实测后果：任务 `failed`、
+  //     节点 `failed`、而 `graph.status` 仍是 `in_progress`，任务清单看起来
+  //     「还在进行中」（用户报障「失败后没有立刻修复任务清单」）。
+  //
+  //  ② **不再自增 `graphRevision`**：落盘时的自增由 `saveGraph` 统一负责
+  //     （`store.ts:343` 每次落盘 `+1`）。此处再增会变成每次 +2，
+  //     让图版本号与实际修订数脱节。本函数仍是纯函数，只是不再碰这个计数器。
+  //
+  // 保留的既有裁决：**失败不连坐排队项**（`failed` 只收在途 + 一个兜底，
+  // `cancelled` 才收全部）—— 见 TC-SYNC-006。
+  const statusChanged = graph.status !== outcome
+  if (changedIds.length === 0 && !statusChanged) return { graph, changedIds }
   return {
-    graph: { ...graph, nodes, status: outcome, updatedAt: now, graphRevision: graph.graphRevision + 1 },
+    graph: { ...graph, nodes, status: outcome, updatedAt: now },
     changedIds,
   }
 }

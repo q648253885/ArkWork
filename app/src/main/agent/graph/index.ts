@@ -188,6 +188,9 @@ export {
   cancelIncomplete,
   installPlanSync,
   markRunningFailed,
+  reopenGraphForRun,
+  sealGraphForOutcome,
+  sealGraphOnSuccess,
   type PlanSyncCtx,
   type PlanSyncResult,
 } from './plan-sync.js'

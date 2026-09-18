@@ -9,6 +9,7 @@ import { getTaskMemoryDir } from '../store/db.js'
 import { broadcast } from '../window.js'
 import { logger } from '../system/logger.js'
 import type { ReActStep, ReActEvent } from '@shared/types/react'
+import type { NodeStatus } from '@shared/types/graph'
 import type { Task, PlanItem, PlanItemStatus, PlanItemSource } from '@shared/types/task'
 import type { PlanItemStatusChanged, PlanItemListSnapshotPayload, TaskTextDeltaPayload, GraphUpdatePayload } from '@shared/types/ipc'
 
@@ -46,6 +47,30 @@ export function broadcastTaskStatus(task: Task): void {
     broadcast('task:status', task)
   } catch (err) {
     logger.warn('Agent', `broadcastTaskStatus failed (silent): ${(err as Error).message}`)
+  }
+}
+
+/**
+ * v0.32.1（缺陷 D36）：**图级 status 变更**的专用广播。
+ *
+ * 为什么必须单独开一条：`persist()` 的 `graph:update` 扇出条件是
+ * `opts.changes?.length > 0`（逐节点变更）。而「回合收口」与「新一轮重开」这两件事
+ * 改变的恰恰是**图级 status 本身**，节点一个都不动 → `changes` 为空 → 面板收不到
+ * 任何刷新信号，于是任务已 `done`、面板却一直显示「进行中」（用户报障现象）。
+ *
+ * kind 复用既有的 `'status'`：渲染层 `useGraph` 对任意 kind 都做一次
+ * `load(true)` 全量重拉（面板是"轻量投影"，不做本地增量合并），因此**无需改渲染层**。
+ */
+export function broadcastGraphStatusChanged(
+  taskId: string,
+  graphId: string,
+  status: NodeStatus,
+  reason?: string,
+): void {
+  try {
+    broadcast('graph:update', { taskId, graphId, kind: 'status', graphStatus: status, reason })
+  } catch (err) {
+    logger.warn('Agent', `broadcastGraphStatusChanged failed (silent): ${(err as Error).message}`)
   }
 }
 

@@ -76,7 +76,13 @@ export interface LlmCompleteResponse {
   tokensOut: number
   /** v0.20.0：缓存命中统计（厂商未返回时为 undefined） */
   cache?: LlmCacheUsage
-  finishReason: 'stop' | 'tool_calls' | 'length' | 'content_filter'
+  /**
+   * 终止原因。v0.32.1 新增 `'interrupted'`：
+   * **流没有给出任何终止帧**（网关截断 / 连接中断 / 客户端超时中止）时如实上报，
+   * 不再兜底成 `'stop'` —— 把「模型正常说完」与「流被切断」混为一谈，会让引擎
+   * 把一次残响应当成正常回合收尾（缺陷 D35：思考突然中断且任务被误判完成）。
+   */
+  finishReason: 'stop' | 'tool_calls' | 'length' | 'content_filter' | 'interrupted'
   /** DeepSeek/o1 等思考模型的 reasoning_content，需原样传回 API */
   reasoningContent?: string
 }

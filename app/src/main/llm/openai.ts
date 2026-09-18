@@ -307,10 +307,21 @@ function toOpenAITool(t: LlmTool): OpenAI.Chat.Completions.ChatCompletionTool {
   }
 }
 
-function mapFinishReason(
+/**
+ * 端点终止帧 → 内部终止原因。
+ *
+ * **导出仅为可测性**（v0.32.1 缺陷 D35 回归）：本函数的 `default` 分支曾把
+ * 「流没有终止帧」伪装成 `'stop'`，是「思考突然中断却被当成正常回合」的根因之一。
+ * 行为语义（而非文本形态）必须被用例钉住，故导出后直接断言其返回值。
+ */
+export function mapFinishReason(
   reason: string | null | undefined,
-): 'stop' | 'tool_calls' | 'length' | 'content_filter' {
+): 'stop' | 'tool_calls' | 'length' | 'content_filter' | 'interrupted' {
   switch (reason) {
+    case 'stop':
+      // 显式列出：OpenAI 兼容端点的正常终止值就是 'stop'。
+      // 加这一 case 是为了把 default 让给「没有终止帧」这一异常情形（见下）。
+      return 'stop'
     case 'tool_calls':
       return 'tool_calls'
     case 'length':
@@ -318,6 +329,12 @@ function mapFinishReason(
     case 'content_filter':
       return 'content_filter'
     default:
-      return 'stop'
+      // ⚠️ 缺陷 D35：此处原为 `default: return 'stop'` —— 把「流根本没有终止帧」
+      // 伪装成「模型正常说完」。实测（ModelScope/GLM-5.3-Flash）表现为：调用
+      // 恰好 120s 后被超时中止、usage 为 0+0、只有 reasoning 没有 content，
+      // 而 finishReason='stop' 让引擎把它当成一个合法的「无工具调用回合」，
+      // 于是任务被静默判为完成、清单纹丝不动。
+      // 现在如实上报 'interrupted'，由引擎决定重试或失败收尾。
+      return 'interrupted'
   }
 }

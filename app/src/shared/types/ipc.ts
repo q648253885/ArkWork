@@ -1366,6 +1366,15 @@ export interface GraphUpdatePayload {
   graphRevision?: number
   /** 需要面板立刻重新拉快照（大变更：replan / converge 应用后、图创建后） */
   refresh?: boolean
+  /**
+   * v0.32.1（缺陷 D36）：kind='status' 时携带的**图级** status。
+   *
+   * 为什么需要它：`persist()` 只在有节点变更时才广播 `graph:update`，而「回合收口 /
+   * 新一轮重开」改的是图级 status、节点零变更 —— 不带这个字段的话面板收不到刷新信号，
+   * 任务 `done` 后面板仍显示「进行中」。
+   */
+  graphStatus?: NodeStatus
+  reason?: string
 }
 
 export interface GraphNodeUpdatePayload {

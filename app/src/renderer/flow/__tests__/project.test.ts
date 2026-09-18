@@ -260,3 +260,83 @@ test('TC-FLOW-004 计划卡状态取 task.planItems', () => {
   assert.deepEqual(plan.states, ['done', 'running']) // 持久化六态优先于 item.planStates
   assert.equal(plan.aggregate, 'running')
 })
+
+/* ============================================================
+ * TC-FLOW-010…012 缺陷 D37（v0.32.1）—— 「正式输出」通道不得被原生思考吞掉
+ * ============================================================ */
+
+test('TC-FLOW-010 D37：原生思考存在时，正文（thought）必须仍有可见通道', () => {
+  // 用户实测报障：交互区「只有思考和工具调用，没有正式输出」。
+  // 根因：`reasoningText()` 在 native 存在时优先返回 reasoning（G4 裁决），
+  // 把 `thought` 整段遮蔽。实测形态（T-20260918-2l6905 steps.jsonl）：
+  // 某步 `reasoning=5172 字符 / thought=87 字符` —— 那 87 字符从未出现在界面上。
+  const items: ConversationItem[] = [
+    userItem('u1', '生成一个简单的超级玛丽网页小游戏', 100),
+    reactItem('r1', [
+      step({
+        id: 's1',
+        type: 'reason',
+        iteration: 1,
+        reasoning: '原生推理链：先分析需求，再决定用 canvas 还是 DOM……',
+        thought: '正在执行目标：生成一个简单的超级玛丽网页小游戏。先查看工作区现有文档：',
+      }),
+    ]),
+  ]
+
+  const turns = projectConversation(baseInput({ items }))
+  const seq = turnRenderSequence(turns[0])
+
+  const reasoning = seq.filter((b) => b.kind === 'reasoning') as ReasoningBlock[]
+  assert.equal(reasoning.length, 1, '思考块仍只有一个')
+  assert.equal(reasoning[0].source, 'native', '★ 原生优先的既有裁决不变（G4）')
+  assert.equal(reasoning[0].text, '原生推理链：先分析需求，再决定用 canvas 还是 DOM……')
+
+  const says = seq.filter((b) => b.kind === 'say') as SayBlock[]
+  assert.equal(says.length, 1, '★ 正文必须有块承载 —— 修复前为 0（正文被吞，界面只剩思考）')
+  assert.match(says[0].text, /^正在执行目标/, '承载的是 thought 正文')
+})
+
+test('TC-FLOW-011 D37：content 源不回落 —— 同一段文字绝不出现两次', () => {
+  // 无原生思考时，ReasoningBlock 已经承载了 `thought`；
+  // 若此时再回落出一个 say 块，界面会把同一段话渲染两遍。
+  const items: ConversationItem[] = [
+    userItem('u1', 'q', 100),
+    reactItem('r1', [step({ id: 's1', type: 'reason', iteration: 1, thought: '只有正文，没有原生思考' })]),
+  ]
+
+  const turns = projectConversation(baseInput({ items }))
+  const seq = turnRenderSequence(turns[0])
+
+  assert.equal(seq.filter((b) => b.kind === 'reasoning').length, 1)
+  assert.equal(reasoningSourceOf(seq), 'content')
+  assert.equal(seq.filter((b) => b.kind === 'say').length, 0, '★ content 源不回落（避免重复渲染）')
+})
+
+test('TC-FLOW-012 D37：模型显式 say 优先于 thought 回落', () => {
+  const items: ConversationItem[] = [
+    userItem('u1', 'q', 100),
+    reactItem('r1', [
+      step({
+        id: 's1',
+        type: 'reason',
+        iteration: 1,
+        reasoning: '推理链',
+        thought: '内部残句（不该成为正式输出）',
+        say: '已读取文档，接下来会先建游戏骨架。',
+      }),
+    ]),
+  ]
+
+  const turns = projectConversation(baseInput({ items }))
+  const seq = turnRenderSequence(turns[0])
+  const says = seq.filter((b) => b.kind === 'say') as SayBlock[]
+
+  assert.equal(says.length, 1)
+  assert.equal(says[0].text, '已读取文档，接下来会先建游戏骨架。', '★ 模型自己给的 say 永远最准')
+})
+
+/** 取序列里第一个 reasoning 块的来源（测试辅助） */
+function reasoningSourceOf(seq: ReturnType<typeof turnRenderSequence>): string {
+  const r = seq.find((b) => b.kind === 'reasoning')
+  return r ? (r as ReasoningBlock).source : 'none'
+}

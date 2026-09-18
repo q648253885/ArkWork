@@ -64,29 +64,79 @@ export class LlmTimeoutError extends Error {
  * - 用户中止（userSignal aborted）→ 原错误原样抛出（上层按 AbortError 处理为 paused/cancelled，不重试）；
  * - 内部超时（ms 到期）→ 抛 LlmTimeoutError（message 含 "timeout"，retryableError 匹配后可重试）；
  * - 其他错误 → 原样透出。
+ *
+ * ⚠️ v0.32.1（缺陷 D35）：**超时后「成功 resolve」也必须认定为超时**。
+ *
+ * 原实现只把超时判定写在 `catch` 分支里。但中止一个流式请求时，SDK 并不保证抛错 ——
+ * 它完全可能**正常结束迭代**（把流当作读完），于是 `fn` 顺利 resolve：
+ *   · 实测形态（ModelScope/GLM-5.3-Flash）：耗时恰好 120.1s、usage 0+0、
+ *     只留下 reasoning 没有 content；
+ *   · 而调用方看到的是一个「正常返回的空回合」→ 思考突然中断却没有任何错误，
+ *     引擎随后把它当成终答收尾（任务被静默判 done、任务清单纹丝不动）。
+ *
+ * 修法：用独立的 `timedOut` 标志（而非 `ctrl.signal.aborted`，避免与用户主动中止混淆）
+ * 记住「这次超时是我们自己造成的」，并在 `fn` resolve 之后补判一次：
+ *   · 结果**完整**（`isIncomplete` 返回 false）→ 照常返回 ——
+ *     超时前一瞬间已完整收到的回答不该被丢掉（避免误杀）；
+ *   · 结果**不完整**（`isIncomplete` 返回 true）→ 抛 LlmTimeoutError，
+ *     让上层的重试 / 失败收尾链路接管。
+ *
+ * `isIncomplete` 缺省时退回原行为（不判），保证既有调用点语义不变。
  */
 export async function withLlmTimeout<T>(
   fn: (signal: AbortSignal) => Promise<T>,
   ms: number,
   userSignal?: AbortSignal,
+  isIncomplete?: (result: T) => boolean,
 ): Promise<T> {
   const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), ms)
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    ctrl.abort()
+  }, ms)
   const onUserAbort = () => ctrl.abort()
   if (userSignal) {
     if (userSignal.aborted) ctrl.abort()
     else userSignal.addEventListener('abort', onUserAbort)
   }
   try {
-    return await fn(ctrl.signal)
+    const result = await fn(ctrl.signal)
+    if (timedOut && !userSignal?.aborted && (isIncomplete?.(result) ?? false)) {
+      throw new LlmTimeoutError(`LLM 调用超时 (timeout ${ms / 1000}s)：已中止，且上游只返回了不完整结果`)
+    }
+    return result
   } catch (err) {
     if (userSignal?.aborted) throw err // 用户中止：保持原错误（不转超时、不重试）
-    if (ctrl.signal.aborted) throw new LlmTimeoutError(`LLM 调用超时 (timeout ${ms / 1000}s)`)
+    if (timedOut) throw new LlmTimeoutError(`LLM 调用超时 (timeout ${ms / 1000}s)`)
     throw err
   } finally {
     clearTimeout(timer)
     userSignal?.removeEventListener('abort', onUserAbort)
   }
+}
+
+/**
+ * v0.32.1（缺陷 D35）：一次响应是否**不完整** —— 既无正文、又无思考正文、还无任何动作。
+ *
+ * 这是「流被截断 / 模型只吐了思考就断了」的可判别特征：调用已经返回，但里面
+ * 没有任何可推进任务的东西。用于 `withLlmTimeout` 的 `isIncomplete` 判定，
+ * 以及测试里的同口径断言（单一真源，避免两处各写一份）。
+ *
+ * 注意**刻意不看** `reasoningContent`：只有思考、没有正文与动作的回合对 ReAct
+ * 而言是空转 —— 模型想了一堆但什么也没做，必须重试或失败，不能算完成。
+ */
+export function isIncompleteLlmResponse(r: {
+  content?: string
+  thought?: string
+  actions?: unknown[]
+  action?: unknown
+}): boolean {
+  if (r.content?.trim()) return false
+  if (r.thought?.trim()) return false
+  if (r.actions && r.actions.length > 0) return false
+  if (r.action) return false
+  return true
 }
 
 /**

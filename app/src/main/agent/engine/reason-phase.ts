@@ -16,7 +16,12 @@ import type { ReActStep } from '@shared/types/react'
 import type { Agent } from '@shared/types/agent'
 import type { LlmCompleteResponse } from '../../llm/adapter.js'
 import { getAdapter, getModel } from '../../llm/registry.js'
-import { callLlmWithRetry, withLlmTimeout, isContextOverflowError } from '../llm-call.js'
+import {
+  callLlmWithRetry,
+  withLlmTimeout,
+  isContextOverflowError,
+  isIncompleteLlmResponse,
+} from '../llm-call.js'
 import { completeWithStream, createTextDeltaPump, type TextDeltaPump } from '../llm-stream.js'
 // v0.31.0 B1：流式期 delta 级协议剥离（与落定期 extractSayMarker 互补，不改最终数据）
 import { createSayStripper } from '../../llm/stream-strip.js'
@@ -211,6 +216,10 @@ export async function runReasonPhase(
       },
       120_000,
       signal,
+      // v0.32.1（缺陷 D35）：超时中止后若上游仍「成功返回」一个空壳响应，
+      // 必须认定为超时而不是正常回合 —— 否则 120s 截断会被静默当成终答。
+      // 包一层 lambda 显式钉住泛型（直接传函数会让 T 被推到结构化子类型上）。
+      (r: LlmCompleteResponse) => isIncompleteLlmResponse(r),
     )
 
   let response: LlmCompleteResponse

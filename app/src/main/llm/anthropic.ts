@@ -270,10 +270,19 @@ function safeJsonParse(s: string): unknown {
   }
 }
 
-function mapFinishReason(
+/**
+ * 端点终止帧 → 内部终止原因。
+ *
+ * **导出仅为可测性**（v0.32.1 缺陷 D35 回归），与 `openai.ts` 的同名修正对齐：
+ * 缺终止帧必须是 `'interrupted'`，不能兜底成 `'stop'`。
+ */
+export function mapFinishReason(
   reason: string | null | undefined,
-): 'stop' | 'tool_calls' | 'length' | 'content_filter' {
+): 'stop' | 'tool_calls' | 'length' | 'content_filter' | 'interrupted' {
   switch (reason) {
+    case 'end_turn':
+    case 'stop_sequence':
+      return 'stop'
     case 'tool_use':
       return 'tool_calls'
     case 'max_tokens':
@@ -281,6 +290,7 @@ function mapFinishReason(
     case 'content_filter':
       return 'content_filter'
     default:
-      return 'stop'
+      // 对齐 openai.ts 的同名修正（缺陷 D35）：缺终止帧 ≠ 正常说完。
+      return 'interrupted'
   }
 }

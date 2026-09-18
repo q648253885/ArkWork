@@ -111,7 +111,7 @@ import {
 
 import { safeSlice, emitEvent, emitProgress } from './broadcast.js'
 import { emitContextSizeReport } from './context.js'
-import { buildFallbackAskUserQuestion, markRunningPlanItemFailed, discardIncompletePlanItems, isProductiveTool, decidePlanAdvance, emitPlanStatus } from './gates.js'
+import { buildFallbackAskUserQuestion, markRunningPlanItemFailed, discardIncompletePlanItems, isProductiveTool, decidePlanAdvance, emitPlanStatus, sealGraphForTaskOutcome, reopenGraphForTaskRun } from './gates.js'
 import { tryGeneratePlan, generatePlan } from './plan.js'
 import { findPlanItemForStage } from './plan-parser.js'
 import { applyStageGateAdvance } from '../graph/plan-sync.js'
@@ -228,10 +228,21 @@ export async function runReActLoop(
   // v0.28.1 fix：连续「无工具调用但清单未完成/输出被截断」计数。用于把注入的
   // 自愈提示从温和版升级为强指令版；有工具调用时归零。
   let consecutiveNoToolFinal = 0
+  // v0.32.1（D39）：当轮 run 内 `task_complete` 因「清单仍有未收口项」被拒的次数。
+  // 上限见 turn-end.MAX_COMPLETE_REFUSALS —— 超限后接受完成，但剩余项会被收成 cancelled，
+  // 保证「任务终态 ↔ 清单」自洽（不会把「已完成 + 4 条待执行」留在界面上）。
+  let completeRefusals = 0
 
   // 标记任务为 running
   await updateTask(task.id, { status: 'running', startedAt: Date.now() })
   broadcastTaskStatus({ ...task, status: 'running' })
+
+  // v0.32.1（缺陷 D36 配套）：**新一轮执行开始时重开图**。
+  // 收口（sealGraphForTaskOutcome）是单向的，而任务是可继续的：`done` 后续聊、
+  // `failed` / `cancelled` 后重试都会再跑一轮。若不重开，续聊时会看到
+  // 「任务在跑、图显示已完成/已取消」的反向矛盾（与 D36 同源）。
+  // 幂等：图已是 in_progress 时不落盘、不广播；无图任务（tier 0/1）直接返回。
+  await reopenGraphForTaskRun(task, '新一轮执行开始')
 
   // Task 9：任务启动 → 初始化进度摘要（默认进入第一阶段「开源调研」，
   // 整体 5%；由 Renderer 收到 task_progress 事件后落地 taskProgress）
@@ -359,6 +370,11 @@ export async function runReActLoop(
           iteration,
           summary: safeSlice(response.thought, 500),
         })
+        // v0.32.1（缺陷 D35）：把**图级 status** 封成 completed。
+        // 清单各节点在过程中已由 decidePlanAdvance / stage-gate 逐项推进到 completed，
+        // 但 graph.status 在此之前从没有任何生产代码写过 —— 不封口就会出现
+        // 「任务 done 而图仍 in_progress」，任务面板一直显示「进行中」。
+        await sealGraphForTaskOutcome(task, 'completed', '任务完成')
         await updateTask(task.id, { status: 'done', completedAt: Date.now() })
         broadcastTaskStatus({ ...task, status: 'done', completedAt: Date.now() })
         // Task 9：任务完成 → 推进进度到 100% + 标记「编码完成」里程碑
@@ -390,6 +406,8 @@ export async function runReActLoop(
       if (action?.tool === 'task_complete') {
         // v0.27.0 R2/F7：完成收尾（配对 observation / 完成态 / 里程碑 / 记忆钩子）→ turn-end.ts
         // v0.30.0：返回 true 表示"完成被验证门禁拦截，本回合不结束"（需先跑验证命令）
+        // v0.32.1（D39）：清单仍有未收口项时也会被拦（上限 MAX_COMPLETE_REFUSALS 次），
+        // 计数器必须由本循环维护 —— 它是「本 run 内已经被拒几次」的唯一来源。
         if (
           await finishViaTaskComplete(
             { task, agent, modelId: opts.modelId },
@@ -398,8 +416,10 @@ export async function runReActLoop(
             pendingActions,
             pendingActionIds,
             iteration,
+            completeRefusals,
           )
         ) {
+          completeRefusals += 1
           continue
         }
         return
@@ -498,14 +518,16 @@ export async function runReActLoop(
         // 连续 3 轮所有请求都被跳过 → 判定为无法继续，避免模型反复尝试已耗尽签名空转
         if (consecutiveSkippedIterations >= 3) {
           logger.warn('Agent', 'all tools exhausted for 3 consecutive iterations — fail task', task.id)
-          await emitEvent(task.id, {
-            type: 'task_failed',
-            iteration,
-            error: '所有工具均已达到调用上限，无法继续执行',
-          })
+          const exhaustMsg = '所有工具均已达到调用上限，无法继续执行'
+          await emitEvent(task.id, { type: 'task_failed', iteration, error: exhaustMsg })
           await markRunningPlanItemFailed(task)
-          await updateTask(task.id, { status: 'failed' })
-          broadcastTaskStatus({ ...task, status: 'failed' })
+          // v0.32.1（真实环境实测补漏）：失败必须把**原因**写进任务记录。
+          // 此前只把原因塞进 `task_failed` 事件（UI 的 toast / 交互区能看到），
+          // 任务本身却不留原因 —— 重启后、任务列表、诊断与记忆钩子全都只看到
+          // 「失败」，看不到「为什么失败」。与 runner 的 catch 路径（写 errorMessage）
+          // 保持一致口径。
+          await updateTask(task.id, { status: 'failed', errorMessage: exhaustMsg })
+          broadcastTaskStatus({ ...task, status: 'failed', errorMessage: exhaustMsg })
           await runDoneMemoryHooks(task, agent, opts.modelId, '')
           return
         }
@@ -880,9 +902,15 @@ export async function runReActLoop(
     const message = (err as Error).message
     logger.error('Agent', `ReAct loop failed: ${message}`, task.id)
     await emitEvent(task.id, { type: 'task_failed', iteration: 0, error: message })
+    // markRunningPlanItemFailed 内部已含「节点收口 + 图级封口」（见 plan-sync:markRunningFailed），
+    // 这里不再重复调用回合收口（否则会多一次空落盘，且图写失败时多一条告警噪音）。
     await markRunningPlanItemFailed(task)
-    await updateTask(task.id, { status: 'failed' })
-    broadcastTaskStatus({ ...task, status: 'failed' })
+    // v0.32.1（真实环境实测补漏）：与 runner 的 catch 路径同口径 —— 失败原因必须落进
+    // 任务记录。实测（黑洞端点模型）：任务 `failed`、图 `failed`、清单 `failed`，
+    // 唯独 `errorMessage` 为空 → 重启后 / 任务列表 / 诊断里只剩「失败」没有「为什么」。
+    // 注意此处**只补原因，不改状态语义**（AbortError 早已在上方分流，不会被写 failed）。
+    await updateTask(task.id, { status: 'failed', errorMessage: message })
+    broadcastTaskStatus({ ...task, status: 'failed', errorMessage: message })
     // v0.9.1 §Task 7：失败路径也尝试归档 L1，让失败的经验也能进入 L3b/L4a
     try {
       await runDoneMemoryHooks(task, agent, opts.modelId, '')

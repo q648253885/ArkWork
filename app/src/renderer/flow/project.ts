@@ -217,14 +217,36 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
             errorMessage: s.errorMessage,
           })
         }
-        const say = (s.say ?? '').trim()
-        if (say) {
+        // v0.32.1（缺陷 D37）：**给正文开一条可见通道**。
+        //
+        // 用户实测报障：「交互区没有正式输出，只有思考和工具调用」。
+        //
+        // 根因是「双通道模型」的产物被优先级吞掉：
+        //   · 模型的原生思考（`reasoning_content` / `thinking_delta`）→ `step.reasoning`
+        //     → 渲染为 ReasoningBlock（`source='native'`），界面上的「思考」；
+        //   · 模型的正文 → `step.thought`；
+        //   · 而 `reasoningText()` 在 native 存在时**优先返回 reasoning**（正本 G4：
+        //     两者互斥、原生胜出）→ **`thought` 整段被丢弃**。
+        //
+        // 实测形态（T-20260918-2l6905 steps.jsonl）：某步 `reasoning=5172 字符 /
+        // `thought=87 字符` —— 那 87 字符的正文从未出现在界面上。
+        //
+        // SayBlock 的语义正是「模型显式产出的『结论 + 下一步』」（03 §三 I5），
+        // 是「正式输出」最贴切的载体，所以这里做**回落**（不改变上面 reasoning
+        // 块的「原生优先」裁决，只是额外开一条通道）：
+        //   · 模型显式给了 `say` → 用它（最高优先，行为不变）；
+        //   · 未给 `say`，但存在原生思考且 `thought` 非空 → 用 `thought` 兜底，
+        //     让正文可见（否则被 native 完全遮蔽）；
+        //   · `content` 源（无原生思考）→ **不回落**：那种情况下 ReasoningBlock
+        //     已经承载了 `thought`，再产一个 say 块会让同一段文字出现两次。
+        const sayText = (s.say ?? '').trim() || (source === 'native' ? (s.thought ?? '').trim() : '')
+        if (sayText) {
           const sb: SayBlock = {
             kind: 'say',
             id: mkBlockId(turn.index, iteration, 'say', blockSeq++),
             turn: turn.index,
             step: iteration,
-            text: s.say!,
+            text: sayText,
             status: s.status === 'running' ? 'streaming' : 'settled',
             isSummarySource: false, // 后置 pass 标记本轮最后一个 say
             ts: s.startedAt,

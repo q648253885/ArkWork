@@ -14,7 +14,7 @@ import { genId } from '@shared/utils/id'
 import { drainContinuations } from '../inbox.js'
 import { emitTurnStopping } from '../turn-stopping.js'
 import { emitEvent } from './broadcast.js'
-import { discardIncompletePlanItems } from './gates.js'
+import { discardIncompletePlanItems, sealGraphForTaskOutcome } from './gates.js'
 
 /**
  * v0.27.0 R1：用户中断时，把本轮已流出的部分文本落盘。
@@ -81,6 +81,11 @@ export async function handleAbort(
   if (current?.status === 'cancelled') {
     await emitEvent(task.id, { type: 'task_paused', iteration })
     await discardIncompletePlanItems(current ?? task, '任务已取消，未完成清单项丢弃')
+    // v0.32.1（缺陷 D35）：**取消时也要封图级 status**。discardIncompletePlanItems 只收
+    // 节点，不收 `graph.status` → 用户取消后清单项显示已丢弃、图却仍 `in_progress`。
+    // 注意只有这里（不可恢复的取消）封口；**下面的 paused 分支刻意不封**
+    // —— 暂停是可恢复的，封成终态会让「继续」后的图状态与执行事实不符。
+    await sealGraphForTaskOutcome(current ?? task, 'cancelled', '任务已取消，未完成清单项丢弃')
     return
   }
   await emitEvent(task.id, { type: 'task_paused', iteration })
