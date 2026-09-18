@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import { mkdirSync, existsSync, readFileSync } from 'node:fs'
 import { createMainWindow, getMainWindow } from './window.js'
-import { registerIpcHandlers } from './ipc/index.js'
+import { registerIpcHandlers, bootstrapIpcSideEffects } from './ipc/index.js'
 import { initStore } from './store/db.js'
 import { reconcileStaleTasks } from './store/tasks.js'
 import { ensureWorkspace } from './fs/workspace.js'
@@ -107,6 +107,10 @@ app.whenReady().then(async () => {
 
   // 注册所有 IPC handlers
   registerIpcHandlers()
+
+  // v0.32.0：挂载持久化的 Workbench Profile（插槽注册 + 快照补写）
+  //   —— 必须在窗口创建之前，否则首屏渲染出的 DocK/首页模块会是未装配形态
+  await bootstrapIpcSideEffects()
 
   // v0.9.1：启动自动化 cron 调度器（30s tick，命中分钟触发）
   startAutomationScheduler()

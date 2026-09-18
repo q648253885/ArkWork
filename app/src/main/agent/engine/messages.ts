@@ -398,6 +398,22 @@ export async function assembleTools(agent: Agent, task: Task): Promise<LlmTool[]
     ...agent.defaultSkillIds,
     ...(task.skillIds || []),
   ])
+  // v0.32.0 G1：当前工作台声明的技能**叠加**进来（只加不减）
+  //   —— profile 的 capabilities/agents[].skills 是「这个垂直台需要的能力」，
+  //     不是「替换掉 agent 默认工具」；做减法会让用户在切台后莫名失去工具，
+  //     且难解释（工具消失比工具多余更难排查）。缺失项在装配时已降级记账，
+  //     这里只取 `found: true` 的（没装上的本就不该出现在工具列表里）。
+  try {
+    const { getLastSnapshot } = await import('../../profile/store.js')
+    const snap = await getLastSnapshot()
+    if (snap) {
+      for (const t of snap.layers.tools) {
+        if (t.kind === 'skill' && t.found) skillIdSet.add(t.ref)
+      }
+    }
+  } catch {
+    // profile 模块不可用（未启用 / 加载失败）→ 不阻断主路径，工具集退回 v0.31 语义
+  }
   const mcpServerIdSet = new Set<string>([
     ...(agent.defaultMcpIds || []),
     ...(task.mcpIds || []),

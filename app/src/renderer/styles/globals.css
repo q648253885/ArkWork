@@ -991,7 +991,7 @@ html.perf-lite .stream-caret {
   color: var(--toast-text);
   opacity: 0.6;
   padding: 2px;
-  border-radius: var(--radius-sm);
+  border-radius: 6px; /* = tailwind borderRadius.sm */
 }
 .toast__close:hover { opacity: 1; background: rgba(255, 255, 255, 0.14); }
 
@@ -1104,7 +1104,7 @@ html.perf-lite .stream-caret {
   font-size: 11px;
   color: var(--text-tertiary);
   background: var(--bg-hover);
-  border-radius: var(--radius-sm);
+  border-radius: 6px; /* = tailwind borderRadius.sm */
   letter-spacing: 0.02em;
 }
 .is-coming-soon {
@@ -1131,7 +1131,7 @@ html.perf-lite .stream-caret {
   font-weight: 500;
   color: var(--danger);
   border: 1px solid var(--error-card-border);
-  border-radius: var(--radius-sm);
+  border-radius: 6px; /* = tailwind borderRadius.sm */
   transition: all var(--duration-fast);
   flex-shrink: 0;
 }
@@ -1245,7 +1245,7 @@ html.perf-lite .stream-caret {
 .plan-flash {
   animation: plan-flash-anim 1.4s var(--ease-out) 1;
   background-color: var(--business-primary-soft);
-  border-radius: var(--radius-sm);
+  border-radius: 6px; /* = tailwind borderRadius.sm */
 }
 @keyframes plan-flash-anim {
   0%   { background-color: transparent; }
@@ -1446,6 +1446,141 @@ html.perf-lite .stream-caret {
 }
 
 /* ============================================================
+ * v0.32.0 — 交互区进程折叠条（ProcessFold）
+ * 设计文档：docs/versions/v0.32.0/03-interaction.md §二
+ *
+ * 目标：主展示区只留「要做的事 + 结论」，思考与工具调用收成一行**有信息量**
+ * 的摘要条（分类计数 + 时长 + 来源），需要时一键展开。
+ *
+ * 视觉语言纪律（03 §四 I13 状态轨唯一竖线）：
+ *  - 折叠条**不设左状态条、不设卡片底**——它是「行」不是「块」；
+ *  - 展开体的层次感靠 1px `--border-subtle` 细线 + 缩进表达；
+ *  - 「颜色只留给异常」（D21）：常态 `--text-tertiary`，仅 failed/guarded 上语义色。
+ * 零新增 token（不触发 design-tokens 两步注册）。
+ * ============================================================ */
+.flow-fold {
+  padding: 2px 0;
+}
+
+.flow-fold__head,
+.flow-fold--static {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 4px;
+  border-radius: 6px; /* = tailwind borderRadius.sm */
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-tertiary);
+  user-select: none;
+  text-align: left;
+}
+
+.flow-fold__head {
+  cursor: pointer;
+  transition: background-color 100ms ease-out; /* = tailwind transitionDuration.fast */
+}
+
+.flow-fold__head:hover {
+  background: var(--bg-overlay-l1);
+  color: var(--text-secondary);
+}
+
+.flow-fold__head:focus-visible {
+  outline: 2px solid var(--business-primary);
+  outline-offset: -2px;
+}
+
+/* 异常：语义色（失败不静默 —— 折叠不能让异常沉默） */
+.flow-fold[data-state='failed'] .flow-fold__head,
+.flow-fold[data-state='failed'] .flow-fold__label {
+  color: var(--danger);
+}
+
+.flow-fold[data-state='running'] .flow-fold__label {
+  color: var(--text-secondary);
+}
+
+.flow-fold__chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  transition: transform 100ms ease-out;
+}
+
+.flow-fold__chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.flow-fold__label {
+  flex-shrink: 0;
+}
+
+.flow-fold__meta,
+.flow-fold__placeholder {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.flow-fold__placeholder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-fold__running {
+  flex-shrink: 0;
+  color: var(--business-primary);
+}
+
+.flow-fold__duration {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 展开体：1px 细线 + 缩进表达层次（不用第二条状态条） */
+.flow-fold__body {
+  margin: 2px 0 2px 5px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: flow-fold-in 120ms ease-out;
+}
+
+@keyframes flow-fold-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 降级：性能模式与 reduced-motion 下取消过渡（与既有降级段同处维护） */
+html.perf-lite .flow-fold__head,
+html.perf-lite .flow-fold__chevron,
+html.perf-lite .flow-fold__body {
+  transition: none;
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow-fold__head,
+  .flow-fold__chevron,
+  .flow-fold__body {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* ============================================================
  * v0.22.0 — ReAct Reason / Observation 视觉分离（DSH ReasoningRow 风格）
  * - Reason 折叠块：左 3px 状态条 + 摘要 + chevron；展开显示 body
  * - Observation 降级为 ToolCard 内尾部的纯文本
@@ -1565,6 +1700,16 @@ html.perf-lite .stream-caret {
   /* v0.30.1：展开的思考正文可选中复制 */
   user-select: text;
   -webkit-user-select: text;
+}
+/* v0.32.0：折叠展开体内的思考块已由 ProcessFold 代持头行（forceOpen），
+   去掉其内层上下留白与左侧 14px 缩进（折叠体自身已有 10px 缩进 + 1px 细线）。
+   位置约束：本规则必须排在同名思考正文规则**之后** —— 既有源码契约测试按
+   文件内首个选择器匹配取块，写在前面对会把它的块判成这条覆盖。 */
+.flow-fold__body .react-reason {
+  padding: 2px 0;
+}
+.flow-fold__body .react-reason__body {
+  padding-left: 0;
 }
 .react-reason__chevron {
   color: var(--text-tertiary);

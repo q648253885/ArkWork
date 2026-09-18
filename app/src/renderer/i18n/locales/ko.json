@@ -13,7 +13,40 @@
     "approvalNeedsHuman": "사람 확인 필요",
     "approvalReplan": "재계획 승인 대기",
     "approvalConverge": "수렴 확인",
-    "openFile": "클릭하여 파일 열기"
+    "openFile": "클릭하여 파일 열기",
+    "fold": {
+      "thinking": "사고 과정",
+      "tools": "도구 호출",
+      "running": "진행 중",
+      "sep": ", ",
+      "read": "{{n}}개 파일 읽음",
+      "edit": "{{n}}개 파일 수정",
+      "delete": "{{n}}개 파일 삭제",
+      "move": "{{n}}개 파일 이동",
+      "search": "{{n}}회 검색",
+      "execute": "{{n}}개 명령 실행",
+      "fetch": "{{n}}개 출처 조회",
+      "other": "기타 도구 {{n}}회 호출",
+      "expandAria": "{{name}} 펼치기",
+      "collapseAria": "{{name}} 접기"
+    },
+    "viewmode": {
+      "compact": "컴팩트",
+      "standard": "표준",
+      "verbose": "상세"
+    },
+    "turn": {
+      "status": {
+        "running": "실행 중",
+        "done": "완료",
+        "failed": "실패",
+        "paused": "일시정지",
+        "cancelled": "취소"
+      },
+      "toolsCount": "도구 {{n}}회",
+      "collapse": "이 턴 접기",
+      "expand": "이 턴 펼치기"
+    }
   },
   "common": {
     "cancel": "취소",
@@ -2601,5 +2634,93 @@
       "discard": "변경 버리기",
       "cancel": "취소"
     }
+  },
+  "profile": {
+    "switcher": {
+      "aria": "워크벤치 전환",
+      "label": "워크벤치 전환",
+      "desc": "워크벤치는 능력의 조합입니다. 전환하면 Dock 패널·홈 모듈·메모리 네임스페이스·바로가기 프롬프트가 함께 바뀝니다",
+      "cap": "현재: {{name}}",
+      "unknown": "알 수 없는 워크벤치"
+    },
+    "menu": {
+      "import": "Profile 가져오기…",
+      "snapshot": "구성 스냅샷 보기",
+      "manage": "Profile 관리…",
+      "empty": "사용 가능한 워크벤치 없음"
+    },
+    "namespace": "메모리 네임스페이스",
+    "source": {
+      "builtin": "내장",
+      "user": "사용자"
+    },
+    "toast": {
+      "switched": "{{name}}(으)로 전환됨",
+      "failed": "전환 실패: {{reason}}"
+    },
+    "report": {
+      "title": "활성화 보고서",
+      "ok": "{{name}}({{id}} v{{version}}) 활성화 · {{ms}}ms",
+      "failed": "활성화 실패",
+      "stillActive": "현재 적용 중: {{name}}",
+      "layers": "5개 계층 구성",
+      "layer": {
+        "agents": "에이전트",
+        "tools": "도구 및 스킬",
+        "ui": "UI",
+        "data": "데이터",
+        "auto": "자동화"
+      },
+      "degraded": "성능 저하 및 경고",
+      "issues": "검증 문제",
+      "none": "없음",
+      "close": "닫기",
+      "snapshot": "구성 스냅샷",
+      "resolvedAt": "{{time}}에 해석됨"
+    },
+    "import": {
+      "title": "Profile 가져오기",
+      "hint": "workbench.json 내용 붙여넣기",
+      "valid": "검증 통과, 가져왔습니다",
+      "invalid": "검증 실패, 가져오지 않음",
+      "parseError": "유효한 JSON이 아닙니다",
+      "submit": "가져오기",
+      "cancel": "취소"
+    },
+    "delete": {
+      "builtinDenied": "내장 워크벤치는 삭제할 수 없습니다",
+      "activeDenied": "현재 활성 워크벤치는 삭제할 수 없습니다"
+    },
+    "ns": {
+      "shared": "워크벤치 간 공유"
+    },
+    "agentsCount": "에이전트 {{n}}개",
+    "list": {
+      "empty": "사용 가능한 워크벤치가 없습니다"
+    },
+    "meta": {
+      "line": "메모리 {{namespace}} · 에이전트 {{agents}} · 능력 {{caps}}"
+    },
+    "homeModule": {
+      "open": "이 워크벤치의 홈 모듈 열기"
+    },
+    "reject": {
+      "hint": "지난번 {{id}} 전환이 실패했습니다. 클릭해 이유를 확인하세요"
+    },
+    "degraded": {
+      "count": "{{count}}개 능력이 적용되지 않음",
+      "blockingCount": "{{count}}개 필수 능력 누락",
+      "layer": {
+        "agents": "에이전트",
+        "tools": "도구",
+        "ui": "UI",
+        "data": "데이터",
+        "auto": "자동화",
+        "unknown": "알 수 없음"
+      }
+    }
+  },
+  "keybind": {
+    "switchProfile": "워크벤치 전환"
   }
 }

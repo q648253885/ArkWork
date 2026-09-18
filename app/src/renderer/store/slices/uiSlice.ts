@@ -16,6 +16,8 @@ import {
   sanitizeInspectorOrder,
 } from '../meta'
 import { loadActiveWorkspace, loadUiState, saveUiState } from '../persist'
+// v0.32.0：折叠切换语义（纯函数；缺陷 D33 的唯一修正点）
+import { applyUserFoldToggle } from '@shared/utils/flow-fold'
 import { findFileTab } from '../../services/previewTabs'
 import i18n from '../../i18n'
 import {
@@ -550,13 +552,19 @@ export const uiSlice: StateCreator<
     saveUiState('flow-show-thinking', b)
     set((s) => ({ flow: { ...s.flow, showThinking: b } }))
   },
+  // v0.32.0 缺陷 D33：这里此前恒写 `userOpen: true`，而 ProcessFold 又把
+  // `userOpen` 当展示态读 → 「点开后收不起来」。现改为经纯函数写入真实意图，
+  // 并与投影层 blockOpenOf 的三态语义对齐（open = 应用态 / userOpen = 门闩）。
   setBlockOpen: (blockId, open) =>
     set((s) => ({
       flow: {
         ...s.flow,
         blockUiState: {
           ...s.flow.blockUiState,
-          [blockId]: { ...(s.flow.blockUiState[blockId] ?? {}), open, userOpen: true },
+          [blockId]: {
+            ...(s.flow.blockUiState[blockId] ?? { open: false, userOpen: null }),
+            ...applyUserFoldToggle(s.flow.blockUiState[blockId], open),
+          },
         },
       },
     })),

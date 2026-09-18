@@ -34,6 +34,7 @@
 | **v0.30.2** | **2026-09-15** | **三问题修复补丁（L1 JSONL 并发写丢数据 · 续聊清单清空重建 · 思考内容运行时展开+完成后折叠）** | **已发布（tag `v0.30.2`）** |
 | **v0.31.0** | **2026-09-17** | **大版本：文件工作台（CM6 编辑器内核 + 原子保存 + chokidar 监听 + Goto Anything）+ 交互区三层信息架构（真思考管道 + Turn/Step/Block）+ C1 视图收敛 + C2 LLM 任务标题 + C3 浮窗最小化恢复修复** | **已发布（tag `v0.31.0` / `f4ad03e`；875 条全绿 + 打包冒烟通过）** |
 | **v0.31.1** | **2026-09-17** | **小版本补丁：v0.31.0 发版后用户双端实测缺陷集中修复（14 项，D19–D30）—— Windows 阻断级三项（快捷键全失效 / 语法高亮缺失 / 编辑器右键无菜单）+ WCO 主题同步 + OpenAI 端点双重拼接 + 品牌紫→业务蓝全局切换 + 交互区/输入区两态中性灰调色 + 低配性能降级模式 + CDP 调试端口** | **已发布（tag `v0.31.1`；940 条全绿 + typecheck/build 通过）** |
+| **v0.32.0** | **2026-09-18** | **大版本：插件模式（Workbench Profile 垂直工作台）+ 交互区进程折叠（思考/工具调用可折叠，主展示要做的事与结论）** | **已交付（1017 条全绿 + typecheck 零错 + build 通过 + 打包冒烟通过；交付 mac `.app` + Windows 免安装 zip）** |
 
 > 说明：`v0.29.0` 仅有设计调研文档（`docs/versions/v0.29.0/02-plugin-extension-research.md`），无代码发布与 tag，故不列入发布索引；v0.30.0 文档线基于 v0.29.0、代码线基于 v0.28.1。
 > 说明：v0.30.0 与 v0.30.1 同日交付，git 侧**只打 tag `v0.30.1`**（指向已包含两版全部代码与文档的提交），v0.30.0 不单独留 tag；四语言 README 已同步新增「最新版本」亮点板块。
@@ -106,6 +107,69 @@
 | 测试 | `typecheck` exit 0；`npm test` **85 文件发现 / 执行 84 / 0 fail**（累积 **875** 条 = 继承 766 + 新增 109；冒烟 **845**）；i18n 四语言键集一致 |
 | 交付产物 | macOS dmg/zip（arm64+x64）· Windows nsis + portable（x64，Win10/11）· Linux AppImage/deb；`app.asar` 逐批标记回验 |
 | git 收尾 | 两笔提交（代码+测试 / 文档）+ tag `v0.31.0` |
+
+---
+
+## v0.32.0（2026-09-17 ~ 09-18）· 插件模式 + 交互区进程折叠（大版本）
+
+**基调**：把 ArkWork 从「一个通用 agent 工作台」变成「可插拔多工作台的宿主」；
+同时把交互区从「所有内容平铺」改为「过程折叠、结论前置」。两条线合一个版本交付。
+
+### A 线 · 交互区进程折叠（需求 2）
+
+参考 opencode / TraeWork 的交互区形态，落地「进程折叠」：
+
+- 新增 `shared/utils/flow-fold.ts`（纯函数）：**连续性分组** —— 仅相邻同类块合成一段，
+  `[reasoning, reasoning, say, tool, tool]` → 3 段；run id 取首块 id（虚拟化可复用）；
+- 新增 `ProcessFold.tsx`：折叠条 = 标签 + **有信息量的摘要** + 耗时 + 失败徽标；
+- 摘要规格（直击 TraeWork 被投诉的「空壳摘要」）：`思考 12.3s · 读取 ×3 / 搜索 ×1 / 执行 ×2 · 用时 45.2s`，零类别不出现；
+- 展开态落 `store.flow.blockUiState[runId]`，**不用组件本地 useState**（虚拟滚动会重建组件，本地态必丢）；
+- 三档 viewMode 策略：`compact` 全折叠 / `standard` 异常强制展开 / `detailed` 全展开；用户手动点击优先于一切自动策略。
+
+### B 线 · Workbench Profile 插件模式（需求 3）
+
+三层结构：`workbench.json`（纯数据）→ `WorkbenchProfile`（extends 链合并）→ `CompositionSnapshot`（装配快照）→ 视图投影。
+
+- **槽位服务** `main/profile/slots.ts`：重复 id 直接 throw（不静默覆盖），返回 `Disposable`；
+- **装配器** `main/profile/activator.ts`：事务性装配 + **五层降级记账**（技能 / MCP / 面板 / 命名空间 / 自动化）；
+- **记忆命名空间** `core/`（跨台共享）+ `ns/<name>/`（域隔离），激活时幂等就绪并进快照；
+- **引擎挂点**：G1 工具集「只加不减」叠加台内技能；G2 新增 `profile-context` system 段（order 180 / run-static 前缀缓存友好）；
+- **切换 UI**：顶栏常驻台名 chip + 切换菜单 + 降级明细（红=阻断 / 橙=非阻断）+ **五层装配快照面板**；
+- **内置三台**：`wb.base`（通用，零降级基线）/ `wb.coding`（代码开发）/ `wb.research`（研究）—— 一律内联 `personaText`，不引用既有 Agent 实体（避免 profile 与 agents.json 双向耦合）。
+
+### 缺陷
+
+D31（`extends` 子台省略 `data` 会致记忆命名空间被空串覆盖 → 装配必然失败；中危，用例暴露后已修）
+· D32（设计文档五处口径与交付实况漂移；文档升级 v1.1）
+· A1/A2（`var()` 颜色加透明度类静默失效 / CSS 契约取块错位 —— 均由 v0.31.0 既有门禁抓到）
+· **D33**（实测：折叠条**点开后收不起来**。`setBlockOpen` 恒写 `userOpen:true` + 读数取自三态门闩，两处叠加；
+  已修并由 TC-FOLD-011b / TC-FOLD-019 把守）
+· **D34**（实测：`bootstrapProfile` 早退 → **第二次及以后每次启动五层插槽全空挂**（静默半死）。
+  根因是「磁盘快照」与「进程内注册表」的错配；已修并由 TC-PUI-011 / TC-PUI-012 把守）。
+
+### 门禁
+
+`npm run typecheck` 双 tsconfig 零错 · `node scripts/run-tests.mjs` **1017 / 1017 pass 0 fail**（基线 940 → +77，新增载体 6 个）
+· `npm run build` 通过（渲染主 chunk 零 `@codemirror` / `chokidar` / `lezer`）· 四语言 i18n parity
+· 打包冒烟通过（mac `.app` 启动零 ERROR；包内 SHA256 与本地构建字节一致，见 `versions/v0.32.0/packaging-smoke-report.md`）。
+
+### 交付形态（用户裁决）
+
+**只交付 mac `.app`（未压缩，557 MB）+ Windows 免安装 zip（≈147 MB，解压顶层 `ArkWork/`）**；
+不做 dmg / nsis / portable / mac zip，旧版产物已清除。
+
+### 遗留
+
+L7（既有记忆文件路径未按命名空间改写）· L10（台下 Dock 偏好未持久化）· L11（导入 UI 未做，IPC 已就绪）
+· L12（namespace 模块无自动化覆盖）· L13（`personaText` 未注入人格段）· L14（无键盘和弦入口）
+· **Windows 实机启动未实测**（本机无 Windows；已完成包内容回验，属未测未知区）。
+
+### 过程教训（两条，均已写成纪律）
+
+1. **凡「写一处、读另一处」的状态，必须配一条往返回归用例** —— D33 之所以躲过全绿，是因为三层守卫
+   全在结构层（纯函数单测 / 源码契约 / slice 不可导入），「写入值 → 读出值」这条缝没有任何用例经过。
+2. **凡「磁盘持久化 + 进程内注册表」双写结构，启动时必须以内存侧为准重放一遍** —— D34 之所以躲过全绿，
+   是因为所有用例都在单进程内跑，**「模块级状态跨进程存活期」是用例完全没覆盖的维度**。
 
 ---
 

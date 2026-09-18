@@ -22,6 +22,9 @@ export function RightDock() {
   const activeDockTab = useStore((s) => s.activeDockTab)
   const setActiveDockTab = useStore((s) => s.setActiveDockTab)
   const dockTabs = useStore((s) => s.dockTabs)
+  // v0.32.0：profile 声明的面板顺序是**视图层覆盖**，不写回 dockPrefs
+  // （切回通用台能立刻恢复用户手动排过的偏好 —— 详见 profileSlice 遗留 L10）
+  const profileDockTabs = useStore((s) => s.profileDockTabs)
   const dockPrefs = useStore((s) => s.dockPrefs)
   const setDockPrefs = useStore((s) => s.setDockPrefs)
   const resetDockPrefs = useStore((s) => s.resetDockPrefs)
@@ -36,7 +39,8 @@ export function RightDock() {
   // Task 2：按智能体启用的侧边栏 widget 过滤 Dock Tab（widget 可用性层）
   // dockTabs（store，预设×用户偏好）→ visibleTabs（再交 enabledSidebarWidgetIds 过滤）
   const enabledDockTabIds = getEnabledDockTabIds(agent)
-  const visibleTabs: DockTabId[] = dockTabs.filter((t) => enabledDockTabIds.has(t))
+  const sourceTabs: DockTabId[] = profileDockTabs ?? dockTabs
+  const visibleTabs: DockTabId[] = sourceTabs.filter((t) => enabledDockTabIds.has(t))
   const visibleTabsKey = visibleTabs.join(',')
   const prevTabsRef = useRef<string>(visibleTabsKey)
   // 当前选中 Tab 被该智能体禁用时 → 回落到首个可见 Tab（store 的 activeDockTab 可能暂未同步）

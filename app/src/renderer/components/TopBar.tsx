@@ -16,6 +16,8 @@ import { useTranslation } from 'react-i18next'
 import { Icon } from '../icons'
 import { useStore } from '../store'
 import { Tooltip } from './ui'
+// v0.32.0：工作台切换器（插件模式入口）
+import { ProfileSwitcher } from './ProfileSwitcher'
 import { ark } from '../ipc/client'
 // v0.31.0 B0：键位提示一律经 keymap 产出，禁止在 JSX / i18n 内写裸修饰键符号
 import { chordText } from '../keymap'
@@ -66,12 +68,15 @@ export function TopBar() {
         </Tooltip>
       </div>
 
-      {/* 右：设置（页面化入口）。polish-workspace-task-title-skills-context-help §Task 5.2:
+      {/* 右：工作台切换器（v0.32.0 插件模式）+ 设置（页面化入口）。polish-workspace-task-title-skills-context-help §Task 5.2:
           大模型显示已收敛到 Composer 唯一入口，TopBar 不再展示。 */}
       <div
         className="flex items-center gap-1 ml-auto pl-2"
         style={{ WebkitAppRegion: 'no-drag' as React.CSSProperties['WebkitAppRegion'] }}
       >
+        {/* v0.32.0：当前工作台（常驻显示台名；切换 / 降级明细在下拉里） */}
+        <ProfileSwitcher />
+
         <Tooltip
           label={t('topbar.settings.label')}
           kbd={chordText('Mod+,')}

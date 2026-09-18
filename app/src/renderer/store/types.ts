@@ -12,6 +12,13 @@ import type {
   DockPreset,
 } from '@shared/types/agent'
 import type { Task } from '@shared/types/task'
+// v0.32.0：Workbench Profile（插件模式）
+import type {
+  ActivationReport,
+  CompositionSnapshot,
+  Degradation,
+  ProfileSummary,
+} from '@shared/types/profile'
 import type { ReActStep } from '@shared/types/react'
 import type {
   TaskProgress,
@@ -202,6 +209,7 @@ export interface ConfirmDialogState extends Required<ConfirmDialogOpts> {
   onConfirm: () => void
 }
 export interface AppState {
+  // v0.32.0：Workbench Profile（插件模式）—— 完整类型见 slices/profileSlice.ts 的 ProfileState
   // v0.7.0 布局：Activity Bar + SidePanel
   sidePanelWidth: number
   sidePanelCollapsed: boolean
@@ -676,6 +684,30 @@ export interface AppState {
   language: Locale
   /** 切换界面语言并持久化（i18next + 文档属性 + localStorage + settings.json） */
   setLanguage: (l: Locale) => Promise<void>
+
+  /* ============================================================
+   * v0.32.0：Workbench Profile（插件模式）
+   * 字段与行为定义见 `slices/profileSlice.ts` 的 `ProfileState`。
+   * 这里重复声明而不是 `extends ProfileState`：AppState 是单一扁平契约，
+   * 让「整个应用有哪几个状态键」在这一处可读可 diff。
+   * ============================================================ */
+  profiles: ProfileSummary[]
+  activeProfileId: string
+  profileSnapshot: CompositionSnapshot | null
+  profileDegraded: Degradation[]
+  profileLastReport: ActivationReport | null
+  profileBusy: boolean
+  profileLoaded: boolean
+  /** profile 声明的 Dock 面板顺序；null = 不覆盖用户/智能体偏好 */
+  profileDockTabs: DockTabId[] | null
+  /** profile 声明的无任务首页模块页；null = 不覆盖 */
+  profileHomeModule: ModulePage | null
+  /** profile 声明的 Composer chips（点击后填入草稿） */
+  profileComposerChips: string[]
+  loadProfiles: () => Promise<void>
+  switchProfile: (id: string) => Promise<boolean>
+  applyProfileToView: (snapshot: CompositionSnapshot | null) => void
+  subscribeProfileChanges: () => () => void
 
   // ---- 初始化 ----
   init: () => Promise<void>

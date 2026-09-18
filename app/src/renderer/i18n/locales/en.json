@@ -13,7 +13,40 @@
     "approvalNeedsHuman": "Needs human confirmation",
     "approvalReplan": "Replan pending approval",
     "approvalConverge": "Converge confirmation",
-    "openFile": "Click to open this file"
+    "openFile": "Click to open this file",
+    "fold": {
+      "thinking": "Thinking process",
+      "tools": "Tool calls",
+      "running": "Running",
+      "sep": ", ",
+      "read": "Read {{n}} file(s)",
+      "edit": "Edited {{n}} file(s)",
+      "delete": "Deleted {{n}} file(s)",
+      "move": "Moved {{n}} file(s)",
+      "search": "Searched {{n}} time(s)",
+      "execute": "Ran {{n}} command(s)",
+      "fetch": "Fetched {{n}} source(s)",
+      "other": "Called {{n}} other tool(s)",
+      "expandAria": "Expand {{name}}",
+      "collapseAria": "Collapse {{name}}"
+    },
+    "viewmode": {
+      "compact": "Compact",
+      "standard": "Standard",
+      "verbose": "Verbose"
+    },
+    "turn": {
+      "status": {
+        "running": "Running",
+        "done": "Done",
+        "failed": "Failed",
+        "paused": "Paused",
+        "cancelled": "Cancelled"
+      },
+      "toolsCount": "{{n}} tool calls",
+      "collapse": "Collapse turn",
+      "expand": "Expand turn"
+    }
   },
   "common": {
     "cancel": "Cancel",
@@ -2601,5 +2634,93 @@
       "discard": "Discard changes",
       "cancel": "Cancel"
     }
+  },
+  "profile": {
+    "switcher": {
+      "aria": "Switch workbench",
+      "label": "Switch workbench",
+      "desc": "A workbench is a composition of capabilities — switching changes Dock panels, home module, memory namespace and quick prompts together",
+      "cap": "Current: {{name}}",
+      "unknown": "Unknown workbench"
+    },
+    "menu": {
+      "import": "Import profile…",
+      "snapshot": "View composition snapshot",
+      "manage": "Manage profiles…",
+      "empty": "No workbench available"
+    },
+    "namespace": "Memory namespace",
+    "source": {
+      "builtin": "Built-in",
+      "user": "User"
+    },
+    "toast": {
+      "switched": "Switched to {{name}}",
+      "failed": "Switch failed: {{reason}}"
+    },
+    "report": {
+      "title": "Activation report",
+      "ok": "Activated {{name}} ({{id}} v{{version}}) · {{ms}}ms",
+      "failed": "Activation failed",
+      "stillActive": "Still active: {{name}}",
+      "layers": "Composition layers",
+      "layer": {
+        "agents": "Agents",
+        "tools": "Tools & skills",
+        "ui": "UI",
+        "data": "Data",
+        "auto": "Automation"
+      },
+      "degraded": "Degradations & warnings",
+      "issues": "Validation issues",
+      "none": "None",
+      "close": "Close",
+      "snapshot": "Composition snapshot",
+      "resolvedAt": "Resolved at {{time}}"
+    },
+    "import": {
+      "title": "Import profile",
+      "hint": "Paste workbench.json content",
+      "valid": "Validation passed, imported",
+      "invalid": "Validation failed, not imported",
+      "parseError": "Not valid JSON",
+      "submit": "Import",
+      "cancel": "Cancel"
+    },
+    "delete": {
+      "builtinDenied": "Built-in workbench cannot be deleted",
+      "activeDenied": "Active workbench cannot be deleted"
+    },
+    "ns": {
+      "shared": "Shared across workbenches"
+    },
+    "agentsCount": "{{n}} agent(s)",
+    "list": {
+      "empty": "No workbench available"
+    },
+    "meta": {
+      "line": "Memory {{namespace}} · {{agents}} agents · {{caps}} capabilities"
+    },
+    "homeModule": {
+      "open": "Open this workbench home module"
+    },
+    "reject": {
+      "hint": "Last switch to {{id}} failed — click to see why"
+    },
+    "degraded": {
+      "count": "{{count}} capabilities not active",
+      "blockingCount": "{{count}} required capabilities missing",
+      "layer": {
+        "agents": "Agents",
+        "tools": "Tools",
+        "ui": "UI",
+        "data": "Data",
+        "auto": "Automation",
+        "unknown": "Unknown"
+      }
+    }
+  },
+  "keybind": {
+    "switchProfile": "Switch workbench"
   }
 }

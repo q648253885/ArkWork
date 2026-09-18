@@ -23,6 +23,16 @@ import type {
 import type { Agent, Skill, McpServer, LlmModel, LlmProviderKind, SkillSource } from './agent'
 import type { Automation, KnowledgeBase } from './conversation'
 import type { PermissionMode, ResolvedRules, PermissionDecision } from './permission'
+// v0.32.0：Workbench Profile（插件模式）
+import type {
+  ActivationReport,
+  CompositionSnapshot,
+  ProfileSummary,
+  SlotEntry,
+  SlotKind,
+  ValidationReport,
+  WorkbenchProfile,
+} from './profile'
 // v0.30.0：TaskGraph（任务面板 IPC 的载荷类型）
 import type {
   GraphResult,
@@ -630,6 +640,24 @@ export const SettingsChannel = {
   PickWorkspace: 'settings:pick-workspace',
 } as const
 
+/**
+ * v0.32.0：Workbench Profile（插件模式）IPC 通道。
+ * 命名沿用 `<domain>:<verb>`；全部为 renderer → main 的 invoke + 一个
+ * main → renderer 的 `profile:changed` 广播（切换后让所有窗口同步重挂）。
+ */
+export const ProfileChannel = {
+  List: 'profile:list',
+  GetActive: 'profile:get-active',
+  Activate: 'profile:activate',
+  Snapshot: 'profile:snapshot',
+  Validate: 'profile:validate',
+  Import: 'profile:import',
+  Delete: 'profile:delete',
+  Slots: 'profile:slots',
+  /** main → renderer：工作台切换完成（含被拒的激活） */
+  Changed: 'profile:changed',
+} as const
+
 /** v0.4.0：主题三态（浅色 / 深色 / 跟随系统） */
 export type ThemeMode = 'light' | 'dark' | 'system'
 
@@ -1211,6 +1239,27 @@ export interface ArkApi {
     setSecret: (key: string, value: string) => Promise<void>
     pickWorkspace: () => Promise<string | undefined>
     activateWorkspace: (path: string) => Promise<boolean>
+  }
+  /** v0.32.0：Workbench Profile（插件模式 · 垂直工作台） */
+  profile: {
+    /** 全部可安装工作台（内置 ∪ 用户），含 active 标记 */
+    list: () => Promise<ProfileSummary[]>
+    /** 当前生效工作台 id（永远有值，必要时回落 wb.base） */
+    getActive: () => Promise<{ profileId: string; snapshot: CompositionSnapshot | null }>
+    /** 激活（事务性：失败时仍生效的是上一个台） */
+    activate: (args: { id: string }) => Promise<ActivationReport>
+    /** 当前装配快照 */
+    snapshot: () => Promise<CompositionSnapshot | null>
+    /** 干跑校验（不改状态）：给导入前的预览用 */
+    validate: (args: { raw: unknown }) => Promise<ValidationReport>
+    /** 导入一个 manifest（JSON 字面量）并立即激活 */
+    import: (args: { raw: unknown; activate?: boolean }) => Promise<{ ok: boolean; report?: ActivationReport; issues: ValidationReport['issues'] }>
+    /** 删除用户工作台（内置 / 生效中会被拒） */
+    delete: (args: { id: string }) => Promise<{ ok: boolean; reason?: 'builtin' | 'active' | 'not-found' }>
+    /** 当前插槽注册明细（诊断 / 可观测性） */
+    slots: () => Promise<Record<SlotKind, SlotEntry[]>>
+    /** 订阅工作台切换事件（任一窗口切换后广播） */
+    onChanged: (cb: (payload: { profileId: string; ok: boolean }) => void) => () => void
   }
   /** v0.4.0：主题（同步原生界面 + 监听系统主题变化） */
   theme: {

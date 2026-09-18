@@ -364,6 +364,22 @@ const ark: ArkApi = {
     pickWorkspace: () => ipcRenderer.invoke('settings:pick-workspace'),
     activateWorkspace: (path: string) => ipcRenderer.invoke('settings:activate-workspace', path),
   },
+  // v0.32.0：Workbench Profile（插件模式 · 垂直工作台）
+  profile: {
+    list: () => ipcRenderer.invoke('profile:list'),
+    getActive: () => ipcRenderer.invoke('profile:get-active'),
+    activate: (args) => ipcRenderer.invoke('profile:activate', args),
+    snapshot: () => ipcRenderer.invoke('profile:snapshot'),
+    validate: (args) => ipcRenderer.invoke('profile:validate', args),
+    import: (args) => ipcRenderer.invoke('profile:import', args),
+    delete: (args) => ipcRenderer.invoke('profile:delete', args),
+    slots: () => ipcRenderer.invoke('profile:slots'),
+    onChanged: (cb) => {
+      const handler = (_e: IpcRendererEvent, payload: Parameters<typeof cb>[0]) => cb(payload)
+      ipcRenderer.on('profile:changed', handler)
+      return () => ipcRenderer.removeListener('profile:changed', handler)
+    },
+  },
   // v0.4.0：主题（同步原生界面 + 监听系统主题变化）
   theme: {
     apply: (t) => ipcRenderer.invoke('theme:apply', t),

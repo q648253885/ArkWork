@@ -13,7 +13,40 @@
     "approvalNeedsHuman": "需要人工确认",
     "approvalReplan": "重新规划待批准",
     "approvalConverge": "收敛确认",
-    "openFile": "点击打开文件"
+    "openFile": "点击打开文件",
+    "fold": {
+      "thinking": "思考过程",
+      "tools": "工具调用",
+      "running": "进行中",
+      "sep": "，",
+      "read": "已读取 {{n}} 个文件",
+      "edit": "已修改 {{n}} 个文件",
+      "delete": "已删除 {{n}} 个文件",
+      "move": "已移动 {{n}} 个文件",
+      "search": "搜索 {{n}} 次",
+      "execute": "执行 {{n}} 条命令",
+      "fetch": "检索 {{n}} 个来源",
+      "other": "调用 {{n}} 次其他工具",
+      "expandAria": "展开{{name}}",
+      "collapseAria": "收起{{name}}"
+    },
+    "viewmode": {
+      "compact": "紧凑",
+      "standard": "标准",
+      "verbose": "详尽"
+    },
+    "turn": {
+      "status": {
+        "running": "运行中",
+        "done": "已完成",
+        "failed": "失败",
+        "paused": "已暂停",
+        "cancelled": "已取消"
+      },
+      "toolsCount": "{{n}} 次工具",
+      "collapse": "收起本轮",
+      "expand": "展开本轮"
+    }
   },
   "common": {
     "cancel": "取消",
@@ -753,7 +786,7 @@
       "successRate": "成功率 {{rate}}%",
       "skillsCount": "技能 {{count}}",
       "startTask": "启动任务",
-        "edit": "编辑"
+      "edit": "编辑"
     },
     "kb": {
       "title": "知识库",
@@ -2601,5 +2634,93 @@
       "discard": "丢弃改动",
       "cancel": "取消"
     }
+  },
+  "profile": {
+    "switcher": {
+      "aria": "切换工作台",
+      "label": "切换工作台",
+      "desc": "工作台是一组能力的装配：切换后 Dock 面板、首页模块、记忆域与快捷指令整体改变",
+      "cap": "当前：{{name}}",
+      "unknown": "未知工作台"
+    },
+    "menu": {
+      "import": "导入 Profile…",
+      "snapshot": "查看装配快照",
+      "manage": "管理 Profile…",
+      "empty": "没有可用的工作台"
+    },
+    "namespace": "记忆命名空间",
+    "source": {
+      "builtin": "内置",
+      "user": "用户"
+    },
+    "toast": {
+      "switched": "已切换到 {{name}}",
+      "failed": "切换失败：{{reason}}"
+    },
+    "report": {
+      "title": "激活报告",
+      "ok": "已激活 {{name}}（{{id}} v{{version}}）· {{ms}}ms",
+      "failed": "激活失败",
+      "stillActive": "当前仍生效：{{name}}",
+      "layers": "五层装配",
+      "layer": {
+        "agents": "智能体",
+        "tools": "工具与技能",
+        "ui": "界面",
+        "data": "数据",
+        "auto": "自动化"
+      },
+      "degraded": "降级与警告",
+      "issues": "校验问题",
+      "none": "无",
+      "close": "关闭",
+      "snapshot": "装配快照",
+      "resolvedAt": "解析于 {{time}}"
+    },
+    "import": {
+      "title": "导入 Profile",
+      "hint": "粘贴 workbench.json 内容",
+      "valid": "校验通过，已导入",
+      "invalid": "校验失败，未导入",
+      "parseError": "不是合法的 JSON",
+      "submit": "导入",
+      "cancel": "取消"
+    },
+    "delete": {
+      "builtinDenied": "内置工作台不可删除",
+      "activeDenied": "当前生效的工作台不可删除"
+    },
+    "ns": {
+      "shared": "跨工作台共享"
+    },
+    "agentsCount": "{{n}} 个智能体",
+    "list": {
+      "empty": "暂无可用工作台"
+    },
+    "meta": {
+      "line": "记忆域 {{namespace}} · {{agents}} 个智能体 · {{caps}} 项能力"
+    },
+    "homeModule": {
+      "open": "打开本工作台的首页模块"
+    },
+    "reject": {
+      "hint": "上次切换到 {{id}} 未成功，点击查看原因"
+    },
+    "degraded": {
+      "count": "{{count}} 项能力未生效",
+      "blockingCount": "{{count}} 项必需能力缺失",
+      "layer": {
+        "agents": "智能体",
+        "tools": "工具",
+        "ui": "界面",
+        "data": "数据",
+        "auto": "定时任务",
+        "unknown": "未知"
+      }
+    }
+  },
+  "keybind": {
+    "switchProfile": "切换工作台"
   }
 }

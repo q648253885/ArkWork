@@ -318,6 +318,35 @@ function WorkspaceOnlyHint({ name }: { name?: string }) {
       <p className="text-xs text-text-tertiary">
         {t('centerstage.greeting.hint')}
       </p>
+      {/* v0.32.0：工作台声明的快捷 chips —— 复用既有 composer:fill 事件桥，
+          不在 Composer 内部读 profile（Composer 是通用组件，不该认识工作台） */}
+      <ProfileChips />
+    </div>
+  )
+}
+
+/**
+ * v0.32.0：当前工作台的 Composer 快捷 chips。
+ * 无 profile / 无 chips → 不渲染任何东西（通用台就该保持空态简洁）。
+ */
+function ProfileChips() {
+  const chips = useStore((s) => s.profileComposerChips)
+  if (!chips.length) return null
+  return (
+    <div className="profile-chips flex flex-wrap items-center justify-center gap-1.5 mt-1">
+      {chips.map((chip) => (
+        <button
+          key={chip}
+          type="button"
+          className="profile-chips__item px-2.5 py-1 rounded-full bg-bg-surface border border-border-subtle text-2xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors focus-ring"
+          onClick={() => {
+            // composer:fill 的处理方在填完文本后自行聚焦（Composer.tsx:618），这里不重复派发
+            window.dispatchEvent(new CustomEvent('composer:fill', { detail: chip }))
+          }}
+        >
+          {chip}
+        </button>
+      ))}
     </div>
   )
 }

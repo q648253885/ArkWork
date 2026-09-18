@@ -392,6 +392,14 @@ export function subscribeAll(
       }),
     )
 
+    // v0.32.0：工作台切换完成（任一窗口触发 → 全部窗口重新拉取，
+    //           避免多窗口各自持有一份不同的 profile 状态）
+    unsubs.push(
+      ark.profile.onChanged(() => {
+        get().loadProfiles()
+      }),
+    )
+
     // v0.4.0：系统主题变化（仅当 theme==='system' 时联动 <html class>）
     unsubs.push(
       ark.theme.onSystemChange((systemTheme) => {

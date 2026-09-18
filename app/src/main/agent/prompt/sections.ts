@@ -30,6 +30,8 @@ export const SECTION_ORDER = {
   coreRules: 0,
   personality: 100,
   alwaysOnSkill: 150,
+  // v0.32.0 G2：工作台上下文（在常驻技能之后、工作区之前 —— 先认身份再看环境）
+  profileContext: 180,
   workspace: 200,
   memory: 300,
   planConstraint: 500,
@@ -83,6 +85,33 @@ registerPromptSection({
   maxTokens: 400,
   required: false,
   build: async (ctx) => buildPersonalitySegment(ctx.agent) || null,
+})
+
+// v0.32.0 G2：工作台上下文段 —— 让 agent「知道自己是谁、在哪、记忆属于哪个域」。
+//
+// 为什么必须写进 system：profile 的存在意义是「让 agent 只在自己的命名空间
+// 与人格内行动」；若不在提示词里声明，隔离就只剩「目录分开了」，agent 依旧
+// 不知道边界在哪（正本 workbench-profile-v1.0/05 §3.1）。
+//
+// 稳定性取值 'run-static'：同一次 run 内文案不变 → 前缀缓存可复用；
+// 跨 run（切了工作台）自然重算。maxTokens 180 由 assertSectionBudget 护栏。
+registerPromptSection({
+  id: 'profile-context',
+  order: SECTION_ORDER.profileContext,
+  slot: { kind: 'system' },
+  stability: 'run-static',
+  owner: 'core',
+  maxTokens: 180,
+  required: false,
+  build: async () => {
+    try {
+      const { buildProfileContextSegment } = await import('../../profile/prompt-context.js')
+      return await buildProfileContextSegment()
+    } catch {
+      // profile 子系统不可用（未启用 / 首次启动竞态）→ 省略本段，绝不拖垮装配
+      return null
+    }
+  },
 })
 
 registerPromptSection({

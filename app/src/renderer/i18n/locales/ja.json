@@ -13,7 +13,40 @@
     "approvalNeedsHuman": "人の確認が必要",
     "approvalReplan": "再計画の承認待ち",
     "approvalConverge": "収束の確認",
-    "openFile": "クリックしてファイルを開く"
+    "openFile": "クリックしてファイルを開く",
+    "fold": {
+      "thinking": "思考プロセス",
+      "tools": "ツール呼び出し",
+      "running": "実行中",
+      "sep": "、",
+      "read": "{{n}} 件のファイルを読み取り",
+      "edit": "{{n}} 件のファイルを編集",
+      "delete": "{{n}} 件のファイルを削除",
+      "move": "{{n}} 件のファイルを移動",
+      "search": "{{n}} 回検索",
+      "execute": "{{n}} 件のコマンドを実行",
+      "fetch": "{{n}} 件のソースを取得",
+      "other": "その他のツールを {{n}} 回呼び出し",
+      "expandAria": "{{name}}を展開",
+      "collapseAria": "{{name}}を折りたたむ"
+    },
+    "viewmode": {
+      "compact": "コンパクト",
+      "standard": "標準",
+      "verbose": "詳細"
+    },
+    "turn": {
+      "status": {
+        "running": "実行中",
+        "done": "完了",
+        "failed": "失敗",
+        "paused": "一時停止",
+        "cancelled": "キャンセル"
+      },
+      "toolsCount": "ツール {{n}} 回",
+      "collapse": "このターンを折りたたむ",
+      "expand": "このターンを展開"
+    }
   },
   "common": {
     "cancel": "キャンセル",
@@ -2601,5 +2634,93 @@
       "discard": "変更を破棄",
       "cancel": "キャンセル"
     }
+  },
+  "profile": {
+    "switcher": {
+      "aria": "ワークベンチを切り替え",
+      "label": "ワークベンチを切り替え",
+      "desc": "ワークベンチは能力の構成です。切り替えると Dock パネル・ホームモジュール・記憶領域・ショート入力がまとめて変わります",
+      "cap": "現在：{{name}}",
+      "unknown": "不明なワークベンチ"
+    },
+    "menu": {
+      "import": "Profile をインポート…",
+      "snapshot": "構成スナップショットを表示",
+      "manage": "Profile を管理…",
+      "empty": "利用可能なワークベンチがありません"
+    },
+    "namespace": "メモリ名前空間",
+    "source": {
+      "builtin": "組み込み",
+      "user": "ユーザー"
+    },
+    "toast": {
+      "switched": "{{name}} に切り替えました",
+      "failed": "切り替えに失敗：{{reason}}"
+    },
+    "report": {
+      "title": "アクティベーション レポート",
+      "ok": "{{name}}（{{id}} v{{version}}）を有効化 · {{ms}}ms",
+      "failed": "アクティベーションに失敗",
+      "stillActive": "現在も有効：{{name}}",
+      "layers": "5 層の構成",
+      "layer": {
+        "agents": "エージェント",
+        "tools": "ツールとスキル",
+        "ui": "UI",
+        "data": "データ",
+        "auto": "自動化"
+      },
+      "degraded": "縮退と警告",
+      "issues": "検証の問題",
+      "none": "なし",
+      "close": "閉じる",
+      "snapshot": "構成スナップショット",
+      "resolvedAt": "{{time}} に解決"
+    },
+    "import": {
+      "title": "Profile のインポート",
+      "hint": "workbench.json の内容を貼り付け",
+      "valid": "検証に合格し、インポートしました",
+      "invalid": "検証に失敗、インポートされませんでした",
+      "parseError": "有効な JSON ではありません",
+      "submit": "インポート",
+      "cancel": "キャンセル"
+    },
+    "delete": {
+      "builtinDenied": "組み込みワークベンチは削除できません",
+      "activeDenied": "現在有効なワークベンチは削除できません"
+    },
+    "ns": {
+      "shared": "ワークベンチ間で共有"
+    },
+    "agentsCount": "エージェント {{n}} 個",
+    "list": {
+      "empty": "利用可能なワークベンチがありません"
+    },
+    "meta": {
+      "line": "記憶領域 {{namespace}} · エージェント {{agents}} · 能力 {{caps}}"
+    },
+    "homeModule": {
+      "open": "このワークベンチのホームを開く"
+    },
+    "reject": {
+      "hint": "前回の {{id}} への切り替えは失敗しました。クリックして理由を表示"
+    },
+    "degraded": {
+      "count": "{{count}} 件の能力が未適用",
+      "blockingCount": "{{count}} 件の必須能力が不足",
+      "layer": {
+        "agents": "エージェント",
+        "tools": "ツール",
+        "ui": "UI",
+        "data": "データ",
+        "auto": "自動実行",
+        "unknown": "不明"
+      }
+    }
+  },
+  "keybind": {
+    "switchProfile": "ワークベンチを切り替え"
   }
 }

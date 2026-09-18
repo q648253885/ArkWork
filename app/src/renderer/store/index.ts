@@ -21,6 +21,8 @@ import { marketSlice } from './slices/marketSlice'
 import { permissionSlice } from './slices/permissionSlice'
 // v0.31.0 B2：文件能力 slice（文档 / 冲突 / 最近关闭）
 import { fsSlice } from './slices/fsSlice'
+// v0.32.0：Workbench Profile（插件模式）
+import { profileSlice } from './slices/profileSlice'
 import type { AppState } from './types'
 
 export const useStore = create<AppState>((set, get, api) => ({
@@ -33,6 +35,7 @@ export const useStore = create<AppState>((set, get, api) => ({
   ...marketSlice(set, get, api),
   ...permissionSlice(set, get, api),
   ...fsSlice(set, get, api),
+  ...profileSlice(set, get, api),
 
 
   // 初始化 — 启动时调用
@@ -85,6 +88,9 @@ export const useStore = create<AppState>((set, get, api) => ({
           set({ activeWorkspaceId: 'default' })
         }
       }
+      // v0.32.0：加载 Workbench Profile（工作台列表 + 当前快照 + UI 投影）
+      // 失败不影响启动：ProfileSwitcher 显示「未知工作台」，其余功能照常
+      void get().loadProfiles()
       await get().refreshCatalog()
       await get().refreshTasks()
       // Task 9：从主进程缓存恢复任务进度（页面切换 / 重启后保持进度不丢）

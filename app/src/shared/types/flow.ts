@@ -235,3 +235,31 @@ export interface FlowTurn {
   summary: TurnSummary
   collapsed: boolean
 }
+
+/* ---------- v0.32.0 进程折叠（04-system-design §1.3–1.5） ----------
+ * 折叠是**渲染投影**：不动 projectConversation 的块列表（等价性基线冻结），
+ * 只把块的线性序列按「连续性」切成 主展示块 / 进程 run 交替的渲染段。
+ */
+
+/** 可折叠的进程域：思考 / 工具（技能与 MCP 调用同归 tool） */
+export type FoldScope = 'reasoning' | 'tool'
+
+/** 一段连续的同类进程块（按连续性分组，kind 变化即断组） */
+export interface FlowFoldRun {
+  /** run id = 该 run 首个块的 id（投影层块 id 确定性生成，故 run id 稳定可持久化） */
+  id: string
+  scope: FoldScope
+  blocks: FlowBlock[]
+  startedAt: number
+  /** run 内块时长之和（思考与工具各自 durationMs） */
+  durationMs: number
+  /** 含 failed / guarded —— 折叠行改用语义色并（standard 及以上）自动展开 */
+  hasFailure: boolean
+  /** 含 running / pending / streaming —— 折叠行追加「进行中」 */
+  hasRunning: boolean
+}
+
+/** 渲染段：主展示块（永不折叠）或进程 run（可折叠） */
+export type FlowSegment =
+  | { type: 'block'; key: string; block: FlowBlock }
+  | { type: 'fold'; key: string; run: FlowFoldRun }
