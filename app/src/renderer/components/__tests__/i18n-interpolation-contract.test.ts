@@ -234,8 +234,8 @@ test('TC-I18NI-006 v0.34.0 新增的 Tab / 插件管理键 4 语言齐备', () =
     'workbench.plugins.uninstallShort',
     'conversationflow.foldedTurns',
     'conversationflow.collapseTurns',
-    'inspector.morePluginTabs',
-    'inspector.morePluginTabsAria',
+    'inspector.moreTabs',
+    'inspector.moreTabsAria',
   ]
   for (const key of required) {
     for (const l of LANGS) {

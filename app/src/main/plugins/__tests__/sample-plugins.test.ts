@@ -10,14 +10,15 @@
  * 本组钉住四件缺一不可的事：
  *   ① **清单合法** —— 唯一示例必须过 VP1–VP6 且**零 warning**（官方示范不能自带坏数据）；
  *   ② **默认启用** —— 真实功能插件默认就该可见（假数据示例才默认禁用）；
- *   ③ **按 id 补写且永不覆盖** —— 已存在的示例一字不改；缺失的补写（否则升级
- *      永远送不到新示例 —— v0.34.1 自己就踩过这个坑）；
+ *   ③ **按 id 补写且永不覆盖用户改动** —— 已存在且被改过的一字不改；缺失的补写；
+ *      ★ v0.34.2：**未被改动过的副本要能随版本升级**（否则修正永远送不到存量机器）；
  *   ④ **退役清理** —— 四个假数据示例的残留目录会被显式删除，不留垃圾。
  *
  * 运行（cwd=app）：node scripts/run-tests.mjs sample-plugins
  * ============================================================ */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -29,7 +30,15 @@ import {
   rawManifestOf,
   sampleManifestForExport,
 } from '../sample-plugins.js'
-import { ensureSamplePlugins, removeRetiredSamplePlugins, RETIRED_SAMPLE_PLUGIN_IDS } from '../seed.js'
+import {
+  ensureSamplePlugins,
+  removeRetiredSamplePlugins,
+  isUntouchedCopy,
+  seedTextOf,
+  RETIRED_SAMPLE_PLUGIN_IDS,
+  SEED_STRING_MIGRATIONS,
+  SEED_SIDECAR,
+} from '../seed.js'
 import { parsePluginManifest } from '@shared/utils/plugin-manifest'
 
 /** 每个用例独立临时目录（互不污染，可并发） */
@@ -108,6 +117,31 @@ test('TC-SMPL-004 示例覆盖多面板 / http 联网取数 / 行点击三类能
     const spec = p.data.http as { pollMs?: number } | undefined
     if (spec?.pollMs) assert.ok(spec.pollMs >= 3000, `${p.panelRef} 的 pollMs 应 ≥3000`)
   }
+})
+
+test('TC-SMPL-013 ★ 取数主机回归锁：自选股/详情不得再用 push2 主机（实测 ERR_EMPTY_RESPONSE）', () => {
+  // 依据：v0.34.2 D56-b 实测（Electron net.fetch + 系统代理）
+  //   push2.eastmoney.com   ulist.np / stock/get → net::ERR_EMPTY_RESPONSE（×3）
+  //   push2delay.eastmoney.com 同接口 → 200 + 合法 JSON
+  // 这条用例把「主机选择」钉住 —— 换回 push2 会让面板在真机上直接打不开，
+  // 而单测/CI 环境根本发现不了（密闭环境不联网）。
+  const m = SAMPLE_PLUGIN_MANIFESTS[0]!
+  const panels = m.provides.panels ?? []
+  const urls = panels.map((p) => String((p.data.http as { url?: string } | undefined)?.url ?? ''))
+
+  for (const u of urls) {
+    assert.doesNotMatch(
+      u,
+      /^https:\/\/push2\.eastmoney\.com/,
+      `不得使用 push2 主机（实测不可达）：${u}`,
+    )
+  }
+  const quotes = urls.find((u) => u.includes('ulist.np'))!
+  assert.match(quotes, /^https:\/\/push2delay\.eastmoney\.com\//, '自选股走 push2delay')
+  const detail = urls.find((u) => u.includes('stock/get'))!
+  assert.match(detail, /^https:\/\/push2delay\.eastmoney\.com\//, '个股详情走 push2delay')
+  const kline = urls.find((u) => u.includes('kline'))!
+  assert.match(kline, /^https:\/\/push2his\.eastmoney\.com\//, 'K 线走 push2his（实测 200）')
 })
 
 test('TC-SMPL-005 K 线面板必须用 CandleChart 且声明开高低收四列（形状自洽）', () => {
@@ -252,6 +286,194 @@ test('TC-SMPL-012 ★ 退役清理：四个假数据示例的残留目录被删�
       assert.equal(existsSync(join(dir, id)), false, `${id} 不得复活`)
     }
     assert.ok(existsSync(join(dir, STOCK, 'plugin.json')), '新示例必须落盘')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+/* ============================================================
+ * 6. v0.34.2（D57）：未改动副本随版本升级（修正必须送得到存量机器）
+ * ============================================================ */
+
+/** 造一份「旧版随包内容」：把现用主机名倒推回退役主机名（即 v0.34.1 落盘的文本） */
+function legacyTextOf(id: string): string {
+  const raw = rawManifestOf(id)!
+  let text = seedTextOf(raw)
+  for (const [oldText, newText] of SEED_STRING_MIGRATIONS) text = text.split(newText).join(oldText)
+  return text
+}
+
+test('TC-SMPL-014 ★ 存量机器路径：无副文件 + 仅差退役主机 → 判定「未改动」并升级（修正送达）', () => {
+  const dir = tmpPluginDir()
+  const sub = join(dir, STOCK)
+  const file = join(sub, 'plugin.json')
+  try {
+    mkdirSync(sub, { recursive: true })
+    const legacy = legacyTextOf(STOCK)
+    assert.notEqual(legacy, seedTextOf(rawManifestOf(STOCK)!), '旧文本必须与新版不同（否则用例空转）')
+    writeFileSync(file, legacy, 'utf-8')
+
+    const res = ensureSamplePlugins(dir)
+    assert.deepEqual(res.upgraded, [STOCK], '仅主机不同的旧副本必须被升级 —— 否则修正永远送不到')
+    assert.equal(readFileSync(file, 'utf-8'), seedTextOf(rawManifestOf(STOCK)!), '升级后内容 = 新版随包内容')
+    assert.ok(existsSync(join(sub, SEED_SIDECAR)), '升级后必须补写指纹副文件')
+    const side = JSON.parse(readFileSync(join(sub, SEED_SIDECAR), 'utf-8')) as { hash: string; version: string }
+    assert.equal(side.version, '1.0.1', '副文件记录插件版本（人可读凭据）')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('TC-SMPL-015 ★ 用户改过的副本（改过数据源/自选股）→ 一字不改，且不误判为升级', () => {
+  const dir = tmpPluginDir()
+  const sub = join(dir, STOCK)
+  const file = join(sub, 'plugin.json')
+  try {
+    mkdirSync(sub, { recursive: true })
+    // 用户把自选股改成了自己的清单（真实用法，见 sample-plugins.ts 注释）
+    const mine = legacyTextOf(STOCK).replace('1.600519,0.000001', '0.002415,1.600036')
+    writeFileSync(file, mine, 'utf-8')
+
+    const res = ensureSamplePlugins(dir)
+    assert.deepEqual(res.upgraded, [], '用户副本绝不能被升级覆盖')
+    assert.deepEqual(res.written, [])
+    assert.equal(readFileSync(file, 'utf-8'), mine, '内容必须一字不改')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('TC-SMPL-016 副文件指纹匹配（正常升级路径）→ 覆盖 + 刷新指纹；再跑一次幂等', () => {
+  const dir = tmpPluginDir()
+  const sub = join(dir, STOCK)
+  const file = join(sub, 'plugin.json')
+  const sideFile = join(sub, SEED_SIDECAR)
+  try {
+    mkdirSync(sub, { recursive: true })
+    const legacy = legacyTextOf(STOCK)
+    writeFileSync(file, legacy, 'utf-8')
+    writeFileSync(
+      sideFile,
+      `${JSON.stringify({ hash: createHash('sha256').update(legacy, 'utf8').digest('hex'), version: '1.0.0', seededAt: '2026-01-01T00:00:00.000Z' })}\n`,
+      'utf-8',
+    )
+
+    const first = ensureSamplePlugins(dir)
+    assert.deepEqual(first.upgraded, [STOCK])
+    const after = readFileSync(file, 'utf-8')
+
+    // 幂等：内容已是最新 → 不再写 plugin.json、不再报升级
+    const second = ensureSamplePlugins(dir)
+    assert.deepEqual(second.upgraded, [])
+    assert.deepEqual(second.written, [])
+    assert.equal(readFileSync(file, 'utf-8'), after)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('TC-SMPL-017 首启落盘即建立指纹；副文件放在插件自己目录内（不污染 plugins/ 根）', () => {
+  const dir = tmpPluginDir()
+  try {
+    ensureSamplePlugins(dir)
+    assert.ok(existsSync(join(dir, STOCK, SEED_SIDECAR)), '首启就该有指纹（否则下次无法判定未改动）')
+    assert.deepEqual(readdirSync(dir), [STOCK], 'plugins/ 根目录只能有插件目录')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('TC-SMPL-018 isUntouchedCopy 真值表：坏 JSON / 坏指纹 / 空指纹一律按「用户副本」保守处理', () => {
+  const raw = rawManifestOf(STOCK)!
+  const bundled = seedTextOf(raw)
+  const legacy = legacyTextOf(STOCK)
+
+  assert.equal(isUntouchedCopy(bundled, raw, null), true, '内容一致 → 未改动')
+  assert.equal(isUntouchedCopy(legacy, raw, null), true, '仅差退役主机 → 视为未改动（存量路径）')
+  // 空白差异不算改动：判定是 **JSON 语义级**（格式化工具重排不该被当成用户编辑）
+  assert.equal(isUntouchedCopy(`${legacy} `, raw, null), true, '空白/缩进差异不是用户改动')
+  assert.equal(isUntouchedCopy(`${JSON.stringify(JSON.parse(legacy))}`, raw, null), true, '重排后语义不变 → 未改动')
+  // 语义差异才算改动
+  assert.equal(isUntouchedCopy('{"id":"ark.plugin.stock"}', raw, null), false, '用户简写副本 → 不动')
+  assert.equal(isUntouchedCopy(legacy.replace('"自选股"', '"我的自选"'), raw, null), false, '改了标题 → 用户副本')
+  assert.equal(isUntouchedCopy('not json at all', raw, null), false, '坏 JSON → 不动（不抛错）')
+  assert.equal(isUntouchedCopy('{}', raw, {}), false, '空指纹字段不构成凭据')
+
+  // 指纹路径真正要覆盖的场景：**未来版本语义变更**时，仍能凭指纹认出
+  // 「这是随包写下的旧内容」→ 升级（否则每改一次字段就得再补一条迁移规则）
+  const oldSemantic = JSON.stringify({ ...raw, version: '1.0.0' }, null, 2) + '\n'
+  const oldHash = createHash('sha256').update(oldSemantic, 'utf8').digest('hex')
+  assert.equal(isUntouchedCopy(oldSemantic, raw, { hash: oldHash }), true, '指纹匹配 → 未改动（语义不同也升级）')
+  assert.equal(
+    isUntouchedCopy(oldSemantic.replace('"自选股"', '"我的自选"'), raw, { hash: oldHash }),
+    false,
+    '指纹不匹配 + 语义也不同 → 用户改过，绝不动',
+  )
+})
+
+test('TC-SMPL-019 退役主机迁移映射必须是非空且新旧不同（否则归一化比对会退化成恒真）', () => {
+  assert.ok(SEED_STRING_MIGRATIONS.length > 0)
+  for (const [from, to] of SEED_STRING_MIGRATIONS) {
+    assert.notEqual(from, to)
+    assert.ok(from.length > 0)
+    assert.ok(to.length > 0)
+  }
+  // 方向 [旧, 新] 必须能被反过来用于「造旧副本」（见 legacyTextOf）
+  const bundled = seedTextOf(rawManifestOf(STOCK)!)
+  assert.notEqual(legacyTextOf(STOCK), bundled, '迁移表必须真的能把新内容还原成旧样子')
+})
+
+/* ---------- 上一版官方副本夹具（v0.34.1 落盘原文） ---------- */
+
+const FIXTURE_V0341 = readFileSync(new URL('./fixtures/sample-plugins.v0.34.1.json', import.meta.url), 'utf-8')
+
+test('TC-SMPL-020 ★ 迁移声明完整性：拿 v0.34.1 官方副本原文判定「未改动」必须成立', () => {
+  // 这条用例是**静默失败模式的把守者**：只要有人改了随包示例的内容（URL/文案/字段）
+  // 却忘了在 SEED_STRING_MIGRATIONS 里声明，本用例就会红 ——
+  // 否则存量机器上那份「原封未动」的副本会被误判成用户副本，修正永远送不到，
+  // 而 CI 里一切全绿（v0.34.2 真实踩过：D56-b 主机迁移 + 描述文案两处改动）。
+  const raw = rawManifestOf(STOCK)!
+  assert.equal(
+    isUntouchedCopy(FIXTURE_V0341, raw, null),
+    true,
+    '上一版官方副本必须被判为「未改动」→ 可升级；否则用户永远拿不到本次修正',
+  )
+  // 反向：夹具本身确实不是新版内容（否则用例空转）
+  assert.notEqual(FIXTURE_V0341, seedTextOf(raw), '夹具应与新版内容不同')
+})
+
+test('TC-SMPL-021 ★ 端到端：v0.34.1 官方副本 → ensure 升级到新版（修正真的送达）', () => {
+  const dir = tmpPluginDir()
+  const sub = join(dir, STOCK)
+  const file = join(sub, 'plugin.json')
+  try {
+    mkdirSync(sub, { recursive: true })
+    writeFileSync(file, FIXTURE_V0341, 'utf-8')
+
+    const res = ensureSamplePlugins(dir)
+    assert.deepEqual(res.upgraded, [STOCK], '必须升级')
+    const after = readFileSync(file, 'utf-8')
+    assert.equal(after, seedTextOf(rawManifestOf(STOCK)!))
+    assert.doesNotMatch(after, /push2\.eastmoney\.com/, '升级后不得残留实测不可达的主机')
+    assert.match(after, /push2delay\.eastmoney\.com/, '升级后必须是实测可用的主机')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('TC-SMPL-022 用户改过自选股清单（在官方副本基础上）→ 绝不被升级覆盖', () => {
+  const dir = tmpPluginDir()
+  const sub = join(dir, STOCK)
+  const file = join(sub, 'plugin.json')
+  try {
+    mkdirSync(sub, { recursive: true })
+    const mine = FIXTURE_V0341.replace('1.600519,0.000001', '0.002415,1.600036')
+    assert.notEqual(mine, FIXTURE_V0341)
+    writeFileSync(file, mine, 'utf-8')
+
+    const res = ensureSamplePlugins(dir)
+    assert.deepEqual(res.upgraded, [])
+    assert.equal(readFileSync(file, 'utf-8'), mine, '用户清单必须原封不动')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

@@ -24,7 +24,17 @@
  *  ② 落盘动作由代码执行，路径/内容可测（见 seed.ts）；
  *  ③ 用户可自由编辑落盘后的 plugin.json —— 那是**用户副本**，不再回写。
  *
- * 数据来源：东方财富公开行情接口（push2 / push2his），无需鉴权、无需 Key。
+ * 数据来源：东方财富公开行情接口（push2delay / push2his），无需鉴权、无需 Key。
+ *
+ * ⚠️ v0.34.2（D56-b）**主机选择有硬证据，勿改回 `push2.eastmoney.com`**：
+ *   本机实测（Electron 主进程 `net.fetch`，走系统代理 127.0.0.1:7890）：
+ *     · `push2.eastmoney.com`  的 ulist.np / stock/get → `net::ERR_EMPTY_RESPONSE`
+ *       （连试 3 次全失败；http 明文经代理返回 502 —— 代理上游也到不了）
+ *     · `push2delay.eastmoney.com` 同两个接口 → **http=200 且 JSON 合法**（49–187ms）
+ *     · `push2his.eastmoney.com` 的 kline → http=200
+ *   字段名与响应结构两个主机完全一致（同一套 `f43/f57/f170/...` 口径），
+ *   故换主机不牵动 columns / derive / path 的声明。
+ *   另有回归用例 TC-SMPL-013 钉死「自选股与详情面板不得再用 push2 主机」。
  * ============================================================ */
 import { parsePluginManifest } from '@shared/utils/plugin-manifest'
 import type { PluginManifest } from '@shared/types/plugin'
@@ -43,9 +53,11 @@ const RAW_BUILTINS: Array<Record<string, unknown>> = [
     schemaVersion: '1.0',
     id: 'ark.plugin.stock',
     name: '股票行情',
-    version: '1.0.0',
+    // v0.34.2：数据源主机迁移（push2 → push2delay）属内容变更，版本号如实 +1 ——
+    // 该字段同时是种子升值的可读凭据（见 seed.ts 的 `.arkwork-seed.json`）
+    version: '1.0.1',
     author: 'ArkWork',
-    description: '自选股实时行情 + 个股详情 + 日 K 线（东方财富公开接口，真实联网数据）',
+    description: '自选股行情 + 个股详情 + 日 K 线（东方财富公开行情接口，真实联网数据）',
     kind: 'panel',
     // v0.34.1：真实功能 → 默认启用（假数据示例才默认禁用）
     enabledByDefault: true,
@@ -60,7 +72,7 @@ const RAW_BUILTINS: Array<Record<string, unknown>> = [
           data: {
             kind: 'http',
             http: {
-              url: `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${WATCHLIST}&fltt=2&fields=f2,f3,f4,f12,f13,f14,f18`,
+              url: `https://push2delay.eastmoney.com/api/qt/ulist.np/get?secids=${WATCHLIST}&fltt=2&fields=f2,f3,f4,f12,f13,f14,f18`,
               response: 'json',
               // 只取列表数组
               path: 'data.diff',
@@ -94,7 +106,7 @@ const RAW_BUILTINS: Array<Record<string, unknown>> = [
             kind: 'http',
             http: {
               // {{secid}} 由行点击参数替换 —— 面板自己不知道被谁打开
-              url: 'https://push2.eastmoney.com/api/qt/stock/get?secid={{secid}}&fltt=2&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f168,f170',
+              url: 'https://push2delay.eastmoney.com/api/qt/stock/get?secid={{secid}}&fltt=2&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f168,f170',
               response: 'json',
               // data 是单个对象 → 自动包成一行
               path: 'data',

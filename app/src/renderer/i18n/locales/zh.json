@@ -1756,8 +1756,8 @@
     "tabBar": "工具窗口标签栏",
     "panelTabTooltip": "来自插件的面板：{{label}} · {{id}}",
     "panelTabAria": "插件面板 {{label}}",
-    "morePluginTabs": "更多插件面板（{{count}}）",
-    "morePluginTabsAria": "更多插件面板：{{count}} 个"
+    "moreTabs": "更多（{{count}}）",
+    "moreTabsAria": "更多面板：{{count}} 个"
   },
   "onboarding": {
     "stepModelsTitle": "配置 AI 模型",

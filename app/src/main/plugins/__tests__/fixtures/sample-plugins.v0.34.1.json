@@ -1,0 +1,171 @@
+{
+  "schemaVersion": "1.0",
+  "id": "ark.plugin.stock",
+  "name": "股票行情",
+  "version": "1.0.0",
+  "author": "ArkWork",
+  "description": "自选股实时行情 + 个股详情 + 日 K 线（东方财富公开接口，真实联网数据）",
+  "kind": "panel",
+  "enabledByDefault": true,
+  "provides": {
+    "panels": [
+      {
+        "panelRef": "panel:stock-quotes",
+        "title": "自选股",
+        "icon": "Graph",
+        "component": "DataTable",
+        "data": {
+          "kind": "http",
+          "http": {
+            "url": "https://push2.eastmoney.com/api/qt/ulist.np/get?secids=1.600519,0.000001,0.300750,1.601318,0.002594,1.600036&fltt=2&fields=f2,f3,f4,f12,f13,f14,f18",
+            "response": "json",
+            "path": "data.diff",
+            "columns": [
+              {
+                "key": "f14",
+                "label": "名称"
+              },
+              {
+                "key": "f12",
+                "label": "代码"
+              },
+              {
+                "key": "f2",
+                "label": "最新价",
+                "align": "right"
+              },
+              {
+                "key": "f3",
+                "label": "涨跌幅%",
+                "align": "right"
+              }
+            ],
+            "derive": {
+              "secid": "{{f13}}.{{f12}}"
+            },
+            "pollMs": 8000
+          }
+        },
+        "interact": {
+          "onRowClick": {
+            "panelRefs": [
+              "panel:stock-detail",
+              "panel:stock-kline"
+            ],
+            "params": {
+              "secid": "secid"
+            }
+          }
+        }
+      },
+      {
+        "panelRef": "panel:stock-detail",
+        "title": "个股详情",
+        "icon": "List",
+        "component": "DataTable",
+        "data": {
+          "kind": "http",
+          "http": {
+            "url": "https://push2.eastmoney.com/api/qt/stock/get?secid={{secid}}&fltt=2&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f168,f170",
+            "response": "json",
+            "path": "data",
+            "columns": [
+              {
+                "key": "f58",
+                "label": "名称"
+              },
+              {
+                "key": "f57",
+                "label": "代码"
+              },
+              {
+                "key": "f43",
+                "label": "最新价",
+                "align": "right"
+              },
+              {
+                "key": "f170",
+                "label": "涨跌幅%",
+                "align": "right"
+              },
+              {
+                "key": "f46",
+                "label": "今开",
+                "align": "right"
+              },
+              {
+                "key": "f44",
+                "label": "最高",
+                "align": "right"
+              },
+              {
+                "key": "f45",
+                "label": "最低",
+                "align": "right"
+              },
+              {
+                "key": "f60",
+                "label": "昨收",
+                "align": "right"
+              },
+              {
+                "key": "f47",
+                "label": "成交量(手)",
+                "align": "right"
+              },
+              {
+                "key": "f48",
+                "label": "成交额",
+                "align": "right"
+              },
+              {
+                "key": "f168",
+                "label": "换手率%",
+                "align": "right"
+              }
+            ],
+            "pollMs": 8000
+          }
+        }
+      },
+      {
+        "panelRef": "panel:stock-kline",
+        "title": "日K线",
+        "icon": "Graph",
+        "component": "CandleChart",
+        "data": {
+          "kind": "http",
+          "http": {
+            "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={{secid}}&klt=101&fqt=1&lmt=120&end=20500101&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+            "response": "json",
+            "path": "data.klines",
+            "split": ",",
+            "columns": [
+              {
+                "key": "date",
+                "label": "日期"
+              },
+              {
+                "key": "open",
+                "label": "开盘"
+              },
+              {
+                "key": "close",
+                "label": "收盘"
+              },
+              {
+                "key": "high",
+                "label": "最高"
+              },
+              {
+                "key": "low",
+                "label": "最低"
+              }
+            ],
+            "limit": 120
+          }
+        }
+      }
+    ]
+  }
+}

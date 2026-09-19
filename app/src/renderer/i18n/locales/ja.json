@@ -1756,8 +1756,8 @@
     "tabBar": "ツールウィンドウタブバー",
     "panelTabTooltip": "プラグインのパネル: {{label}} · {{id}}",
     "panelTabAria": "プラグインパネル {{label}}",
-    "morePluginTabs": "その他のプラグインパネル（{{count}}）",
-    "morePluginTabsAria": "その他のプラグインパネル: {{count}} 件"
+    "moreTabs": "その他（{{count}}）",
+    "moreTabsAria": "その他のパネル: {{count}} 件"
   },
   "onboarding": {
     "stepModelsTitle": "AIモデルを設定",

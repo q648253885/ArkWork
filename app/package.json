@@ -1,6 +1,6 @@
 {
   "name": "arkwork",
-  "version": "0.34.1",
+  "version": "0.34.2",
   "description": "Local-first AI Agent workbench — ReAct loop visible, controllable, reusable.",
   "main": "out/main/index.js",
   "author": {

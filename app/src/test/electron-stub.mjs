@@ -49,6 +49,14 @@ export const shell = {
   openExternal: async () => true,
 }
 
+/* v0.34.2（D56-a）：net 模块 —— 面板取数通道（ipc/panel.ts）优先用 `net.fetch`
+ * （Chromium 栈 → 遵循系统代理/PAC）。单测环境**刻意不提供 fetch**，
+ * 让 `pickFetch()` 回落到全局 fetch —— 生产该走哪条栈由 panel-fetch 用例
+ * 用注入的假 net 显式断言，而不是靠此桩的存在与否。 */
+export const net = {
+  fetch: undefined,
+}
+
 export const session = {
   defaultSession: {
     webRequest: {
@@ -84,4 +92,4 @@ export const dialog = {
   showSaveDialog: async () => ({ canceled: true, filePath: undefined }),
 }
 
-export default { app, BrowserWindow, WebContentsView, nativeTheme, shell, session, ipcMain, dialog }
+export default { app, BrowserWindow, WebContentsView, nativeTheme, shell, net, session, ipcMain, dialog }

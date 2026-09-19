@@ -1756,8 +1756,8 @@
     "tabBar": "도구 창 탭 바",
     "panelTabTooltip": "플러그인 패널: {{label}} · {{id}}",
     "panelTabAria": "플러그인 패널 {{label}}",
-    "morePluginTabs": "더 많은 플러그인 패널 ({{count}})",
-    "morePluginTabsAria": "더 많은 플러그인 패널: {{count}}개"
+    "moreTabs": "더보기 ({{count}})",
+    "moreTabsAria": "더 많은 패널: {{count}}개"
   },
   "onboarding": {
     "stepModelsTitle": "AI 모델 구성",

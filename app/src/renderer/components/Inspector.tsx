@@ -38,8 +38,9 @@ import {
   INSPECTOR_TAB_REFS,
   type PanelTab,
 } from '@shared/utils/panel-model'
-// v0.34.0（D54）：插件面板溢出收纳 —— 竖排栏插件名称不超过 3 个
-import { splitPluginTabs, MAX_VISIBLE_PLUGIN_TABS } from '../utils/plugin-tab-overflow'
+// v0.34.2（D56）：竖排栏**高度自适应折叠** —— 可见名称 ≤3 且不超过栏高，
+// 其余（内置与插件一视同仁）进底部「更多」弹层。取代 v0.34.0 D54 的「插件≤3」。
+import { computeRailLayout, hiddenBlockHeight, pickVisibleTabs } from '../utils/rail-tab-overflow'
 // v0.34.0（D54）：展示名防御（未解析模板串 + 超长名）—— 竖排栏与面板宿主共用同一真源
 import { guardLabel } from '../utils/label-guard'
 
@@ -99,8 +100,32 @@ export function Inspector() {
     () => mergePanelOrder(builtinTabsOf(visibleBuiltin), profilePanels),
     [visibleBuiltin, profilePanels],
   )
-  /* v0.34.0（D54）：插件面板可见上限 —— 内置全留，插件只留前 3 个，其余进「更多」弹层 */
-  const { visible: railTabs, hidden: overflowTabList } = useMemo(() => splitPluginTabs(tabs), [tabs])
+  /* v0.34.2（D56）：竖排栏高度 → 可见条数
+   * 用户诉求：「>3 个名称会挤压溢出」「超过栏高必须有折叠机制」。
+   * 高度用 ResizeObserver 实测（窗口缩放 / 左右栏拖拽都会触发），
+   * 未测量（首帧 / jsdom 无 RO）时退化为「只按 ≤3」，两帧同口径不闪跳。 */
+  const railRef = useRef<HTMLDivElement | null>(null)
+  const [railHeight, setRailHeight] = useState<number | null>(null)
+  useEffect(() => {
+    const el = railRef.current
+    if (!el) return
+    const sync = () => setRailHeight(el.clientHeight)
+    sync()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(sync)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const reservedHeight = hiddenBlockHeight(hiddenInspectorTabs.length)
+  const layout = useMemo(
+    () => computeRailLayout({ total: tabs.length, availableHeight: railHeight, reservedHeight }),
+    [tabs.length, railHeight, reservedHeight],
+  )
+  /* 可见段选取：激活面板的入口**永远可见**（否则在「更多」里点完找不到自己点了哪个） */
+  const { visible: railTabs, hidden: overflowTabList } = useMemo(
+    () => pickVisibleTabs(tabs, layout.visibleCount, inspectorTab),
+    [tabs, layout.visibleCount, inspectorTab],
+  )
   const [overflowOpen, setOverflowOpen] = useState(false)
   useEffect(() => {
     if (!overflowOpen) return
@@ -288,6 +313,7 @@ export function Inspector() {
 
       {/* 垂直标签栏 — 始终常驻于窗口最右边 */}
       <div
+        ref={railRef}
         role="tablist"
         aria-orientation="vertical"
         aria-label={t('inspector.tabBar')}
@@ -349,11 +375,12 @@ export function Inspector() {
           )
         })}
 
-        {/* v0.34.0（D54）：插件面板溢出收纳 —— 超过 3 个时其余收进「更多」弹层 */}
+        {/* v0.34.2（D56）：高度/条数溢出收纳 —— 被折叠的项（内置与插件一视同仁）
+            全部进这里。内置项附快捷键提示，保证「位置折叠了、键位仍记得住」。 */}
         {overflowTabList.length > 0 && (
           <div className="relative mt-1 pt-2 border-t border-border-subtle px-1">
             <Tooltip
-              label={t('inspector.morePluginTabs', { count: overflowTabList.length })}
+              label={t('inspector.moreTabs', { count: overflowTabList.length })}
               placement="left"
               delay={150}
             >
@@ -361,7 +388,7 @@ export function Inspector() {
                 type="button"
                 aria-haspopup="menu"
                 aria-expanded={overflowOpen}
-                aria-label={t('inspector.morePluginTabsAria', { count: overflowTabList.length })}
+                aria-label={t('inspector.moreTabsAria', { count: overflowTabList.length })}
                 onClick={() => setOverflowOpen((v) => !v)}
                 className="w-full flex items-center justify-center h-9 rounded-sm text-text-tertiary hover:text-text-primary hover:bg-bg-hover transition-all focus-ring"
                 data-testid="inspector-more-plugin-tabs"
@@ -372,12 +399,14 @@ export function Inspector() {
             {overflowOpen && (
               <div
                 role="menu"
-                aria-label={t('inspector.morePluginTabsAria', { count: overflowTabList.length })}
+                aria-label={t('inspector.moreTabsAria', { count: overflowTabList.length })}
                 data-testid="inspector-plugin-tabs-menu"
                 className="absolute right-full top-0 mr-1 z-50 min-w-[160px] max-w-[240px] rounded-md border border-border-subtle bg-bg-overlay shadow-panel py-1"
               >
                 {overflowTabList.map((tab) => {
-                  const TabIcon = Icon[(tab.icon ?? 'Plug') as IconName] ?? Icon.Dot
+                  const meta = tab.builtin ? INSPECTOR_TAB_META[tab.ref as InspectorTabId] : null
+                  const label = meta ? t(meta.label) : guardLabel(tab.title)
+                  const TabIcon = Icon[(meta?.icon ?? tab.icon ?? 'Plug') as IconName] ?? Icon.Dot
                   const active = tab.ref === inspectorTab
                   return (
                     <button
@@ -385,6 +414,7 @@ export function Inspector() {
                       type="button"
                       role="menuitem"
                       data-active={active}
+                      title={label}
                       onClick={() => {
                         setInspectorTab(tab.ref as InspectorTabRef)
                         if (rightDockCollapsed) toggleRightDock()
@@ -393,7 +423,10 @@ export function Inspector() {
                       className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
                     >
                       <TabIcon width={14} height={14} aria-hidden="true" className="flex-shrink-0" />
-                      <span className="truncate">{tab.title}</span>
+                      <span className="truncate">{label}</span>
+                      {meta && (
+                        <span className="ml-auto flex-shrink-0 text-2xs text-text-faint">{meta.shortcut}</span>
+                      )}
                     </button>
                   )
                 })}

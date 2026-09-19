@@ -1756,8 +1756,8 @@
     "tabBar": "Tool window tab bar",
     "panelTabTooltip": "Plugin panel: {{label}} · {{id}}",
     "panelTabAria": "Plugin panel {{label}}",
-    "morePluginTabs": "More plugin panels ({{count}})",
-    "morePluginTabsAria": "More plugin panels: {{count}}"
+    "moreTabs": "More ({{count}})",
+    "moreTabsAria": "More panels: {{count}}"
   },
   "onboarding": {
     "stepModelsTitle": "Configure AI models",
