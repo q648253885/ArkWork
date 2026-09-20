@@ -40,6 +40,22 @@ export interface StallRoundInput {
   hasNewThought: boolean
   /** 本轮清单/图节点是否发生状态推进（任一节点 status 变化） */
   planProgressed: boolean
+  /**
+   * **本轮请求的工具是否全部被预算守卫拦截**（D64，v0.34.4）。
+   *
+   * 为什么必须单列：`hasNewThought` 的豁免（见上）在小模型空转时会**反噬** ——
+   * 模型每轮都在写"换个办法"的新思考，于是 51 轮**没有一轮**被判零产出，
+   * 6 轮终局守卫一次都没到。真机记录：t1 · T-20260919-6c3v48，51 轮 / 86 次调用 /
+   * 15 次「同参数调用已达上限（5/5）」/ 4 次上下文压缩 / **零产物** /
+   * 终局 task_failed。
+   *
+   * 判定依据是语义而非情绪：**被守卫拦截 = 这一轮拿不到任何新信息**。
+   * 有新思考也只是空想（模型在思考"怎么绕过拦截"），定义上就是零产出。
+   * 因此本项为真时**无条件**判零产出，不受 `hasNewThought` / `hasSayOutput` 豁免。
+   *
+   * 缺省 false：无工具调用的分支（loop.ts 无工具路径）本就没有"被拦截"可言。
+   */
+  allGuardBlocked?: boolean
 }
 
 /**
@@ -59,8 +75,14 @@ export interface StallRoundInput {
  * | true  | true  | false | true  | —     | 有产出（读完有结论） |
  * | true  | true  | false | false | true  | 有产出（探索中每轮有新发现，v0.34.x） |
  * | true  | false | —     | —     | —     | 有产出（含写类/产成性动作） |
+ *
+ * v0.34.4（D64）追加一条**最高优先**规则：`allGuardBlocked === true` → 零产出
+ * （与上表其余各列无关，只看这一件事）。
  */
 export function isStalledRound(input: StallRoundInput): boolean {
+  // D64：被守卫拦截的轮次无论叙述多新鲜都是零产出（拦截 = 零新信息），
+  // 因此必须排在 hasNewThought 豁免之前。
+  if (input.allGuardBlocked) return true
   if (input.hasToolCall && !input.allReadonly) return false
   if (input.planProgressed) return false
   if (input.hasSayOutput) return false

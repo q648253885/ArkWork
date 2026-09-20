@@ -57,8 +57,11 @@ export function mapHttpResponse(
 
   const cols = spec.columns
   const rows: Array<Record<string, unknown>> = []
+  /** 当前行的**投影前原始记录**（D62：derive 必须能引用不展示的字段，见下方注释） */
+  let raw: Record<string, unknown> | null = null
   for (const item of arr) {
     const row: Record<string, unknown> = {}
+    raw = null
     if (spec.split && typeof item === 'string') {
       const parts = item.split(spec.split)
       if (cols && cols.length > 0) {
@@ -72,6 +75,7 @@ export function mapHttpResponse(
       }
     } else if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
       const rec = item as Record<string, unknown>
+      raw = rec
       if (cols && cols.length > 0) {
         for (const c of cols) row[c.key] = rec[c.key]
       } else {
@@ -80,10 +84,16 @@ export function mapHttpResponse(
     } else {
       continue
     }
-    // 派生列：模板里的 {{字段}} 取的是**本行**的值
+    // 派生列：模板里的 {{字段}} 取的是**本行原始记录** ∪ **已派生字段**。
+    //
+    // D62（真实故障）：此前只在**投影后**的 row 上求值，于是 `derive: {secid:'{{f13}}.{{f12}}'}`
+    // 里的 f13（市场码）被 `columns` 投影滤掉 → `applyTemplate` 对未命中变量**原样保留**
+    // → secid 退化成字面量「{{f13}}.600519」→ 详情接口 `data:null` → 面板空。
+    // 语义裁决：`columns` 管「展示什么」，`derive` 管「算什么」——后者面向原始响应。
+    // 逐 key 重算 `{...raw, ...row}` 是为了支持**链式派生**（后面的模板能引用前面派生出的字段）。
     if (spec.derive) {
       for (const [key, tpl] of Object.entries(spec.derive)) {
-        row[key] = applyTemplate(tpl, row)
+        row[key] = applyTemplate(tpl, raw ? { ...raw, ...row } : row)
       }
     }
     rows.push(row)
@@ -93,6 +103,20 @@ export function mapHttpResponse(
     ? rows.slice(-spec.limit)
     : rows
 
+  // D62-b：派生字段若仍含 `{{…}}`，说明模板引用的字段在响应里根本不存在
+  // （或拼错了字段名）。**必须说出来** —— 否则用户只看到「数据为空」，
+  // 而真正的原因是参数没拼出来。
+  const unresolved = new Set<string>()
+  if (spec.derive) {
+    for (const r of limited) {
+      for (const key of Object.keys(spec.derive)) {
+        const v = r[key]
+        if (typeof v === 'string' && /\{\{\s*[\w.-]+\s*\}\}/.test(v)) unresolved.add(key)
+      }
+    }
+  }
+
   const note = `${limited.length} 行${spec.limit && rows.length > spec.limit ? `（原 ${rows.length} 行，按 limit=${spec.limit} 取最近）` : ''}`
+    + (unresolved.size > 0 ? `；派生字段「${[...unresolved].join('、')}」未解析（模板引用的字段不在响应里）` : '')
   return { rows: limited, columns: cols, note }
 }

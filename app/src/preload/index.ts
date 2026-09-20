@@ -5,6 +5,7 @@
  * ============================================================ */
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
 import type { ArkApi, PermissionModeEvent } from '@shared/types/ipc'
+import { PLUGIN_VIEW_METHODS } from '@shared/types/ipc'
 import { decodeFsError } from '@shared/utils/fs-error'
 import type { FsBatchEvent, FsErrorCode } from '@shared/types/fs'
 
@@ -391,17 +392,69 @@ const ark: ArkApi = {
     fetch: (req) => ipcRenderer.invoke('panel:fetch', req),
   },
   plugin: {
-    list: () => ipcRenderer.invoke('plugin:list'),
+    /* ---- A. 插拔（v0.33.0） ---- */
+    list: (args) => ipcRenderer.invoke('plugin:list', args),
     setEnabled: (args) => ipcRenderer.invoke('plugin:set-enabled', args),
     uninstall: (args) => ipcRenderer.invoke('plugin:uninstall', args),
     rescan: () => ipcRenderer.invoke('plugin:rescan'),
-    openDir: () => ipcRenderer.invoke('plugin:open-dir'),
+    openDir: (args) => ipcRenderer.invoke('plugin:open-dir', args),
     exportSample: (args) => ipcRenderer.invoke('plugin:export-sample', args),
     onChanged: (cb) => {
       const handler = (_e: IpcRendererEvent, payload: Parameters<typeof cb>[0]) => cb(payload)
       ipcRenderer.on('plugin:changed', handler)
       return () => ipcRenderer.removeListener('plugin:changed', handler)
     },
+
+    /* ---- B. 运行期（v0.35.0） ---- */
+    runtimeStatus: (args) => ipcRenderer.invoke('plugin:runtime-status', args),
+    views: () => ipcRenderer.invoke('plugin:views'),
+    onRuntimeChanged: (cb) => {
+      const handler = (_e: IpcRendererEvent, payload: Parameters<typeof cb>[0]) => cb(payload)
+      ipcRenderer.on('plugin:runtime-changed', handler)
+      return () => ipcRenderer.removeListener('plugin:runtime-changed', handler)
+    },
+
+    /* ---- C. 视图桥（v0.35.0） ---- */
+    viewOpen: (args) => ipcRenderer.invoke('plugin:view-open', args),
+    viewClose: (args) => ipcRenderer.invoke('plugin:view-close', args),
+    /**
+     * 纪律⑤ 双处校验之一：白名单在 preload 先卡一次。
+     * 这不是安全边界（沙箱里的 Client 半可以绕过 preload 直接发 IPC），
+     * 只是让写错方法名的作者在**开发时**立刻看到明确拒绝，而不是静默 timeout。
+     * 真正的边界在 `ipc/plugin.ts` 的 main 侧。
+     */
+    viewCall: (args) => {
+      if (!(PLUGIN_VIEW_METHODS as readonly string[]).includes(args?.method)) {
+        return Promise.resolve({
+          ok: false,
+          error: { code: 'method-not-allowed', message: `桥方法「${String(args?.method)}」不在白名单内` },
+        })
+      }
+      return ipcRenderer.invoke('plugin:view-call', args)
+    },
+    /** 事件是单向尽力而为：`send` 无回执，避免「插件未响应」把 UI 卡住 */
+    viewEvent: (args) => {
+      ipcRenderer.send('plugin:view-event', args)
+    },
+    onViewPost: (cb) => {
+      const handler = (_e: IpcRendererEvent, payload: Parameters<typeof cb>[0]) => cb(payload)
+      ipcRenderer.on('plugin:view-post', handler)
+      return () => ipcRenderer.removeListener('plugin:view-post', handler)
+    },
+    /**
+     * 模型侧控制工具触发的「请打开某视图」。
+     * 之所以走广播而不是让 main 直接改 UI：视图容器归渲染层所有，
+     * main 不该知道面板/Tab 的存在。
+     */
+    onViewOpenRequest: (cb) => {
+      const handler = (_e: IpcRendererEvent, payload: Parameters<typeof cb>[0]) => cb(payload)
+      ipcRenderer.on('plugin:view-open-request', handler)
+      return () => ipcRenderer.removeListener('plugin:view-open-request', handler)
+    },
+
+    /* ---- D. 作者工具（v0.35.0） ---- */
+    scaffold: (args) => ipcRenderer.invoke('plugin:scaffold', args),
+    migrateCheck: () => ipcRenderer.invoke('plugin:migrate-check'),
   },
   // v0.4.0：主题（同步原生界面 + 监听系统主题变化）
   theme: {

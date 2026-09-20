@@ -19,6 +19,15 @@
  *   04-system-design §9.2，属已知欠账，不假装已覆盖。
  *
  * 运行（cwd=app）：node scripts/run-tests.mjs abilities-tabs
+ *
+ * ★ v0.35.0 修订（TC-ABL-007/007b/009/011/011b）：
+ *   插件能跑代码之后，能力页这块面板的契约变了两处 ——
+ *     · 来源徽标由两档（bundled / local）改**三档**（bundled / workspace / global）：
+ *       `User` 分不出「只在本工作区生效」与「全局生效」，后果完全不同；
+ *     · 「新建插件」由「贴一段 JSON 引导」改**脚手架**（生成最小可运行目录）：
+ *       代码插件的 Host/Client/清单三者形状耦合，手拼必踩坑。
+ *   同时新增两条把守：开关与「打开目录」必须带**当前作用域**（否则静默写错级别）；
+ *   空 id/name 必须被拦下（不落一个空目录）。
  * ============================================================ */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -108,12 +117,18 @@ test('TC-ABL-007 一行一插件：行节点带插件 id，开关是 role=switch
   // 开关复用既有 store 动作：别名 → store 动作 → 调用点，三段都要在（只查别名会被改名绕过）
   assert.match(capabilitySrc, /useStore\(\(s\) => s\.setPluginEnabled\)/, '必须绑定既有 setPluginEnabled')
   assert.match(capabilitySrc, /useStore\(\(s\) => s\.uninstallPlugin\)/, '必须绑定既有 uninstallPlugin')
-  assert.match(capabilitySrc, /setEnabled\(p\.id, next\)/, '启停调用点必须落在绑定好的动作上')
-  assert.match(capabilitySrc, /uninstall\(p\.id\)/, '卸载调用点必须落在绑定好的动作上')
-  assert.match(capabilitySrc, /openDir\(\)/, '打开目录走既有 IPC')
-  assert.match(capabilitySrc, /rescan\(\)/, '重新扫描走既有 IPC')
   assert.match(capabilitySrc, /useStore\(\(s\) => s\.openPluginsDir\)/, '绑定既有 openPluginsDir')
   assert.match(capabilitySrc, /useStore\(\(s\) => s\.rescanPlugins\)/, '绑定既有 rescanPlugins')
+  assert.match(capabilitySrc, /uninstall\(p\.id\)/, '卸载调用点必须落在绑定好的动作上')
+  assert.match(capabilitySrc, /rescan\(\)/, '重新扫描走既有 IPC')
+})
+
+test('TC-ABL-007b ★ v0.35.0：开关与「打开目录」必须带上**当前作用域**（否则静默写错级别）', () => {
+  // 这是 v0.35.0 引入 workspace 级之后才出现的新误伤面：不改这两处调用点，
+  // 用户在本工作区视图里拨开关，实际写的是全局那份 plugins.json。
+  assert.match(capabilitySrc, /setEnabled\(p\.id, next, scope\)/, '启停必须把当前作用域传下去')
+  assert.match(capabilitySrc, /openDir\(scope\)/, '打开目录必须打开当前作用域那个目录')
+  assert.match(capabilitySrc, /useStore\(\(s\) => s\.setPluginScope\)/, '必须有作用域切换动作')
 })
 
 test('TC-ABL-008 详情就地展开（不跳页），且随包示例不可卸载', () => {
@@ -127,11 +142,16 @@ test('TC-ABL-008 详情就地展开（不跳页），且随包示例不可卸载
   )
 })
 
-test('TC-ABL-009 来源徽标区分 bundled / local（不再是 builtin / user）', () => {
-  assert.match(capabilitySrc, /const bundled = p\.source === 'bundled'/, "来源判定必须用新语义 'bundled'")
+test('TC-ABL-009 ★ v0.35.0 来源徽标区分三档 bundled / workspace / global（不再是 bundled / local）', () => {
+  assert.match(capabilitySrc, /const bundled = p\.source === 'bundled'/, "来源判定必须用语义 'bundled'")
   assert.doesNotMatch(capabilitySrc, /'builtin'/, "不得残留旧来源语义 'builtin'（P4 改名须彻底）")
+  // v0.35.0：`User` 这一档已分不出「只在本工作区生效」与「全局生效」——两者的后果完全不同，
+  // 故必须拆成两档，并把「来源徽标」收进一个统一助手（避免三处各写一遍判断）
+  assert.match(capabilitySrc, /function sourceText\(/, '来源文案必须收敛到单一助手')
   assert.match(capabilitySrc, /workbench\.plugins\.sourceBundled/, '随包示例徽标走 i18n')
-  assert.match(capabilitySrc, /workbench\.plugins\.sourceLocal/, '本地徽标走 i18n')
+  assert.match(capabilitySrc, /workbench\.plugins\.scopeWorkspace/, '本工作区徽标走 i18n')
+  assert.match(capabilitySrc, /workbench\.plugins\.scopeGlobal/, '全局徽标走 i18n')
+  assert.doesNotMatch(capabilitySrc, /workbench\.plugins\.sourceLocal/, '两档来源语义已被三档取代')
 })
 
 test('TC-ABL-010 空态与问题区都在（降级必须可见，不许空白面板）', () => {
@@ -141,14 +161,25 @@ test('TC-ABL-010 空态与问题区都在（降级必须可见，不许空白面
   assert.match(capabilitySrc, /p\.invalidReason &&/, '单行也要标出问题')
 })
 
-test('TC-ABL-011 「新建插件」= 引导（展开清单 + 打开目录），不新增写盘 IPC', () => {
+test('TC-ABL-011 ★ v0.35.0「新建插件」= 脚手架（生成最小可运行目录），不再是贴一段 JSON', () => {
+  // v0.34.0 的做法是「展开一段 SAMPLE_JSON 让用户自己拼」。代码插件时代这不够用 ——
+  // 插件的 Host 半/Client 半/清单三者形状耦合，手拼必然踩坑（设计 §7 · P1）。
   assert.match(capabilitySrc, /data-testid="new-plugin-toggle"/, '新建插件入口存在')
-  assert.match(capabilitySrc, /data-testid="new-plugin-guide"/, '引导区按需展开')
-  assert.match(capabilitySrc, /SAMPLE_JSON/, '引导区给出可复制的最小清单')
-  assert.match(capabilitySrc, /aria-expanded=\{showSample\}/, '展开态须暴露')
-  // 本版明确不新增后端接口（设计 §4.2 E1–E3）
-  assert.doesNotMatch(capabilitySrc, /createPlugin|plugin:create/, '本版不新增写盘 IPC（设计 §4.2.1 E3）')
+  assert.match(capabilitySrc, /data-testid="new-plugin-guide"/, '脚手架区按需展开')
+  assert.match(capabilitySrc, /aria-expanded=\{showScaffold\}/, '展开态须暴露（含 aria）')
+  for (const tid of ['scaffold-id', 'scaffold-name', 'scaffold-kind', 'scaffold-create']) {
+    assert.match(capabilitySrc, new RegExp(`data-testid="${tid}"`), `脚手架必须有 ${tid}`)
+  }
+  assert.match(capabilitySrc, /SCAFFOLD_KINDS/, '可选类型必须同源于 PLUGIN_KINDS（含 v0.35.0 的 tool 档）')
+  // 走 store 动作，不得直连 window.api
+  assert.match(capabilitySrc, /useStore\(\(s\) => s\.scaffoldPlugin\)/, '必须走既有 scaffoldPlugin 动作')
   assert.doesNotMatch(capabilitySrc, /window\.api\./, '必须走 store，不得直连 window.api')
+  assert.match(capabilitySrc, /scaffold\(\{ id, name, kind: draftKind, scope \}\)/, '脚手架必须把当前作用域带下去')
+})
+
+test('TC-ABL-011b v0.35.0 脚手架前的入口守卫：id/name 为空必须拦下并给人话提示（不落一个空目录）', () => {
+  assert.match(capabilitySrc, /scaffoldIdRequired/, '缺 id/name 时必须给可读提示')
+  assert.match(capabilitySrc, /pushToast\(\{ type: 'warning'/, '用警告 toast 提示，而不是静默失败')
 })
 
 /* ============================================================

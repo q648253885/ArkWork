@@ -39,7 +39,10 @@ import {
   SEED_STRING_MIGRATIONS,
   SEED_SIDECAR,
 } from '../seed.js'
+import { RETIRED_PANEL_REFS } from '../migrate.js'
 import { parsePluginManifest } from '@shared/utils/plugin-manifest'
+import { mapHttpResponse } from '@shared/utils/panel-http'
+import { applyTemplate, VLIB_COMPONENTS, type HttpSourceSpec } from '@shared/types/vlib'
 
 /** 每个用例独立临时目录（互不污染，可并发） */
 function tmpPluginDir(): string {
@@ -86,40 +89,36 @@ test('TC-SMPL-003 示例是 panel 类，且 provides 与 kind 自洽（多面板
  * 2. 真实功能示例的三项能力点（这就是「接入范例」的价值）
  * ============================================================ */
 
-test('TC-SMPL-004 示例覆盖多面板 / http 联网取数 / 行点击三类能力', () => {
+test('TC-SMPL-004 示例覆盖「单面板 + http 联网取数 + 派生列」三类能力', () => {
   const m = SAMPLE_PLUGIN_MANIFESTS[0]!
   const panels = m.provides.panels ?? []
-  assert.equal(panels.length, 3, '列表 + 详情 + K 线三面板')
+  // ★ v0.35.0（D75）：三面板 → 单面板。原「个股详情」「日K线」被用户点名为废弃项，
+  //   已从随包示例摘除（见 TC-SMPL-026 的回归锁）
+  assert.equal(panels.length, 1, 'D75 后只保留「自选股」一个面板')
   const refs = panels.map((p) => p.panelRef)
-  assert.deepEqual(refs, ['panel:stock-quotes', 'panel:stock-detail', 'panel:stock-kline'])
+  assert.deepEqual(refs, ['panel:stock-quotes'])
 
-  // ① http 数据源：三个面板全部真实联网，且只允许 https
+  // ① http 数据源：真实联网，且只允许 https
   for (const p of panels) {
     assert.equal(p.data.kind, 'http', `${p.panelRef} 必须是 http 源（真实数据）`)
     const url = String((p.data.http as { url?: string } | undefined)?.url ?? '')
     assert.match(url, /^https:\/\//, `${p.panelRef} 的 url 必须是 https`)
   }
 
-  // ② 行点击 → 浮窗打开详情 + K 线，参数取自当前行字段
-  const click = panels[0]!.interact?.onRowClick
-  assert.ok(click, '列表面板必须声明行点击')
-  assert.deepEqual(click!.panelRefs, ['panel:stock-detail', 'panel:stock-kline'])
-  assert.deepEqual(click!.params, { secid: 'secid' })
+  // ② 行点击**必须不存在**：它唯一的指向就是那两个废弃面板，
+  //    留着 = 用户点一行什么都不会发生（比没有交互更难排查）
+  assert.equal(panels[0]!.interact, undefined, 'D75 后不得再声明 interact.onRowClick')
 
-  // ③ 参数化 URL：详情/K线面板的 url 含 {{secid}} 占位符
-  for (const p of panels.slice(1)) {
-    const url = String((p.data.http as { url?: string } | undefined)?.url ?? '')
-    assert.match(url, /\{\{secid\}\}/, `${p.panelRef} 的 url 必须含 {{secid}} 占位符`)
-  }
+  // ③ 派生列仍在：secid 不再驱动浮窗，但它仍是「行级标识」的表达范例
+  //    （未来任何个股级视图/工具都能直接复用；TC-SMPL-023/025 继续把守其解析正确性）
+  const quotes = panels[0]!.data.http as { derive?: Record<string, string>; pollMs?: number }
+  assert.deepEqual(quotes.derive, { secid: '{{f13}}.{{f12}}' }, '派生列必须保留')
 
   // ④ 轮询间隔不低于宿主下限（否则宿主夹取，等于作者意图失真）
-  for (const p of panels) {
-    const spec = p.data.http as { pollMs?: number } | undefined
-    if (spec?.pollMs) assert.ok(spec.pollMs >= 3000, `${p.panelRef} 的 pollMs 应 ≥3000`)
-  }
+  if (quotes.pollMs) assert.ok(quotes.pollMs >= 3000, 'pollMs 应 ≥3000')
 })
 
-test('TC-SMPL-013 ★ 取数主机回归锁：自选股/详情不得再用 push2 主机（实测 ERR_EMPTY_RESPONSE）', () => {
+test('TC-SMPL-013 ★ 取数主机回归锁：自选股不得再用 push2 主机（实测 ERR_EMPTY_RESPONSE）', () => {
   // 依据：v0.34.2 D56-b 实测（Electron net.fetch + 系统代理）
   //   push2.eastmoney.com   ulist.np / stock/get → net::ERR_EMPTY_RESPONSE（×3）
   //   push2delay.eastmoney.com 同接口 → 200 + 合法 JSON
@@ -138,22 +137,34 @@ test('TC-SMPL-013 ★ 取数主机回归锁：自选股/详情不得再用 push2
   }
   const quotes = urls.find((u) => u.includes('ulist.np'))!
   assert.match(quotes, /^https:\/\/push2delay\.eastmoney\.com\//, '自选股走 push2delay')
-  const detail = urls.find((u) => u.includes('stock/get'))!
-  assert.match(detail, /^https:\/\/push2delay\.eastmoney\.com\//, '个股详情走 push2delay')
-  const kline = urls.find((u) => u.includes('kline'))!
-  assert.match(kline, /^https:\/\/push2his\.eastmoney\.com\//, 'K 线走 push2his（实测 200）')
+  // ★ v0.35.0（D75）：detail / kline 两条 URL 已随面板一起摘除，
+  //   「它们不得复活」由 TC-SMPL-026 单独把守（这里不再断言不存在的东西）
 })
 
-test('TC-SMPL-005 K 线面板必须用 CandleChart 且声明开高低收四列（形状自洽）', () => {
+/**
+ * ★ v0.35.0（D75）退役回归锁。
+ *
+ * 这条用例存在的理由：那两个面板被摘除是**用户指令**（「删除废弃的侧边栏插件」）。
+ * 写代码的人很容易在后续版本里「顺手把删掉的面板加回来」（它们看着挺有用），
+ * 而加回来不会有任何测试变红 —— 除非有这么一条锁。
+ *
+ * 同时把守「摘除必须连带摘掉引用它的 interact」—— 半摘（删了面板留了交互）
+ * 会造出一个「点了没反应」的死交互，比完整保留更难排查。
+ */
+test('TC-SMPL-026 ★ D75 退役锁：两个废弃面板不得复活，且不得遗留指向它们的交互', () => {
   const m = SAMPLE_PLUGIN_MANIFESTS[0]!
-  const kline = (m.provides.panels ?? []).find((p) => p.panelRef === 'panel:stock-kline')!
-  assert.equal(kline.component, 'CandleChart')
-  const spec = kline.data.http as { split?: string; columns?: Array<{ key: string }> }
-  assert.equal(spec.split, ',', 'K 线接口每行是逗号分隔字符串')
-  const keys = (spec.columns ?? []).map((c) => c.key)
-  for (const k of ['date', 'open', 'close', 'high', 'low']) {
-    assert.ok(keys.includes(k), `CandleChart 需要 ${k} 字段，实际：${keys.join(',')}`)
+  const refs = (m.provides.panels ?? []).map((p) => p.panelRef)
+  for (const retired of RETIRED_PANEL_REFS) {
+    assert.ok(!refs.includes(retired), `废弃面板 ${retired} 不得重新出现在随包示例里`)
   }
+  // 全清单任意深度都不得残留对废弃 ref 的引用（interact / 未来的新字段都覆盖）
+  const text = JSON.stringify(RAW_SAMPLE_PLUGINS)
+  for (const retired of RETIRED_PANEL_REFS) {
+    assert.ok(!text.includes(retired), `清单里不得残留 ${retired} 的任何引用`)
+  }
+  // `CandleChart` 组件本身**不退役**（Q4 裁决）—— 它仍应是合法白名单组件，
+  // 只是随包示例不再用它（这里断言白名单仍在，防止有人把「删示例」误做成「删组件」）
+  assert.ok(VLIB_COMPONENTS.includes('CandleChart'), 'CandleChart 应保留在组件白名单里')
 })
 
 /* ============================================================
@@ -318,7 +329,9 @@ test('TC-SMPL-014 ★ 存量机器路径：无副文件 + 仅差退役主机 →
     assert.equal(readFileSync(file, 'utf-8'), seedTextOf(rawManifestOf(STOCK)!), '升级后内容 = 新版随包内容')
     assert.ok(existsSync(join(sub, SEED_SIDECAR)), '升级后必须补写指纹副文件')
     const side = JSON.parse(readFileSync(join(sub, SEED_SIDECAR), 'utf-8')) as { hash: string; version: string }
-    assert.equal(side.version, '1.0.1', '副文件记录插件版本（人可读凭据）')
+    // 绑到清单自身的 version（而非硬编码字面量）—— 断言的是「副文件如实记录了
+    // 落盘那一版的版本号」这条不变量；硬编码会让每次版本号 +1 都制造一次假红。
+    assert.equal(side.version, String(rawManifestOf(STOCK)!.version), '副文件记录插件版本（人可读凭据）')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -477,4 +490,90 @@ test('TC-SMPL-022 用户改过自选股清单（在官方副本基础上）→ �
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+/* ============================================================
+ * D62 ★ 行点击参数链端到端钉：出厂清单 → 派生 secid → 详情 URL
+ *
+ * 为什么放在这组：D62 是一条**只有把「出厂清单的真实形状」喂进映射器**
+ * 才会暴露的缺陷。单元用例（TC-PHTTP-005）恰好把 `f13` 也写进了 columns，
+ * 于是永远看不到「derive 引用了未投影字段」这条真实路径。
+ * 本组用**清单自身的 spec** 驱动映射器，形状与线上完全一致。
+ * ============================================================ */
+
+/** 东方财富 ulist.np 的真实响应形状（f13 是**数字**市场码，且未被声明进 columns） */
+const EASTMONEY_ULIST = {
+  rc: 0,
+  data: {
+    total: 2,
+    diff: [
+      { f2: 1257.12, f3: -0.78, f4: -9.86, f12: '600519', f13: 1, f14: '贵州茅台', f18: 1266.98 },
+      { f2: 11.7, f3: 0.78, f4: 0.09, f12: '000001', f13: 0, f14: '平安银行', f18: 11.61 },
+    ],
+  },
+}
+
+/** 出厂清单某面板的 http 规格（缺失即抛 —— 用例前提不成立时应当**响亮失败**） */
+function httpSpecOf(ref: string): HttpSourceSpec {
+  const p = (SAMPLE_PLUGIN_MANIFESTS[0]!.provides.panels ?? []).find((x) => x.panelRef === ref)
+  assert.ok(p, `出厂清单必须有 ${ref}`)
+  assert.ok(p!.data.http, `${ref} 必须是 http 数据源`)
+  return p!.data.http!
+}
+
+test('TC-SMPL-023 ★ D62 回归：出厂「自选股」spec 必须派生出可用的 secid（f13 不在 columns 里）', () => {
+  const quotes = httpSpecOf('panel:stock-quotes')
+  // 前提断言：本用例的有效性依赖「derive 引用的字段确实没被投影展示」
+  const colKeys = (quotes.columns ?? []).map((c) => c.key)
+  assert.ok(!colKeys.includes('f13'), '前提：f13（市场码）本就不该出现在展示列里')
+  assert.match(String(quotes.derive?.secid), /\{\{f13\}\}/, '前提：secid 模板确实引用 f13')
+
+  const res = mapHttpResponse(EASTMONEY_ULIST, quotes)
+  assert.equal(res.rows.length, 2)
+  // 缺陷现象：secid 退化成字面量 '{{f13}}.600519' → 详情接口 data:null → 空面板
+  for (const r of res.rows) {
+    assert.doesNotMatch(String(r.secid), /\{\{/, `secid 不得残留未解析占位符：${String(r.secid)}`)
+  }
+  assert.equal(res.rows[0]!.secid, '1.600519', '沪市市场码 1')
+  assert.equal(res.rows[1]!.secid, '0.000001', '深市市场码 0')
+  assert.doesNotMatch(String(res.note), /未解析/, '解析成功时不得报「未解析」噪音')
+})
+
+test('TC-SMPL-024 ★ D62 机制守卫：派生 secid 代入 URL 模板必须零 {{…}} 残留（消费者已随 D75 退役）', () => {
+  // ★ D75 背景（本用例从「端到端」降级为「机制级」的原因）：
+  //   原先消费「派生 secid」的两个面板 —— `panel:stock-detail`（个股详情）与
+  //   `panel:stock-kline`（日K线）—— 已被用户点名为废弃项并摘除，随包清单里
+  //   再没有任何 URL 模板引用 secid。于是这条 D62 用例的**原始诉求**（拿出厂
+  //   清单的真实形状喂进映射器、钉死详情/K线 URL 被完全替换）已无随包载体。
+  //
+  //   但 D62 钉住的**机制**（`derive` 产出的字段代入 `applyTemplate` 必须完全
+  //   替换、零 `{{…}}` 残留）仍然通用 —— 未来的插件照样会这么用。故此处刻意
+  //   保留该 ID、改为**机制级**守卫，而不是连机制一起悄悄丢掉。
+  const quotes = httpSpecOf('panel:stock-quotes')
+  const rows = mapHttpResponse(EASTMONEY_ULIST, quotes).rows
+  const secid = String(rows[0]!.secid)
+  assert.equal(secid, '1.600519', '前提：derive 必须先产出正确的 secid（沪市市场码 1）')
+
+  // 模板用「未来插件会写的样子」（secid 走 query，与东方财富真实接口同形）。
+  // 这不是替身断言：applyTemplate 是否残留占位符只取决于入参，与 URL 真伪无关。
+  const tpl = 'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={{secid}}&klt=101'
+  const resolved = applyTemplate(tpl, { secid })
+  assert.doesNotMatch(resolved, /\{\{[\w.-]+\}\}/, `URL 模板必须被完全替换，实际：${resolved}`)
+  assert.match(resolved, /secid=1\.600519(&|$)/, '必须带上真实 secid')
+
+  // 反向钉：退役面板确实不再提供任何 URL 模板（否则上面的「机制级」说法不成立）
+  const refs = (SAMPLE_PLUGIN_MANIFESTS[0]!.provides.panels ?? []).map((p) => p.panelRef)
+  for (const retired of RETIRED_PANEL_REFS) {
+    assert.ok(!refs.includes(retired), `退役面板 ${retired} 不得重新出现`)
+  }
+})
+
+test('TC-SMPL-025 ★ D62 回归：响应缺 f13 时，note 必须点名「派生字段未解析」（不静默空面板）', () => {
+  const quotes = httpSpecOf('panel:stock-quotes')
+  // 模拟接口字段变更（或模板字段名拼错）：f13 消失
+  const broken = { rc: 0, data: { diff: [{ f2: 1, f12: '600519', f14: '贵州茅台' }] } }
+  const res = mapHttpResponse(broken, quotes)
+  assert.match(String(res.rows[0]!.secid), /\{\{f13\}\}/, '未命中变量按 applyTemplate 语义原样保留')
+  assert.match(String(res.note), /未解析/, 'note 必须把人话原因说出来')
+  assert.match(String(res.note), /secid/, 'note 必须点名是哪个派生字段')
 })

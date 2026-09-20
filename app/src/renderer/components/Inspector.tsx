@@ -17,7 +17,8 @@
  *  ② **面板 Tab 不可拖拽、不可隐藏** —— 它不属于用户偏好域（同上）；
  *  ③ **归属可见** —— 面板 Tab 的 title 来自贡献者，`PanelHost` 再标出插件 id。
  * ============================================================ */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useStore, INSPECTOR_TAB_META, DEFAULT_INSPECTOR_TAB, type InspectorTabId, type InspectorTabRef } from '../store'
 import { Icon, type IconName } from '../icons'
@@ -31,6 +32,8 @@ import { LogsView } from './right/LogsView'
 import { TerminalPanel } from './dock/TerminalPanel'
 // v0.33.0：面板宿主（工作台 / 插件贡献的 ui.panel 插槽）
 import { PanelHost } from './vlib/PanelHost'
+// ★ v0.35.0：插件**代码视图**宿主（iframe 沙箱 + postMessage 桥）
+import { PluginViewHost } from './plugins/PluginViewHost'
 import {
   builtinTabsOf,
   mergePanelOrder,
@@ -38,13 +41,22 @@ import {
   INSPECTOR_TAB_REFS,
   type PanelTab,
 } from '@shared/utils/panel-model'
-// v0.34.2（D56）：竖排栏**高度自适应折叠** —— 可见名称 ≤3 且不超过栏高，
-// 其余（内置与插件一视同仁）进底部「更多」弹层。取代 v0.34.0 D54 的「插件≤3」。
+// v0.34.2（D56-c）→ v0.34.3（D58）：竖排栏**纯高度驱动折叠** ——
+// 只有放不下才折叠，折叠出来的部分才进「更多」弹层。
 import { computeRailLayout, hiddenBlockHeight, pickVisibleTabs } from '../utils/rail-tab-overflow'
+// v0.34.3（D59）：弹层定位纯函数 —— 弹层用 Portal 逃出栏盒（栏是 overflow-x: hidden），
+// 坐标由它按触发器矩形现算（见 utils/anchored-menu.ts 文件头）
+import { computeAnchoredMenu, type AnchoredMenuStyle } from '../utils/anchored-menu'
 // v0.34.0（D54）：展示名防御（未解析模板串 + 超长名）—— 竖排栏与面板宿主共用同一真源
 import { guardLabel } from '../utils/label-guard'
 
 const TOOL_BAR_WIDTH = 44 // 垂直标签栏宽度（保持紧凑、足够容纳 16px 图标 + 文字）
+
+/**
+ * v0.34.3（D60）：「更多」弹层的 DOM id。
+ * 触发器 `aria-controls` 与弹层 `id` **必须同源**（一处常量），否则屏幕阅读器关联断掉。
+ */
+const MORE_MENU_ID = 'inspector-more-tabs-menu'
 
 /**
  * v0.34.0（D54）：展示层防御（真源在 `utils/label-guard.ts`，此处转出便于既有调用点与测试复用）。
@@ -86,6 +98,8 @@ export function Inspector() {
   const restoreInspectorTab = useStore((s) => s.restoreInspectorTab)
   // v0.33.0：工作台 / 插件贡献的面板（来自 profile:slots 的 ui.panel 条目）
   const profilePanels = useStore((s) => s.profilePanels)
+  // ★ v0.35.0：插件**代码视图**（运行期来的，与 profilePanels 分两路 —— 见 pluginSlice 头注释）
+  const pluginViews = useStore((s) => s.pluginViews)
 
   const isBuiltin = useCallback((ref: string): ref is InspectorTabId => {
     return (INSPECTOR_TAB_REFS as readonly string[]).includes(ref)
@@ -97,16 +111,25 @@ export function Inspector() {
     [inspectorTabOrder, hiddenInspectorTabs],
   )
   const tabs: PanelTab[] = useMemo(
-    () => mergePanelOrder(builtinTabsOf(visibleBuiltin), profilePanels),
-    [visibleBuiltin, profilePanels],
+    () =>
+      // ★ v0.35.0：三层拼接 —— 内置（用户顺序）→ 工作台面板（manifest position）
+      //   → 插件代码视图（运行期 order）。第二层合并已完成一次「不重复插入」，
+      //   第三层再走一次 `mergePanelOrder` 复用同一条去重与插入规则。
+      mergePanelOrder(mergePanelOrder(builtinTabsOf(visibleBuiltin), profilePanels), pluginViews),
+    [visibleBuiltin, profilePanels, pluginViews],
   )
-  /* v0.34.2（D56）：竖排栏高度 → 可见条数
-   * 用户诉求：「>3 个名称会挤压溢出」「超过栏高必须有折叠机制」。
-   * 高度用 ResizeObserver 实测（窗口缩放 / 左右栏拖拽都会触发），
-   * 未测量（首帧 / jsdom 无 RO）时退化为「只按 ≤3」，两帧同口径不闪跳。 */
+  /* v0.34.3（D58）：竖排栏高度 → 可见条数
+   * 用户口径（本版纠正）：「**在铺满的时候才有更多**」——
+   * 只有放不下才折叠；放得下就一条都不收，数量不再是判据。
+   * 高度用 ResizeObserver 实测（窗口缩放 / 左右栏拖拽都会触发）；
+   * 未测量（首帧 / jsdom 无 RO）时**不折叠** —— 规则既然是「铺满才折叠」，
+   * 那「还没量到高度」就绝不能假定已铺满。
+   *
+   * 用 `useLayoutEffect` 而非 `useEffect`：它在 DOM 变更后、**浏览器绘制前**同步跑，
+   * 因此首帧拿到的就是真实高度 —— 不会出现「先渲染 9 条、下一帧才折叠」的闪跳。 */
   const railRef = useRef<HTMLDivElement | null>(null)
   const [railHeight, setRailHeight] = useState<number | null>(null)
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = railRef.current
     if (!el) return
     const sync = () => setRailHeight(el.clientHeight)
@@ -126,18 +149,119 @@ export function Inspector() {
     () => pickVisibleTabs(tabs, layout.visibleCount, inspectorTab),
     [tabs, layout.visibleCount, inspectorTab],
   )
+
+  /* ---------- v0.34.3（D59 + D60）：「更多」弹层 ----------
+   * D59：弹层用 createPortal 渲染到 document.body + position:fixed —— 栏盒是
+   *      `overflow-x: hidden` 且仅 44px 宽，任何留在栏内的 absolute 弹层都会
+   *      向左侧伸出容器盒之外、被裁成零宽（v0.34.2 的「点不开」根因）。
+   * D60：开关 / 键盘 / 焦点 / aria 的完整交互契约见 04-system-design.md §D60。 */
+  const moreBtnRef = useRef<HTMLButtonElement | null>(null)
+  const moreMenuRef = useRef<HTMLDivElement | null>(null)
   const [overflowOpen, setOverflowOpen] = useState(false)
+  /* 位置由纯函数算好再渲染 —— 避免弹层先出现在 (0,0) 再跳过去的闪帧 */
+  const [moreMenuStyle, setMoreMenuStyle] = useState<AnchoredMenuStyle | null>(null)
+
+  /** 按当前触发器矩形重算弹层位置（打开时 + 视口变化时调用） */
+  const repositionMoreMenu = useCallback(() => {
+    const btn = moreBtnRef.current
+    if (!btn) return
+    const { style } = computeAnchoredMenu(btn.getBoundingClientRect(), {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    })
+    setMoreMenuStyle(style)
+  }, [])
+
+  const openMoreMenu = useCallback(() => {
+    repositionMoreMenu()
+    setOverflowOpen(true)
+  }, [repositionMoreMenu])
+
+  /** 收起弹层；`refocus` = 是否把焦点还给触发器（Esc 走这条） */
+  const closeMoreMenu = useCallback((refocus = false) => {
+    setOverflowOpen(false)
+    if (refocus) moreBtnRef.current?.focus()
+  }, [])
+
+  /** 触发器点击 = 开关（E2：必须能关，否则「点了不切换」） */
+  const toggleMoreMenu = useCallback(() => {
+    if (overflowOpen) closeMoreMenu()
+    else openMoreMenu()
+  }, [overflowOpen, openMoreMenu, closeMoreMenu])
+
   useEffect(() => {
     if (!overflowOpen) return
-    const close = () => setOverflowOpen(false)
-    // 点击任意处关闭（capture 阶段，避免被内部点击 stopPropagation 拦掉）
-    window.addEventListener('mousedown', close)
-    window.addEventListener('keydown', close)
-    return () => {
-      window.removeEventListener('mousedown', close)
-      window.removeEventListener('keydown', close)
+
+    /* 关闭：外部按下才关 —— **排除触发器与弹层自身**。
+     * 不排除触发器会踩到一个经典时序坑：触发器 mousedown 先把它关掉、
+     * 紧接着同一手势的 click 又把它打开 ⇒ 用户看到的是「点了没反应」。 */
+    const onPointerDown = (e: MouseEvent) => {
+      const target = e.target as Node | null
+      if (!target) return
+      if (moreBtnRef.current?.contains(target)) return
+      if (moreMenuRef.current?.contains(target)) return
+      setOverflowOpen(false)
     }
-  }, [overflowOpen])
+
+    /* 键盘：**白名单**。
+     * v0.34.2 的 `keydown → close` 是「任意键都关」—— 键盘导航会被自己人打断。 */
+    const onKeyDown = (e: KeyboardEvent) => {
+      const items = Array.from(
+        moreMenuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+      )
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        closeMoreMenu(true)
+        return
+      }
+      if (e.key === 'Tab') {
+        // 焦点要离开菜单了 → 收起（不拦截默认行为，让 Tab 正常走）
+        setOverflowOpen(false)
+        return
+      }
+      const isNav =
+        e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End'
+      if (!isNav) return // 其余按键一律不干预
+      if (items.length === 0) return
+      e.preventDefault()
+      const idx = items.findIndex((node) => node === document.activeElement)
+      let next: number
+      if (e.key === 'ArrowDown') next = idx < 0 ? 0 : (idx + 1) % items.length
+      else if (e.key === 'ArrowUp') next = idx < 0 ? items.length - 1 : (idx - 1 + items.length) % items.length
+      else if (e.key === 'Home') next = 0
+      else next = items.length - 1
+      items[next]?.focus({ preventScroll: true })
+    }
+
+    const onViewportChange = () => repositionMoreMenu()
+
+    window.addEventListener('mousedown', onPointerDown)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('resize', onViewportChange)
+    // capture：scroll 不冒泡到 window，但栏自身（overflow-y: auto）会滚动
+    window.addEventListener('scroll', onViewportChange, true)
+
+    // 打开后把焦点移到「当前激活项」（无则首项）—— 键盘打开时立刻可导航
+    const items = Array.from(
+      moreMenuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+    )
+    const target = items.find((n) => n.dataset.active === 'true') ?? items[0]
+    target?.focus({ preventScroll: true })
+
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('resize', onViewportChange)
+      window.removeEventListener('scroll', onViewportChange, true)
+    }
+  }, [overflowOpen, closeMoreMenu, repositionMoreMenu])
+
+  /* 折叠项被「吃光」（例如窗口拉高后不再溢出）→ 顺手复位开关状态。
+   * 不复位的话：触发器随 `overflowTabList.length > 0` 一起卸载、`overflowOpen`
+   * 却停在 true —— 下次再溢出时触发器一出现就是「已展开」的假象。 */
+  useEffect(() => {
+    if (overflowOpen && overflowTabList.length === 0) setOverflowOpen(false)
+  }, [overflowOpen, overflowTabList.length])
 
   /** 当前 Tab 的展示元信息（内置取 i18n，面板取贡献者标题） */
   const currentTab = useMemo(() => tabs.find((x) => x.ref === inspectorTab) ?? null, [tabs, inspectorTab])
@@ -306,7 +430,13 @@ export function Inspector() {
             {/* 内置面板：按 ref 分支渲染 */}
             {isBuiltin(inspectorTab) && inspectorTab !== 'browser' && <BuiltinBody tab={inspectorTab} />}
             {/* v0.33.0：工作台 / 插件贡献的面板（四态渲染 + 组件白名单） */}
-            {!isBuiltin(inspectorTab) && currentTab && !currentTab.builtin && <PanelHost tab={currentTab} />}
+            {!isBuiltin(inspectorTab) && currentTab && !currentTab.builtin && !currentTab.view && (
+              <PanelHost tab={currentTab} />
+            )}
+            {/* ★ v0.35.0：插件代码视图（iframe 沙箱 + 桥；**不复用 PanelHost** —— 两者的
+                内容来源与安全模型都不同，合并会让「白名单组件」与「任意插件 HTML」
+                共用一条渲染路径，安全边界就没了） */}
+            {!isBuiltin(inspectorTab) && currentTab?.view && <PluginViewHost tab={currentTab} />}
           </div>
         </div>
       </div>
@@ -375,8 +505,11 @@ export function Inspector() {
           )
         })}
 
-        {/* v0.34.2（D56）：高度/条数溢出收纳 —— 被折叠的项（内置与插件一视同仁）
-            全部进这里。内置项附快捷键提示，保证「位置折叠了、键位仍记得住」。 */}
+        {/* v0.34.3（D58/D59/D60）：被折叠的项（内置与面板一视同仁）进「更多」弹层。
+            D59：弹层用 createPortal 渲染到 document.body + position:fixed ——
+                 栏盒是 `overflow-x: hidden` 且仅 44px 宽，任何留在栏内的 absolute
+                 弹层都会向容器左侧之外伸出、被裁成零宽（用户实测「更多点不开」的根因）。
+            D60：内置项附快捷键提示（位置折叠了、键位仍记得住）；激活项有可见选中态。 */}
         {overflowTabList.length > 0 && (
           <div className="relative mt-1 pt-2 border-t border-border-subtle px-1">
             <Tooltip
@@ -385,53 +518,74 @@ export function Inspector() {
               delay={150}
             >
               <button
+                ref={moreBtnRef}
                 type="button"
                 aria-haspopup="menu"
                 aria-expanded={overflowOpen}
+                aria-controls={overflowOpen ? MORE_MENU_ID : undefined}
                 aria-label={t('inspector.moreTabsAria', { count: overflowTabList.length })}
-                onClick={() => setOverflowOpen((v) => !v)}
+                onClick={toggleMoreMenu}
                 className="w-full flex items-center justify-center h-9 rounded-sm text-text-tertiary hover:text-text-primary hover:bg-bg-hover transition-all focus-ring"
-                data-testid="inspector-more-plugin-tabs"
+                data-testid="inspector-more-tabs"
               >
                 <Icon.MoreHorizontal width={14} height={14} aria-hidden="true" />
               </button>
             </Tooltip>
-            {overflowOpen && (
-              <div
-                role="menu"
-                aria-label={t('inspector.moreTabsAria', { count: overflowTabList.length })}
-                data-testid="inspector-plugin-tabs-menu"
-                className="absolute right-full top-0 mr-1 z-50 min-w-[160px] max-w-[240px] rounded-md border border-border-subtle bg-bg-overlay shadow-panel py-1"
-              >
-                {overflowTabList.map((tab) => {
-                  const meta = tab.builtin ? INSPECTOR_TAB_META[tab.ref as InspectorTabId] : null
-                  const label = meta ? t(meta.label) : guardLabel(tab.title)
-                  const TabIcon = Icon[(meta?.icon ?? tab.icon ?? 'Plug') as IconName] ?? Icon.Dot
-                  const active = tab.ref === inspectorTab
-                  return (
-                    <button
-                      key={tab.ref}
-                      type="button"
-                      role="menuitem"
-                      data-active={active}
-                      title={label}
-                      onClick={() => {
-                        setInspectorTab(tab.ref as InspectorTabRef)
-                        if (rightDockCollapsed) toggleRightDock()
-                        setOverflowOpen(false)
-                      }}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
-                    >
-                      <TabIcon width={14} height={14} aria-hidden="true" className="flex-shrink-0" />
-                      <span className="truncate">{label}</span>
-                      {meta && (
-                        <span className="ml-auto flex-shrink-0 text-2xs text-text-faint">{meta.shortcut}</span>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
+            {overflowOpen &&
+              moreMenuStyle &&
+              createPortal(
+                <div
+                  ref={moreMenuRef}
+                  id={MORE_MENU_ID}
+                  role="menu"
+                  aria-label={t('inspector.moreTabsAria', { count: overflowTabList.length })}
+                  data-testid="inspector-more-tabs-menu"
+                  style={moreMenuStyle}
+                  className="z-50 overflow-y-auto min-w-[160px] max-w-[240px] rounded-md border border-border-subtle bg-bg-overlay shadow-panel py-1"
+                >
+                  {overflowTabList.map((tab) => {
+                    const meta = tab.builtin ? INSPECTOR_TAB_META[tab.ref as InspectorTabId] : null
+                    const label = meta ? t(meta.label) : guardLabel(tab.title)
+                    const TabIcon = Icon[(meta?.icon ?? tab.icon ?? 'Plug') as IconName] ?? Icon.Dot
+                    const active = tab.ref === inspectorTab
+                    return (
+                      <button
+                        key={tab.ref}
+                        type="button"
+                        role="menuitem"
+                        data-active={active}
+                        tabIndex={-1}
+                        title={label}
+                        aria-current={active ? 'true' : undefined}
+                        onClick={() => {
+                          setInspectorTab(tab.ref as InspectorTabRef)
+                          if (rightDockCollapsed) toggleRightDock()
+                          setOverflowOpen(false)
+                        }}
+                        className={`w-full flex items-center gap-1.5 pl-1.5 pr-2 py-1.5 text-left text-xs transition-colors ${
+                          active
+                            ? 'bg-bg-overlay-l2 text-text-primary'
+                            : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
+                        }`}
+                      >
+                        {/* 激活指示条 —— 与竖排栏 `.inspector-toolbar__indicator` 同一视觉语言
+                            （2px `--accent`）。用显式条件类而非 data-* 变体：契约用例要能断言
+                            「除了属性之外，确实存在样式绑定」。 */}
+                        <span
+                          aria-hidden="true"
+                          className={`w-[2px] h-4 rounded-full flex-shrink-0 ${active ? 'bg-accent' : 'bg-transparent'}`}
+                        />
+                        <TabIcon width={14} height={14} aria-hidden="true" className="flex-shrink-0" />
+                        <span className="truncate">{label}</span>
+                        {meta && (
+                          <span className="ml-auto flex-shrink-0 text-2xs text-text-faint">{meta.shortcut}</span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>,
+                document.body,
+              )}
           </div>
         )}
 

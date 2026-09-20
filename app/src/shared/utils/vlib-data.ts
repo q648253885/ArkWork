@@ -11,6 +11,7 @@
  * ============================================================ */
 import {
   VLIB_DATA_REQUIREMENT,
+  isPanelDataKind,
   isVLibComponent,
   type PanelData,
   type VLibComponentName,
@@ -42,7 +43,9 @@ export function validatePanelData(component: unknown, data: unknown): PanelDataC
     return { ok: false, reason: '数据必须是对象' }
   }
   const d = data as PanelData
-  if (d.kind !== 'static' && d.kind !== 'file' && d.kind !== 'mcp') {
+  // D61：此前的三路白名单漏了 'http' —— http 源取数成功（「6 行」）却在渲染前被拒，
+  // 现象是「插件打开失败 · 未知数据源 kind「http」」。改为单一事实源守卫，杜绝枚举漏项。
+  if (!isPanelDataKind(d.kind)) {
     return { ok: false, reason: `未知数据源 kind「${String(d.kind)}」` }
   }
 

@@ -21,6 +21,9 @@ import {
   pluginContributions,
   pluginSummaries,
   uninstallPlugin,
+  verifyPluginEntries,
+  setHostVersion,
+  getHostVersion,
 } from '../registry.js'
 import { parsePluginManifest } from '@shared/utils/plugin-manifest'
 import { BUILTIN_EXTENSIONS } from '@shared/utils/renderer-ext'
@@ -48,7 +51,8 @@ function manifestOf(id: string, over: Record<string, unknown> = {}): PluginManif
 }
 
 function installed(m: PluginManifest, over: Partial<InstalledPlugin> = {}): InstalledPlugin {
-  return { manifest: m, source: 'local', dir: '', enabled: true, ...over }
+  // v0.35.0：`'local'` 已由 `'global'` 承接（`PluginSource` 三级作用域）
+  return { manifest: m, source: 'global', dir: '', enabled: true, ...over }
 }
 
 /* ============================================================
@@ -130,7 +134,7 @@ test('TC-PLGR-005 逐插件隔离：1 好 1 坏的输入 → 只产好的，且�
   // 「坏」在 registry 的判据里 = invalidReason 非空（buildUserEntry 对校验失败
   // 的插件就是标 invalidReason 而非产出 manifest）—— 这里直接按该形态构造
   const badM = manifestOf('ark.plugin.bad')
-  const broken: InstalledPlugin = { manifest: badM, source: 'local', dir: '', enabled: true, invalidReason: 'VP1 $.version: 不是语义化版本' }
+  const broken: InstalledPlugin = { manifest: badM, source: 'global', dir: '', enabled: true, invalidReason: 'VP1 $.version: 不是语义化版本' }
   assert.doesNotThrow(() => pluginContributions([broken, installed(good)]))
   const out = pluginContributions([broken, installed(good)])
   assert.equal(out.length, 1)
@@ -207,4 +211,58 @@ test('TC-PLGR-009 summaries：禁用/非法插件不贡献 panelRefs；uninstall
   assert.equal(rows[1]!.homeModules!.length, 0)
   assert.equal(rows[2]!.uninstallable, false, '随包示例不可卸载')
   assert.equal(rows[0]!.uninstallable, true)
+})
+
+/* ============================================================
+ * VP8 — engines 兼容判定（v0.35.0 补：此前 **零覆盖**）
+ *
+ * 为什么补：`hostVersion` 在 registry 里是模块级变量，VP8 拿它判
+ * `engines.arkwork`。它由 `setHostVersion()` 注入 —— 而接线时**忘了调用**，
+ * 于是永远是占位值 '0.0.0'，任何声明了 engines 的合法插件都被判 invalid。
+ * 这类「函数全对、错在没人调用」的缺陷，只有把**接线**也钉住才会被抓到。
+ * ============================================================ */
+
+test('TC-PLGR-010 VP8：宿主版本满足 engines.arkwork → 不产生问题项', () => {
+  setHostVersion('0.35.0')
+  assert.equal(getHostVersion(), '0.35.0')
+  const m = manifestOf('ark.plugin.eng-ok', { engines: { arkwork: '>=0.30.0' } })
+  assert.deepEqual(verifyPluginEntries(m, '/nonexistent'), [])
+})
+
+test('TC-PLGR-011 ★ VP8：不满足 → error，且人话里点名「当前版本」与实际要求', () => {
+  setHostVersion('0.35.0')
+  const m = manifestOf('ark.plugin.eng-bad', { engines: { arkwork: '>=99.0.0' } })
+  const issues = verifyPluginEntries(m, '/nonexistent')
+  assert.equal(issues.length, 1)
+  assert.equal(issues[0]!.rule, 'VP8')
+  assert.equal(issues[0]!.level, 'error')
+  assert.match(issues[0]!.message, /0\.35\.0/, '必须告诉作者当前版本是多少')
+  assert.match(issues[0]!.message, /99\.0\.0/, '也要复述他要求的是什么')
+})
+
+test('TC-PLGR-012 未声明 engines → VP8 不介入（零配置插件不该被版本卡住）', () => {
+  setHostVersion('0.35.0')
+  assert.deepEqual(verifyPluginEntries(manifestOf('ark.plugin.no-eng'), '/nonexistent'), [])
+})
+
+test('TC-PLGR-013 ★ 反向保险：占位值 0.0.0 必须判为不满足 —— 证明「不注入即误杀」这条链是真的', () => {
+  // 这条用例不测产品行为，测的是**上面那条接线用例的有效性**：
+  // 若把 hostVersion 停在占位值，合法插件就会被误杀（本用例必须红）。
+  setHostVersion('0.0.0')
+  const m = manifestOf('ark.plugin.eng-must-fail', { engines: { arkwork: '>=0.35.0' } })
+  const issues = verifyPluginEntries(m, '/nonexistent')
+  assert.equal(issues.length, 1, '占位版本下必须报 VP8 —— 否则说明 VP8 根本没生效')
+  assert.equal(issues[0]!.rule, 'VP8')
+  setHostVersion('0.35.0') // 复位，避免影响同文件其它用例
+})
+
+test('TC-PLGR-014 ★ 接线契约：bootstrap 必须注入真实宿主版本，且**早于**首次扫描', () => {
+  const bootSrc = readFileSync(new URL('../bootstrap.ts', import.meta.url), 'utf-8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '')
+  assert.match(bootSrc, /setHostVersion\(app\.getVersion\(\)\)/, '必须注入 app.getVersion()，不是别的来源')
+  const atInject = bootSrc.indexOf('setHostVersion(app.getVersion())')
+  const atScan = bootSrc.indexOf('refreshPluginsAndIndex()')
+  assert.ok(atScan > 0, '前提：bootstrap 里确实有首次扫描（否则本用例空转）')
+  assert.ok(atInject < atScan, '注入必须早于首次扫描 —— 顺序反了 VP8 仍读到占位值')
 })

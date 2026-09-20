@@ -15,6 +15,11 @@ import { seedDefaults } from './store/seed.js'
 import { seedBuiltinSkillsToFolders } from './agent/registry.js'
 import { startAutomationScheduler, stopAutomationScheduler } from './automation/scheduler.js'
 import { scheduleCleanup } from './fs/cleanup.js'
+// ★ v0.35.0：插件运行时（代码化插件 · 双端 · 进程隔离）
+//   `registerPluginSchemePrivileges` 必须在 app ready **之前**调用 ——
+//   `standard: true` 的协议特权注册只被 Electron 在 ready 前接受，之后调用静默无效。
+import { registerPluginSchemePrivileges } from './plugins/protocol.js'
+import { bootstrapPluginRuntime, shutdownPluginRuntime } from './plugins/bootstrap.js'
 import { logger } from './system/logger.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -92,6 +97,11 @@ app.on('second-instance', () => {
   }
 })
 
+// ★ v0.35.0：注册 `arkwork-plugin://` 的协议特权（standard / secure / 允许 fetch）。
+// **必须在 `app.whenReady()` 之前** —— ready 之后注册会被静默忽略，
+// 于是插件的 iframe 拿不到独立源、它自己的 fetch 也会被 CORS 挡掉（无报错，只是不工作）。
+registerPluginSchemePrivileges()
+
 app.whenReady().then(async () => {
   logger.info('System', `ArkWork v${app.getVersion()} starting…`)
 
@@ -111,6 +121,15 @@ app.whenReady().then(async () => {
   // v0.32.0：挂载持久化的 Workbench Profile（插槽注册 + 快照补写）
   //   —— 必须在窗口创建之前，否则首屏渲染出的 DocK/首页模块会是未装配形态
   await bootstrapIpcSideEffects()
+
+  // ★ v0.35.0：装配插件运行时（协议 → 宿主服务 → 拔插连通 → 扫描/索引 → 常驻激活）
+  // 放在 profile 之后：它要读「工作区级插件目录」，而工作区路径由上面那步确定。
+  // 出问题也只 warn（单个坏插件绝不能拦住整个 App 启动）
+  try {
+    await bootstrapPluginRuntime({ mainDir: __dirname })
+  } catch (err) {
+    logger.warn('System', `[plugin] 运行时装配失败：${String(err)}`)
+  }
 
   // v0.9.1：启动自动化 cron 调度器（30s tick，命中分钟触发）
   startAutomationScheduler()
@@ -153,6 +172,10 @@ app.on('web-contents-created', (_event, contents) => {
 app.on('before-quit', () => {
   // v0.9.1：停止自动化调度器
   stopAutomationScheduler()
+  // ★ v0.35.0：插件运行时 —— 先让每个插件的 Host 半跑完自己的 effect 清理
+  // （`host/dispose`，3s 超时后 kill），再退出。顺序在 MCP 断开之前：
+  // 插件工具可能正持有 MCP 连接，反过来会让插件的 cleanup 拿到已断开的会话。
+  shutdownPluginRuntime()
   // v0.14.0 Task 9：退出前优雅暂停所有运行中任务——落盘 pause checkpoint 并置
   // paused，重启后 reconcileStaleTasks 保留 paused（可恢复续跑），而不是清成 cancelled。
   void (async () => {

@@ -116,11 +116,29 @@ export function usePanelData(
       let alive = true
       let timer: ReturnType<typeof setInterval> | undefined
       const varsObj = (JSON.parse(varsKey) ?? {}) as Record<string, unknown>
+      const resolvedUrl = applyTemplate(spec.url, varsObj)
+      // D62-c：URL 里的 {{param}} 没被替换，等于面板缺「打开参数」（如行点击传来的 secid）。
+      // 此时照常请求的话，接口只会回一个空集合 —— 用户看到的是**误导性**的「数据为空」，
+      // 而真正原因是「你没从上一级点进来」。必须点名缺哪个参数、并说明它从哪来。
+      const missing: string[] = []
+      const re = /\{\{\s*([\w.-]+)\s*\}\}/g
+      let mm: RegExpExecArray | null
+      while ((mm = re.exec(resolvedUrl)) !== null) {
+        if (mm[1] && !missing.includes(mm[1])) missing.push(mm[1])
+      }
+      if (missing.length > 0) {
+        setState({
+          status: 'error',
+          data: null,
+          error: `缺少打开参数 ${missing.map((k) => `{{${k}}}`).join('、')} —— 该面板需由上游面板传入（例如在行情表里点击一行）`,
+        })
+        return
+      }
       const runOnce = async (isRefresh: boolean) => {
         if (!isRefresh) setState({ status: 'loading', data: null })
         try {
           const res = await ark.panel.fetch({
-            url: applyTemplate(spec.url, varsObj),
+            url: resolvedUrl,
             method: spec.method ?? 'GET',
             headers: spec.headers ?? {},
             response: spec.response ?? 'json',
@@ -141,7 +159,7 @@ export function usePanelData(
             setState({ status: 'error', data: null, error: `${check.reason}（${mapped.note ?? '映射后'}）` })
             return
           }
-          setState({ status: 'ready', data: merged, resolvedPath: spec.url })
+          setState({ status: 'ready', data: merged, resolvedPath: resolvedUrl })
         } catch (err) {
           if (!alive) return
           setState({ status: 'error', data: null, error: err instanceof Error ? err.message : String(err) })

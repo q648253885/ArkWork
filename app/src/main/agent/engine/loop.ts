@@ -165,6 +165,18 @@ const MAX_ITERATIONS = 200
 const MAX_PER_SIGNATURE = 5
 const MAX_PER_TOOL_DEFAULT = 400
 const MAX_PER_TOOL_READONLY = 600
+/**
+ * v0.34.4（D65）：**连续**「本轮所有请求的工具都被预算拦截」的轮数上限。
+ *
+ * 达到即优雅暂停（paused + ask_user），**不再 task_failed**。
+ * 取 3 而非 D52 的 6：这一路是"引擎侧已无工具可用"的硬事实，
+ * 不像零产出轮那样需要留观察窗口给模型自己找回节奏。
+ *
+ * 与 D52 的零产出守卫（`MAX_STALLED_ROUNDS=6`）关系：两条**独立**路径，
+ * 谁先到谁结束；本路径更严（要求"本轮**每一个**工具都被拦"），
+ * 零产出守卫更宽（含"只读空转但没被拦"）。
+ */
+const MAX_ALL_EXHAUSTED_ROUNDS = 3
 // v0.28.1 fix：无工具调用回合的提示加强阈值。LLM 只回文字不调工具时，注入
 // 提示让模型自愈；连续达到该阈值后提示升级为强指令（继续调工具 / task_complete
 // 二选一）。不打扰用户——用户无从判断引擎内部状态；失控由 maxIterations 兜底。
@@ -200,6 +212,42 @@ const WRITE_COMMAND_RE = /mkdir|tee|\bcp\b|\bmv\b|\becho\b|cat\s*>|>|\$\s*\(/i
 async function pauseForStalledRounds(task: Task, iteration: number, rounds: number): Promise<void> {
   const question = tFor(getUiLocale(), 'askUser.stalledQuestion', { count: rounds })
   logger.warn('Agent', `${rounds} consecutive stalled rounds — paused for user decision`, task.id)
+  await emitEvent(task.id, { type: 'max_iterations_reached', iteration })
+  await emitEvent(task.id, {
+    type: 'ask_user',
+    iteration,
+    question,
+    suggestions: [
+      { label: tFor(getUiLocale(), 'suggest.resumeRun.label'), description: tFor(getUiLocale(), 'suggest.resumeRun.desc') },
+      { label: tFor(getUiLocale(), 'suggest.finishHere.label'), description: tFor(getUiLocale(), 'suggest.finishHere.desc') },
+    ],
+  })
+  await updateTask(task.id, {
+    status: 'paused',
+    pendingAskUser: { question, askedAt: Date.now() },
+  })
+  broadcastTaskStatus({ ...task, status: 'paused' })
+}
+
+/**
+ * v0.34.4（D65）：**预算耗尽终局的优雅暂停**。
+ *
+ * 此前这里是 `task_failed`（硬失败）。用户实测看到的是：
+ *   「运行出错：请查看上方错误信息」+ 重试 / 停止
+ * —— 一个**没有任何可选动作的死胡同**，与 D52 写在 `stall.ts` 的意图
+ * （「把『模型能力不足』这类事实如实交给用户判断」）自相矛盾。
+ *
+ * 两者的语义本该相同：都是「引擎侧资源耗尽，不是任务本身的错」。
+ * 因此统一走 paused + ask_user：进度保留、可不封图、可继续运行（模型会换工具）、
+ * 可调整描述后重试、也可就此结束。
+ */
+async function pauseForBudgetExhausted(task: Task, iteration: number, rounds: number): Promise<void> {
+  const question = tFor(getUiLocale(), 'askUser.budgetExhaustedQuestion', { count: rounds })
+  logger.warn(
+    'Agent',
+    `all tools exhausted for ${rounds} consecutive iterations — paused for user decision`,
+    task.id,
+  )
   await emitEvent(task.id, { type: 'max_iterations_reached', iteration })
   await emitEvent(task.id, {
     type: 'ask_user',
@@ -579,26 +627,28 @@ export async function runReActLoop(
       // 本轮所有 action 均被跳过
       if (exhaustedIndices.size === actions.length && actions.length > 0) {
         consecutiveSkippedIterations += 1
-        // 连续 3 轮所有请求都被跳过 → 判定为无法继续，避免模型反复尝试已耗尽签名空转
-        if (consecutiveSkippedIterations >= 3) {
-          logger.warn('Agent', 'all tools exhausted for 3 consecutive iterations — fail task', task.id)
-          const exhaustMsg = '所有工具均已达到调用上限，无法继续执行'
-          await emitEvent(task.id, { type: 'task_failed', iteration, error: exhaustMsg })
-          await markRunningPlanItemFailed(task)
-          // v0.32.1（真实环境实测补漏）：失败必须把**原因**写进任务记录。
-          // 此前只把原因塞进 `task_failed` 事件（UI 的 toast / 交互区能看到），
-          // 任务本身却不留原因 —— 重启后、任务列表、诊断与记忆钩子全都只看到
-          // 「失败」，看不到「为什么失败」。与 runner 的 catch 路径（写 errorMessage）
-          // 保持一致口径。
-          await updateTask(task.id, { status: 'failed', errorMessage: exhaustMsg })
-          broadcastTaskStatus({ ...task, status: 'failed', errorMessage: exhaustMsg })
-          await runDoneMemoryHooks(task, agent, opts.modelId, '')
+        // 连续 MAX_ALL_EXHAUSTED_ROUNDS 轮所有请求都被跳过 → 引擎侧已无可用工具，
+        // 避免模型反复尝试已耗尽签名空转。
+        if (consecutiveSkippedIterations >= MAX_ALL_EXHAUSTED_ROUNDS) {
+          // v0.34.4（D65）：**曾经这里是 task_failed 硬失败** —— 用户只拿到
+          // 「运行出错」+ 重试/停止，一个没有可选动作的死胡同。改为与 D52 同源的
+          // 优雅暂停（paused + ask_user）：这本来就是"引擎侧资源耗尽"而非任务本身
+          // 的错，应当把判断权交回用户。刻意不调 markRunningPlanItemFailed
+          // —— 暂停可恢复，清单不该被标失败（同 D36）。
+          await pauseForBudgetExhausted(task, iteration, consecutiveSkippedIterations)
           return
         }
-        // 部分工具达上限但还有其他可用工具 → 注入强提示
-        pendingSystemHint = `本次请求的工具（${actions.map((a) => a.tool).join(', ')}）均已达到调用上限。请改用其他可用工具，或基于已有信息推理完成任务。`
+        // 全部达上限 → 注入强提示（换**类别**，而不是原样重试）
+        pendingSystemHint = `本次请求的工具（${actions.map((a) => a.tool).join(', ')}）均已达到调用上限。请改用**其他类别**的可用工具，或基于已有信息推理完成任务。`
       } else {
         consecutiveSkippedIterations = 0
+        // v0.34.4（D65）：修正**注释与分支相反**的历史错位。
+        // 原代码把"部分达上限"的提示写在"全部达上限"分支里，于是这段提示
+        // 在它真正该出现的场景（部分耗尽、还有别的工具可用）**永远不会触发**。
+        if (exhaustedIndices.size > 0) {
+          const blocked = actions.filter((_, i) => exhaustedIndices.has(i)).map((a) => a.tool)
+          pendingSystemHint = `工具（${blocked.join(', ')}）已达调用上限，本轮未执行。请换用其它工具或**其它参数**继续，不要原样重试。`
+        }
       }
       const actSteps: ReActStep[] = actions.map((a) => {
         // v0.29.0 F5：动作意图 key 化（intentKey/intentParams 供渲染层展示层翻译）
@@ -927,6 +977,12 @@ export async function runReActLoop(
         hasSayOutput: !!(response.say && response.say.trim()),
         hasNewThought: freshNarrative,
         planProgressed: planSignature(task.planItems) !== planSigBefore,
+        // v0.34.4（D64）：本轮**每一个**请求的工具都被预算守卫拦截 ⇒ 拿不到任何新信息。
+        // 此时 `hasNewThought` 的豁免会反噬（模型每轮都在写"换个办法"的新思考，
+        // 于是 51 轮无一被判零产出，终局守卫一次都没到）。拦截轮定义上就是零产出，
+        // 必须排在豁免之前 —— 见 stall.ts 的 isStalledRound 首行。
+        // 真机：t1 · T-20260919-6c3v48，51 轮 / 86 调用 / 15 次被拦 / 零产物。
+        allGuardBlocked: actions.length > 0 && exhaustedIndices.size === actions.length,
       })
       if (stalledRound) {
         consecutiveStalledRounds = advanceStallCounter(consecutiveStalledRounds, true)

@@ -16,6 +16,11 @@ import type { LlmMessage, LlmTool, LlmCompleteResponse } from '../../llm/adapter
 // agent-context-compaction-robustness：LLM 调用健壮性（120s 超时 / 中止短路 / 重试分级）
 import { callLlmWithRetry, withLlmTimeout, isContextOverflowError } from '../llm-call.js'
 import { invokeSkill, skillToLlmTool, skillToolName, listSkills, getSkill, type SkillContext } from '../registry.js'
+// ★ v0.35.0：插件工具名的命名空间判定（**零依赖纯模块** ——
+// 不 import 插件运行时，否则会把 utilityProcess 等 Electron 依赖拖进引擎模块图）
+import { isPluginToolName } from '@shared/utils/plugin-tool-name'
+// ★ v0.35.0：插件控制工具（宿主侧，管理插件本身）—— 判定来自零依赖纯模块
+import { isPluginControlTool } from '@shared/utils/plugin-tool-name'
 // v0.19.0 M1：系统提示词组装器（收敛 parts.push 硬拼逻辑）
 import { buildSystemSections, renderSystemPrompt, buildPersonalitySegment } from '../prompt-assembly.js'
 // v0.25.0 F1：提示词契约层（契约注册 + always-on 技能段 + 契约装配 + 门禁状态机）
@@ -29,6 +34,8 @@ import {
   isDocDrivenAgent,
 } from '../prompt/gates.js'
 import type { GateSpec } from '@shared/types/agent'
+// v0.34.4（D67）：未知工具名的「你是不是想用 X」（纯函数，见 shared/utils/tool-name-hint.ts）
+import { unknownToolError } from '@shared/utils/tool-name-hint.js'
 // v0.19.0 M2：唯一真源会话事件日志（Reason/Act/tool 事件落盘 session.jsonl）
 import { appendSessionEvent } from '../session-log.js'
 // v0.19.0 M3：轮次/步骤收件箱 + 停止候选钩子（turn/step 语义）
@@ -211,7 +218,19 @@ export function buildObservationSummary(
   summary: string,
   ok: boolean,
 ): string {
-  // 失败时根据工具名返回可操作的替代建议，引导 LLM 自主恢复
+  /* 失败时根据工具名返回可操作的替代建议，引导 LLM 自主恢复。
+   *
+   * v0.34.4（D63）：本表是「失败 → 建议 → 再失败」死循环的唯一来源，纪律⑩：
+   * **不得建议本轮刚被拒绝的那条调用**。建议必须满足「换参数 / 换工具 / 换层次」至少其一。
+   *
+   * 血案：v0.17.x 修过 `file-reader` 分支里的 `shell ls`（见下），却把同一类错误
+   * 留在了本分支自己身上——第 ② 条建议 `file-reader({ path: "." })` 正是刚刚被
+   * 「同参数调用已达上限（5/5）」拦掉的那条调用。真机记录（t1 · T-20260919-6c3v48）：
+   * 模型照做 → I18/I24/I39/I45/I49 连续 5 次重试同一条被拦调用，51 轮零产物。
+   *
+   * 因此：① 建议里只出现**尚未被拦**的工具与参数形态；② 每个分支都要给"改什么"，
+   * 不许退化成"换一种方法"这类空话（D63 同族：glob-search 落 default → 空话 →
+   * 模型弹回 file-reader，两个已耗尽工具乒乓）。 */
   const suggestionFor = (t: string): string => {
     switch (t) {
       case 'web-search':
@@ -223,12 +242,21 @@ export function buildObservationSummary(
       case 'file-reader':
         // v0.17.x：shell 的 ls/cat 已被文件工具守卫拦截，此处不得再建议 shell ls，
         // 否则会形成「失败 → 建议 shell ls → 又被拦截」的死循环。改为指向专用文件工具。
-        return '\n\n💡 替代建议：1) 用 glob-search({ pattern: "<dir>/**/*" }) 列出目录/查找文件 2) 用 file-reader({ path: "." }) 列出工作区根目录 3) 检查路径是否正确（相对路径基于工作区根目录解析）。'
+        // v0.34.4（D63）：同上理由，**不得再建议 file-reader 自身**（尤其 path="."）。
+        return '\n\n💡 替代建议：1) 换**不同**的 path（同一 path 本轮已被拒绝，再试必然再失败）2) 用 glob-search({ pattern: "docs/**/*" }) 缩小范围列出候选文件 3) 用 grep-search 直接在文件内容里找关键词 4) 若已读到足够信息，**停止探索、直接开始产出**（写文件 / 给出结论）。'
+      case 'glob-search':
+      case 'grep-search':
+        return '\n\n💡 替代建议：1) 换**更精确**的 pattern（如 "docs/**/*.md"、"src/**/*.ts"），不要再用 "**/*" 2) 改用 file-reader({ path: "<具体子目录>" }) 逐层列出 3) 若已拿到文件清单，**停止列举、直接读文件或开始产出**。'
+      case 'todo-update':
+      case 'todo_update':
+        // D66：模型常把「创建清单」当成该工具的职责。这里把真实契约讲清楚，
+        // 而不是让它继续猜（真机曾出现 item_index=-1 与编造 todo-write 两种动作）。
+        return '\n\n💡 替代建议：清单由**计划阶段**生成，本工具只更新**已有项**：item_index 从 0 开始。请用 todo_update({ item_index: 0, status: "done", comment: "…" })。不要新造工具名，不要用 -1。'
       case 'task_complete':
       case 'ask_user':
         return ''
       default:
-        return '\n\n💡 替代建议：尝试换一种方法或基于已有信息推理。'
+        return '\n\n💡 替代建议：1) 换一个**参数不同**的工具，或改用同类工具的另一形态 2) 若已拿到足够信息，直接进入产出（写文件 / 给出结论）3) 说明当前信息缺口，让用户补齐。'
     }
   }
   if (!ok) {
@@ -653,19 +681,46 @@ export async function executeAct(
     }
 
     // 找到 skill id：按 LLM 工具名匹配（v0.6.1：兼容 SkillHub 中文名技能，见 skillToolName）
-    const skills = await listSkills()
-    const skill = skills.find((s) => skillToolName(s) === action.tool)
-    if (!skill) throw new Error(`Tool not found: ${action.tool}`)
-    skillAct = true
+    // ★ v0.35.0：插件工具（`plugin__<pluginId>__<name>`）。
+    // 走独立分支而不是塞进 skill 路径：它的**执行边界在另一个进程**，
+    // 失败语义（插件未激活 / 进程判死 / 调用超时）与 skill 完全不同，
+    // 混在一条链上会让这些错误被当成「工具不存在」而推给模型重猜名字。
+    // ★ v0.35.0：插件控制工具（**宿主**提供的，与插件自带工具刻意分开命名空间）。
+    // 放在插件工具分支之前：这几个在插件运行时缺席时也要能给出人话错误，
+    // 而不是掉进 `isPluginToolName` 的兜底里被当成「插件抛错」。
+    if (isPluginControlTool(action.tool)) {
+      const { invokePluginControlTool } = await import('../tools/plugins.js')
+      const r = await invokePluginControlTool(action.tool, (action.args ?? {}) as Record<string, unknown>)
+      result = r.result
+      resultSummary = r.summary
+    } else if (isPluginToolName(action.tool)) {
+      const { getPluginHostService } = await import('../../plugins/runtime/host-service.js')
+      const svc = getPluginHostService()
+      if (!svc) throw new Error(`plugin-runtime-unavailable: 插件运行时未装配，无法调用 ${action.tool}`)
+      const r = await svc.callPluginTool(action.tool, action.args ?? {})
+      result = r.result
+      resultSummary = r.summary
+      const resultJson = JSON.stringify(result)
+      if (resultJson.length > 4000) {
+        rawL2Path = await persistRawL2(placeholder.taskId, placeholder.id, result)
+      }
+    } else {
+      const skills = await listSkills()
+      const skill = skills.find((s) => skillToolName(s) === action.tool)
+      // v0.34.4（D67）：未知工具必须回「你是不是想用 X」，否则模型只能再猜一个名字
+      // （真机：`todo-write` 被拒时真实工具就叫 `todo_update`，只差一个词根）。
+      if (!skill) throw new Error(unknownToolError(action.tool, skills.map((s) => skillToolName(s))))
+      skillAct = true
 
-    const r = await invokeSkill(skill.id, action.args, skillCtx)
-    result = r.result
-    resultSummary = r.summary
+      const r = await invokeSkill(skill.id, action.args, skillCtx)
+      result = r.result
+      resultSummary = r.summary
 
-    // 大结果落 L2
-    const resultJson = JSON.stringify(result)
-    if (resultJson.length > 4000) {
-      rawL2Path = await persistRawL2(placeholder.taskId, placeholder.id, result)
+      // 大结果落 L2
+      const resultJson = JSON.stringify(result)
+      if (resultJson.length > 4000) {
+        rawL2Path = await persistRawL2(placeholder.taskId, placeholder.id, result)
+      }
     }
   } catch (err) {
     ok = false

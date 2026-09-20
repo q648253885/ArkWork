@@ -34,7 +34,7 @@ import type {
   WorkbenchProfile,
 } from './profile'
 // v0.33.0：插件包（插件插拔能力的载荷类型）
-import type { PluginSummary } from './plugin'
+import type { PluginRuntimeStatus, PluginSource, PluginSummary } from './plugin'
 // v0.30.0：TaskGraph（任务面板 IPC 的载荷类型）
 import type {
   GraphResult,
@@ -673,6 +673,70 @@ export const ProfileChannel = {
  * 启停/卸载后由 main 重建 `plugin` 来源插槽并广播 `plugin:changed`，
  * renderer 免重启刷新（`refreshPluginSlots()` 是唯一重建入口）。
  */
+/* ---------- ★ v0.35.0：代码插件运行期的载荷类型 ---------- */
+
+/** 一个可打开的插件代码视图（渲染层建 Tab 用） */
+export interface PluginViewSummary {
+  pluginId: string
+  source: PluginSource
+  viewRef: string
+  title: string
+  icon?: string
+  /** 只允许右侧侧边栏（dock）与浮窗（float） */
+  placement: 'dock' | 'float'
+  order: number
+  /** Host 半是否已激活（未激活点开时会先激活） */
+  active: boolean
+}
+
+/** 视图打开结果（`plugin:view-open` 的返回） */
+export interface PluginViewOpenResult {
+  ok: boolean
+  reason?: 'not-found' | 'not-activated' | 'permission-denied' | 'no-renderer' | 'bad-args' | 'activation-failed'
+  /** 会话 id：Client 半的每一次桥调用都必须带上它（主进程据此绑定 pluginId + 视图） */
+  sessionId?: string
+  /** iframe 的 src（`arkwork-plugin://…`） */
+  url?: string
+  title?: string
+  /** 失败时的人话原因（纪律⑦） */
+  message?: string
+}
+
+/** 桥调用白名单方法（Client 半只能调这些；闭集） */
+export const PLUGIN_VIEW_METHODS = [
+  'ui.ready',
+  'ui.resize',
+  'ui.theme.get',
+  'ui.toast',
+  'ui.openPanel',
+  'data.request',
+  'storage.get',
+  'storage.set',
+] as const
+export type PluginViewMethod = (typeof PLUGIN_VIEW_METHODS)[number]
+
+/** `plugin:view-call` 的请求/应答 */
+export interface PluginViewCallRequest {
+  sessionId: string
+  method: PluginViewMethod | string
+  params?: unknown
+}
+export interface PluginViewCallResult {
+  ok: boolean
+  result?: unknown
+  error?: { code: string; message: string }
+}
+
+/** 运行期诊断载荷 */
+export interface PluginRuntimeReport {
+  /** 每个插件的健康度（含未激活的 registered 态） */
+  items: PluginRuntimeStatus[]
+  /** 被同 id 高优先级作用域覆盖的记录（诊断用） */
+  shadowed: Array<{ id: string; by: PluginSource }>
+  /** 当前打开的视图会话数 */
+  openViews: number
+}
+
 export const PluginChannel = {
   List: 'plugin:list',
   SetEnabled: 'plugin:set-enabled',
@@ -682,6 +746,30 @@ export const PluginChannel = {
   ExportSample: 'plugin:export-sample',
   /** main → renderer：插件集合或启停态发生变化（插槽已重建） */
   Changed: 'plugin:changed',
+
+  /* ---------- ★ v0.35.0：代码插件运行期 ---------- */
+  /** 运行期诊断（phase / 耗时 / 权限 / 最近错误 / 覆盖关系） */
+  RuntimeStatus: 'plugin:runtime-status',
+  /** 启用插件贡献的代码视图（渲染层据此建 Tab） */
+  Views: 'plugin:views',
+  /** 打开一个插件视图 → 签发会话 + 给出 iframe URL */
+  ViewOpen: 'plugin:view-open',
+  /** 关闭视图会话 */
+  ViewClose: 'plugin:view-close',
+  /** Client 半 → 宿主的**白名单桥调用** */
+  ViewCall: 'plugin:view-call',
+  /** Client 半 → 宿主的事件上行（如 `ui.ready`） */
+  ViewEvent: 'plugin:view-event',
+  /** 新建插件脚手架 */
+  Scaffold: 'plugin:scaffold',
+  /** 迁移对账（死条目清理 / 旧值映射） */
+  MigrateCheck: 'plugin:migrate-check',
+  /** main → renderer：某个插件的运行期状态变化 */
+  RuntimeChanged: 'plugin:runtime-changed',
+  /** main → renderer：给某视图会话推事件（Host 半 `renderer.post` 的下游） */
+  ViewPost: 'plugin:view-post',
+  /** main → renderer：插件试图打开/聚焦某个视图（模型侧控制工具用） */
+  ViewOpenRequest: 'plugin:view-open-request',
 } as const
 
 /** v0.4.0：主题三态（浅色 / 深色 / 跟随系统） */
@@ -1331,20 +1419,51 @@ export interface ArkApi {
     }>
   },
   plugin: {
-    /** 全部插件（内置 ∪ 用户目录），含启停态与校验问题 */
-    list: () => Promise<PluginSummary[]>
-    /** 启停（内置插件允许禁用；禁用后其插槽条目立即消失） */
-    setEnabled: (args: { id: string; enabled: boolean }) => Promise<{ ok: boolean; reason?: string }>
+    /** 全部插件（随包 ∪ 全局 ∪ 本工作区），含启停态与校验问题 */
+    list: (args?: { scope?: 'workspace' | 'global' | 'all' }) => Promise<PluginSummary[]>
+    /** 启停（内置插件允许禁用；禁用后其插槽条目立即消失）。scope 决定写哪一级偏好 */
+    setEnabled: (args: { id: string; enabled: boolean; scope?: 'workspace' | 'global' }) => Promise<{
+      ok: boolean
+      reason?: string
+    }>
     /** 卸载用户插件（内置插件会被拒） */
     uninstall: (args: { id: string }) => Promise<{ ok: boolean; reason?: string }>
     /** 重新扫描插件目录（文件系统外部改动后手动刷新） */
     rescan: () => Promise<PluginSummary[]>
     /** 在系统文件管理器中打开插件目录（给用户放插件用） */
-    openDir: () => Promise<{ ok: boolean; path: string }>
+    openDir: (args?: { scope?: 'workspace' | 'global' }) => Promise<{ ok: boolean; path: string }>
     /** 导出一个内置示例插件到用户目录（脚手架，P1） */
     exportSample: (args: { id: string }) => Promise<{ ok: boolean; path?: string; reason?: string }>
     /** 订阅插件集合变化（启停/卸载/重扫后广播） */
     onChanged: (cb: (payload: { pluginId: string }) => void) => () => void
+
+    /* ---------- ★ v0.35.0：代码插件 ---------- */
+    /** 运行期诊断 + 覆盖关系 + 已开会话数 */
+    runtimeStatus: (args?: { id?: string }) => Promise<PluginRuntimeReport>
+    /** 启用插件贡献的代码视图（渲染层建 Tab 用） */
+    views: () => Promise<PluginViewSummary[]>
+    /** 打开视图（会按需先激活 Host 半） */
+    viewOpen: (args: { pluginId: string; viewRef: string }) => Promise<PluginViewOpenResult>
+    /** 关闭视图会话（幂等） */
+    viewClose: (args: { sessionId: string }) => Promise<{ ok: boolean }>
+    /** Client 半的桥调用（白名单方法；session 不匹配即安全丢弃） */
+    viewCall: (args: PluginViewCallRequest) => Promise<PluginViewCallResult>
+    /** Client 半的事件上行（无应答，最常用于 `ui.ready`） */
+    viewEvent: (args: { sessionId: string; event: string; params?: unknown }) => void
+    /** 新建插件脚手架（生成最小可运行目录） */
+    scaffold: (args: { id: string; name: string; kind: string; scope: 'workspace' | 'global' }) => Promise<{
+      ok: boolean
+      dir?: string
+      reason?: string
+    }>
+    /** 迁移对账（返回清掉的死条目与映射的旧值） */
+    migrateCheck: () => Promise<{ cleaned: string[]; migrated: string[] }>
+    /** 订阅某插件的运行期状态变化 */
+    onRuntimeChanged: (cb: (status: PluginRuntimeStatus) => void) => () => void
+    /** 订阅「给某视图会话推事件」 */
+    onViewPost: (cb: (payload: { sessionId: string; payload: unknown }) => void) => () => void
+    /** 订阅「请打开某视图」（模型侧控制工具触发） */
+    onViewOpenRequest: (cb: (payload: { pluginId: string; viewRef: string }) => void) => () => void
   }
   /** v0.4.0：主题（同步原生界面 + 监听系统主题变化） */
   theme: {

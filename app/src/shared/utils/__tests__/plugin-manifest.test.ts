@@ -7,7 +7,7 @@
  * ============================================================ */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parsePluginManifest } from '../plugin-manifest.js'
+import { parsePluginManifest, satisfiesEngineRange } from '../plugin-manifest.js'
 import type { PluginIssue } from '@shared/types/plugin'
 import { PLUGIN_KINDS } from '@shared/types/plugin'
 import { VLIB_COMPONENTS } from '@shared/types/vlib'
@@ -304,4 +304,147 @@ test('TC-PLG-019 单花括号 / 空 title → 不误报（边界：必填失败�
   )
   assert.equal(empty.manifest, null)
   assert.equal(warnings(empty.issues).length, 0, '必填校验失败时不必再报占位符告警')
+})
+
+/* ============================================================
+ * D61 回归：http 数据源在清单层必须被认可
+ * ============================================================ */
+
+test('TC-PLG-020 [D61 回归] http 数据源合法 url → 无 error（不得被当作未知 kind 拒绝）', () => {
+  const ok = parsePluginManifest(
+    panelRaw({
+      provides: {
+        panel: {
+          panelRef: 'panel:watchlist',
+          title: '自选股',
+          component: 'DataTable',
+          data: { kind: 'http', http: { url: 'https://example.com/quotes.json', path: 'data.list' }, rows: [] },
+        },
+      },
+    }),
+  )
+  assert.equal(errors(ok.issues).length, 0, `http 源必须放行：${JSON.stringify(ok.issues)}`)
+  assert.ok(ok.manifest, 'http 源面板必须正常注册')
+
+  // 反面：http 缺 url / 非 http(s) 协议仍要拦（放行不等于不校验）
+  const noUrl = parsePluginManifest(
+    panelRaw({
+      provides: {
+        panel: {
+          panelRef: 'panel:watchlist',
+          title: '自选股',
+          component: 'DataTable',
+          data: { kind: 'http', http: {}, rows: [] },
+        },
+      },
+    }),
+  )
+  assert.ok(errors(noUrl.issues).some((i) => i.path === '$.provides.panel.data.http.url'), '缺 url 必须报错')
+
+  const badProto = parsePluginManifest(
+    panelRaw({
+      provides: {
+        panel: {
+          panelRef: 'panel:watchlist',
+          title: '自选股',
+          component: 'DataTable',
+          data: { kind: 'http', http: { url: 'ftp://example.com/a.json' }, rows: [] },
+        },
+      },
+    }),
+  )
+  assert.ok(errors(badProto.issues).some((i) => i.path === '$.provides.panel.data.http.url'), '非 http(s) 协议必须报错')
+})
+
+/* ============================================================
+ * ★ v0.35.0 — engines.arkwork 兼容判定（TC-PMF-ENG-001..008）
+ *
+ * 为什么单独立组：`satisfiesEngineRange` 此前**零覆盖**，而它有两个叠加缺陷：
+ *   ① 运算符分组写成了非捕获组 `(?:>=|\^)?` → `r[1]` 拿到的是主版本号数字，
+ *      运算符恒为 ''，判定掉进「精确等值」分支且比较对象是 NaN → 恒 false；
+ *   ② 调用方（registry）从未注入宿主版本 → 恒为占位值 '0.0.0'。
+ * 结果：**任何**声明 engines 的插件都被判不兼容。两个缺陷各自都能让 VP8 失效，
+ * 所以本组既测正常语义，也测「恒 false」这个曾经的失败形态不再回来。
+ * ============================================================ */
+
+test('TC-PMF-ENG-001 ★ >= 语义：宿主不低于要求即兼容', () => {
+  assert.equal(satisfiesEngineRange('>=0.30.0', '0.35.0'), true, '这正是曾经恒 false 的那条')
+  assert.equal(satisfiesEngineRange('>=0.35.0', '0.35.0'), true, '边界：相等即满足')
+  assert.equal(satisfiesEngineRange('>=0.35.1', '0.35.0'), false)
+  assert.equal(satisfiesEngineRange('>=0.36.0', '0.35.0'), false)
+  assert.equal(satisfiesEngineRange('>=0.34.99', '0.35.0'), true)
+})
+
+test('TC-PMF-ENG-002 ^ 语义：本实现定义为「同主版本且不低于」（0.x 下不设上限，属刻意简化）', () => {
+  assert.equal(satisfiesEngineRange('^0.35.0', '0.35.0'), true)
+  assert.equal(satisfiesEngineRange('^0.35.0', '0.35.2'), true)
+  assert.equal(satisfiesEngineRange('^0.35.0', '0.34.9'), false)
+  assert.equal(satisfiesEngineRange('^0.30.0', '0.35.0'), true)
+  // ★ 与 npm semver 的**刻意差异**：npm 把 0.x 的次版本当破坏性边界（^0.35.0 → <0.36.0），
+  //   本实现只比主版本号（0.35.0 与 0.36.0 主版本都是 0 → 兼容）。
+  //   这里如实钉住**本实现的语义**，而不是照抄 npm —— 免得下次有人「按 semver 修」时
+  //   以为这是 bug，改完又和下面这条断言打架。
+  assert.equal(
+    satisfiesEngineRange('^0.35.0', '0.36.0'),
+    true,
+    '同主版本（0=0）且不低于 → 兼容；上限不在本实现的语义里',
+  )
+  assert.equal(satisfiesEngineRange('^1.0.0', '2.0.0'), false, '主版本不同 → 不兼容')
+})
+
+test('TC-PMF-ENG-003 精确值语义：必须逐位相等', () => {
+  assert.equal(satisfiesEngineRange('0.35.0', '0.35.0'), true)
+  assert.equal(satisfiesEngineRange('0.35.0', '0.35.1'), false)
+  assert.equal(satisfiesEngineRange('0.35.0', '0.34.9'), false)
+})
+
+test('TC-PMF-ENG-004 ★ 三位数字比较（不是字符串比较）：0.9.0 低于 0.35.0 是错的，0.10.0 高于 0.9.0 才对', () => {
+  // 若有人把实现改成字符串比较，这两条会立刻红 —— 这是本组的存在理由之一。
+  assert.equal(satisfiesEngineRange('>=0.10.0', '0.9.0'), false, '0.9.0 < 0.10.0（数值比较）')
+  assert.equal(satisfiesEngineRange('>=0.9.0', '0.10.0'), true, '0.10.0 > 0.9.0')
+  assert.equal(satisfiesEngineRange('>=1.0.0', '0.99.99'), false)
+  assert.equal(satisfiesEngineRange('>=0.0.1', '0.0.2'), true)
+})
+
+test('TC-PMF-ENG-005 宿主版本读不出来 → 放行（宁可放过，不误杀）', () => {
+  for (const bad of ['', 'dev', '0.35', 'v0.35.0', 'abc', '0.35.0-beta.1']) {
+    assert.equal(satisfiesEngineRange('>=99.0.0', bad), true, `宿主版本 ${bad} 无法解析时应放行`)
+  }
+})
+
+test('TC-PMF-ENG-006 范围写法非法 → 不兼容（先把关形状，避免「看不懂就放过」）', () => {
+  for (const bad of ['>=1.0', '1.0.0.0', '~1.0.0', '>= 1.0.0', '*', '', '>=x.y.z']) {
+    assert.equal(satisfiesEngineRange(bad, '0.35.0'), false, `非法范围 ${bad} 应判不兼容`)
+  }
+})
+
+test('TC-PMF-ENG-007 ★ 回归锁：合法范围在「宿主版本正常」时不得整片判 false（旧缺陷形态）', () => {
+  // 旧实现下这四条全为 false。用一整片断言把「恒 false」这个形态钉死。
+  const cases: Array<[string, string]> = [
+    ['>=0.30.0', '0.35.0'],
+    ['^0.30.0', '0.35.0'],
+    ['>=0.35.0', '0.35.0'],
+    ['0.35.0', '0.35.0'],
+  ]
+  for (const [range, host] of cases) {
+    assert.equal(satisfiesEngineRange(range, host), true, `${range} @ ${host} 应兼容`)
+  }
+})
+
+test('TC-PMF-ENG-008 清单层：engines.arkwork 写法非法 → VP8 error + fix，且整体拒绝解析', () => {
+  const r = parsePluginManifest(panelRaw({ engines: { arkwork: '>=1.0' } }))
+  // 解析器的既定契约：只要出现 error 级问题就 `manifest: null`（不给出半成品清单）
+  assert.equal(r.manifest, null, '有 error 时不产出清单 —— 避免下游拿着半合法清单跑起来')
+  const hit = r.issues.filter((i) => i.path.includes('engines'))
+  assert.ok(hit.length > 0, 'engines 写法非法必须报出来')
+  assert.equal(hit[0]!.rule, 'VP8')
+  assert.equal(hit[0]!.level, 'error')
+  assert.ok(Boolean(hit[0]!.fix), '必须给人话修法')
+})
+
+test('TC-PMF-ENG-009 清单层：合法 engines 写法被保留进清单（供主进程按真实版本判 VP8）', () => {
+  const r = parsePluginManifest(panelRaw({ engines: { arkwork: '>=0.30.0' } }))
+  assert.ok(r.manifest, `合法 engines 不该被拒：${JSON.stringify(r.issues)}`)
+  assert.equal(r.manifest!.engines?.arkwork, '>=0.30.0', '形状校验通过后要原样带进清单')
+  assert.equal(r.issues.length, 0, '合法写法不该产生噪音')
 })

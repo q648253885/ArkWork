@@ -190,3 +190,63 @@ test('TC-PHTTP-010 clampPollMs 夹到 [3000, 600000]，非法值返回 undefined
   assert.equal(clampPollMs('8000'), undefined)
   assert.equal(clampPollMs(Number.NaN), undefined)
 })
+
+/* ============================================================
+ * 5. D62 派生列语义：面向**原始记录**，不是投影后的行
+ * ============================================================ */
+
+test('TC-PHTTP-011 ★ D62：derive 可引用**未列入 columns** 的字段（投影只管展示）', () => {
+  // 真实故障形状：f13（市场码）不展示，但 secid 要用它
+  const payload = { data: { diff: [{ f12: '600519', f13: 1, f14: '贵州茅台' }] } }
+  const res = mapHttpResponse(payload, {
+    url: 'https://x',
+    path: 'data.diff',
+    columns: [{ key: 'f14', label: '名称' }, { key: 'f12', label: '代码' }],
+    derive: { secid: '{{f13}}.{{f12}}' },
+  })
+  assert.equal(res.rows[0]!.secid, '1.600519')
+  assert.deepEqual(Object.keys(res.rows[0]!).sort(), ['f12', 'f14', 'secid'], '投影仍然只放展示列 + 派生列')
+})
+
+test('TC-PHTTP-012 ★ D62：链式 derive —— 后面的模板可引用前面派生出的字段', () => {
+  const payload = { data: { diff: [{ f12: '600519', f13: 1, f14: '贵州茅台' }] } }
+  const res = mapHttpResponse(payload, {
+    url: 'https://x',
+    path: 'data.diff',
+    columns: [{ key: 'f14', label: '名称' }],
+    // 顺序敏感：secid 先算，label 再用 secid
+    derive: { secid: '{{f13}}.{{f12}}', label: '{{secid}}｜{{f14}}' },
+  })
+  assert.equal(res.rows[0]!.label, '1.600519｜贵州茅台')
+})
+
+test('TC-PHTTP-013 ★ D62：派生字段未解析时 note 必须点名（绝不静默）', () => {
+  const payload = { data: { diff: [{ f12: '600519', f14: '贵州茅台' }] } } // 缺 f13
+  const res = mapHttpResponse(payload, {
+    url: 'https://x',
+    path: 'data.diff',
+    columns: [{ key: 'f14', label: '名称' }],
+    derive: { secid: '{{f13}}.{{f12}}' },
+  })
+  assert.equal(res.rows[0]!.secid, '{{f13}}.600519', 'applyTemplate 的既有语义：未命中变量原样保留')
+  assert.match(String(res.note), /派生字段「secid」未解析/, `note 应点名：${String(res.note)}`)
+  // 反面：解析成功时 note 不得出现该噪音
+  const ok = mapHttpResponse({ data: { diff: [{ f12: '600519', f13: 1 }] } }, {
+    url: 'https://x',
+    path: 'data.diff',
+    derive: { secid: '{{f13}}.{{f12}}' },
+  })
+  assert.doesNotMatch(String(ok.note), /未解析/)
+})
+
+test('TC-PHTTP-014 ★ D62：derive 在 split 形态（K 线）下仍取自本行，行为不变', () => {
+  const payload = { data: { klines: ['2026-09-18,1,2,3,4'] } }
+  const res = mapHttpResponse(payload, {
+    url: 'https://x',
+    path: 'data.klines',
+    split: ',',
+    columns: [{ key: 'date', label: '日期' }, { key: 'open', label: '开' }],
+    derive: { klineId: '{{date}}' },
+  })
+  assert.equal(res.rows[0]!.klineId, '2026-09-18')
+})

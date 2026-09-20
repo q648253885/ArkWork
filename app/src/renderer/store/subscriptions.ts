@@ -403,12 +403,29 @@ export function subscribeAll(
     // v0.33.0：插件集合 / 启停态变化（主进程已重建 `plugin` 来源插槽）
     // `loadProfiles` 会连带重拉 `profile:slots` —— 面板 Tab / 渲染器覆盖 /
     // 主题覆盖三份派生量都在那条链路上，因此这里不必单独调用派生。
+    // v0.35.0：`loadPlugins` 内部已连带刷新插件视图 Tab；诊断另拉一次。
     unsubs.push(
       ark.plugin.onChanged(() => {
         get().loadPlugins()
         get().loadProfiles()
+        get().loadPluginRuntime()
       }),
     )
+
+    // ★ v0.35.0：插件运行期状态变化（激活成功 / 失败 / 判死）。
+    // 只更新诊断，**不重拉视图列表** —— phase 变化不改视图集合，
+    // 每次都重拉会让 Inspector 的 Tab 数组换引用、触发整栏重排闪烁。
+    unsubs.push(
+      ark.plugin.onRuntimeChanged((status) => {
+        const cur = get().pluginRuntime
+        const idx = cur.findIndex((s) => s.id === status.id)
+        const next = idx >= 0 ? cur.map((s) => (s.id === status.id ? status : s)) : [...cur, status]
+        set({ pluginRuntime: next })
+      }),
+    )
+
+    // ★ v0.35.0：模型侧控制工具请求打开某视图
+    unsubs.push(get().subscribeViewOpenRequest())
 
     // v0.4.0：系统主题变化（仅当 theme==='system' 时联动 <html class>）
     unsubs.push(

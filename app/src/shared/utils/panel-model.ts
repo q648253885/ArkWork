@@ -57,6 +57,18 @@ export interface PanelTab {
    * 参与 URL 模板替换 —— 「点哪只股票就看哪只股票」靠它。
    */
   params?: Record<string, unknown>
+  /**
+   * ★ v0.35.0：**代码视图**标记。
+   *
+   * 有它 → 该 Tab 的内容由 `PluginViewHost`（iframe 容器 + postMessage 桥）
+   * 渲染；没有 → 走 `PanelHost`（白名单组件）。两者**根本不同**：
+   * 前者是插件自己的任意 HTML/JS，后者是宿主白名单组件的声明式数据。
+   *
+   * 之所以标在 Tab 上而不是让渲染层去查列表：Tab 是渲染层唯一拿到的东西，
+   * 让分支判定自包含，就不会出现「查表失败 → 渲染成白名单面板 → 报组件不存在」
+   * 这种把「插件视图」误报成「面板坏掉」的错位（D78 类问题的同型）。
+   */
+  view?: { pluginId: string; viewRef: string; placement: 'dock' | 'float' }
 }
 
 /** 内置 Tab 的 i18n 标题键（与 `INSPECTOR_TAB_META` 的 label 保持一致） */
@@ -209,3 +221,74 @@ export function mergePanelOrder(base: PanelTab[], panels: PanelTab[]): PanelTab[
 export function isPanelTabRef(ref: string): boolean {
   return !(INSPECTOR_TAB_REFS as readonly string[]).includes(ref)
 }
+
+/* ============================================================
+ * ★ v0.35.0：插件**代码视图** → Tab（M13 的建 Tab 半边）
+ * ============================================================ */
+
+/**
+ * 视图 ref 形状：`view:<name>`。
+ * 与面板的 `panel:<name>` **刻意分开命名空间** —— 两者渲染路径完全不同，
+ * 同名会让「插件视图」与「白名单面板」在诊断与日志里无法区分。
+ */
+const VIEW_REF_RE = /^view:[a-z0-9][\w.-]*$/
+
+/**
+ * 视图 ref 形状守卫。
+ *
+ * 返回**类型谓词**而不是 `boolean`：调用点（渲染层把跨进程来的 ref 交给
+ * `setInspectorTab`）正好需要「值级校验 + 类型收窄」一步到位。
+ * 写成 boolean 的话调用点只能 `as` 一下，形状校验就被顺手丢掉了
+ * —— 而这里守的正是**来自另一个进程**的字符串。
+ */
+export function isPluginViewRef(ref: unknown): ref is `view:${string}` {
+  return typeof ref === 'string' && VIEW_REF_RE.test(ref)
+}
+
+/**
+ * 插件视图贡献（来自 `ark.plugin.views()`）→ 可渲染 Tab。
+ *
+ * 与 `panelTabsOf` 的三条差异（都是刻意的）：
+ *  ① 数据源不同：这里吃的是**运行期**视图列表（Host 半已激活才知道有哪些），
+ *     不是磁盘扫描出的 `provides.views`；因此禁用一个插件后它自然消失；
+ *  ② 不合并进 `profilePanels`：profile 是「工作台引用清单」，插件视图不受它管辖
+ *     —— 合成一条会破坏 profile 的语义（也违反 v0.34.0 的 P3 重组裁决）；
+ *  ③ 只接受合法 ref / 非空 title，其余整条丢弃（视图列表是跨进程来的）。
+ *
+ * `order` 升序、同序按 ref 字典序（确定性，与面板同口径）。
+ */
+export function pluginViewTabsOf(
+  views:
+    | ReadonlyArray<{
+        pluginId: string
+        viewRef: string
+        title: string
+        icon?: string | undefined
+        placement: 'dock' | 'float'
+        order: number
+        active: boolean
+      }>
+    | undefined
+    | null,
+): PanelTab[] {
+  const out: PanelTab[] = []
+  const seen = new Set<string>()
+  for (const v of views ?? []) {
+    if (!v || typeof v.pluginId !== 'string' || v.pluginId.length === 0) continue
+    if (!isPluginViewRef(v.viewRef)) continue
+    if (seen.has(v.viewRef)) continue // 同 ref 只留第一条（跨插件重复 ref 由 main 侧拦，这里只兜底）
+    const title = typeof v.title === 'string' && v.title.trim().length > 0 ? v.title : v.viewRef
+    seen.add(v.viewRef)
+    out.push({
+      ref: v.viewRef,
+      title,
+      ...(v.icon ? { icon: v.icon } : {}),
+      builtin: false,
+      pluginId: v.pluginId,
+      position: Number.isInteger(v.order) && v.order >= 0 ? v.order : undefined,
+      view: { pluginId: v.pluginId, viewRef: v.viewRef, placement: v.placement === 'float' ? 'float' : 'dock' },
+    })
+  }
+  return sortByPosition(out)
+}
+

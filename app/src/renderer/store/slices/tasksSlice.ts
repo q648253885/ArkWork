@@ -25,6 +25,9 @@ import {
 import { shortTaskId, formatUpdatedAt } from '../../types'
 import { baseNameOf } from '@shared/utils/path-display'
 import { simplifyFirstLine } from '../../utils/title'
+// v0.34.4（D69）：导出/复制与屏幕共用同一投影（projectConversation → FlowTurn）
+import { projectConversation } from '../../flow/project'
+import { renderTurnsMarkdown } from '../conversation-markdown'
 import type { AppState, DockPrefs, Workspace } from '../types'
 
 /* ============================================================
@@ -36,36 +39,41 @@ const OPTIMISTIC_TTL_MS = 2000
 const optimisticTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 /* ============================================================
- * v0.34.1：对话 Markdown 正文（「复制」与「导出」的唯一真源）
+ * v0.34.4（D69）：对话 Markdown 正文（复制 / 导出 / **屏幕** 三者同源）
  *
- * 两个入口此前各拼一份正文 → 一旦只改一边，用户复制出去的内容与导出存档
- * 就会分叉。抽成纯函数后两处共用同一段文本。
+ * 历史：v0.34.1 统一了「复制 vs 导出」，但两者**都**只遍历 `ConversationItem`
+ * （4 种 type）—— 而屏幕走的是 `projectConversation` → `FlowTurn`（9 种 FlowBlock）。
+ * 于是导出漏掉：计划清单卡、工具名与参数、工具结果、守卫拦截与失败、思考通道、
+ * 通知（上下文压缩 / 门禁）、轮头（轮号 / 时间 / tokens）……用户表述为
+ * 「导出的内容和真正内容不一致」。
  *
- * @returns 完整 Markdown；无选中任务或无内容时返回空串（调用方据此提示）
+ * 现在：先把 `projectConversation` 跑成 `FlowTurn[]`（**与 TurnList 完全同一入参**），
+ * 再交给 `renderTurnsMarkdown` 序列化。屏幕加一种块，导出同步可获得
+ * —— 由 `conversation-markdown.test.ts` 的块覆盖真值表把守（纪律⑪）。
  * ============================================================ */
-function buildConversationMarkdown(
-  title: string,
-  agentId: string,
-  items: AppState['conversation'],
-): string {
-  const lines: string[] = [`# ${title}`, '']
-  for (const it of items) {
-    if (it.type === 'user') {
-      lines.push('## You', '')
-      lines.push(it.text ?? '', '')
-    } else if (it.type === 'assistant') {
-      lines.push(`## @${agentId}`, '')
-      lines.push(it.text ?? '', '')
-    } else if (it.type === 'react' && it.steps) {
-      lines.push(`### ${i18n.t('slice.tasks.exportStepStream')}`, '')
-      for (const s of it.steps) {
-        lines.push(`- [${s.type}] ${s.summary || s.thought || ''}`)
-      }
-      lines.push('')
-    }
-  }
-  // 只有标题（无正文）视为「没有可复制内容」
-  return lines.length > 2 ? lines.join('\n') : ''
+function buildConversationMarkdown(title: string, agentId: string, state: AppState): string {
+  const taskId = state.selectedTaskId ?? ''
+  if (!taskId) return ''
+  const task = state.tasks.find((t) => t.id === taskId)
+  const streamBuffer = state.streamBuffers[`${taskId}:turn:reasoning`]
+  const activeAgent = state.selectedTask?.agentId
+  const agentMeta = activeAgent ? state.agents.find((a) => a.id === activeAgent) : undefined
+  const turns = projectConversation({
+    taskId,
+    items: state.conversation,
+    steps: state.steps,
+    events: [], // 与 TurnList 同口径：渲染层暂无 session 事件通道（§11 登记）
+    streamBuffers: streamBuffer ? { [`${taskId}:turn:reasoning`]: streamBuffer } : {},
+    planItems: task?.planItems ?? [],
+    viewMode: state.flow.viewMode,
+    showThinking: state.flow.showThinking,
+    ui: state.flow,
+    now: Date.now(),
+    agent: activeAgent
+      ? { id: activeAgent, name: agentMeta?.name ?? activeAgent, avatarColor: agentMeta?.avatarColor ?? '' }
+      : undefined,
+  })
+  return renderTurnsMarkdown(title, agentId, turns)
 }
 
 function clearOptimisticTimer(taskId: string, planItemId: string): void {
@@ -451,7 +459,7 @@ export const tasksSlice: StateCreator<
   exportConversation: () => {
     const task = get().selectedTask
     if (!task) return
-    const md = buildConversationMarkdown(task.title, task.agentId, get().conversation)
+    const md = buildConversationMarkdown(task.title, task.agentId, get())
     if (!md) return
     const blob = new Blob([md], { type: 'text/markdown' })
     const url = URL.createObjectURL(blob)
@@ -470,7 +478,7 @@ export const tasksSlice: StateCreator<
    */
   copyConversation: async () => {
     const task = get().selectedTask
-    const md = task ? buildConversationMarkdown(task.title, task.agentId, get().conversation) : ''
+    const md = task ? buildConversationMarkdown(task.title, task.agentId, get()) : ''
     if (!md) {
       get().pushToast({ type: 'warning', message: i18n.t('slice.tasks.copyConversationEmpty'), duration: 3000 })
       return

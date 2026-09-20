@@ -690,12 +690,14 @@ test('TC-SEAL-028 引擎失败落点必须持久化失败原因（errorMessage�
   const loop = read('src/main/agent/engine/loop.ts')
   const runner = read('src/main/agent/runner.ts')
 
-  // 两处引擎内失败落点：工具全部达限（连续 3 轮）与 catch 兜底
+  // v0.34.4（D65）：原本这里是 **2** 处失败落点（工具全部达限 + catch 兜底）。
+  // 达限终局已改为**优雅暂停**（paused + ask_user）—— 暂停不是失败，不该走 failed。
+  // 因此改为「**每一处** failed 落点都必须带 errorMessage」+「至少 1 处」，
+  // 既保留本条用例的原始意图（失败必须留原因），又不再被落点数量变动连带误伤。
   const taskFailedWrites = [...loop.matchAll(/updateTask\(task\.id, \{ status: 'failed'[^}]*\}/g)].map((m) => m[0])
-  assert.equal(
-    taskFailedWrites.length,
-    2,
-    `引擎内应有 2 处失败落点，实际 ${taskFailedWrites.length} 处（新增/删除落点时请同步本用例）`,
+  assert.ok(
+    taskFailedWrites.length >= 1,
+    `引擎内应至少有 1 处失败落点，实际 ${taskFailedWrites.length} 处（删除落点时请同步本用例）`,
   )
   for (const w of taskFailedWrites) {
     assert.match(
@@ -704,6 +706,15 @@ test('TC-SEAL-028 引擎失败落点必须持久化失败原因（errorMessage�
       `★ 失败落点必须写入 errorMessage —— 实测（黑洞端点模型）任务 failed 而 errorMessage 为空，用户与诊断都看不到原因：${w}`,
     )
   }
+
+  // ★ v0.34.4（D65）反向保险：优雅暂停的终局必须把「为什么停下」交给用户 ——
+  // 真机（t1 · T-20260919-6c3v48）原本落到 task_failed，用户只看到
+  // 「运行出错：请查看上方错误信息」+ 重试/停止，没有任何可选动作。
+  const pauseBody = loop.match(/async function pauseForBudgetExhausted\([\s\S]*?\n\}/)?.[0] ?? ''
+  assert.match(pauseBody, /askUser\.budgetExhaustedQuestion/, '★ 预算耗尽终局必须 ask_user 说明原因')
+  assert.match(pauseBody, /status: 'paused'/, '★ 预算耗尽终局必须是 paused 而非 failed')
+  assert.match(pauseBody, /pendingAskUser/, '★ 原因必须落进 pendingAskUser（让用户看得到"为什么停下"）')
+  assert.doesNotMatch(pauseBody, /status: 'failed'/, '★ 暂停不是失败，不得写 failed')
 
   // 与 runner 的兜底路径保持同口径（runner 一直有写）
   assert.match(

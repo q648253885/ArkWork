@@ -42,6 +42,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { RAW_SAMPLE_PLUGINS, PLUGIN_DIR_NAME } from './sample-plugins.js'
+import { migratePluginManifest } from './migrate.js'
 import { logger } from '../system/logger.js'
 
 export interface SeedResult {
@@ -77,6 +78,14 @@ export const SEED_STRING_MIGRATIONS: ReadonlyArray<readonly [string, string]> = 
   [
     '自选股实时行情 + 个股详情 + 日 K 线（东方财富公开接口，真实联网数据）',
     '自选股行情 + 个股详情 + 日 K 线（东方财富公开行情接口，真实联网数据）',
+  ],
+  // ③ ★ v0.35.0（D75）：摘除「个股详情」「日K线」两个废弃面板后，
+  //    描述里不该再提它们 —— 这是**纯文案**层面的对称声明。
+  //    （面板的**结构性**删除由 `migrate.ts` 的外科式迁移负责，见
+  //     `isUntouchedCopy` 的第 4 条判定路径 —— 那种差异不是字符串能表达的。）
+  [
+    '自选股行情 + 个股详情 + 日 K 线（东方财富公开行情接口，真实联网数据）',
+    '自选股实时行情（东方财富公开行情接口，真实联网数据）',
   ],
 ]
 
@@ -120,11 +129,18 @@ function contentSignature(value: unknown): string {
  * `version` 是随包内容的一部分：**任何**内容修正都会让它 +1，若把它算进比对，
  * 那么「旧版落盘的未改动副本」在每次升级时都会被误判成用户副本 → 修正永远
  * 送不到（v0.34.2 实测踩到过：本机副本 1.0.0 对新包 1.0.1，归一化比对直接失败）。
+ *
+ * `schemaVersion` 同理，且它的漂移与「内容改了没」**无关** —— 它声明的是清单
+ * **格式**版本，随包整体升级（v0.35.0 把 1.0 → 1.1 以对齐代码插件入口）。若把它
+ * 算进比对，则任何一次格式升级都会让**全部**未改动副本被误判成用户副本 ——
+ * 失败的形态与 `version` 一模一样，只是触发面更大（涨一次、全盘皆输）。
+ * 判据同 `version`：它由包决定，不表达用户的任何编辑意图。
  */
 function dropVolatileFields(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value
   const out = { ...(value as Record<string, unknown>) }
   delete out.version
+  delete out.schemaVersion
   return out
 }
 
@@ -156,7 +172,19 @@ function writeSidecar(file: string, raw: Record<string, unknown>, text: string):
 /**
  * 磁盘副本是否「未被用户改动」。
  *
- * 导出以便直接单测判定真值表（三条路径都不依赖文件系统）。
+ * 四条判定路径（**顺序有意义**：从强到弱）：
+ *  ① 逐字节等于新版随包文本 → 未改动；
+ *  ② 指纹副文件的 hash 匹配 → 未改动（唯一能在「跨版本语义变更」下仍然成立的凭据）；
+ *  ③ 按 `SEED_STRING_MIGRATIONS` 归一化后**语义**等于新版 → 未改动
+ *     （覆盖「升级路径上没有副文件的存量用户」）；
+ *  ④ ★ v0.35.0：**先做外科式迁移再比对** —— 覆盖「旧官方副本里有本版要摘的废弃面板」
+ *     这一情形。这类差异是**结构性**的（删了数组里的两项），字符串迁移表表达不了：
+ *     要么在表里塞进整段被删的 JSON（脆、易漂），要么就在这里做一次结构比对。
+ *
+ * 第 ④ 条的保守性：只有当「迁移后与新版完全一致」才判为未改动 ——
+ * 用户哪怕改了自选股清单里的一只股票，迁移后的签名就对不上，仍走「用户副本」分支。
+ *
+ * 导出以便直接单测判定真值表（四条路径都不依赖文件系统）。
  */
 export function isUntouchedCopy(
   onDiskText: string,
@@ -167,7 +195,14 @@ export function isUntouchedCopy(
   if (onDiskText === bundled) return true
   if (sidecar?.hash && sidecar.hash === sha256(onDiskText)) return true
   try {
-    return contentSignature(JSON.parse(onDiskText)) === contentSignature(bundledRaw)
+    const parsed = JSON.parse(onDiskText) as unknown
+    if (contentSignature(parsed) === contentSignature(bundledRaw)) return true
+    // ④ 结构级：把废弃面板摘掉后是否等于新版
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const { next, result } = migratePluginManifest(parsed as Record<string, unknown>)
+      if (result.changed && contentSignature(next) === contentSignature(bundledRaw)) return true
+    }
+    return false
   } catch {
     return false
   }

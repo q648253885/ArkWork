@@ -272,3 +272,111 @@ test('TC-STALLG-016 freshNarrative 接线：两处判定都吃「叙述翻新」
   const actIdx = loopSrc.indexOf('const stalledRound = isStalledRound({')
   assert.ok(calcIdx !== -1 && calcIdx < noToolIdx && calcIdx < actIdx, 'freshNarrative 必须在两处判定之前计算')
 })
+
+/* ============================================================
+ * v0.34.4（D64 / D65）：预算拦截必须计入零产出维度 + 终局必须优雅暂停
+ *
+ * 真机（t1 · T-20260919-6c3v48）：51 轮 / 86 调用 / 15 次「同参数调用已达上限(5/5)」
+ * / 4 次上下文压缩 / 零产物 / 终局 `task_failed`。
+ * 两条接线缺陷：
+ *   D64 —— `isStalledRound` 的入参里**没有"被拦截"这一维**，于是模型每轮写新思考
+ *          就被当成有产出，6 轮终局守卫一次都没到；
+ *   D65 —— 真正的兜底（连续 3 轮全耗尽）落在 `task_failed` 硬失败上，
+ *          用户只看到「运行出错」+ 重试/停止，没有任何可选动作。
+ *
+ * 本组按 D38-a 的教训（**函数全对、错的是接线**）只问：
+ *   loop.ts 真的把这两件事接上了吗？接在了真实会走的那条路径上吗？
+ * ============================================================ */
+
+test('TC-STALLG-017 ★ [D64] Act 路径的 isStalledRound 必须传 allGuardBlocked', () => {
+  const actCall = slice('const stalledRound = isStalledRound({', '})', loopSrc)
+  assert.match(
+    actCall,
+    /allGuardBlocked\s*:/,
+    '★ Act 路径必须把「本轮工具是否全被拦截」喂给判定 —— 少了这一维，D52 终局在拦截型空转下永不触发',
+  )
+  // 必须与真实数据源同源：exhaustedIndices 就是"本轮被守卫跳过的下标集合"
+  assert.match(
+    actCall,
+    /exhaustedIndices\.size\s*===\s*actions\.length/,
+    '★ allGuardBlocked 必须由 exhaustedIndices 真实计算，不得写成常量/猜测',
+  )
+  // 语义护栏：必须有 actions.length > 0，否则"0 个工具 ⇒ 全部被拦"会把无工具轮误判
+  assert.match(
+    actCall,
+    /actions\.length\s*>\s*0/,
+    '★ 必须排除 actions 为空的情形（空集不代表"全被拦"）',
+  )
+})
+
+test('TC-STALLG-018 ★ [D64] 判定层与接线层口径一致：only-when-blocked 才压过豁免', () => {
+  // stall.ts 里该分支必须在 hasNewThought 之前 return（否则豁免先生效，新维度被架空）
+  const body = slice('export function isStalledRound', '\n}', stallSrc)
+  const iBlocked = body.indexOf('input.allGuardBlocked')
+  const iNewThought = body.indexOf('input.hasNewThought')
+  assert.notEqual(iBlocked, -1, 'stall.ts 应含 allGuardBlocked 分支')
+  assert.ok(
+    iBlocked < iNewThought,
+    '★ allGuardBlocked 必须排在 hasNewThought 豁免之前 —— 否则新维度永远轮不到生效',
+  )
+})
+
+test('TC-STALLG-019 ★ [D65] 预算耗尽终局必须是优雅暂停而非 task_failed', () => {
+  const body = slice('async function pauseForBudgetExhausted', '\n}', loopSrc)
+  assert.match(body, /status:\s*'paused'/, '★ 终局状态必须是 paused')
+  assert.doesNotMatch(
+    body,
+    /status:\s*'failed'/,
+    '★ 暂停不是失败 —— 写 failed 会让用户回到"运行出错"死胡同',
+  )
+  assert.match(body, /pendingAskUser/, '★ 必须留下"为什么停下"，否则用户只看到一句错误')
+  assert.match(body, /type:\s*'ask_user'/, '★ 必须发 ask_user 事件（UI 才有可选动作）')
+})
+
+test('TC-STALLG-020 ★ [D65] 达限分支必须调用 pauseForBudgetExhausted（接线存在性）', () => {
+  assert.match(
+    loopSrc,
+    /if \(consecutiveSkippedIterations >= MAX_ALL_EXHAUSTED_ROUNDS\) \{[\s\S]{0,400}await pauseForBudgetExhausted\(task, iteration, consecutiveSkippedIterations\)/,
+    '★ 达限分支必须真的调用 pauseForBudgetExhausted —— 函数写了没人叫 = D38-a 重演',
+  )
+  assert.match(
+    loopSrc,
+    /const MAX_ALL_EXHAUSTED_ROUNDS = \d+/,
+    '阈值必须是具名常量（便于调参与用例引用）',
+  )
+  // 反向：达限分支不得再出现旧的硬失败写法
+  const branch = slice('if (consecutiveSkippedIterations >= MAX_ALL_EXHAUSTED_ROUNDS) {', '}\n', loopSrc)
+  assert.doesNotMatch(branch, /status:\s*'failed'/, '★ 达限分支不得保留 task_failed 残留')
+  assert.doesNotMatch(
+    branch,
+    /markRunningPlanItemFailed\(task\)/,
+    '★ 暂停可恢复，不得把清单项标 failed（D36「暂停刻意不封口」）',
+  )
+})
+
+test('TC-STALLG-021 ★ [D65] 「部分达上限」提示必须落在部分分支（修正注释与代码相反）', () => {
+  // 历史缺陷：`// 部分工具达上限但还有其他可用工具 → 注入强提示` 写在
+  // `if (全部达上限)` 分支里 → 该提示在它真正该出现的场景**永不触发**。
+  // 注意：结束锚点不能用 `}` —— anchor 自身首字符就是 `}`，indexOf 会立刻命中它。
+  const partial = slice(
+    '} else {\n        consecutiveSkippedIterations = 0',
+    '\n      const actSteps',
+    loopSrc,
+  )
+  assert.match(
+    partial,
+    /pendingSystemHint/,
+    '★ 部分耗尽分支必须注入脱困提示（换工具/换参数），否则模型会原地重试',
+  )
+  assert.match(partial, /exhaustedIndices\.size > 0/, '★ 只在真的发生过拦截时才提示')
+})
+
+test('TC-STALLG-022 ★ [D65] 预算耗尽文案四语言齐备且含 {count} 占位', () => {
+  const count = (messagesSrc.match(/'askUser\.budgetExhaustedQuestion'/g) ?? []).length
+  assert.equal(count, 4, `askUser.budgetExhaustedQuestion 应在 zh/en/ja/ko 四语言各定义一次，实际 ${count}`)
+  const hits = messagesSrc.match(/'askUser\.budgetExhaustedQuestion':[^\n]*/g) ?? []
+  for (const h of hits) {
+    assert.match(h, /\{count\}/, `文案必须插值轮数，否则用户看不到"连续几轮"：${h}`)
+  }
+})
+

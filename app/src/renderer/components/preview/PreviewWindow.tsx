@@ -29,6 +29,8 @@ import { getEditorHandle } from '../../services/savePipeline'
 // v0.31.0 B2：关闭保护三选一（dirty 缓冲只能由用户显式处置，A5/A6）
 import { CloseGuardPrompt } from '../editor/CloseGuardPrompt'
 import { PanelHost } from '../vlib/PanelHost'
+// ★ v0.35.0：插件代码视图（浮窗承载 placement:'float' 的视图）
+import { PluginViewHost } from '../plugins/PluginViewHost'
 import type { EditorViewMode } from '@shared/types/fs'
 
 /* ---- 常量 ---- */
@@ -90,9 +92,15 @@ function PanelFloatHost({
   params?: Record<string, unknown>
 }) {
   const profilePanels = useStore((s) => s.profilePanels)
+  // ★ v0.35.0：浮窗同样承载插件**代码视图**（placement:'float' 的视图只能开在这里
+  //   —— 侧边栏只能放下一个窄面板）。视图与面板分两路存，所以这里要查两张表。
+  const pluginViews = useStore((s) => s.pluginViews)
   const tab = useMemo(
-    () => (profilePanels ?? []).find((t) => t.ref === panelRef) ?? null,
-    [profilePanels, panelRef],
+    () =>
+      (profilePanels ?? []).find((t) => t.ref === panelRef) ??
+      (pluginViews ?? []).find((t) => t.ref === panelRef) ??
+      null,
+    [profilePanels, pluginViews, panelRef],
   )
   if (!tab) {
     return (
@@ -104,6 +112,7 @@ function PanelFloatHost({
     )
   }
   // params 参与 URL 模板替换 —— 面板本身不知道自己被谁打开
+  if (tab.view) return <PluginViewHost tab={{ ...tab, title: title || tab.title }} />
   return <PanelHost tab={{ ...tab, title: title || tab.title, params }} />
 }
 

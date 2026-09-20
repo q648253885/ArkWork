@@ -413,8 +413,12 @@ export const uiSlice: StateCreator<
     set((s) => {
       const tabsOf = (seq: number): PreviewTab[] =>
         (panelRefs ?? []).map((ref: string, i: number) => {
-          // profilePanels 是「当前面板 Tab 全集」（内置 ∪ profile ∪ 插件贡献）
-          const known = (s.profilePanels ?? []).find((t) => t.ref === ref)
+          // profilePanels 是「工作台面板 Tab 全集」；★ v0.35.0 起插件**代码视图**
+          // 另存一路（pluginViews），因此标题要查两张表 —— 只查一张时，
+          // 浮窗 Tab 会显示成裸 ref（看着像「面板丢了」，其实是查错了表）
+          const known =
+            (s.profilePanels ?? []).find((t) => t.ref === ref) ??
+            (s.pluginViews ?? []).find((t) => t.ref === ref)
           return {
             id: `tab-${seq}-${i}`,
             target: {

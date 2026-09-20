@@ -503,10 +503,52 @@ export async function assembleTools(agent: Agent, task: Task): Promise<LlmTool[]
   const available = skills.filter(
     (s) => mergedIds.includes(s.id) && s.enabled !== false,
   )
-  if (available.length === 0) return undefined
   // v0.20.0 缓存优化：按工具名确定性排序，避免技能发现顺序抖动导致 tools 前缀变化
   //（MiniMax 缓存前缀顺序为 tools → system → messages，tools 抖动会破坏整段缓存）。
-  return available
-    .map(skillToLlmTool)
-    .sort((a, b) => a.function.name.localeCompare(b.function.name))
+  const out: LlmTool[] = available.map(skillToLlmTool)
+
+  /* ------------------------------------------------------------
+   * ★ v0.35.0：并上插件工具（`plugin__<pluginId>__<name>`）
+   *
+   * 三个要点：
+   *  ① 数据源是**清单声明**（`declaredTools`）而不是运行期注册 ——
+   *     插件是懒激活的，用运行期注册会让「看不见 → 不调用 → 不激活 →
+   *     仍然看不见」变成死锁（详见 host-service 该方法的注释）；
+   *  ② 插件运行时**未装配**（例如单测里只跑 engine）时静默跳过：
+   *     工具集退回 v0.34 语义，不该因为插件子系统缺席就连主链路都不可用；
+   *  ③ 名字带命名空间前缀，且**不与 skill 去重合并** —— 撞名是插件的错误，
+   *     要让它表现为「两个工具都在」，而不是让插件静默顶掉宿主的同名工具。
+   * ------------------------------------------------------------ */
+  try {
+    const { getPluginHostService } = await import('../../plugins/runtime/host-service.js')
+    const declared = getPluginHostService()?.declaredTools() ?? []
+    for (const t of declared) {
+      out.push({
+        type: 'function',
+        function: {
+          name: t.globalName,
+          description: `[插件 ${t.pluginId}] ${t.description}`,
+          parameters: t.inputSchema,
+        },
+      })
+    }
+
+    /* ------------------------------------------------------------
+     * ★ v0.35.0：并上**插件控制工具**（`plugin_list` / `plugin_detail`
+     * / `plugin_set_enabled` / `plugin_open_view`）。
+     *
+     * 这是「大模型可以控制插件」（用户裁决）的落地。与上面那批的区别：
+     * 上面是插件自带的工具（要插件活着才有用），这四个是**宿主**的工具
+     * —— 插件坏了 / 没激活 / 被禁用了，它们照样能用。
+     * 少了这一条，模型就无法自己查「插件为什么不生效」（只能让用户去看界面）。
+     * ------------------------------------------------------------ */
+    const { PLUGIN_CONTROL_TOOLS } = await import('../tools/plugins.js')
+    out.push(...PLUGIN_CONTROL_TOOLS)
+  } catch (err) {
+    logger.warn('Tool', `assembleTools: 插件工具汇入失败（已跳过）：${String(err)}`)
+  }
+
+  if (out.length === 0) return undefined
+  // 排序放在最后：插件工具的全局名以 `plugin__` 开头，混排后仍保持确定性
+  return out.sort((a, b) => a.function.name.localeCompare(b.function.name))
 }

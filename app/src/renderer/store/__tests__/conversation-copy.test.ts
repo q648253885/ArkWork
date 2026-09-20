@@ -59,10 +59,40 @@ test('TC-CPCV-003 ★ 复制走**同一个** buildConversationMarkdown（正文�
   const start = SLICE.indexOf('copyConversation: async')
   assert.ok(start > 0, '应定义 copyConversation')
   const body = SLICE.slice(start, start + 900)
+  // v0.34.4（D69）：入参由 `get().conversation` 改为一整个 store 快照 `get()` ——
+  // 因为正文改为先跑 projectConversation（需要 steps/planItems/flow 等），
+  // 与屏幕同源。契约不变：**两个入口必须传完全相同的入参**。
   assert.match(
     body,
-    /buildConversationMarkdown\(task\.title, task\.agentId, get\(\)\.conversation\)/,
+    /buildConversationMarkdown\(task\.title, task\.agentId, get\(\)\)/,
     'copyConversation 必须以与导出完全相同的入参调用 buildConversationMarkdown',
+  )
+})
+
+test('TC-CPCV-009 ★ 导出/复制与**屏幕**同源：都必须经 projectConversation（D69）', () => {
+  // 病：屏幕走 projectConversation → FlowTurn（9 种 FlowBlock），
+  //     导出走 ConversationItem（4 种 type）→ 用户报「导出的内容和真正内容不一致」。
+  const builder = SLICE.slice(
+    SLICE.indexOf('function buildConversationMarkdown('),
+    SLICE.indexOf('function clearOptimisticTimer('),
+  )
+  assert.ok(builder.length > 0, '应能切出 buildConversationMarkdown 函数体')
+  assert.match(
+    builder,
+    /projectConversation\(/,
+    '★ buildConversationMarkdown 必须先跑 projectConversation（与 TurnList 同一投影）',
+  )
+  assert.match(
+    builder,
+    /renderTurnsMarkdown\(/,
+    '★ 序列化必须交给 renderTurnsMarkdown（纯模块，屏幕 9 种块全覆盖）',
+  )
+  // 屏幕侧同一投影（挂点存在性：不能只有导出用、屏幕不用）
+  const turnList = read('../../components/flow/TurnList.tsx')
+  assert.match(
+    turnList,
+    /projectConversation\(/,
+    '★ TurnList 必须也走 projectConversation —— 同一投影链，两侧才会一致',
   )
 })
 

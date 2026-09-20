@@ -12,6 +12,9 @@ import { setCachedUiLocale } from '../i18n/messages.js'
 import { pickWorkspace, ensureWorkspace, assertWorkspaceWritable } from '../fs/workspace.js'
 import { setWorkspaceDir } from '../store/db.js'
 import { resetTaskCollection } from '../store/tasks.js'
+// ★ v0.35.0：工作区切换时重算插件运行时（workspace 级插件随工作区拆/建）
+import { onWorkspaceSwitchedPluginRuntime } from '../plugins/bootstrap.js'
+import { logger } from '../system/logger.js'
 import type { AppSettings, SecretKeys } from '@shared/types/ipc'
 
 const SETTINGS_FILE = () => join(getArkworkDir(), 'settings.json')
@@ -127,6 +130,14 @@ export function registerSettingsHandlers(): void {
     // v0.4.0-rev2：重置 task collection 单例，确保后续 listTasks/createTask 读取新工作区的 tasks.json
     resetTaskCollection()
     await ensureWorkspace()
+    // ★ v0.35.0：工作区级插件随工作区切换（先拆旧工作区来源的插件进程，再扫新目录）。
+    // 放在 ensureWorkspace 之后：扫描需要新工作区的 `.arkwork/plugins/` 已在盘上。
+    // 失败只 warn —— 插件是附加能力，绝不能拦住「切换工作区」这个基本操作。
+    try {
+      await onWorkspaceSwitchedPluginRuntime()
+    } catch (err) {
+      logger.warn('System', `[plugin] 工作区切换后重算插件失败：${String(err)}`)
+    }
     return true
   })
 }

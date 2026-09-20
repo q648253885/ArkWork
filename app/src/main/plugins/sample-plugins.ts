@@ -8,10 +8,12 @@
  *   全是**假数据演示件** —— 它们证明了「插件机制能跑」，却也让人误以为
  *   插件就是用来放示例表格的。现全部删除，只保留一个**真实功能插件**：
  *
- *     ark.plugin.stock  股票行情（多面板 · 真实联网数据）
+ *     ark.plugin.stock  股票行情（侧边栏单面板 · 真实联网数据）
  *       · panel:stock-quotes  侧边栏：自选股实时行情（每 8s 刷新）
- *       · panel:stock-detail  浮窗：个股完整盘口数据
- *       · panel:stock-kline   浮窗：个股日 K 线（原生 Canvas，涨红跌绿）
+ *       ★ v0.35.0（D75）：原先的 `panel:stock-detail`（浮窗·个股详情）与
+ *         `panel:stock-kline`（浮窗·日K线）已被用户点名为废弃项，本版摘除；
+ *         随之摘掉引用它们的 `interact.onRowClick`（否则行点击变成「点了没反应」）。
+ *         已装机用户的落盘副本由 `migrate.ts` 做同款外科式迁移。
  *
  *   它同时是**未来插件接入的范例**，覆盖插件格式的全部能力点：
  *     ① `provides.panels` 多面板（一个插件一组面板，同生共死）
@@ -50,20 +52,27 @@ const WATCHLIST = '1.600519,0.000001,0.300750,1.601318,0.002594,1.600036'
 
 const RAW_BUILTINS: Array<Record<string, unknown>> = [
   {
-    schemaVersion: '1.0',
+    // v0.35.0：1.0 → 1.1（`order` 字段与代码插件入口同版）
+    schemaVersion: '1.1',
     id: 'ark.plugin.stock',
     name: '股票行情',
     // v0.34.2：数据源主机迁移（push2 → push2delay）属内容变更，版本号如实 +1 ——
     // 该字段同时是种子升值的可读凭据（见 seed.ts 的 `.arkwork-seed.json`）
-    version: '1.0.1',
+    // v0.35.0（D75）：外科式摘除「个股详情」「日K线」两个废弃面板 → 1.1.0
+    version: '1.1.0',
     author: 'ArkWork',
-    description: '自选股行情 + 个股详情 + 日 K 线（东方财富公开行情接口，真实联网数据）',
+    description: '自选股实时行情（东方财富公开行情接口，真实联网数据）',
     kind: 'panel',
     // v0.34.1：真实功能 → 默认启用（假数据示例才默认禁用）
     enabledByDefault: true,
     provides: {
       panels: [
-        /* ---------- ① 侧边栏：自选股实时行情 ---------- */
+        /* ---------- ① 侧边栏：自选股实时行情 ----------
+         * ★ v0.35.0（D75）：本轮**只剩这一个面板**。
+         *   原「② 个股详情」「③ 日K线」两个浮窗面板被用户点名为废弃，已摘除；
+         *   连带摘掉它们的唯一入口 —— 本面板的 `interact.onRowClick`
+         *   （它的 panelRefs 只指向那两个面板，留着就是「点了没反应」）。
+         *   已装机用户的落盘副本由 `migrate.ts` 做同款外科式迁移（A12）。 */
         {
           panelRef: 'panel:stock-quotes',
           title: '自选股',
@@ -82,75 +91,9 @@ const RAW_BUILTINS: Array<Record<string, unknown>> = [
                 { key: 'f2', label: '最新价', align: 'right' },
                 { key: 'f3', label: '涨跌幅%', align: 'right' },
               ],
-              // 派生列：把「市场.代码」拼成东方财富的 secid —— 行点击时作为参数传下去
+              // 派生列：把「市场.代码」拼成东方财富的 secid（供后续需要个股级数据的视图复用）
               derive: { secid: '{{f13}}.{{f12}}' },
               pollMs: 8000,
-            },
-          },
-          interact: {
-            onRowClick: {
-              // 点一只股票 → 浮窗里同时打开「详情」与「K 线」两个 Tab
-              panelRefs: ['panel:stock-detail', 'panel:stock-kline'],
-              params: { secid: 'secid' },
-            },
-          },
-        },
-
-        /* ---------- ② 浮窗：个股完整盘口 ---------- */
-        {
-          panelRef: 'panel:stock-detail',
-          title: '个股详情',
-          icon: 'List',
-          component: 'DataTable',
-          data: {
-            kind: 'http',
-            http: {
-              // {{secid}} 由行点击参数替换 —— 面板自己不知道被谁打开
-              url: 'https://push2delay.eastmoney.com/api/qt/stock/get?secid={{secid}}&fltt=2&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f168,f170',
-              response: 'json',
-              // data 是单个对象 → 自动包成一行
-              path: 'data',
-              columns: [
-                { key: 'f58', label: '名称' },
-                { key: 'f57', label: '代码' },
-                { key: 'f43', label: '最新价', align: 'right' },
-                { key: 'f170', label: '涨跌幅%', align: 'right' },
-                { key: 'f46', label: '今开', align: 'right' },
-                { key: 'f44', label: '最高', align: 'right' },
-                { key: 'f45', label: '最低', align: 'right' },
-                { key: 'f60', label: '昨收', align: 'right' },
-                { key: 'f47', label: '成交量(手)', align: 'right' },
-                { key: 'f48', label: '成交额', align: 'right' },
-                { key: 'f168', label: '换手率%', align: 'right' },
-              ],
-              pollMs: 8000,
-            },
-          },
-        },
-
-        /* ---------- ③ 浮窗：日 K 线 ---------- */
-        {
-          panelRef: 'panel:stock-kline',
-          title: '日K线',
-          icon: 'Graph',
-          component: 'CandleChart',
-          data: {
-            kind: 'http',
-            http: {
-              url: 'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={{secid}}&klt=101&fqt=1&lmt=120&end=20500101&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61',
-              response: 'json',
-              path: 'data.klines',
-              // 每行是逗号分隔字符串：日期,开,收,高,低,量,额,振幅,涨跌幅,涨跌额,换手率
-              split: ',',
-              // split 模式下按**位置**对应：0=日期 1=开 2=收 3=高 4=低
-              columns: [
-                { key: 'date', label: '日期' },
-                { key: 'open', label: '开盘' },
-                { key: 'close', label: '收盘' },
-                { key: 'high', label: '最高' },
-                { key: 'low', label: '最低' },
-              ],
-              limit: 120,
             },
           },
         },

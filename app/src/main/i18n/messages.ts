@@ -57,6 +57,9 @@ export const MESSAGES: Record<Locale, Record<string, string>> = {
     // ---- 工具预算 / 迭代上限询问（loop.ts）----
     'askUser.budgetRepeatHint': '（重点关注：已拦截同参数重复调用 {count} 次，存在循环嫌疑）',
     'askUser.budgetQuestion': '工具「{tool}」调用已达 {limit} 次上限，任务执行时间可能过长或已陷入循环{hint}。是否继续执行？',
+    // v0.34.4（D65）：与「零产出轮」同属引擎侧能力/预算耗尽，终局口径统一为
+    // 「优雅暂停 + 交给用户判断」，不再走 task_failed 硬失败（用户对硬失败无任何可选动作）。
+    'askUser.budgetExhaustedQuestion': '模型连续 {count} 轮请求的工具均已达到调用上限，已无法继续执行。进度已保留：可以继续运行（模型会换用其它工具）、调整任务描述后重试，或就此结束。',
     'askUser.budgetContinue.label': '继续执行',
     'askUser.budgetContinue.desc': '重置调用计数并继续当前任务',
     'askUser.budgetStop.label': '停止任务',
@@ -234,6 +237,7 @@ export const MESSAGES: Record<Locale, Record<string, string>> = {
     'suggest.pause.desc': 'Pause first; I will provide more details',
     'askUser.budgetRepeatHint': ' (Note: {count} repeated calls with identical arguments were blocked — possible loop)',
     'askUser.budgetQuestion': 'Tool "{tool}" has reached its call limit of {limit}. The task may be taking too long or be stuck in a loop{hint}. Continue?',
+    'askUser.budgetExhaustedQuestion': 'Every tool the model requested has been exhausted for {count} consecutive rounds, so it cannot continue. Progress is saved: resume (the model will switch to other tools), retry after clarifying the task, or finish here.',
     'askUser.budgetContinue.label': 'Continue',
     'askUser.budgetContinue.desc': 'Reset call counters and keep going',
     'askUser.budgetStop.label': 'Stop task',
@@ -385,6 +389,7 @@ export const MESSAGES: Record<Locale, Record<string, string>> = {
     'suggest.pause.desc': '一時停止し、補足情報を伝えます',
     'askUser.budgetRepeatHint': '（要注意：同一引数の重複呼び出しを {count} 回ブロック——ループの疑い）',
     'askUser.budgetQuestion': 'ツール「{tool}」の呼び出しが上限 {limit} 回に達しました。タスクが長時間化またはループしている可能性があります{hint}。続行しますか？',
+    'askUser.budgetExhaustedQuestion': 'モデルが {count} ラウンド連続で要求したツールがすべて上限に達し、続行できません。進捗は保存されています。実行を再開する（モデルは別のツールに切り替えます）か、タスク記述を修正して再試行するか、終了してください。',
     'askUser.budgetContinue.label': '続行',
     'askUser.budgetContinue.desc': '呼び出しカウントをリセットして続行',
     'askUser.budgetStop.label': 'タスクを停止',
@@ -536,6 +541,7 @@ export const MESSAGES: Record<Locale, Record<string, string>> = {
     'suggest.pause.desc': '먼저 중지하고 추가 정보를 알림',
     'askUser.budgetRepeatHint': ' (주의: 동일 인자 반복 호출 {count}회 차단 — 루프 의심)',
     'askUser.budgetQuestion': '도구 "{tool}" 호출이 상한 {limit}회에 도달했습니다. 작업이 오래 걸리거나 루프에 빠졌을 수 있습니다{hint}. 계속하시겠습니까?',
+    'askUser.budgetExhaustedQuestion': '모델이 {count}라운드 연속으로 요청한 도구가 모두 상한에 도달해 계속할 수 없습니다. 진행 상황은 저장되었습니다. 실행을 재개하거나(모델이 다른 도구로 전환합니다), 작업 설명을 수정해 재시도하거나, 여기서 종료하세요.',
     'askUser.budgetContinue.label': '계속 진행',
     'askUser.budgetContinue.desc': '호출 카운트 초기화 후 계속',
     'askUser.budgetStop.label': '작업 중지',

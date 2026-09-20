@@ -1,11 +1,22 @@
 /* ============================================================
- * ArkWork — 插件清单解析与校验（纯函数 · v0.33.0）
+ * ArkWork — 插件清单解析与校验（纯函数 · v0.33.0；v0.35.0 扩 VP7–VP10）
  * 设计文档：docs/versions/v0.33.0/04-system-design.md §3
  *           正本 `workbench-profile-v1.0/04-宿主插槽与UI扩展体系.md` §2–§5
+ *           ★ v0.35.0：docs/versions/v0.35.0/04-system-design.md §4.2
  *
- * 校验规则 **VP1–VP6**（与 profile 的 V1–V6 独立编号，互不干扰）：
- *   VP1 结构 · VP2 provides↔kind 匹配 · VP3 panel 载荷 · VP4 renderer 载荷 ·
- *   VP5 theme 载荷 · VP6 homeModule/action 载荷
+ * 校验规则 **VP1–VP10**（与 profile 的 V1–V6 独立编号，互不干扰）：
+ *   VP1  结构 · VP2 provides↔kind 匹配 · VP3 panel 载荷 · VP4 renderer 载荷 ·
+ *   VP5  theme 载荷 · VP6 homeModule/action 载荷
+ *   ★ VP7  代码入口：形状（相对路径、不得 `..`）+ 目标是否为空视图
+ *   ★ VP8  代码视图与模型工具载荷（placement 只能是 dock/float、tool 名合法）
+ *   ★ VP9  权限名必须在白名单内（**未知权限名即 error，不静默忽略**）
+ *   ★ VP10 入口路径的**形状**校验（`..` / 绝对路径 / 空段）
+ *
+ * ⚠️ **VP7 的「文件真的存在吗」不在这里做**：本文件是**零依赖纯函数**
+ *    （shared 层不得碰 fs —— 它同时被渲染层 import）。文件存在性、realpath
+ *    是否逃逸、`engines` 是否兼容这三项需要真实磁盘与宿主版本，
+ *    由主进程侧 `main/plugins/registry.ts` 的 `verifyPluginEntries()` 完成，
+ *    并**沿用同一批规则编号**（VP7/VP8/VP10），保证「作者看到的规则号」唯一。
  *
  * 三条纪律（对齐 `04-system-design.md` §12）：
  *  ① **永不抛错** —— 输入是第三方/磁盘 JSON，坏输入只能是「不注册 + 报问题」；
@@ -16,16 +27,22 @@
  * 零依赖纯函数（沿用 `shared/utils/profile-manifest.ts` 的同一先例）。
  * ============================================================ */
 import {
+  PLUGIN_API_VERSION,
   PLUGIN_KINDS,
+  PLUGIN_PERMISSIONS,
   PLUGIN_SCHEMA_VERSION,
+  SUPPORTED_PLUGIN_SCHEMA_VERSIONS,
   type PluginIssue,
   type PluginKind,
   type PluginManifest,
   type PluginPanelProvide,
   type PluginParseResult,
+  type PluginPermission,
   type PluginRule,
+  type PluginToolProvide,
+  type PluginViewProvide,
 } from '@shared/types/plugin'
-import { RENDERER_KIND_WHITELIST, VLIB_COMPONENTS, isVLibComponent, PANEL_POLL_MIN_MS } from '@shared/types/vlib'
+import { RENDERER_KIND_WHITELIST, VLIB_COMPONENTS, isVLibComponent, PANEL_POLL_MIN_MS, PANEL_DATA_KINDS, isPanelDataKind } from '@shared/types/vlib'
 import type { PanelData as PluginPanelData } from '@shared/types/vlib'
 import { sanitizeThemeTokens } from './theme-tokens.js'
 import { validatePanelData } from './vlib-data.js'
@@ -40,6 +57,57 @@ const PANEL_REF_RE = /^panel:[a-z0-9][\w.-]*$/
 const MODULE_REF_RE = /^module:[\w.-]+$/
 /** 扩展名（小写字母数字，无点无斜杠） */
 const EXT_RE = /^[a-z0-9]+$/
+/** ★ v0.35.0 视图引用 */
+const VIEW_REF_RE = /^view:[a-z0-9][\w.-]*$/
+/** ★ v0.35.0 模型工具名（snake_case，与 ArkWork 工具命名一致） */
+const TOOL_NAME_RE = /^[a-z][a-z0-9_]{1,63}$/
+/**
+ * ★ v0.35.0 `engines.arkwork` 版本范围（只支持 `>=x.y.z` / `^x.y.z` / 精确值三种写法）。
+ *
+ * ⚠️ 运算符**必须是捕获组** `(>=|\^)?`：`satisfiesEngineRange` 靠 `r[1]` 取运算符。
+ * 曾经写成非捕获组 `(?:>=|\^)?`，于是 `r[1]` 变成了主版本号数字、运算符恒为 '',
+ * 判定一路掉进「精确等值」分支且比较对象是 NaN —— 结果是**任何**声明了
+ * engines 的插件都被判不兼容（且因为宿主版本当时也没注入，双重失效）。
+ * 回归用例：TC-PMF-ENG-001..008 / TC-PLGR-010..014。
+ */
+const ENGINE_RANGE_RE = /^(>=|\^)?(\d+)\.(\d+)\.(\d+)$/
+
+/**
+ * ★ v0.35.0：入口路径的**形状**校验（VP10 的纯函数部分）。
+ *
+ * 为什么形状也要查：`main: "../../../etc/passwd"` 在纯函数层拦掉，
+ * 作者能立刻拿到规则号；磁盘级 realpath 校验（挡 symlink）在主进程再做一层。
+ * **两层都要**，因为纯函数层不知道插件目录在哪。
+ *
+ * @returns 合法返回 null，否则返回人话原因
+ */
+export function checkEntryPathShape(v: unknown): string | null {
+  if (typeof v !== 'string' || v.trim().length === 0) return '入口路径必须是非空字符串'
+  const p = v.trim()
+  if (p.startsWith('/') || /^[A-Za-z]:/.test(p)) return '入口路径必须是相对插件目录的相对路径'
+  if (p.includes('\\')) return '入口路径必须用 / 分隔（不接受反斜杠）'
+  const segs = p.split('/')
+  if (segs.some((s) => s === '' || s === '.' || s === '..')) {
+    return '入口路径不得包含空段、"." 或 ".."（防止逃出插件目录）'
+  }
+  return null
+}
+
+/** ★ v0.35.0：`engines.arkwork` 版本范围是否与宿主版本兼容（纯字符串比较，不引 semver 包） */
+export function satisfiesEngineRange(range: string, hostVersion: string): boolean {
+  const m = /^(>=|\^)?(\d+)\.(\d+)\.(\d+)$/.exec(hostVersion)
+  if (!m) return true // 宿主版本读不出来时不阻断（宁可放过，不误杀）
+  const host = [Number(m[2]), Number(m[3]), Number(m[4])] as const
+  const r = ENGINE_RANGE_RE.exec(range)
+  if (!r) return false
+  const op = r[1] ?? ''
+  const want = [Number(r[2]), Number(r[3]), Number(r[4])] as const
+  const cmp = (a: readonly number[], b: readonly number[]): number =>
+    a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]!
+  if (op === '>=') return cmp(host, want) >= 0
+  if (op === '^') return host[0] === want[0] && cmp(host, want) >= 0 // 同主版本且不低于
+  return cmp(host, want) === 0
+}
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -111,8 +179,9 @@ function parsePanelSpec(
     issues.push(issue('VP3', 'error', `${path}.data`, '面板必须声明 data（static / file / http / mcp）'))
   } else {
     const dk = p.data.kind
-    if (dk !== 'static' && dk !== 'file' && dk !== 'http' && dk !== 'mcp') {
-      issues.push(issue('VP3', 'error', `${path}.data.kind`, `未知数据源「${String(dk)}」`, '可选：static / file / http / mcp'))
+    // D61：统一走单一事实源守卫（此前硬编码四路链表，新增 kind 时必漏）。
+    if (!isPanelDataKind(dk)) {
+      issues.push(issue('VP3', 'error', `${path}.data.kind`, `未知数据源「${String(dk)}」`, `可选：${PANEL_DATA_KINDS.join(' / ')}`))
     } else if (dk === 'file') {
       if (!isStr(p.data.path)) {
         issues.push(issue('VP3', 'error', `${path}.data.path`, 'file 数据源必须给出 path', '例如 "reports/quotes.json"'))
@@ -207,11 +276,20 @@ export function parsePluginManifest(raw: unknown): PluginParseResult {
     issues.push(
       issue('VP1', 'warning', '$.schemaVersion', `缺少 schemaVersion，按当前版本 ${PLUGIN_SCHEMA_VERSION} 处理`, `补 "schemaVersion": "${PLUGIN_SCHEMA_VERSION}"`),
     )
-  } else if (raw.schemaVersion !== PLUGIN_SCHEMA_VERSION) {
+  } else if (!(SUPPORTED_PLUGIN_SCHEMA_VERSIONS as readonly string[]).includes(raw.schemaVersion)) {
+    // v0.35.0：可接受集合扩到 ['1.0','1.1'] —— `1.0` 是「零代码声明式插件」，是一等公民不是遗留
     issues.push(
-      issue('VP1', 'error', '$.schemaVersion', `schemaVersion 为 ${String(raw.schemaVersion)}，底座仅支持 ${PLUGIN_SCHEMA_VERSION}`, `改为 "${PLUGIN_SCHEMA_VERSION}"`),
+      issue(
+        'VP1',
+        'error',
+        '$.schemaVersion',
+        `schemaVersion 为 ${String(raw.schemaVersion)}，底座支持 ${SUPPORTED_PLUGIN_SCHEMA_VERSIONS.join(' / ')}`,
+        `改为 "${PLUGIN_SCHEMA_VERSION}"`,
+      ),
     )
     schemaVersion = String(raw.schemaVersion)
+  } else {
+    schemaVersion = raw.schemaVersion
   }
 
   let id = ''
@@ -245,9 +323,14 @@ export function parsePluginManifest(raw: unknown): PluginParseResult {
     issues.push(issue('VP2', 'error', '$.provides', 'provides 必填且为对象', '按 kind 提供对应的一项'))
   } else if (kind && !isObj(raw.provides[kind])) {
     // v0.34.1：panel 额外接受 `provides.panels`（多面板）—— 一个插件贡献一组面板
-    if (!(kind === 'panel' && Array.isArray(raw.provides.panels) && raw.provides.panels.length > 0)) {
+    // v0.35.0：panel 还额外接受 `provides.views`（代码视图）—— 「一个面板插件带自己的界面」
+    const panelOk =
+      kind === 'panel' &&
+      ((Array.isArray(raw.provides.panels) && raw.provides.panels.length > 0) ||
+        (Array.isArray(raw.provides.views) && raw.provides.views.length > 0))
+    if (!panelOk) {
       issues.push(
-        issue('VP2', 'error', `$.provides.${kind}`, `kind 为 "${kind}" 时 provides.${kind} 必填`, kind === 'panel' ? '补 provides.panel 对象或 provides.panels 数组' : `补一个 provides.${kind} 对象`),
+        issue('VP2', 'error', `$.provides.${kind}`, `kind 为 "${kind}" 时 provides.${kind} 必填`, kind === 'panel' ? '补 provides.panel 对象，或 provides.panels / provides.views 数组' : `补一个 provides.${kind} 对象`),
       )
     }
   }
@@ -372,6 +455,214 @@ export function parsePluginManifest(raw: unknown): PluginParseResult {
         provides.action = { actionId: String(a.actionId), label: String(a.label) }
       }
     }
+
+    /* ---- ★ VP8 代码视图（provides.views）—— 只能进浮窗与右侧侧边栏 ---- */
+    if (raw.provides.views !== undefined) {
+      if (!Array.isArray(raw.provides.views)) {
+        issues.push(issue('VP8', 'error', '$.provides.views', 'provides.views 必须是数组', '形如 [{ "viewRef": "view:x", "title": "…", "placement": "dock" }]'))
+      } else if (raw.provides.views.length === 0) {
+        issues.push(issue('VP8', 'warning', '$.provides.views', 'provides.views 是空数组（不贡献任何视图）', '去掉该字段，或至少给一个视图'))
+      } else {
+        const list: PluginViewProvide[] = []
+        raw.provides.views.forEach((rawView, i) => {
+          const path = `$.provides.views[${i}]`
+          if (!isObj(rawView)) {
+            issues.push(issue('VP8', 'error', path, '视图条目必须是对象'))
+            return
+          }
+          let ok = true
+          if (!isStr(rawView.viewRef) || !VIEW_REF_RE.test(rawView.viewRef)) {
+            issues.push(issue('VP8', 'error', `${path}.viewRef`, 'viewRef 必填且形如 "view:<name>"', '例如 "view:my-calc"'))
+            ok = false
+          }
+          if (!isStr(rawView.title)) {
+            issues.push(issue('VP8', 'error', `${path}.title`, '视图标题 title 必填'))
+            ok = false
+          }
+          // ★ 边界纪律：插件只能控**浮窗**与**右侧侧边栏**。闭集判定，别的值一律拒。
+          if (rawView.placement !== 'dock' && rawView.placement !== 'float') {
+            issues.push(
+              issue('VP8', 'error', `${path}.placement`, `placement 只能是 "dock"（右侧侧边栏）或 "float"（浮窗），收到「${String(rawView.placement)}」`, '插件不得在其他 UI 区域加挂点'),
+            )
+            ok = false
+          }
+          if (rawView.renderer !== undefined) {
+            const bad = checkEntryPathShape(rawView.renderer)
+            if (bad) {
+              issues.push(issue('VP10', 'error', `${path}.renderer`, `renderer 入口不合法：${bad}`, '例如 "renderer.js" 或 "ui/index.html"'))
+              ok = false
+            }
+          }
+          if (ok) {
+            const size = isObj(rawView.initialSize) ? rawView.initialSize : null
+            list.push({
+              viewRef: String(rawView.viewRef),
+              title: String(rawView.title),
+              icon: isStr(rawView.icon) ? rawView.icon : undefined,
+              renderer: isStr(rawView.renderer) ? rawView.renderer : undefined,
+              placement: rawView.placement as PluginViewProvide['placement'],
+              initialSize:
+                size && typeof size.w === 'number' && typeof size.h === 'number'
+                  ? { w: size.w, h: size.h }
+                  : undefined,
+            })
+          }
+        })
+        if (list.length > 0) provides.views = list
+      }
+    }
+
+    /* ---- ★ VP8 模型工具（provides.tools）---- */
+    if (raw.provides.tools !== undefined) {
+      if (!Array.isArray(raw.provides.tools)) {
+        issues.push(issue('VP8', 'error', '$.provides.tools', 'provides.tools 必须是数组', '形如 [{ "name": "calc", "description": "…", "inputSchema": {…} }]'))
+      } else if (raw.provides.tools.length === 0) {
+        issues.push(issue('VP8', 'warning', '$.provides.tools', 'provides.tools 是空数组（不贡献任何工具）', '去掉该字段，或至少给一个工具'))
+      } else {
+        const list: PluginToolProvide[] = []
+        raw.provides.tools.forEach((rawTool, i) => {
+          const path = `$.provides.tools[${i}]`
+          if (!isObj(rawTool)) {
+            issues.push(issue('VP8', 'error', path, '工具条目必须是对象'))
+            return
+          }
+          let ok = true
+          if (!isStr(rawTool.name) || !TOOL_NAME_RE.test(rawTool.name)) {
+            issues.push(issue('VP8', 'error', `${path}.name`, 'name 必填且为 snake_case（小写字母开头，仅含小写字母/数字/下划线）', '例如 "calc_indicator"'))
+            ok = false
+          }
+          if (!isStr(rawTool.description)) {
+            issues.push(issue('VP8', 'error', `${path}.description`, 'description 必填（模型靠它决定何时调用）'))
+            ok = false
+          }
+          if (!isObj(rawTool.inputSchema)) {
+            issues.push(issue('VP8', 'error', `${path}.inputSchema`, 'inputSchema 必填且为 JSON Schema 对象', '形如 { "type": "object", "properties": {…} }'))
+            ok = false
+          }
+          if (ok) {
+            list.push({
+              name: String(rawTool.name),
+              description: String(rawTool.description),
+              inputSchema: rawTool.inputSchema as Record<string, unknown>,
+            })
+          }
+        })
+        if (list.length > 0) provides.tools = list
+      }
+    }
+  }
+
+  /* ---- ★ VP7/VP9/VP10 顶层：入口、权限、引擎 ---- */
+  let mainEntry: string | undefined
+  if (raw.main !== undefined) {
+    const bad = checkEntryPathShape(raw.main)
+    if (bad) issues.push(issue('VP10', 'error', '$.main', `Host 半入口不合法：${bad}`, '例如 "main.js"'))
+    else mainEntry = String(raw.main).trim()
+  }
+  let rendererEntry: string | undefined
+  if (raw.renderer !== undefined) {
+    const bad = checkEntryPathShape(raw.renderer)
+    if (bad) issues.push(issue('VP10', 'error', '$.renderer', `Client 半入口不合法：${bad}`, '例如 "renderer.js"'))
+    else rendererEntry = String(raw.renderer).trim()
+  }
+
+  // VP9：权限名必须在白名单内。**未知权限名即 error** —— 静默忽略会让作者以为"声明了就有"。
+  let permissions: PluginPermission[] | undefined
+  if (raw.permissions !== undefined) {
+    if (!Array.isArray(raw.permissions)) {
+      issues.push(issue('VP9', 'error', '$.permissions', 'permissions 必须是字符串数组', '例如 ["fs:workspace-read", "net"]'))
+    } else {
+      const known: PluginPermission[] = []
+      const unknown: string[] = []
+      for (const p of raw.permissions) {
+        if (typeof p === 'string' && (PLUGIN_PERMISSIONS as readonly string[]).includes(p)) {
+          known.push(p as PluginPermission)
+        } else {
+          unknown.push(String(p))
+        }
+      }
+      if (unknown.length > 0) {
+        issues.push(
+          issue('VP9', 'error', '$.permissions', `未知权限名：${unknown.join(' / ')}`, `可选：${PLUGIN_PERMISSIONS.join(' / ')}`),
+        )
+      }
+      // 去重（同一权限写两遍无害，但收敛成一份方便诊断展示）
+      permissions = Array.from(new Set(known))
+    }
+  }
+
+  // VP7（形状部分）：声明了代码视图却没有任何入口 → 视图跑不起来，属于作者笔误
+  if (provides.views && provides.views.length > 0) {
+    const missing = provides.views
+      .map((v, i) => ({ v, i }))
+      .filter(({ v }) => !v.renderer && !rendererEntry)
+    for (const { v, i } of missing) {
+      issues.push(
+        issue('VP7', 'error', `$.provides.views[${i}].renderer`, `视图「${v.viewRef}」没有 Client 半入口（views[i].renderer 与顶层 renderer 都缺失）`, '补 views[i].renderer，或在清单顶层写 "renderer": "renderer.js"'),
+      )
+    }
+  }
+
+  // VP8：声明了模型工具，但没有 Host 半入口 → 工具无实现
+  if (provides.tools && provides.tools.length > 0 && !mainEntry) {
+    issues.push(
+      issue('VP7', 'error', '$.main', '声明了 provides.tools 却没有 Host 半入口（main）—— 工具无处执行', '补 "main": "main.js"'),
+    )
+  }
+
+  // apiVersion：缺省 1；声明了不匹配的值直接报错（契约版本不兼容不是小事）
+  let apiVersion = PLUGIN_API_VERSION
+  if (raw.apiVersion !== undefined) {
+    if (raw.apiVersion !== PLUGIN_API_VERSION) {
+      issues.push(
+        issue('VP1', 'error', '$.apiVersion', `apiVersion 为 ${String(raw.apiVersion)}，本底座支持 ${PLUGIN_API_VERSION}`, `改为 ${PLUGIN_API_VERSION}`),
+      )
+    } else {
+      apiVersion = PLUGIN_API_VERSION
+    }
+  }
+
+  // engines.arkwork：只校验**形状**；版本是否兼容由主进程侧按真实宿主版本判定（VP8 的磁盘部分）
+  let engines: { arkwork?: string } | undefined
+  if (raw.engines !== undefined) {
+    if (!isObj(raw.engines)) {
+      issues.push(issue('VP8', 'error', '$.engines', 'engines 必须是对象', '形如 { "arkwork": ">=0.35.0" }'))
+    } else if (raw.engines.arkwork !== undefined) {
+      if (typeof raw.engines.arkwork !== 'string' || !ENGINE_RANGE_RE.test(raw.engines.arkwork)) {
+        issues.push(
+          issue('VP8', 'error', '$.engines.arkwork', `版本范围「${String(raw.engines.arkwork)}」不合法`, '支持 ">=0.35.0" / "^0.35.0" / "0.35.0" 三种写法'),
+        )
+      } else {
+        engines = { arkwork: raw.engines.arkwork }
+      }
+    }
+  }
+
+  // activation：只认四种事件前缀
+  let activation: string[] | undefined
+  if (raw.activation !== undefined) {
+    if (!Array.isArray(raw.activation)) {
+      issues.push(issue('VP1', 'error', '$.activation', 'activation 必须是字符串数组', '例如 ["onWorkspaceOpen", "onView:view:my-calc"]'))
+    } else {
+      const ok: string[] = []
+      const bad: string[] = []
+      for (const a of raw.activation) {
+        const s = String(a)
+        if (s === 'onStartup' || s === 'onWorkspaceOpen' || /^on(?:View|Tool|Panel):/.test(s)) ok.push(s)
+        else bad.push(s)
+      }
+      if (bad.length > 0) {
+        issues.push(
+          issue('VP1', 'error', '$.activation', `未知激活事件：${bad.join(' / ')}`, '可选：onStartup / onWorkspaceOpen / onView:<ref> / onTool:<name> / onPanel:<ref>'),
+        )
+      }
+      activation = ok
+    }
+  }
+
+  // kind='tool' 必须真的给工具（否则插件什么都不贡献）
+  if (kind === 'tool' && (!provides.tools || provides.tools.length === 0)) {
+    issues.push(issue('VP2', 'error', '$.provides.tools', 'kind 为 "tool" 时必须贡献至少一个模型工具', '补 provides.tools 数组'))
   }
 
   const hasError = issues.some((i) => i.level === 'error')
@@ -387,6 +678,13 @@ export function parsePluginManifest(raw: unknown): PluginParseResult {
       description: isStr(raw.description) ? raw.description : undefined,
       kind,
       enabledByDefault: raw.enabledByDefault !== false,
+      /* ★ v0.35.0 新增字段（全部可选；缺省即「零代码声明式插件」） */
+      apiVersion,
+      engines,
+      main: mainEntry,
+      renderer: rendererEntry,
+      activation,
+      permissions,
       provides,
     },
     issues,
@@ -395,22 +693,30 @@ export function parsePluginManifest(raw: unknown): PluginParseResult {
 
 /** 人话贡献摘要（列表与诊断页共用） */
 export function contributionLabelOf(m: PluginManifest): string {
+  const extra: string[] = []
+  if (m.provides.views?.length) extra.push(`视图 ×${m.provides.views.length}`)
+  if (m.provides.tools?.length) extra.push(`工具 ×${m.provides.tools.length}`)
+  const suffix = extra.length > 0 ? ` ＋ ${extra.join(' ＋ ')}` : ''
+
   switch (m.kind) {
     case 'panel': {
       const list = [m.provides.panel, ...(m.provides.panels ?? [])].filter(Boolean)
-      if (list.length <= 1) return `面板 ×1（${m.provides.panel?.component ?? '?'}）`
-      return `面板 ×${list.length}（${list.map((x) => x!.component).join(' / ')}）`
+      if (list.length === 0) return `视图插件（无声明式面板）${suffix}`
+      if (list.length === 1) return `面板 ×1（${list[0]!.component}）${suffix}`
+      return `面板 ×${list.length}（${list.map((x) => x!.component).join(' / ')}）${suffix}`
     }
     case 'renderer': {
       const exts = m.provides.renderer?.extensions ?? []
-      return `渲染器 ×${exts.length}（.${exts.join(' / .')}）`
+      return `渲染器 ×${exts.length}（.${exts.join(' / .')}）${suffix}`
     }
     case 'action':
-      return `动作 ×1（${m.provides.action?.actionId ?? '?'}）`
+      return `动作 ×1（${m.provides.action?.actionId ?? '?'}）${suffix}`
     case 'homeModule':
-      return `首页模块 ×1（${m.provides.homeModule?.module ?? '?'}）`
+      return `首页模块 ×1（${m.provides.homeModule?.module ?? '?'}）${suffix}`
     case 'theme':
-      return `主题 token 覆盖 ×1`
+      return `主题 token 覆盖 ×1${suffix}`
+    case 'tool':
+      return `模型工具 ×${m.provides.tools?.length ?? 0}${suffix}`
     default:
       return '—'
   }

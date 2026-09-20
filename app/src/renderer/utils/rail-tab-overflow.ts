@@ -1,22 +1,32 @@
 /* ============================================================
- * ArkWork — 竖排 Tab 栏「高度自适应折叠」（v0.34.2 · D56）
+ * ArkWork — 竖排 Tab 栏「铺满才折叠」（v0.34.3 · D58）
  *
- * 规格来源：docs/versions/v0.34.2/04-system-design.md §2
+ * 规格来源：docs/versions/v0.34.3/04-system-design.md §D58
  *
- * 用户诉求原文（v0.34.2 实测复报）：
- *   ① 「显示的侧边栏名称超过三个会挤压溢出」
- *   ② 「右侧侧边栏栏目如果超过侧边栏容纳范围高度，需要有折叠机制」
+ * ★ 本版为什么再改一次（口径纠正，不是修 bug）：
+ *   v0.34.2（D56-c）把用户的两句话读成了一条「双条件」规则：
+ *       **可见条数 = min(名称上限 3, 可用高度能容纳的条数)**
+ *   其中「≤3」被当成**用户的硬偏好**。用户本版给出真正的规则（实测原文）：
  *
- * 与 v0.34.0（D54）的差别 —— D54 把诉求读成了「插件面板 ≤ 3，内置全留」，
- * 结果竖排栏仍渲染 6 内置 + 3 插件 = 9 个名称（实测），用户复报同一问题。
- * 本版的读法是两句话合起来的一条规则：
+ *       「在**铺满**的时候才有更多」
  *
- *   **可见条数 = min(名称上限 3, 可用高度能容纳的条数)**
+ *   即：**「超过三个会挤压溢出」是对症状的描述，不是对数量的偏好** ——
+ *   她的窗口恰好只能放 3 个，多了就溢出；而「>3」这个数字被误当成了偏好上限。
+ *   后果很直接：在有 9 个名称、窗口却完全放得下时，仍然被强行折叠出「更多」。
  *
- *   · 「≤3」来自诉求① —— 三个以上就开始挤压，这是用户的硬偏好；
- *   · 「高度能容纳」来自诉求② —— 高度不够时继续减，而不是撑出滚动条；
- *   · 被折叠的项**全部**进底部「更多」弹层（内置与插件一视同仁：
- *     诉求①说的是「名称」总数，不是「插件名称」）。
+ *   故本版规则收敛为**单条件、纯高度驱动**：
+ *
+ *       **只有放不下，才折叠；折叠出来的部分才进「更多」。**
+ *
+ *     ① 放得下（`itemsHeight(total) ≤ usable`）→ 一条都不收，「更多」不出现；
+ *     ② 放不下 → 先给「更多」触发器留位，再按剩余高度算能放几条；
+ *     ③ 未测量（首帧 / 无 ResizeObserver / jsdom）→ **不折叠**（全显示）。
+ *        既然规则是「铺满才折叠」，那么「还没量到高度」就**不能假定已铺满**；
+ *        多渲染一条由 `.inspector-toolbar` 的 `overflow-y: auto` 兜底，
+ *        而凭空冒出一个「更多」是更糟的假象。
+ *
+ *   想回到「≤3 硬上限」只有一处实参：`computeRailLayout({ …, maxVisible: 3 })`。
+ *   `MAX_VISIBLE_NAMES` 常量保留导出（标 @deprecated）仅为不破坏历史 import。
  *
  * 代价与补偿（写在代码里，避免后来者以为是遗漏）：
  *   · 内置 Tab 也会被折叠 —— 但 ⌥1~⌥6 快捷键**不依赖可见性**（切 Tab 走
@@ -25,7 +35,7 @@
  *   · 当前激活的面板**永远可见** —— `pickVisibleTabs` 会把激活项换进可见段，
  *     否则用户在「更多」里点完，竖排栏上找不到自己点的是哪一个。
  *
- * 纯函数、零依赖：可直接密闭单测（TC-RTO 组）。
+ * 纯函数、零依赖：可直接密闭单测（TC-OVF 组）。
  * ============================================================ */
 
 /* ---------- 尺寸常量：全部来自 Inspector 现有样式，改样式必须同步改这里 ---------- */
@@ -46,10 +56,15 @@ export const RAIL_HIDDEN_BLOCK_BASE_H = 48
 export const RAIL_HIDDEN_ITEM_H = 40
 
 /**
- * 竖排栏「名称」总数上限（用户定调：超过三个会挤压溢出）。
- * 改动此常量 = 改动需求，必须先回到用户确认。
+ * @deprecated v0.34.3（D58）起**不再参与判定** —— 用户口径已纠正为「铺满才折叠」
+ * （纯高度驱动），数量上限被判定为对症状的误读。
+ * 常量仅为不破坏历史 import 而保留；如需恢复硬上限，请给 `computeRailLayout`
+ * 显式传 `maxVisible`（见 TC-OVF-016）。
  */
 export const MAX_VISIBLE_NAMES = 3
+
+/** `maxVisible` 缺省值：不限（只有高度说了算） */
+export const DEFAULT_MAX_VISIBLE = Number.POSITIVE_INFINITY
 
 /** n 条连续条目占用的高度（n ≤ 0 → 0；含条目间 gap） */
 export function itemsHeight(n: number): number {
@@ -73,12 +88,16 @@ export interface RailLayoutInput {
   /**
    * 竖排栏可用高度（`clientHeight`）。
    * `null` / `NaN` / `<= 0` = **尚未测量**（首帧、测试环境、jsdom）→
-   * 退化为「只按名称上限」判定，保证首帧与终帧同一口径、不闪跳。
+   * **不折叠**（全显示）：规则是「铺满才折叠」，没量到高度就不能假定已铺满。
    */
   availableHeight: number | null
   /** 额外预留高度（已隐藏区；缺省 0） */
   reservedHeight?: number
-  /** 名称上限（缺省 MAX_VISIBLE_NAMES；仅用于测试与后续可配置化） */
+  /**
+   * 可见条数上限。
+   * **缺省不限**（`DEFAULT_MAX_VISIBLE`）—— D58 口径纠正后数量不再是判据；
+   * 显式传入（如 `3`）可恢复 v0.34.2 的「≤3 硬上限」，仅供口径回退与测试使用。
+   */
   maxVisible?: number
 }
 
@@ -91,45 +110,54 @@ export interface RailLayout {
   collapsed: boolean
 }
 
+/** `maxVisible` 归一：缺省 / 非有限 → 不限；其余取 ≥1 整数 */
+function normalizeMaxVisible(value: number | undefined): number {
+  if (value === undefined || value === null) return DEFAULT_MAX_VISIBLE
+  if (typeof value !== 'number' || Number.isNaN(value)) return DEFAULT_MAX_VISIBLE
+  if (value === Number.POSITIVE_INFINITY) return DEFAULT_MAX_VISIBLE
+  if (!Number.isFinite(value)) return 1
+  return Math.max(1, Math.floor(value))
+}
+
 /**
  * 计算竖排栏可见条数。
  *
  * 规则（逐条有用例）：
- *  ① `total ≤ 上限` 且高度放得下 → 全可见、不折叠（够用时绝不提前收纳）；
- *  ② 否则折叠：先给「更多」触发器留位，再按剩余高度算能放几条；
- *  ③ 可见条数夹在 `[1, min(上限, total)]` —— 至少留 1 条（只剩一个「更多」
+ *  ① `total = 0` → 全 0、不折叠（空栏连「更多」都不该有）；
+ *  ② **未测量**（`availableHeight` 非法）→ `visibleCount = total`、不折叠；
+ *  ③ **放得下**（`itemsHeight(total) ≤ usable` 且 `total ≤ maxVisible`）→ 不折叠；
+ *  ④ 否则折叠：先给「更多」触发器留位，再按剩余高度算能放几条；
+ *  ⑤ 可见条数夹在 `[1, min(maxVisible, total)]` —— 至少留 1 条（只剩一个「更多」
  *     按钮的竖排栏没有意义），且绝不出现「负上限」；
- *  ④ 未测量（availableHeight 非法）→ 退化为 `min(上限, total)`；
- *  ⑤ 高度极矮（连 1 条 + 触发器都放不下）→ 仍给 1 条，由 `.inspector-toolbar`
+ *  ⑥ 高度极矮（连 1 条 + 触发器都放不下）→ 仍给 1 条，由 `.inspector-toolbar`
  *     的 `overflow-y: auto` 兜底滚动（最后一层保险，不再是常规路径）。
+ *
+ * 不变式（用例把守）：`visibleCount + overflowCount ≡ total`；
+ * `overflowCount > 0 ⟹ itemsHeight(total) > usable`（**「更多」只在铺满时出现**）；
+ * `H` 递增则 `visibleCount` 不减（高度单调）。
  */
 export function computeRailLayout(input: RailLayoutInput): RailLayout {
   const total = Math.max(0, Math.floor(input.total))
-  const max = Math.max(1, Math.floor(input.maxVisible ?? MAX_VISIBLE_NAMES))
   if (total === 0) return { visibleCount: 0, overflowCount: 0, collapsed: false }
 
   const H = input.availableHeight
   const measured = typeof H === 'number' && Number.isFinite(H) && H > 0
 
-  // ④ 未测量：只按名称上限（首帧稳定，不依赖测量时序）
+  // ② 未测量：不折叠（「铺满才折叠」⇒ 没量到高度就不能假定已铺满）
   if (!measured) {
-    const visibleCount = Math.min(max, total)
-    return {
-      visibleCount,
-      overflowCount: total - visibleCount,
-      collapsed: total > visibleCount,
-    }
+    return { visibleCount: total, overflowCount: 0, collapsed: false }
   }
 
-  const reserved = Math.max(0, input.reservedHeight ?? 0)
+  const max = normalizeMaxVisible(input.maxVisible)
+  const reserved = Math.max(0, Math.floor(input.reservedHeight ?? 0))
   const usable = (H as number) - RAIL_PADDING_Y - RAIL_COLLAPSE_BTN_H - reserved
 
-  // ① 全放得下 → 一条都不收
+  // ③ 放得下 → 一条都不收（「铺满的时候才有更多」）
   if (total <= max && itemsHeight(total) <= usable) {
     return { visibleCount: total, overflowCount: 0, collapsed: false }
   }
 
-  // ②③ 折叠：扣掉「更多」触发器（含它自己的 gap）后再算容量
+  // ④⑤⑥ 折叠：扣掉「更多」触发器（含它与上一项之间的 gap）后再算容量
   const usableForItems = usable - RAIL_OVERFLOW_TRIGGER_H - RAIL_ITEM_GAP
   const fit = Math.floor((usableForItems + RAIL_ITEM_GAP) / (RAIL_ITEM_H + RAIL_ITEM_GAP))
   const visibleCount = Math.max(1, Math.min(max, fit, total))

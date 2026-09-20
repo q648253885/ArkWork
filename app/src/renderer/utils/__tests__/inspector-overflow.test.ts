@@ -1,26 +1,32 @@
 /* ============================================================
- * ArkWork — 竖排栏高度自适应折叠（TC-OVF 组）
- * 规格来源：docs/versions/v0.34.2/04-system-design.md §2
+ * ArkWork — 竖排栏「铺满才折叠」（TC-OVF 组）
+ * 规格来源：docs/versions/v0.34.3/04-system-design.md §D58
  *
  * ⚠️ 口径取代登记（不是静默改动）：
- *   D54（v0.34.0）的 TC-OVF-001..008 断言的是「**插件面板** ≤3、内置全留」，
- *   而该口径经用户实测复报后被判定为**需求读错**——竖排栏实测仍渲染
- *   6 内置 + 3 插件 = 9 个名称。用户 v0.34.2 复报原文：
- *     ① 「显示的侧边栏名称超过三个会挤压溢出」
- *     ② 「右侧侧边栏栏目如果超过侧边栏容纳范围高度，需要有折叠机制」
- *   新规则：**可见条数 = min(名称上限 3, 可用高度能容纳的条数)**，
- *   被折叠项（内置与插件一视同仁）全部进「更多」弹层。
- *   故本组整体重写为 TC-OVF-001..013；D54 的「插件专属上限」语义已退役，
- *   退役记录见 docs/versions/v0.34.2/00-release-goal.md §3。
+ *   D56-c（v0.34.2）的 TC-OVF-001..017 断言的是
+ *       **可见条数 = min(名称上限 3, 可用高度能容纳的条数)**
+ *   —— 其中「≤3」被当成**用户的硬偏好**。用户 v0.34.3 实测复报给出真正的规则：
+ *
+ *       「整体验证，尤其是侧边栏，**在铺满的时候才有更多**，
+ *         现在的更多我点不开」
+ *
+ *   即「超过三个会挤压溢出」是对**症状**的描述（她的窗口恰好只放得下 3 个），
+ *   不是对数量的偏好。故本组整体重写为 TC-OVF-001..019，规则收敛为：
+ *
+ *       **只有放不下才折叠；放得下就一条都不收，数量不再是判据。**
+ *
+ *   退役记录见 docs/versions/v0.34.3/00-release-goal.md §三「口径纠正登记」。
  *
  * 运行（cwd=app）：node scripts/run-tests.mjs inspector-overflow
  * ============================================================ */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  DEFAULT_MAX_VISIBLE,
   MAX_VISIBLE_NAMES,
   RAIL_COLLAPSE_BTN_H,
   RAIL_HIDDEN_BLOCK_BASE_H,
+  RAIL_HIDDEN_ITEM_H,
   RAIL_ITEM_GAP,
   RAIL_ITEM_H,
   RAIL_OVERFLOW_TRIGGER_H,
@@ -31,182 +37,234 @@ import {
   pickVisibleTabs,
 } from '../rail-tab-overflow.js'
 
-/** 造 n 个条目（builtin 只为可读性，新规则不再区分来源） */
+/** 造 n 个条目（builtin 只为可读性，折叠不区分来源） */
 const tabsOf = (n: number, prefix = 'panel:t') =>
   Array.from({ length: n }, (_, i) => ({ ref: `${prefix}${i}`, builtin: i % 2 === 0 }))
 
-/** 让「可见上限 3 条」刚好放得下的最小高度 */
-const H_FULL_3 = RAIL_PADDING_Y + RAIL_COLLAPSE_BTN_H + itemsHeight(3)
+/** 给定竖排栏高度 → 条目实际可用高度（扣内边距 + 底部折叠按钮 + 已隐藏区） */
+const usableOf = (H: number, reserved = 0) => H - RAIL_PADDING_Y - RAIL_COLLAPSE_BTN_H - reserved
 
 /* ---------- 常量契约 ---------- */
 
-test('TC-OVF-001 ★ 名称上限 = 3（用户定调「超过三个会挤压溢出」；改动必须回到用户确认）', () => {
-  assert.equal(MAX_VISIBLE_NAMES, 3)
-})
-
-test('TC-OVF-002 尺寸常量与 Inspector 样式同源（改样式不改这里 = 折叠算错）', () => {
+test('TC-OVF-001 尺寸常量与 Inspector 样式同源（改样式不改这里 = 折叠算错）', () => {
   assert.equal(RAIL_ITEM_H, 64, '.inspector-toolbar__item height: 64px')
   assert.equal(RAIL_ITEM_GAP, 2, '.inspector-toolbar gap: 2px')
   assert.equal(RAIL_PADDING_Y, 12, '.inspector-toolbar padding: 6px 0')
   assert.equal(RAIL_COLLAPSE_BTN_H, 36, '底部折叠按钮 h-9')
   assert.equal(RAIL_OVERFLOW_TRIGGER_H, 48, '「更多」区块 mt-1(4) + pt-2(8) + h-9(36)')
   assert.equal(RAIL_HIDDEN_BLOCK_BASE_H, 48, '「已隐藏区」首项同构')
+  assert.equal(RAIL_HIDDEN_ITEM_H, 40, '「已隐藏区」每多一项 h-9 + gap-1')
 })
 
-test('TC-OVF-003 itemsHeight / hiddenBlockHeight：n≤0 → 0，含条目间 gap', () => {
+test('TC-OVF-002 itemsHeight：n≤0 → 0，含条目间 gap', () => {
   assert.equal(itemsHeight(0), 0)
   assert.equal(itemsHeight(-3), 0)
   assert.equal(itemsHeight(1), 64)
   assert.equal(itemsHeight(2), 130)
   assert.equal(itemsHeight(3), 196)
+  assert.equal(itemsHeight(9), 592)
+})
+
+test('TC-OVF-003 hiddenBlockHeight：0 项 → 0（该区块不渲染）', () => {
   assert.equal(hiddenBlockHeight(0), 0)
+  assert.equal(hiddenBlockHeight(-1), 0)
   assert.equal(hiddenBlockHeight(1), 48)
-  assert.equal(hiddenBlockHeight(2), 88)
+  assert.equal(hiddenBlockHeight(3), 128)
 })
 
-/* ---------- computeRailLayout ---------- */
-
-test('TC-OVF-004 total = 0 → 三字段零值（不产生「空折叠」）', () => {
-  assert.deepEqual(computeRailLayout({ total: 0, availableHeight: 800 }), {
-    visibleCount: 0,
-    overflowCount: 0,
-    collapsed: false,
-  })
+test('TC-OVF-004 ★ 数量上限常量已退役：不再参与判定，仅在显式传入时生效', () => {
+  // 常量仍导出（不破坏历史 import），但语义已改 —— 缺省判定完全由高度决定
+  assert.equal(MAX_VISIBLE_NAMES, 3)
+  assert.equal(DEFAULT_MAX_VISIBLE, Number.POSITIVE_INFINITY)
+  // 6 项 + 高度充裕 → 不传 maxVisible 时 6 条全显（若 3 仍是硬上限就会只剩 3）
+  const r = computeRailLayout({ total: 6, availableHeight: 800 })
+  assert.equal(r.visibleCount, 6)
 })
 
-test('TC-OVF-005 ★ 条数 ≤3 且高度足够 → 全可见、不折叠（够用时绝不提前收纳）', () => {
-  for (const n of [1, 2, 3]) {
-    const r = computeRailLayout({ total: n, availableHeight: 800 })
-    assert.equal(r.visibleCount, n, `total=${n} 应全可见`)
-    assert.equal(r.overflowCount, 0)
-    assert.equal(r.collapsed, false)
+/* ---------- 核心：铺满才折叠 ---------- */
+
+test('TC-OVF-005 空栏：total=0 → 全 0、不折叠（空栏连「更多」都不该有）', () => {
+  for (const H of [null, 0, 100, 800]) {
+    const r = computeRailLayout({ total: 0, availableHeight: H })
+    assert.deepEqual(r, { visibleCount: 0, overflowCount: 0, collapsed: false })
   }
-  // 恰好卡在临界高度：H_FULL_3 放得下 3 条
-  assert.equal(computeRailLayout({ total: 3, availableHeight: H_FULL_3 }).collapsed, false)
 })
 
-test('TC-OVF-006 ★ 用户复报场景回归：9 个名称 + 充裕高度 → 仍只显示 3（不得按高度放开）', () => {
-  const r = computeRailLayout({ total: 9, availableHeight: 1200 })
-  assert.equal(r.visibleCount, 3, '≥4 个名称就是「挤压溢出」——高度再宽也不放开')
-  assert.equal(r.overflowCount, 6)
+test('TC-OVF-006 ★ 没铺满 → 不出现「更多」：9 项 / 栏高 800 全显示', () => {
+  const r = computeRailLayout({ total: 9, availableHeight: 800 })
+  assert.equal(r.visibleCount, 9)
+  assert.equal(r.overflowCount, 0)
+  assert.equal(r.collapsed, false)
+  // 前提校验：9 项确实放得下（放不下就不该走这条断言）
+  assert.ok(itemsHeight(9) <= usableOf(800))
+})
+
+test('TC-OVF-007 ★ 名义「三个」不再是边界：3 项 + 高度充裕 / 4 项 + 高度充裕 都不折叠', () => {
+  for (const total of [1, 2, 3, 4, 5]) {
+    const r = computeRailLayout({ total, availableHeight: 800 })
+    assert.equal(r.visibleCount, total, `${total} 项应全显`)
+    assert.equal(r.overflowCount, 0, `${total} 项不应折叠`)
+  }
+})
+
+test('TC-OVF-008 ★ 放不下才折叠：9 项 / 栏高 560 → 出现「更多」', () => {
+  const H = 560
+  const r = computeRailLayout({ total: 9, availableHeight: H })
+  assert.ok(itemsHeight(9) > usableOf(H), '前提：9 项放不下')
+  assert.ok(r.overflowCount > 0, '放不下必须折叠')
+  assert.ok(r.visibleCount < 9)
   assert.equal(r.collapsed, true)
-  // 高度翻倍也不改变结论（防「按测量值全放开」的回归）
-  assert.equal(computeRailLayout({ total: 9, availableHeight: 4000 }).visibleCount, 3)
+  // 具体数值：usable=512 → 462/66 → 7 条
+  assert.equal(r.visibleCount, 7)
+  assert.equal(r.overflowCount, 2)
 })
 
-test('TC-OVF-007 ★ 诉求②：高度不够时继续减（折叠而不是撑出滚动条）', () => {
-  // 刚好差 1px 放不下 3 条 → 退到 2 条
-  const r = computeRailLayout({ total: 3, availableHeight: H_FULL_3 - 1 })
-  assert.equal(r.visibleCount, 2)
-  assert.equal(r.overflowCount, 1)
-  // 极矮：连 2 条都放不下 → 1 条
-  const tiny = computeRailLayout({ total: 9, availableHeight: 200 })
-  assert.equal(tiny.visibleCount, 1)
-  assert.equal(tiny.overflowCount, 8)
-})
-
-test('TC-OVF-008 极矮窗口仍给 1 条（绝不出现「只剩一个更多按钮」的竖排栏）', () => {
-  for (const h of [1, 40, 60, 100]) {
-    const r = computeRailLayout({ total: 5, availableHeight: h })
-    assert.equal(r.visibleCount, 1, `H=${h} 时应保留 1 条`)
-    assert.ok(r.overflowCount >= 0)
+test('TC-OVF-009 折叠时先给「更多」触发器留位（含它与上一项之间的 gap）', () => {
+  for (const H of [200, 300, 400, 500, 560, 600]) {
+    const r = computeRailLayout({ total: 9, availableHeight: H })
+    if (r.overflowCount === 0) continue
+    const used = itemsHeight(r.visibleCount) + RAIL_OVERFLOW_TRIGGER_H + RAIL_ITEM_GAP
+    assert.ok(
+      used <= usableOf(H),
+      `H=${H}: 可见 ${r.visibleCount} 条 + 触发器 = ${used} 应 ≤ 可用 ${usableOf(H)}`,
+    )
   }
 })
 
-test('TC-OVF-009 未测量（null / NaN / 0 / 负）→ 退化为「只按上限 3」', () => {
-  for (const h of [null, Number.NaN, 0, -100]) {
-    const r = computeRailLayout({ total: 7, availableHeight: h })
-    assert.equal(r.visibleCount, 3, `availableHeight=${String(h)} 应退化为条数上限`)
-    assert.equal(r.overflowCount, 4)
+test('TC-OVF-010 高度单调：栏越高，可见条数只增不减', () => {
+  let prev = -1
+  for (let H = 100; H <= 1000; H += 10) {
+    const r = computeRailLayout({ total: 9, availableHeight: H })
+    assert.ok(r.visibleCount >= prev, `H=${H} 时可见 ${r.visibleCount} < 上一档 ${prev}`)
+    prev = r.visibleCount
   }
-  // 未测量且条数本来就 ≤3 → 不折叠（首帧不该闪出一个假的「更多」）
-  assert.equal(computeRailLayout({ total: 2, availableHeight: null }).collapsed, false)
 })
 
-test('TC-OVF-010 预留高度（已隐藏区）参与预算：同样高度、有隐藏区时更早折叠', () => {
-  const H = 260
-  const noReserve = computeRailLayout({ total: 3, availableHeight: H, reservedHeight: 0 })
-  const withReserve = computeRailLayout({ total: 3, availableHeight: H, reservedHeight: hiddenBlockHeight(1) })
-  assert.equal(noReserve.visibleCount, 3, '无隐藏区时 3 条放得下')
-  assert.equal(withReserve.visibleCount, 1, '隐藏区吃掉高度后应更早折叠')
+test('TC-OVF-011 保底 1 条：极矮时也不出现「只剩一个更多按钮」的空栏', () => {
+  for (const H of [1, 40, 100, 120, 200]) {
+    const r = computeRailLayout({ total: 9, availableHeight: H })
+    assert.ok(r.visibleCount >= 1, `H=${H} 时应至少显示 1 条`)
+  }
 })
 
-test('TC-OVF-011 maxVisible 可配置（为后续「用户自定义上限」留口），非法值夹到 ≥1', () => {
-  assert.equal(computeRailLayout({ total: 3, availableHeight: 800, maxVisible: 1 }).visibleCount, 1)
-  assert.equal(computeRailLayout({ total: 9, availableHeight: 800, maxVisible: 5 }).visibleCount, 5)
-  assert.equal(computeRailLayout({ total: 9, availableHeight: 800, maxVisible: 0 }).visibleCount, 1)
-  assert.equal(computeRailLayout({ total: 9, availableHeight: 800, maxVisible: -2 }).visibleCount, 1)
-})
-
-test('TC-OVF-012 输出自洽：visible + hidden = total 恒成立（不丢项、不重复）', () => {
-  for (const total of [0, 1, 3, 4, 9, 20]) {
-    for (const h of [null, 120, 240, 400, 900]) {
-      const r = computeRailLayout({ total, availableHeight: h })
-      assert.equal(r.visibleCount + r.overflowCount, total, `total=${total} h=${String(h)}`)
-      assert.ok(r.visibleCount >= 0)
-      assert.equal(r.collapsed, r.overflowCount > 0)
+test('TC-OVF-012 ★ 「更多」只在铺满时出现（total≥2 时二者等价）', () => {
+  for (let total = 2; total <= 12; total++) {
+    for (let H = 60; H <= 1000; H += 37) {
+      const r = computeRailLayout({ total, availableHeight: H })
+      const full = itemsHeight(total) > usableOf(H)
+      assert.equal(
+        r.overflowCount > 0,
+        full,
+        `total=${total} H=${H}: 溢出 ${r.overflowCount} 与「放不下=${full}」不一致`,
+      )
     }
   }
 })
 
-/* ---------- pickVisibleTabs ---------- */
-
-test('TC-OVF-013 可见/折叠两段保持输入顺序，且引用透传（UI 需要同一 ref）', () => {
-  const tabs = tabsOf(6)
-  const { visible, hidden } = pickVisibleTabs(tabs, 3)
-  assert.deepEqual(visible.map((t) => t.ref), ['panel:t0', 'panel:t1', 'panel:t2'])
-  assert.deepEqual(hidden.map((t) => t.ref), ['panel:t3', 'panel:t4', 'panel:t5'])
-  assert.equal(visible[0], tabs[0], '不得克隆元素')
-  assert.equal(hidden[0], tabs[3])
-  assert.equal(visible.length + hidden.length, tabs.length)
-})
-
-test('TC-OVF-014 visibleCount = 0 → 全部进折叠段（弹层仍可用，不丢项）', () => {
-  const tabs = tabsOf(4)
-  const { visible, hidden } = pickVisibleTabs(tabs, 0)
-  assert.deepEqual(visible, [])
-  assert.deepEqual(hidden, tabs)
-  // 负数同义；超长（> length）→ 全部可见
-  assert.deepEqual(pickVisibleTabs(tabs, -1).visible, [])
-  assert.equal(pickVisibleTabs(tabs, 99).hidden.length, 0)
-})
-
-test('TC-OVF-015 ★ 激活项落在折叠段 → 换入可见段（可见段最后一位被换出）', () => {
-  const tabs = tabsOf(6)
-  const { visible, hidden } = pickVisibleTabs(tabs, 3, 'panel:t4')
-  assert.deepEqual(visible.map((t) => t.ref), ['panel:t0', 'panel:t1', 'panel:t4'], '输入顺序不变，只换人')
-  assert.deepEqual(hidden.map((t) => t.ref), ['panel:t2', 'panel:t3', 'panel:t5'])
-  assert.equal(visible.length + hidden.length, tabs.length, '不丢项')
-  assert.equal(new Set([...visible, ...hidden].map((t) => t.ref)).size, tabs.length, '不重复')
-})
-
-test('TC-OVF-016 激活项本就在可见段 / ref 不存在 / 未传 → 一律不动', () => {
-  const tabs = tabsOf(6)
-  assert.deepEqual(pickVisibleTabs(tabs, 3, 'panel:t1').visible.map((t) => t.ref), ['panel:t0', 'panel:t1', 'panel:t2'])
-  assert.deepEqual(pickVisibleTabs(tabs, 3, 'panel:ghost').hidden.map((t) => t.ref), ['panel:t3', 'panel:t4', 'panel:t5'])
-  assert.deepEqual(pickVisibleTabs(tabs, 3, null).visible.map((t) => t.ref), ['panel:t0', 'panel:t1', 'panel:t2'])
-  assert.deepEqual(pickVisibleTabs(tabs, 3).visible.map((t) => t.ref), ['panel:t0', 'panel:t1', 'panel:t2'])
-})
-
-test('TC-OVF-017 泛型保形：额外字段（title/icon）随元素原样透传（弹层要渲染它们）', () => {
-  interface RichTab {
-    ref: string
-    builtin: boolean
-    title: string
-    icon: string
+test('TC-OVF-013 不丢项：visible + overflow ≡ total（任意输入）', () => {
+  for (let total = 0; total <= 15; total++) {
+    for (const H of [null, 0, -5, 80, 300, 560, 900, Number.NaN]) {
+      const r = computeRailLayout({ total, availableHeight: H })
+      assert.equal(r.visibleCount + r.overflowCount, total, `total=${total} H=${String(H)}`)
+    }
   }
-  const tabs: RichTab[] = Array.from({ length: 5 }, (_, i) => ({
-    ref: `panel:p${i}`,
-    builtin: false,
-    title: `面板 ${i}`,
-    icon: 'Plug',
-  }))
-  const r = computeRailLayout({ total: tabs.length, availableHeight: 200 })
-  assert.equal(r.visibleCount, 1, 'H=200 只放得下 1 条（本用例顺带锁住高度口径）')
-  const { visible, hidden } = pickVisibleTabs(tabs, r.visibleCount, 'panel:p4')
-  assert.equal(visible.length, 1)
-  assert.equal(visible[0]!.title, '面板 4', '激活项换入后仍带着自己的标题')
-  assert.equal(visible[0]!.icon, 'Plug')
-  assert.equal(hidden[0]!.title, '面板 0', '被换出的那一位落进折叠段（不丢项）')
-  assert.equal(hidden.length, tabs.length - 1)
+})
+
+test('TC-OVF-014 预留高度（已隐藏区）参与判定：预留越多，可见越少且可能触发折叠', () => {
+  const base = computeRailLayout({ total: 9, availableHeight: 800 })
+  assert.equal(base.overflowCount, 0, '前提：不预留时 9 项放得下')
+
+  let prev = base.visibleCount
+  for (const reserved of [100, 200, 300, 400]) {
+    const r = computeRailLayout({ total: 9, availableHeight: 800, reservedHeight: reserved })
+    assert.ok(r.visibleCount <= prev, `预留 ${reserved} 时可见 ${r.visibleCount} > ${prev}`)
+    assert.ok(itemsHeight(r.visibleCount) <= usableOf(800, reserved), '不得超出预留后的空间')
+    prev = r.visibleCount
+  }
+  const tight = computeRailLayout({ total: 9, availableHeight: 800, reservedHeight: 400 })
+  assert.ok(tight.overflowCount > 0, '预留 400 后 9 项已放不下 → 必须折叠')
+})
+
+/* ---------- 未测量：绝不凭「没量到」冒「更多」 ---------- */
+
+test('TC-OVF-015 ★ 未测量（null）→ 不折叠、全显示', () => {
+  const r = computeRailLayout({ total: 9, availableHeight: null })
+  assert.equal(r.visibleCount, 9)
+  assert.equal(r.overflowCount, 0)
+  assert.equal(r.collapsed, false)
+})
+
+test('TC-OVF-016 非法高度（NaN / 0 / 负数）→ 同「未测量」，一律不折叠', () => {
+  for (const H of [Number.NaN, 0, -1, -100]) {
+    const r = computeRailLayout({ total: 9, availableHeight: H })
+    assert.equal(r.visibleCount, 9, `H=${String(H)} 不应折叠`)
+    assert.equal(r.overflowCount, 0)
+    assert.equal(r.collapsed, false)
+  }
+})
+
+/* ---------- maxVisible：口径回退逃生口 ---------- */
+
+test('TC-OVF-017 ★ 显式 maxVisible=3 可恢复 v0.34.2 的「≤3 硬上限」', () => {
+  const r = computeRailLayout({ total: 9, availableHeight: 800, maxVisible: 3 })
+  assert.equal(r.visibleCount, 3)
+  assert.equal(r.overflowCount, 6)
+  assert.equal(r.collapsed, true)
+})
+
+test('TC-OVF-018 maxVisible 边界：非法值按缺省（不限）处理，不出现 0 或负上限', () => {
+  const t = (mv: unknown) =>
+    computeRailLayout({ total: 9, availableHeight: 800, maxVisible: mv as number })
+  assert.equal(t(Number.NaN).visibleCount, 9, 'NaN → 不限')
+  assert.equal(t(Number.POSITIVE_INFINITY).visibleCount, 9, 'Infinity → 不限')
+  assert.equal(t(0).visibleCount, 1, '0 → 夹到最小 1（不是 0 或负）')
+  assert.equal(t(-5).visibleCount, 1, '负数 → 夹到最小 1')
+  // 高度放不下时，maxVisible 只做「上限」，实际仍受高度约束
+  const tight = computeRailLayout({ total: 9, availableHeight: 300, maxVisible: 99 })
+  assert.ok(tight.visibleCount < 9, '高度才是硬约束')
+})
+
+/* ---------- 可见段选取（激活项恒可见） ---------- */
+
+test('TC-OVF-019 pickVisibleTabs：顺序恒等于输入，且 visible + hidden ≡ tabs', () => {
+  const tabs = tabsOf(9)
+  for (const n of [0, 1, 3, 7, 9]) {
+    const { visible, hidden } = pickVisibleTabs(tabs, n)
+    assert.equal(visible.length + hidden.length, tabs.length)
+    assert.deepEqual(
+      [...visible, ...hidden].map((t) => t.ref),
+      tabs.map((t) => t.ref),
+      '两段拼接后必须还原输入顺序',
+    )
+  }
+  // 引用透传（不克隆）
+  const { visible } = pickVisibleTabs(tabs, 3)
+  assert.equal(visible[0], tabs[0])
+})
+
+test('TC-OVF-020 ★ 激活项落在折叠段 → 换进可见段（对调末位，其余次序不变）', () => {
+  const tabs = tabsOf(9)
+  const { visible, hidden } = pickVisibleTabs(tabs, 3, 'panel:t8')
+  assert.equal(visible.length, 3)
+  assert.deepEqual(
+    visible.map((t) => t.ref),
+    ['panel:t0', 'panel:t1', 'panel:t8'],
+    '保留前 n-1 个 + 激活项，按输入顺序排列',
+  )
+  assert.deepEqual(
+    hidden.map((t) => t.ref),
+    ['panel:t2', 'panel:t3', 'panel:t4', 'panel:t5', 'panel:t6', 'panel:t7'],
+    '被换出的末位落入折叠段，其余次序不变',
+  )
+})
+
+test('TC-OVF-021 激活项不在表内 / 为 null / visibleCount=0 → 不做对调', () => {
+  const tabs = tabsOf(5)
+  const a = pickVisibleTabs(tabs, 2, 'not-exist')
+  assert.deepEqual(a.visible.map((t) => t.ref), ['panel:t0', 'panel:t1'])
+  const b = pickVisibleTabs(tabs, 2, null)
+  assert.deepEqual(b.visible.map((t) => t.ref), ['panel:t0', 'panel:t1'])
+  const c = pickVisibleTabs(tabs, 0, 'panel:t3')
+  assert.equal(c.visible.length, 0)
+  assert.equal(c.hidden.length, 5, 'visibleCount=0 → 全部进折叠段（弹层仍可用）')
 })

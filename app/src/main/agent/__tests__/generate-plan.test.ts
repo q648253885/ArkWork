@@ -309,13 +309,18 @@ test('v0.9.1: READONLY_TOOLS 存在且含 file-reader', () => {
   )
 })
 
-test('v0.19.0: seed.ts 使用 syncBuiltinAgentsToLatest 统一同步内置 Agent 到 0.25.0', () => {
+test('v0.19.0: seed.ts 使用 syncBuiltinAgentsToLatest 统一同步内置 Agent 到最新版本', () => {
   const src = readFileSync(
     fileURLToPath(new URL('../../store/seed.ts', import.meta.url)),
     'utf8',
   )
   assert.match(src, /async\s+function\s+syncBuiltinAgentsToLatest/, 'seed.ts 应定义 syncBuiltinAgentsToLatest')
-  assert.match(src, /version:\s*'0\.25\.0'/, '@default.version 应保持 0.25.0')
+  // v0.34.4（D66）：由 0.25.0 升到 0.34.4 —— 提示词 §6/§7 修正了
+  // 「创建 TodoWrite 清单」（该工具并不存在，真机导致模型编造 `todo-write` 与
+  // `item_index:-1`）→ 改为「清单由计划阶段生成，你只更新已有项」。
+  // syncBuiltinAgentsToLatest **只在 version 落后时同步**，因此改提示词必须同时升版本，
+  // 否则已装机器永远拿不到新提示词。
+  assert.match(src, /version:\s*'0\.34\.4'/, '@default.version 应升到 0.34.4（提示词修正需触发同步）')
   assert.match(src, /systemSections/, '内置 Agent 应派生 systemSections')
   assert.match(src, /## 1\. 技能优先/, '@default.systemPrompt 应含技能优先段')
   assert.match(src, /## 2\. 工具选择层级/, '@default.systemPrompt 应含工具选择层级段')

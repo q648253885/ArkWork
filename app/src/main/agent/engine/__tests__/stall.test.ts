@@ -225,3 +225,93 @@ test('TC-STALL-014 签名是快照字符串：底层对象后续被改写不回�
   assert.equal(after, 'done')
   assert.notEqual(before, after, '快照必须能反映后续变化 —— 这正是「本轮是否推进」的判据')
 })
+
+/* ============================================================
+ * 2b. v0.34.4（D64）：被守卫拦截的轮次必须计零产出
+ *
+ * 立组原因（真机 t1 · T-20260919-6c3v48）：
+ *   51 轮 / 86 次调用 / 15 次「同参数调用已达上限（5/5）」/ 零产物。
+ *   `hasNewThought` 的豁免（TC-STALL-005 立的口）在这里**反噬** ——
+ *   模型每轮都在写"换个办法"的新思考（每轮 thought 都不同），
+ *   于是**没有一轮**被判零产出，6 轮终局守卫一次都没到。
+ *
+ * 新维度的语义：**被守卫拦截 = 这一轮拿不到任何新信息**，有新思考也只是空想。
+ * 因此它必须**压过** hasNewThought / hasSayOutput / planProgressed 的豁免，
+ * 排在 isStalledRound 的第一行。
+ * ============================================================ */
+
+test('TC-STALL-015 ★ [D64] 全部工具被守卫拦截 → 零产出（即使有全新思考）', () => {
+  const v = isStalledRound(
+    row({
+      hasToolCall: true,
+      allReadonly: true,
+      allGuardBlocked: true,
+      hasNewThought: true, // ← 模型在写"换个办法"，正是真机里发生的事
+      hasSayOutput: false,
+    }),
+  )
+  assert.equal(v, true, '★ 拦截轮 = 零新信息，必须判零产出（否则 D52 终局永不到达）')
+})
+
+test('TC-STALL-016 [D64] 拦截轮压过 say 叙述与清单推进豁免', () => {
+  assert.equal(
+    isStalledRound(row({ hasToolCall: true, allGuardBlocked: true, hasSayOutput: true })),
+    true,
+    '★ 说了话但一个工具都没执行成功，仍是零产出',
+  )
+  assert.equal(
+    isStalledRound(row({ hasToolCall: true, allGuardBlocked: true, planProgressed: true })),
+    true,
+    '★ 拦截轮清单不可能真推进（引擎推进走的是另一条路）—— 防守卫判据被绕过',
+  )
+})
+
+test('TC-STALL-017 ★ [D64 反向] 未被拦截的探索轮仍享 hasNewThought 豁免（不得回归误杀）', () => {
+  // D52 补口的既有契约：qwen3.5:9b 真机两次误杀「分析工作区」类任务，
+  // 只读探索**就是任务本体**，有新发现不算空转。
+  // 新维度只许在"被拦截"时生效，不许把这条豁免顺手一起废掉。
+  assert.equal(
+    isStalledRound(row({ hasToolCall: true, allReadonly: true, allGuardBlocked: false, hasNewThought: true })),
+    false,
+    '★ 未被拦截 + 有新思考 = 有产出（D52 v0.34.x 补口不可回归）',
+  )
+  // 缺省（不传该字段）等价于 false
+  assert.equal(
+    isStalledRound(row({ hasToolCall: true, allReadonly: true, hasNewThought: true })),
+    false,
+    '★ 缺省 false：无工具调用分支本就没有"被拦截"可言',
+  )
+})
+
+test('TC-STALL-018 [D64] 拦截轮连续计数 → 与既有终局阈值同源（6 轮即停）', () => {
+  let c = 0
+  for (let i = 0; i < MAX_STALLED_ROUNDS - 1; i++) {
+    const stalled = isStalledRound(row({ hasToolCall: true, allGuardBlocked: true, hasNewThought: true }))
+    c = advanceStallCounter(c, stalled)
+    assert.equal(isStallTerminal(c), false, `第 ${i + 1} 轮不应终局`)
+  }
+  c = advanceStallCounter(
+    c,
+    isStalledRound(row({ hasToolCall: true, allGuardBlocked: true, hasNewThought: true })),
+  )
+  assert.equal(isStallTerminal(c), true, `★ 连续 ${MAX_STALLED_ROUNDS} 轮全被拦截 → 必须终局（优雅暂停）`)
+})
+
+test('TC-STALL-019 [D64] 真机序列复现：13 轮「拦截↔成功」交替仍必须走到终局', () => {
+  // 复刻 t1 任务 I39→I51 的真实形态：模型每隔一两轮插一次成功调用"洗白"，
+  // 使「连续全耗尽」计数反复归零（旧兜底因此拖到第 13 轮才停）。
+  // 本用例钉住的是：只要存在连续 6 轮全被拦，就必须停下，无论前面怎么交替。
+  const seq = [true, true, false, false, false, true, true, false, false, true, true, true, true, true, true]
+  let c = 0
+  let terminalAt = -1
+  seq.forEach((blocked, i) => {
+    const stalled = isStalledRound(
+      row({ hasToolCall: true, allReadonly: true, allGuardBlocked: blocked, hasNewThought: true }),
+    )
+    c = advanceStallCounter(c, stalled)
+    if (terminalAt === -1 && isStallTerminal(c)) terminalAt = i + 1
+  })
+  assert.notEqual(terminalAt, -1, '★ 序列里存在 6 连拦截，必须终局')
+  assert.ok(terminalAt <= seq.length, `终局应在序列内到达，实际第 ${terminalAt} 轮`)
+})
+

@@ -297,6 +297,21 @@ test('v0.18.x fix: 任务失败时 markRunningPlanItemFailed 把 running 项标 
   assert.match(engineSrc, /source:\s*['"]engine-fail['"]/, '失败来源应为 engine-fail')
   // 失败路径接入该函数（v0.23.2：max-iterations 改为优雅暂停不再标 failed，
   // 真实失败路径剩 catch task_failed 与上下文溢出 fast-fail 等 ≥2 处）
+  // v0.34.4（D65）再减 1：预算耗尽终局从 task_failed 改为**优雅暂停**
+  // （paused + ask_user），暂停可恢复，按 D36「暂停刻意不封口」不得标清单失败。
   const callCount = (engineSrc.match(/await\s+markRunningPlanItemFailed\(task\)/g) ?? []).length
-  assert.ok(callCount >= 2, `markRunningPlanItemFailed 应至少在 2 个失败路径接入，当前 ${callCount} 处`)
+  assert.ok(callCount >= 1, `markRunningPlanItemFailed 应至少在 1 个真实失败路径接入，当前 ${callCount} 处`)
+
+  // v0.34.4（D65）★ 反向保险：**优雅暂停**路径不得标清单失败。
+  // 暂停不是失败 —— 用户可能续聊完成它，清单被标 failed 会让"续聊后清单全是失败项"。
+  // 与 v0.34.0 D52 的 pauseForStalledRounds 同口径（它也从一开始就不标）。
+  for (const fn of ['pauseForStalledRounds', 'pauseForBudgetExhausted']) {
+    const m = engineSrc.match(new RegExp(`async function ${fn}\\([\\s\\S]*?\\n\\}`))
+    assert.ok(m, `应存在 ${fn}`)
+    assert.doesNotMatch(
+      m![0],
+      /markRunningPlanItemFailed/,
+      `★ ${fn} 是优雅暂停路径，不得把清单项标 failed（暂停可恢复，见 D36/D65）`,
+    )
+  }
 })

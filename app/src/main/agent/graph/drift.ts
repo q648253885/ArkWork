@@ -172,9 +172,14 @@ export function computeDrift(
 /** 把漂移结果渲染成给模型的软提示（一行，不啰嗦） */
 export function renderDriftHint(focus: TaskNode | undefined, result: DriftResult): string {
   if (result.action !== 'soft' || !focus) return ''
+  // v0.34.4（D68）：这里原文案末尾曾有一句"如果这是完成它必须做的准备工作，请忽略此提示"
+  // —— 等于给模型发了一张免死金牌：真机（t1 · T-20260919-6c3v48）I25 已触发 0.63 的
+  // 软提示，模型读到后原样继续空转，streak 也从不累积成 replan。
+  // 改为要求**显式表态**：要么说明本轮动作为何属于当前步，要么先 replan。
   return (
     `⚠ 注意：你本轮的动作与当前任务「${focus.key ?? focus.id} ${focus.title}」关联较弱（一致性 ${result.score.toFixed(2)}）。` +
-    `如果这是完成它必须做的准备工作，请忽略此提示；如果不是，请先确认是否应该调整计划（replan）。`
+    `请在本轮 Reason 中**显式表态**：① 若它确属该步的必要准备，一句话说明理由后继续；` +
+    `② 若不属于，立即用 ask_user 提出调整计划（replan），不要沉默地重复同类动作。`
   )
 }
 

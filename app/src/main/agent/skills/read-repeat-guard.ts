@@ -33,16 +33,70 @@ interface RepeatEntry {
   lastContentHead: string
 }
 
-/** 内部 Map：taskId → (signature → entry) */
-const taskMaps = new WeakMap<object, Map<string, RepeatEntry>>()
+/** 内部 Map：taskId → (signature → entry)
+ *
+ * v0.34.4（D70）：**这里曾经是 `WeakMap<object, …>`，键是 `ctx` 对象身份 —— 这是本条守卫
+ * 自 v0.24.0 起在生产上完全失效的根因。**
+ *
+ * 为什么失效：`SkillContext` 由 `act.ts:414` 在 `executeAct()` 内部**每次工具调用新建**
+ * （对象里含 `iteration` 等逐次变化的字段，不可能复用）；`WeakMap` 按对象身份取值
+ * ⇒ 每次调用都命中不到上一次的 bucket，计数恒为 1 ⇒ 永远停在 `pass`。
+ *
+ * 真机证据（t1 · T-20260919-6c3v48，51 轮空转）：
+ *   · 同一文件 `docs/v1.0/00-release-goal.md` 被**成功读取 9 次**（两种写法各 5/4 次）；
+ *   · 出题人本意是第 4 次起 block —— 实际是 0 次 warn、0 次 block；
+ *   · `session.jsonl` 383 条事件里 `重复读警告` / `已拦截` 出现次数 = **0 / 0**。
+ *
+ * 为什么用例没拦住：`read-repeat-guard.test.ts` 用**模块级单例** `const ctx = {taskId:'test'}`
+ * 复用同一个对象，测的是「意图」而非「接线」—— 与 v0.32.1 D38-a 的教训同型（纪律③）。
+ *
+ * 修正：键改为**稳定标识 `taskId`**（`SkillContext.taskId` 为必填 string）。
+ * 因改为强引用 Map，配套加**空闲过期 + 上限淘汰**，避免跨任务无界增长
+ * （`clearRepeatReadMap` 在生产代码里从未被调用，不能指望它兜底）。
+ */
+const MAX_TASKS = 64
+/** 空闲多久视为任务已结束，可回收（毫秒） */
+const TASK_IDLE_MS = 30 * 60 * 1000
+
+interface TaskBucket {
+  map: Map<string, RepeatEntry>
+  lastTouchedAt: number
+}
+
+const taskMaps = new Map<string, TaskBucket>()
+
+/** 任务标识：优先 taskId；缺失时归入同一兜底桶（宁可多拦，不可漏拦） */
+function keyOf(ctx: SkillContext): string {
+  const id = (ctx as { taskId?: unknown }).taskId
+  return typeof id === 'string' && id ? id : '__no_task__'
+}
+
+function pruneIdle(): void {
+  const now = Date.now()
+  for (const [k, b] of taskMaps) {
+    if (now - b.lastTouchedAt > TASK_IDLE_MS) taskMaps.delete(k)
+  }
+  if (taskMaps.size <= MAX_TASKS) return
+  // 仍超上限 → 按最后触碰时间淘汰最旧的（Map 保持插入序，但 lastTouchedAt 更准）
+  const byAge = [...taskMaps.entries()].sort((a, b) => a[1].lastTouchedAt - b[1].lastTouchedAt)
+  for (let i = 0; i < byAge.length - MAX_TASKS; i++) taskMaps.delete(byAge[i][0])
+}
 
 function mapOf(ctx: SkillContext): Map<string, RepeatEntry> {
-  let map = taskMaps.get(ctx as object)
-  if (!map) {
-    map = new Map()
-    taskMaps.set(ctx as object, map)
+  pruneIdle()
+  const k = keyOf(ctx)
+  let bucket = taskMaps.get(k)
+  if (!bucket) {
+    bucket = { map: new Map(), lastTouchedAt: 0 }
+    taskMaps.set(k, bucket)
   }
-  return map
+  bucket.lastTouchedAt = Date.now()
+  return bucket.map
+}
+
+/** 仅供测试：当前登记的桶数（验证有界性） */
+export function repeatGuardBucketCount(): number {
+  return taskMaps.size
 }
 
 /**
@@ -109,17 +163,17 @@ export function recordRepeatResult(
  */
 export function invalidateReadsOf(ctx: SkillContext, path: string): void {
   if (!path) return
-  const map = taskMaps.get(ctx as object)
-  if (!map) return
+  const bucket = taskMaps.get(keyOf(ctx))
+  if (!bucket) return
   const p = path.replaceAll('\\', '/')
-  for (const sig of map.keys()) {
-    if (sig.includes(p)) map.delete(sig)
+  for (const sig of bucket.map.keys()) {
+    if (sig.includes(p)) bucket.map.delete(sig)
   }
 }
 
 /** 清空某 task 的所有读文件记录（如任务结束 / pause） */
 export function clearRepeatReadMap(ctx: SkillContext): void {
-  taskMaps.delete(ctx as object)
+  taskMaps.delete(keyOf(ctx))
 }
 
 function stableSignature(signature: Record<string, unknown>): string | null {

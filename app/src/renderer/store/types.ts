@@ -56,7 +56,7 @@ import type { SaveOutcome } from '../services/editorDoc'
 // v0.33.0：面板 Tab（来自 shared 纯函数层，保证与 main 侧同一套归一规则）
 import type { PanelTab } from '@shared/utils/panel-model'
 import type { SlotEntry, SlotKind } from '@shared/types/profile'
-import type { PluginSummary } from '@shared/types/plugin'
+import type { PluginRuntimeStatus, PluginSource, PluginSummary } from '@shared/types/plugin'
 import type { ThemeTokens } from '@shared/utils/theme-tokens'
 import type { RendererKindName } from '@shared/types/vlib'
 import type {
@@ -104,11 +104,15 @@ export type InspectorTabId = 'todos' | 'context' | 'files' | 'logs' | 'browser' 
  * v0.33.0：Inspector Tab 的**运行时引用**。
  *
  * 内置六项用 `InspectorTabId`；插件/工作台声明贡献的面板用 `panel:<name>`。
+ * ★ v0.35.0：插件**代码视图**用 `view:<name>`（`PluginViewHost` 渲染）。
+ *   两者刻意分开命名空间 —— 渲染路径与安全模型完全不同（白名单组件 vs 任意插件 HTML），
+ *   同名会让「视图」在日志与诊断里与「面板」混为一谈。
+ *
  * 类型上是宽联合（模板字面量），值级校验由 `shared/utils/panel-model.ts` 的
- * `isPanelTabRef` / `panelRefToInspectorTab` 负责 —— manifest 来自磁盘，
- * 不能只靠类型把守。
+ * `isPanelTabRef` / `panelRefToInspectorTab` / `isPluginViewRef` 负责 ——
+ * manifest 与视图列表来自磁盘/跨进程，不能只靠类型把守。
  */
-export type InspectorTabRef = InspectorTabId | `panel:${string}`
+export type InspectorTabRef = InspectorTabId | `panel:${string}` | `view:${string}`
 
 export interface DockPrefs {
   tabs: DockTabId[]
@@ -760,17 +764,34 @@ export interface AppState {
 
   /* ============================================================
    * v0.33.0：插件注册表（插件插拔能力）
+   * v0.35.0：+ 代码插件运行期（作用域 / 视图 Tab / 诊断 / 脚手架）
    * 字段与行为定义见 `slices/pluginSlice.ts` 的 `PluginState`。
    * ============================================================ */
   plugins: PluginSummary[]
   pluginsLoaded: boolean
   pluginsBusy: boolean
+  pluginScope: 'workspace' | 'global'
+  /** 插件**代码视图** → 渲染层 Tab（与 `profilePanels` 分两路，见 slice 头注释） */
+  pluginViews: PanelTab[]
+  pluginRuntime: PluginRuntimeStatus[]
+  pluginShadowed: Array<{ id: string; by: PluginSource }>
+  pluginOpenViews: number
   loadPlugins: () => Promise<void>
-  setPluginEnabled: (id: string, enabled: boolean) => Promise<boolean>
+  setPluginScope: (scope: 'workspace' | 'global') => Promise<void>
+  setPluginEnabled: (id: string, enabled: boolean, scope?: 'workspace' | 'global') => Promise<boolean>
   uninstallPlugin: (id: string) => Promise<boolean>
   rescanPlugins: () => Promise<void>
-  openPluginsDir: () => Promise<void>
+  openPluginsDir: (scope?: 'workspace' | 'global') => Promise<void>
   exportPluginSample: (id: string) => Promise<void>
+  scaffoldPlugin: (input: {
+    id: string
+    name: string
+    kind: string
+    scope: 'workspace' | 'global'
+  }) => Promise<boolean>
+  loadPluginRuntime: () => Promise<void>
+  refreshPluginViews: () => Promise<void>
+  subscribeViewOpenRequest: () => () => void
   subscribePluginChanges: () => () => void
 
   // ---- 初始化 ----

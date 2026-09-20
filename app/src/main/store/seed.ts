@@ -103,7 +103,8 @@ const BUILTIN_AGENTS: Agent[] = [
 3. 本次调用是否重复了之前同一参数？如果是，立即改策略，禁止再次调用。
 
 ## 6. 任务清单（todo-update）
-- 多步骤任务首轮必须创建 TodoWrite 清单；简单一问一答可省略。
+- **清单由引擎在计划阶段自动生成**，你不需要（也没有工具可以）自己去"创建"清单。
+- 你只负责**更新已有项**：todo-update({ item_index, status, comment })，item_index 从 **0** 开始，合法 status 为 done/running/pending/skipped/failed/cancelled。禁止传 -1 或负数。
 - 清单状态推进规则（v0.18.0）：act 失败时引擎自动把当前项标 failed；写文件 / 跑命令等阶段内工具**不会**自动推进清单，避免清单抢跑、与真实执行进度错位。
 - 每个子任务**真正完成**时，必须调用 todo-update 把当前项标 done 并说明下一步；跳过 / 重试 / 取消也调 todo-update（标 skipped / retry 等），但不要批量打标。
 - 中断续聊时，先读取当前 Todo 状态；若发现"全部完成却又继续"的冲突，可调 todo-update 修正并告知用户。
@@ -119,7 +120,7 @@ const BUILTIN_AGENTS: Agent[] = [
     defaultKbIds: [],
     defaultConfig: { temperature: 0.5, maxIterations: 60 },
     isBuiltin: true,
-    version: '0.25.0',
+    version: '0.34.4',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
   },
@@ -203,7 +204,8 @@ const BUILTIN_AGENTS: Agent[] = [
 - 文档/注释/实现三者一致，禁止静默分叉。
 
 ## 7. 任务清单（todo-update）
-- 收到软件工程任务后，首轮思考创建 TodoWrite 清单（场景 A 还要列出文档链阶段）。
+- **清单由引擎在计划阶段自动生成**（场景 A 会一并列出文档链阶段），你不需要（也没有工具可以）自己去"创建"清单。
+- 你只负责**更新已有项**：todo-update({ item_index, status, comment })，item_index 从 **0** 开始，合法 status 为 done/running/pending/skipped/failed/cancelled。禁止传 -1 或负数。
 - 清单状态推进规则（v0.18.0）：act 失败时引擎自动把当前项标 failed；写文件 / 跑命令等阶段内工具**不会**自动推进清单，避免清单抢跑、与真实执行进度错位。
 - 每个子任务**真正完成**时，必须调用 todo-update 把当前项标 done 并说明下一步；跳过 / 重试 / 把失败项标 cancelled 也调 todo-update，但不要批量打标。
 - 中断续聊时，先读取当前 Todo 状态；若发现"全部完成却又继续"的冲突，可调 todo-update 修正并告知用户。
@@ -227,7 +229,9 @@ const BUILTIN_AGENTS: Agent[] = [
     defaultConfig: { temperature: 0.3, maxIterations: 80 },
     isBuiltin: true,
     // v0.34.1：更名后必须升版本 —— syncBuiltinAgentsToLatest 只在 version 落后时同步
-    version: '0.34.1',
+    // v0.34.4（D66）：提示词 §7 修正（"创建 TodoWrite 清单" → 清单由计划阶段生成），
+    //                 再次升版本以触发已装机器的同步。
+    version: '0.34.4',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
     // v0.15.0 Task 6：@coder 默认 acceptEdits —— 工作区内轻写（sed -i/tee/mkdir/cp/...）不再每次弹确认；

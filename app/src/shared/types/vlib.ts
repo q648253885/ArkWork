@@ -58,10 +58,33 @@ export interface PanelInteract {
   onRowClick?: PanelRowClick
 }
 
+/**
+ * 面板数据源 kind 的**唯一真源**（v0.34.3 · D61）。
+ *
+ * 为什么必须是常量而不是四处手写的联合：
+ *   本版实测发现「插件打开失败」的**真正最后一层**根因 —— 这份白名单曾在
+ *   **四处**各写一遍，其中三处含 `http`、**渲染前的 `validatePanelData` 独独漏了它**。
+ *   后果：`kind: 'http'` 的面板取数成功（实测已拿到 6 行真实行情）、却永远
+ *   停在「面板数据结构不正确 · 未知数据源 kind「http」」，**从 v0.34.1 起就没渲染过**。
+ *   四处手写 = 四次机会写漏；改为单一常量后，漏项在类型层就编译不过。
+ *
+ * 新增 kind 的完整清单（与 VLIB_COMPONENTS 同款纪律）：
+ *   ① 本常量 ② `PanelData` 的字段注释 ③ `use-panel-data.ts` 的取数分支
+ *   ④ `panel-http.ts`（若走 http 语义）⑤ 用例 `TC-VD` 组的穷尽表驱动
+ */
+export const PANEL_DATA_KINDS = ['static', 'file', 'http', 'mcp'] as const
+
+export type PanelDataKind = (typeof PANEL_DATA_KINDS)[number]
+
+/** 运行时守卫：kind 是否属于白名单（清单校验 / 形状校验 / payload 守卫共用） */
+export function isPanelDataKind(value: unknown): value is PanelDataKind {
+  return typeof value === 'string' && (PANEL_DATA_KINDS as readonly string[]).includes(value)
+}
+
 /** 面板数据形状（唯一形状，组件各取所需；缺必需形状由 validatePanelData 拦在宿主侧） */
 export interface PanelData {
   /** 数据来源：static 直出 / file 读文件 / http 拉网络 / mcp 走 MCP（未接线，诚实报错） */
-  kind: 'static' | 'file' | 'http' | 'mcp'
+  kind: PanelDataKind
   /** 表格类组件的行数据 */
   rows?: Array<Record<string, unknown>>
   /** 表格类组件的列定义（缺省则从首行键推导） */
@@ -208,7 +231,7 @@ export function isPanelSlotPayload(v: unknown): v is PanelSlotPayload {
   if (!isVLibComponent(p.component)) return false
   if (typeof p.data !== 'object' || p.data === null || Array.isArray(p.data)) return false
   const kind = (p.data as Record<string, unknown>).kind
-  if (kind !== 'static' && kind !== 'file' && kind !== 'http' && kind !== 'mcp') return false
+  if (!isPanelDataKind(kind)) return false
   return true
 }
 

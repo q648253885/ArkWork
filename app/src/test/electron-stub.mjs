@@ -19,6 +19,8 @@ export const app = {
   whenReady: async () => {},
   on: () => {},
   quit: () => {},
+  /* v0.35.0：registry 的 VP8 engines 判定与 pack 版本对账要读宿主版本 */
+  getVersion: () => '0.35.0',
 }
 
 export class BrowserWindow {
@@ -92,4 +94,34 @@ export const dialog = {
   showSaveDialog: async () => ({ canceled: true, filePath: undefined }),
 }
 
-export default { app, BrowserWindow, WebContentsView, nativeTheme, shell, net, session, ipcMain, dialog }
+/* v0.35.0：插件 Host 半进程（runtime/supervisor.ts spawnUtilityProcess）。
+ * 单测**不真起进程** —— supervisor 的 spawn 是注入的，用例用假句柄驱动；
+ * 这里提供空壳只是为了让 `import { utilityProcess } from 'electron'` 能解析。 */
+export const utilityProcess = {
+  fork: (_entryPath, _args, _opts) => ({
+    postMessage: () => {},
+    on: () => {},
+    kill: () => {},
+    pid: 0,
+    stdout: { on: () => {} },
+    stderr: { on: () => {} },
+  }),
+}
+
+/* v0.35.0：`arkwork-plugin://` 自定义协议（main/plugins/protocol.ts）。
+ * 空壳注册表 —— 用例只断言「注册了什么 scheme」，不真跑 Chromium 协议栈。 */
+const protocolHandlers = new Map()
+export const protocol = {
+  handle: (scheme, handler) => {
+    protocolHandlers.set(scheme, handler)
+  },
+  unhandle: (scheme) => {
+    protocolHandlers.delete(scheme)
+  },
+  isProtocolHandled: (scheme) => protocolHandlers.has(scheme),
+}
+export function __getProtocolHandler(scheme) {
+  return protocolHandlers.get(scheme)
+}
+
+export default { app, BrowserWindow, WebContentsView, nativeTheme, shell, net, session, ipcMain, dialog, utilityProcess, protocol }
