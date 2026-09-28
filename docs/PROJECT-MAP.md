@@ -122,6 +122,8 @@
 | 构建（不打包） | `npm run build` |
 | 打包 mac `.app` | `npm run build:dir`（产物 `release/mac/ArkWork.app`，**架构 = 宿主架构**；宿主 Intel 时即 x64。**不要**顺手交叉打 arm64：缺 `@napi-rs/canvas-darwin-arm64` 会产出坏包，见 `docs/versions/v0.39.0/evidence/02-package-and-diagnosis.md` §1.1） |
 | 交付前核产物白名单 | 解 `app.asar` 列**非 `node_modules` 条目**并与白名单比对（表见上述 evidence §1.2）——`electron-builder` 把 `out/` 整棵收进 asar，而 `electron-vite build` **不清 `out/`**，历史残留会静默随包出货（D194 / 纪律㉟） |
-| 出 dmg / Windows | 见 `docs/BACKLOG.md` 与 `docs/ARCHITECTURE-ASBUILT.md`（代理须显式禁用） |
+| 出 dmg | `npm run build:mac`（未签名；`.app` 首次打开需在「系统设置 → 隐私与安全性」放行）。**打包前若报 `ENOTEMPTY: release/mac`** → 先 `rm -rf release/mac` 再跑 |
+| 打 Windows 绿色 zip | `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ ./node_modules/.bin/electron-builder --win zip --x64`。**⚠️ 两个已知坑**：① electron-builder 原生 zip 的**顶层是散开的**（148 个文件直接铺开）→ 交付前用 `ditto win-unpacked <tmp>/ArkWork-<ver>-win-x64` + `zip -r` 重打成**顶层唯一目录**；② **网络**：本机代理不可用时**必须不带代理变量**（否则 `ECONNREFUSED 127.0.0.1:7890`），GitHub 直连不通时走 npmmirror 镜像；`rcedit` 在 macOS 上**不需要 wine** |
+| 清理旧产物 | `python3 app/scripts/clean-release.py --dry-run`（先出清单）→ 去掉 `--dry-run` 执行。保留版本**自动读 `app/package.json` 的 version**（唯一真源）；只动 `app/release/` **顶层**、带前缀二次校验；会一并回收 `win-unpacked/`、`_stale-*` 残留与过期 `latest*.yml`。v0.40.0 实测清掉 **1.65 GB 旧安装包 + 2.1 GB `_stale-*` 打包失败残留 + 425 MB 中间产物**（`release/` 1.65 GB → 705 MB） |
 | 版本文档门禁 | `python3 bin/validate_version_docs.py <版本>` |
 | 实机 UI 探针 | `app/scripts/ui-probe.mjs`（CDP 127.0.0.1:9223） |
