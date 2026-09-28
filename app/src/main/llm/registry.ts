@@ -118,7 +118,9 @@ export async function getAdapter(modelId: string): Promise<LlmAdapter> {
  * 思考会压掉原生 tool_calls（详见 `openai.ts:thinkingExtrasFor` 注释）。
  * 因此按端点形态兜底，而不是只看 kind —— 否则这条修复对真实用户配置无效。
  */
-function isOllamaLikeEndpoint(model: LlmModel): boolean {
+/** v0.41.0（D208）导出：正文工具降级通道（engine/prose-tool-call.ts）的激活谓词
+ *  复用本判定 —— 「ollama 形态端点」只许一个事实源（纪律⑦），不得在引擎侧复制。 */
+export function isOllamaLikeEndpoint(model: LlmModel): boolean {
   if (model.kind === 'ollama' || model.kind === 'vllm') return true
   return /:11434\b/.test(model.baseURL ?? '')
 }

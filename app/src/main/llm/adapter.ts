@@ -53,6 +53,16 @@ export interface LlmCompleteRequest {
   temperature?: number
   maxTokens?: number
   signal?: AbortSignal
+  /**
+   * v0.41.0（D208）：**请求级**思考开关覆盖（engine → adapter 的唯一通道）。
+   * · undefined → 沿用模型配置（resolveThink；既有行为零变化）；
+   * · true → Ollama qwen3.5 正文工具降级通道激活：原生 /api/chat 请求体
+   *   `think:true`（思考走独立 `message.thinking` 字段，content 保持干净可解析），
+   *   且不再被「think===true 拒走原生」的模型配置规则拦住 —— 降级模式下
+   *   引擎不依赖原生 tool_calls，思考开、正文可解析正是目标形态。
+   * 除降级谓词命中外，任何调用方都不应传本字段（纪律㊵：安全默认与放行分离）。
+   */
+  think?: boolean
 }
 
 export interface LlmCompleteResponse {

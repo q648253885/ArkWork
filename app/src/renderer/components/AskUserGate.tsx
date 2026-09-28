@@ -18,6 +18,8 @@ import { Icon } from '../icons'
 import type { Suggestion } from '@shared/types/conversation'
 import { isImeComposing } from '@shared/utils/ime'
 import { moveSelection, digitToIndex } from '@shared/utils/gate-nav'
+// v0.41.0（D207）：自由文本输入「就此结束」= 点击「就此结束」chip，不再当答复发送
+import { isFinishHerePhrase } from '@shared/utils/finish-phrase'
 import { useStore } from '../store'
 
 interface AskUserGateProps {
@@ -55,6 +57,14 @@ export function AskUserGate({ question, suggestions, onAnswer, onStop }: AskUser
   const answer = (text: string) => {
     const trimmed = text.trim()
     if (!trimmed) return
+    // v0.41.0（D207）：终局短语与 chip 同通道 —— 实测用户把「就此结束」输进
+    // 自由文本框会被当普通答复发回模型重新规划续跑（主进程侧拦截是权威点，
+    // 这里先行短路省一次 IPC 往返）。
+    if (isFinishHerePhrase(trimmed)) {
+      useStore.getState().clearAskUser()
+      onStop()
+      return
+    }
     useStore.getState().clearAskUser()
     onAnswer(trimmed)
   }

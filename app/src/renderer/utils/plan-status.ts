@@ -106,3 +106,95 @@ export function derivePlanItems(steps: ReActStep[]): string[] {
   if (planStep?.plan && planStep.plan.items.length > 0) return planStep.plan.items
   return []
 }
+
+/* ============================================================
+ * v0.41.0（D209 / TC-TDP-001…003）：清单层级与筛选纯函数
+ * 语义镜像 main 侧 ledger/project.ts 的 buildDepthMap（渲染层不得 import
+ * main 模块）；孤儿父引用 / 自引用环 / 越级一律兜底为顶级，深度 clamp ≤1
+ *（账本层级 ≤2 的镜像，数据坏时 UI 不破版）。
+ * ============================================================ */
+
+export interface PlanItemHierarchy {
+  id: string
+  parentId?: string | null
+}
+
+/** 每项深度（0 = 顶级；与 items 下标对齐返回） */
+export function planItemDepths(items: readonly PlanItemHierarchy[]): number[] {
+  const byId = new Map(items.map((it, i) => [it.id, i]))
+  const depth: number[] = new Array(items.length).fill(0)
+  for (let i = 0; i < items.length; i++) {
+    const pid = items[i]!.parentId
+    if (!pid) continue
+    const p = byId.get(pid)
+    // 父不存在 / 自引用环 → 顶级兜底
+    if (p === undefined || p === i) continue
+    depth[i] = Math.min(depth[p]! + 1, 1)
+  }
+  return depth
+}
+
+/** 复合编号（'1' / '1.1' / '1.2' / '2' …；与 items 下标对齐返回）。
+ *  两遍法：先给全部顶级项编号，再回填子项 —— 父项在子项之后声明也能对上。 */
+export function planItemNumbering(items: readonly PlanItemHierarchy[]): string[] {
+  const byId = new Map(items.map((it, i) => [it.id, i]))
+  const depth = planItemDepths(items)
+  const labels: string[] = new Array(items.length).fill('')
+  let topSeq = 0
+  for (let i = 0; i < items.length; i++) {
+    const pid = items[i]!.parentId
+    const p = pid ? byId.get(pid) : undefined
+    if (depth[i]! === 0 || p === undefined || p === i) {
+      topSeq += 1
+      labels[i] = String(topSeq)
+    }
+  }
+  // 兄弟序号按出现顺序计（父项出现序 → 已遇到的子项个数）
+  const childCount = new Map<number, number>()
+  for (let i = 0; i < items.length; i++) {
+    if (labels[i] !== '') continue
+    const pid = items[i]!.parentId
+    const p = byId.get(pid!)
+    if (p === undefined || p === i) {
+      // 兜底：父缺失但 depth 推断为子（不会发生，防御式收口）
+      topSeq += 1
+      labels[i] = String(topSeq)
+      continue
+    }
+    const n = (childCount.get(p) ?? 0) + 1
+    childCount.set(p, n)
+    labels[i] = `${labels[p] ?? topSeq}.${n}`
+  }
+  return labels
+}
+
+/** TodoPanel 筛选口径：'all' = 仅未终态（完成项归档出主视线）；'ended' = 全部终态 */
+export type PlanFilter = 'all' | 'ended' | PlanItemStatus
+
+const TERMINAL_STATUSES: ReadonlySet<PlanItemStatus> = new Set(['done', 'failed', 'cancelled', 'skipped'])
+
+export function isTerminalPlanStatus(s: PlanItemStatus): boolean {
+  return TERMINAL_STATUSES.has(s)
+}
+
+/**
+ * 筛选 → 可见下标（与 states 对齐）。
+ * 计数与列表口径一致性由调用方保证：「全部」chip 计数必须取本函数 'all' 的长度。
+ */
+export function filterPlanItemIndices(
+  states: readonly PlanItemStatus[],
+  filter: PlanFilter,
+): number[] {
+  const out: number[] = []
+  for (let i = 0; i < states.length; i++) {
+    const s = states[i] ?? 'pending'
+    if (filter === 'all') {
+      if (!isTerminalPlanStatus(s)) out.push(i)
+    } else if (filter === 'ended') {
+      if (isTerminalPlanStatus(s)) out.push(i)
+    } else if (s === filter) {
+      out.push(i)
+    }
+  }
+  return out
+}

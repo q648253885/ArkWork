@@ -201,7 +201,16 @@ export class OpenAIAdapter implements LlmAdapter {
     // v0.38.1（D167）：Ollama 端点 + 显式关思考 → 改走原生 /api/chat 通道
     // （/no_think 与 thinkingExtrasFor 三参数对 ollama /v1 均被实测证伪，
     // 证据见 useOllamaNativeChannel 注释）；非 ollama 端点（vLLM 等）仍走本路径。
-    if (useOllamaNativeChannel(this.provider, this.client.baseURL, this.think)) {
+    // v0.41.0（D208）：`req.think === true`（降级通道显式要求思考）时用
+    // `useOllamaNativeChannel(…, false)` 做**形态探针** —— 只判断"是不是
+    // ollama 形态"，绕开「模型配置 think===true 拒走原生」的规则（该规则
+    // 存在的理由是"原生通道强制 think:false 与用户意图冲突"，而降级通道
+    // 的 body 会带 req.think=true，冲突已不存在）。
+    const useNative =
+      req.think === true
+        ? useOllamaNativeChannel(this.provider, this.client.baseURL, false)
+        : useOllamaNativeChannel(this.provider, this.client.baseURL, this.think)
+    if (useNative) {
       return this.completeOllamaNative(req)
     }
 
@@ -305,7 +314,12 @@ export class OpenAIAdapter implements LlmAdapter {
    */
   async completeStream(req: LlmCompleteRequest, handlers: LlmStreamHandlers): Promise<LlmCompleteResponse> {
     // v0.38.1（D167）：同 complete —— Ollama 原生通道
-    if (useOllamaNativeChannel(this.provider, this.client.baseURL, this.think)) {
+    // v0.41.0（D208）：同 complete —— req.think=true 走形态探针（见 complete 注释）
+    const useNative =
+      req.think === true
+        ? useOllamaNativeChannel(this.provider, this.client.baseURL, false)
+        : useOllamaNativeChannel(this.provider, this.client.baseURL, this.think)
+    if (useNative) {
       return this.completeStreamOllamaNative(req, handlers)
     }
     const model = (req as LlmCompleteRequest & { modelId?: string }).modelId ?? this.defaultModel
@@ -429,7 +443,9 @@ export class OpenAIAdapter implements LlmAdapter {
       messages: toOllamaNativeMessages(req),
       stream,
       // D167 核心参数：think 是 /api/chat 的一等思考开关（/v1 不透传，实测唯一有效关闭通道）
-      think: false,
+      // v0.41.0（D208）：请求级覆盖 —— 降级通道显式 `think:true`（思考走独立
+      // `message.thinking`，content 保持可解析）；缺省仍为 false（D161/D167 行为不变）。
+      think: req.think === true,
       // 工具定义与 OpenAI 形态同构（ollama 原生协议兼容），直接复用 toOpenAITool
       tools: req.tools?.map(toOpenAITool),
       options: {

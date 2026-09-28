@@ -362,3 +362,88 @@ test('TC-ON-007 原生流式无终帧 → interrupted（D35 语义在原生通�
     await mock.close()
   }
 })
+
+/* ============================================================
+ * v0.41.0（D208）：请求级 think 覆盖 —— Ollama qwen3.5 正文工具降级通道
+ * （TC-ON-008…010；矩阵 §二 模块 Q）。纪律㉔：肯定/否定两条腿都钉。
+ * ============================================================ */
+
+test('TC-ON-008 req.think=true + ollama 形态 → 仍走原生通道（形态探针绕开配置否决）', async () => {
+  // chatOnly 只响应 /api/chat：若走 /v1 会 404 —— 用 404 与否钉住通道选择
+  const mock = await startMock(
+    chatOnly((body, _req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ message: { role: 'assistant', content: 'ok' }, done: true, done_reason: 'stop', prompt_eval_count: 1, eval_count: 1 }))
+    }),
+  )
+  try {
+    const adapter = ollamaAdapterOf(mock.url) // 适配器配置 think:false（默认形态）
+    const resp = await adapter.complete({
+      system: 'sys',
+      messages: [{ role: 'user', content: 'x' }],
+      think: true, // ← 请求级覆盖（降级通道激活）
+    })
+    assert.equal(resp.content, 'ok', '原生通道应正常返回 —— 走了 /v1 会被 chatOnly 404 打死')
+    assert.equal(mock.bodies.length, 1)
+  } finally {
+    await mock.close()
+  }
+})
+
+test('TC-ON-009 req.think=true → 请求体 think:true；thinking 走独立通道、content 保持可解析（非流式+流式同源）', async () => {
+  const mock = await startMock((req, res, body) => {
+    if (!req.url || !req.url.endsWith('/api/chat')) {
+      res.writeHead(404)
+      res.end()
+      return
+    }
+    const wantStream = (body as { stream?: boolean }).stream === true
+    if (wantStream) {
+      res.writeHead(200, { 'content-type': 'application/x-ndjson' })
+      res.write(`${JSON.stringify({ message: { role: 'assistant', thinking: '推理片段' }, done: false })}\n`)
+      res.write(`${JSON.stringify({ message: { role: 'assistant', content: '{"tool":"file-reader","path":"."}' }, done: true, done_reason: 'stop', prompt_eval_count: 3, eval_count: 5 })}\n`)
+      res.end()
+    } else {
+      assert.equal((body as { think?: boolean }).think, true, '非流式请求体必须 think:true')
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({
+        message: { role: 'assistant', content: '{"tool":"file-reader","path":"."}', thinking: '推理片段' },
+        done: true,
+        done_reason: 'stop',
+        prompt_eval_count: 3,
+        eval_count: 5,
+      }))
+    }
+  })
+  try {
+    const adapter = ollamaAdapterOf(mock.url)
+    const nonStream = await adapter.complete({ system: 's', messages: [{ role: 'user', content: 'x' }], think: true })
+    assert.equal(nonStream.content, '{"tool":"file-reader","path":"."}', 'content 必须保持原样可解析（思考不得混入正文）')
+    assert.equal(nonStream.reasoningContent, '推理片段', 'thinking 必须映射 reasoningContent')
+    const streamed = await adapter.completeStream(
+      { system: 's', messages: [{ role: 'user', content: 'x' }], think: true },
+      { onText: () => {}, onReasoning: () => {} },
+    )
+    assert.equal(streamed.content, '{"tool":"file-reader","path":"."}')
+    assert.equal(streamed.reasoningContent, '推理片段')
+    assert.equal((mock.bodies[1] as { think?: boolean }).think, true, '流式请求体同样 think:true')
+  } finally {
+    await mock.close()
+  }
+})
+
+test('TC-ON-010 req.think 缺省 → 请求体 think:false（D167 既有行为零变化，否定腿）', async () => {
+  const mock = await startMock(
+    chatOnly((body, _req, res) => {
+      assert.equal((body as { think?: boolean }).think, false, '缺省必须保持显式关思考（D161/D167 行为不变）')
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ message: { role: 'assistant', content: 'ok' }, done: true, done_reason: 'stop' }))
+    }),
+  )
+  try {
+    await ollamaAdapterOf(mock.url).complete({ system: 's', messages: [{ role: 'user', content: 'x' }] })
+    assert.equal(mock.bodies.length, 1)
+  } finally {
+    await mock.close()
+  }
+})

@@ -248,8 +248,14 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
         //     让正文可见（否则被 native 完全遮蔽）；
         //   · `content` 源（无原生思考）→ **不回落**：那种情况下 ReasoningBlock
         //     已经承载了 `thought`，再产一个 say 块会让同一段文字出现两次。
+        //
+        // v0.41.0（D210 P4-2）：**无工具轮（!s.action）不再做 thought 兜底** ——
+        // 无工具轮是 isFinalAnswer 轮（derive-conversation 会产出 assistant 项
+        // → AnswerBlock(thought)），say 兜底与它是**同文双份**（实机弱模型每轮
+        // 都中）。显式 `s.say` 不受影响（与 thought 是不同文本，不算重复）。
         const sayText = stripSayMarkers(
-          (s.say ?? '').trim() || (source === 'native' ? (s.thought ?? '').trim() : ''),
+          (s.say ?? '').trim() ||
+            (source === 'native' && s.action ? (s.thought ?? '').trim() : ''),
         )
         if (sayText) {
           const sb: SayBlock = {
@@ -415,6 +421,8 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
         goal: item.plan?.goal ?? '',
         items: item.plan?.items ?? [],
         states,
+        // v0.41.0（D209）：父引用随快照透传（缺省 = 旧数据平铺）
+        parentIds: item.plan?.parentIds,
         aggregate: aggregateOf(states),
         collapsed: false,
         ts: item.ts ?? 0,

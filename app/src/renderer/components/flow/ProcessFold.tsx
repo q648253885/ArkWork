@@ -25,6 +25,7 @@ import { EMPTY_REASON_KEY, reasoningSourceKey } from '@shared/utils/reasoning'
 import {
   TOOL_FOLD_I18N_KEY,
   countToolRun,
+  lastResultSummaryOf,
   resolveFoldOpen,
   thinkingCountOf,
   toolCountTotal,
@@ -91,6 +92,9 @@ export function ProcessFold({ run }: { run: FlowFoldRun }) {
 
   const state = run.hasFailure ? 'failed' : run.hasRunning ? 'running' : 'settled'
   const ariaName = run.scope === 'tool' ? t('flow.fold.tools') : t('flow.fold.thinking')
+  // v0.41.0（D210 P4-3）：折叠行尾追加「结果信号」—— 最后一个工具结果摘要
+  //（失败优先）。纯思考 run 无结果信号；有信号时 title 悬停看全文。
+  const resultSignal = run.scope === 'reasoning' ? '' : lastResultSummaryOf(visibleBlocks)
 
   // ---- 空思考：静态行（点了也没内容），不渲染箭头、不作为按钮 ----
   if (emptyReason) {
@@ -144,6 +148,11 @@ export function ProcessFold({ run }: { run: FlowFoldRun }) {
         </svg>
         <span className="flow-fold__label">{label}</span>
         {sourceLabel && <span className="flow-fold__meta">{sourceLabel}</span>}
+        {resultSignal && (
+          // v0.41.0（D210 P4-3）：结果信号只做行内摘要（60 字截断），**不**加原生
+          // title —— TC-FOLD-016 既定规范：折叠条提示不得用原生悬浮（ Tooltip 通道）。
+          <span className="flow-fold__meta truncate max-w-[45%]">{resultSignal}</span>
+        )}
         {run.hasRunning && <span className="flow-fold__running">{t('flow.fold.running')}</span>}
         <span className="flex-1" />
         {run.durationMs > 0 && <span className="flow-fold__duration">{fmtSec(run.durationMs)}s</span>}

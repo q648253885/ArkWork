@@ -139,6 +139,11 @@ export interface PlanBlock {
   goal: string
   items: string[]
   states: PlanItemStatus[]
+  /**
+   * v0.41.0（D209）：与 items 按下标对齐的父引用（null = 顶级）。
+   * 缺省 = 旧数据 / 推断占位，平铺渲染（零迁移）。
+   */
+  parentIds?: Array<string | null>
   /** 来自 task.planItems 的聚合状态徽标（沿用 utils/plan-status.ts） */
   aggregate: PlanItemStatus | null
   collapsed: boolean

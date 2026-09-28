@@ -18,6 +18,12 @@ import { broadcastTaskStatus } from '../agent/events.js'
 import { logger } from '../system/logger.js'
 import { getUiLocale, tFor } from '../i18n/messages.js'
 import { migrateTasks } from './tasks.migrate.js'
+// v0.41.0（D207）：「就此结束」终局短语识别 —— 自由文本输入同款短语必须走
+// 完整终局（与 D171 chip 的 onStop 同语义），而不是被当成新指令重新规划续跑。
+import { resolveFinishHereAction } from '@shared/utils/finish-phrase'
+// turn_note 事件的会话落盘（与 engine/broadcast.emitEvent 同款双轨：推送 + session.jsonl）；
+// 不直接 import engine/broadcast —— 它是 engine-context 的重导出枢纽，store 引它会成环。
+import { appendSessionEvent } from '../agent/session-log.js'
 // v0.30.1 问题②·修复点 C：任务终态/删除时清理待决补丁与计划闸门。
 // `agent/graph/pending.ts` 是**零运行时依赖**的纯内存表（仅 import type），
 // 静态引入不会形成 tasks ↔ graph 的 ESM 求值期循环（风险 R4 已核）。
@@ -270,6 +276,49 @@ export async function appendUserMessage(taskId: string, text: string): Promise<T
     content: text,
     enabled: true,
   })
+
+  // ============================================================
+  // v0.41.0（D207）：「就此结束」终局识别 —— 必须在 transient cancel /
+  // status 重置 / runTask **之前**拦截。
+  //
+  // 实机证据（用户会话导出轮 #9）：暂停卡片提示「或就此结束」后，用户把
+  // 「就此结束」输入进 AskUserGate 文本框 → appendUserMessage 把它当普通
+  // 答复发回模型 → 规划通道重排 12 项清单 → 任务继续执行。v0.38.1（D171）
+  // 只堵了建议项 chip（action='finish' → onStop）这一条路，自由文本 /
+  // Composer / 暂停态输入框仍泄漏。
+  //
+  // 语义与 D171 chip 完全对齐（不发明第三种终局）：
+  //   · 'cancel'    → 完整 cancelTask（aborted 控制器 + status=cancelled +
+  //                   sealGraph + sealLedger）+ turn_note 人话回执；
+  //   · 'ack-only'  → 任务已终态，只回执、不改状态、不重跑。
+  //   · 两条路径都【不】执行下方的 transient cancel / pending 重置 / runTask。
+  // ============================================================
+  const finishHere = resolveFinishHereAction(text, task.status)
+  if (finishHere) {
+    const note =
+      finishHere === 'cancel'
+        ? '已按你的选择就此结束：任务已停止并标记为取消，未完成项已收口；已完成的进度与答复都保留在对话中。'
+        : '任务已结束，无需再次结束。可以随时新建任务继续。'
+    try {
+      // 与 emitEvent 同款双轨：推给 renderer + 落 session.jsonl（推送失败不阻断终局）
+      broadcast('task:event', { type: 'turn_note', taskId, iteration: 0, text: note, via: 'engine-stop' })
+      await appendSessionEvent(taskId, { type: 'turn_note', taskId, iteration: 0, text: note, via: 'engine-stop' })
+    } catch (noteErr) {
+      logger.warn('System', `finish-here note skipped: ${(noteErr as Error).message}`, taskId)
+    }
+    if (finishHere === 'cancel') {
+      const { cancelTask } = await import('../agent/runner.js')
+      await cancelTask(taskId)
+      // 暂停卡片的提问已经由「就此结束」回答，不清会残留成重开时的无因由提问（D198 同族）
+      await updateTask(taskId, { pendingAskUser: undefined })
+      const finished = await getTask(taskId)
+      if (finished) broadcastTaskStatus(finished)
+      logger.info('System', `finish-here phrase detected — task ended without rerun`, taskId)
+      return finished
+    }
+    logger.info('System', `finish-here phrase on terminal task — ack only, no state change`, taskId)
+    return await getTask(taskId)
+  }
 
   // v0.16.7+：续聊路径竞态修复——
   // 1. 先调 cancelTask 清掉内存 controllers（如果上一次 run 还在 await 返回中），

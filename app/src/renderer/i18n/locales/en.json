@@ -1314,6 +1314,7 @@
       "locate_card_tooltip": "Locate the plan card in the conversation",
       "locate": "Locate",
       "filter_all": "All",
+      "filter_ended": "Ended",
       "filter_empty": "No items under current filter",
       "engine_tooltip": "Status set automatically by the engine based on act results",
       "engine": "Engine",

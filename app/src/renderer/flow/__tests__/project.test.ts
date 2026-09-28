@@ -265,11 +265,16 @@ test('TC-FLOW-004 计划卡状态取 task.planItems', () => {
  * TC-FLOW-010…012 缺陷 D37（v0.32.1）—— 「正式输出」通道不得被原生思考吞掉
  * ============================================================ */
 
-test('TC-FLOW-010 D37：原生思考存在时，正文（thought）必须仍有可见通道', () => {
+test('TC-FLOW-010 D37（v0.41.0 P4-2 改写）：原生思考存在时，正文（thought）必须仍有可见通道', () => {
   // 用户实测报障：交互区「只有思考和工具调用，没有正式输出」。
   // 根因：`reasoningText()` 在 native 存在时优先返回 reasoning（G4 裁决），
   // 把 `thought` 整段遮蔽。实测形态（T-20260918-2l6905 steps.jsonl）：
   // 某步 `reasoning=5172 字符 / thought=87 字符` —— 那 87 字符从未出现在界面上。
+  //
+  // v0.41.0（D210 P4-2）语义升级：无工具轮（!action）是 isFinalAnswer 轮，
+  // thought 由 **AnswerBlock**（assistant 项）承载 —— say 兜底不再产生
+  // （否则同文双份，TC-FLW-001）；**有工具轮**的 thought 兜底仍由 say 承载
+  // （见下方否定腿与 TC-FLW-001）。
   const items: ConversationItem[] = [
     userItem('u1', '生成一个简单的超级玛丽网页小游戏', 100),
     reactItem('r1', [
@@ -281,6 +286,7 @@ test('TC-FLOW-010 D37：原生思考存在时，正文（thought）必须仍有�
         thought: '正在执行目标：生成一个简单的超级玛丽网页小游戏。先查看工作区现有文档：',
       }),
     ]),
+    { id: 'a1', type: 'assistant', text: '正在执行目标：生成一个简单的超级玛丽网页小游戏。先查看工作区现有文档：', ts: 200 },
   ]
 
   const turns = projectConversation(baseInput({ items }))
@@ -292,8 +298,12 @@ test('TC-FLOW-010 D37：原生思考存在时，正文（thought）必须仍有�
   assert.equal(reasoning[0].text, '原生推理链：先分析需求，再决定用 canvas 还是 DOM……')
 
   const says = seq.filter((b) => b.kind === 'say') as SayBlock[]
-  assert.equal(says.length, 1, '★ 正文必须有块承载 —— 修复前为 0（正文被吞，界面只剩思考）')
-  assert.match(says[0].text, /^正在执行目标/, '承载的是 thought 正文')
+  assert.equal(says.length, 0, '★ v0.41.0：无工具轮不产 say 兜底（防同文双份）')
+
+  // 正文可见性由 AnswerBlock 承载（D37 的「正文不得被吞」目标不变，载体升级）
+  const answers = turns[0].outerBlocks.filter((b) => b.kind === 'answer') as AnswerBlock[]
+  assert.equal(answers.length, 1, 'assistant 项 → AnswerBlock 必须存在')
+  assert.match(answers[0].text, /^正在执行目标/, '承载的是 thought 正文')
 })
 
 test('TC-FLOW-011 D37：content 源不回落 —— 同一段文字绝不出现两次', () => {
@@ -340,3 +350,55 @@ function reasoningSourceOf(seq: ReturnType<typeof turnRenderSequence>): string {
   const r = seq.find((b) => b.kind === 'reasoning')
   return r ? (r as ReasoningBlock).source : 'none'
 }
+
+/* ============================================================
+ * v0.41.0（D210 · TC-FLW-001/002）：交互区展示对齐 ZCode
+ * ============================================================ */
+
+test('TC-FLW-001 D210 P4-2：无工具轮不再产 say 兜底（AnswerBlock 唯一，杜绝同文双份）', () => {
+  // native 思考 + thought + 无 action —— derive-conversation 会为该轮合成
+  // assistant 项（thought → AnswerBlock）。此前 say 兜底也用 thought → 双份。
+  const items: ConversationItem[] = [
+    userItem('u1', 'q', 100),
+    reactItem('r1', [
+      step({ id: 's1', type: 'reason', iteration: 1, reasoning: '原生推理链', thought: '正在执行计划第 1 步：读取根目录' }),
+    ]),
+    { id: 'a1', type: 'assistant', text: '正在执行计划第 1 步：读取根目录', ts: 200 },
+  ]
+  const turns = projectConversation(baseInput({ items }))
+  assert.equal(turns.length, 1)
+  const blocks = turns[0].steps.flatMap((s) => s.blocks)
+  const sayBlocks = blocks.filter((b) => b.kind === 'say')
+  assert.equal(sayBlocks.length, 0, '无工具轮不得再产 say 兜底（thought 已由 AnswerBlock 呈现）')
+  // 否定腿：有 action 的轮 say 兜底必须保留（D37 修复不回退）
+  const itemsWithAct: ConversationItem[] = [
+    userItem('u1', 'q', 100),
+    reactItem('r1', [
+      step({ id: 's1', type: 'reason', iteration: 1, reasoning: '原生推理链', thought: '正文可见性', action: { tool: 'file-reader', args: { path: '.' } } }),
+    ]),
+  ]
+  const turns2 = projectConversation(baseInput({ items: itemsWithAct }))
+  const blocks2 = turns2[0].steps.flatMap((s) => s.blocks)
+  assert.equal(blocks2.filter((b) => b.kind === 'say').length, 1, '有动作轮 thought 兜底保留（D37 语义不回退）')
+})
+
+test('TC-FLW-002 D210 P4-1：isSummarySource 仅标本轮最后一个 say（SayBlock 降调的数据源）', () => {
+  const items: ConversationItem[] = [
+    userItem('u1', 'q', 100),
+    reactItem('r1', [
+      step({ id: 's1', type: 'reason', iteration: 1, say: '第一条叙述' }),
+      step({ id: 's2', type: 'reason', iteration: 2, say: '第二条叙述' }),
+      step({ id: 's3', type: 'reason', iteration: 3, say: '阶段结论' }),
+    ]),
+  ]
+  const turns = projectConversation(baseInput({ items }))
+  const says = turns[0].steps
+    .flatMap((s) => s.blocks)
+    .filter((b): b is SayBlock => b.kind === 'say')
+  assert.equal(says.length, 3)
+  assert.deepEqual(
+    says.map((b) => b.isSummarySource),
+    [false, false, true],
+    '只有本轮最后一个 say 保持主内容层级，其余降调',
+  )
+})

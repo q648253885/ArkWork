@@ -52,10 +52,15 @@ export function AnswerBlock({ block }: { block: AnswerBlockT }) {
   const { t } = useTranslation()
   const [verificationOpen, setVerificationOpen] = useState(false)
 
+  // v0.41.0（D210 P4-4 · 对齐 ZCode）：最终答复**轻量强调容器** —— 左侧 2px
+  // 主色边 + 极浅底色，让长轮次里「最终答复」有唯一的强终点。流式/未分层/
+  // 分层三种形态统一包裹；不改内部 Markdown / 分层逻辑，不新增文案。
+  const shell = 'rounded-r-md border-l-2 border-l-accent bg-accent-soft pl-2.5 py-0.5'
+
   // 流式期不解析（防残帧）
   if (block.streaming) {
     return (
-      <div className="text-base text-text-primary leading-relaxed select-text">
+      <div className={`text-base text-text-primary leading-relaxed select-text ${shell}`}>
         <pre className="whitespace-pre-wrap font-sans m-0">{block.text}</pre>
       </div>
     )
@@ -66,7 +71,7 @@ export function AnswerBlock({ block }: { block: AnswerBlockT }) {
   // 未成形（识别 < 2 段）→ 保持原样渲染，不做任何切分
   if (!shouldRenderLayered(parsed)) {
     return (
-      <div className="text-base text-text-primary leading-relaxed select-text">
+      <div className={`text-base text-text-primary leading-relaxed select-text ${shell}`}>
         <Markdown content={block.text} />
       </div>
     )
@@ -76,7 +81,7 @@ export function AnswerBlock({ block }: { block: AnswerBlockT }) {
 
   return (
     <div
-      className="text-base text-text-primary leading-relaxed select-text"
+      className={`text-base text-text-primary leading-relaxed select-text ${shell}`}
       data-testid="answer-layered"
     >
       {parsed.prefix && (

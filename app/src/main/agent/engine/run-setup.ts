@@ -282,6 +282,22 @@ export async function prepareRun(args: {
       // 「确保任务图存在」块会据这份 planItems 建图（migrateToGraph），两通道按构造一致。
       task.planItems = planItems
       await updateTask(task.id, { planItems })
+      // v0.41.0（D209）：计划步快照透传父引用 —— **必须与 plan.items 对齐**（PlanBlock
+      // 渲染的是 plan.items），而 planItems 经阶段标题过滤后可能比 plan.items 短，
+      // 故按「保留项在原 items 中的下标」回映射。初次生成的 items 是扁平的（层级引用
+      // 由 task_plan / PlanOps 落账后产生，活体层级展示在 TodoPanel）；本透传链让
+      // PlanBlock 具备与 TodoPanel 相同的层级渲染能力（TC-TDP-005）。
+      {
+        const keptSet = new Set(keepItems)
+        const keptOriginalIdx: number[] = []
+        plan.items.forEach((text, j) => {
+          if (keptSet.has(text)) keptOriginalIdx.push(j)
+        })
+        plan.parentIds = plan.items.map((_text, j) => {
+          const i = keptOriginalIdx.indexOf(j)
+          return i >= 0 ? (planItems[i]?.parentId ?? null) : null
+        })
+      }
       // v0.37.0：清单落账 —— 从这一刻起 TaskLedger 是唯一真相源，
       // Task.planItems 降级为它的只读投影（由 ledger 单一写入者回写）。
       try {

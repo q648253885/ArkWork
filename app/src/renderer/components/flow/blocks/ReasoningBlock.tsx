@@ -17,7 +17,6 @@
  * `forceOpen` 只作用于头行渲染与正文可见性，**不动 resolveReasoningOpen
  * 解析链本身**（源契约 TC-THINK-001/002/003 断言方向不变）。
  * ============================================================ */
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../../../store'
 import { EMPTY_REASON_KEY, reasoningSourceKey, resolveReasoningOpen } from '@shared/utils/reasoning'
@@ -32,7 +31,11 @@ interface ReasoningBlockProps {
 export function ReasoningBlock({ block, forceOpen = false }: ReasoningBlockProps) {
   const { t } = useTranslation()
   const showThinking = useStore((s) => s.flow.showThinking)
-  const [userOpen, setUserOpen] = useState<boolean | null>(null)
+  // v0.41.0（D210 P4-5）：userOpen 从组件 useState 迁入 store `flow.blockUiState`
+  // （与 ProcessFold 同模式）—— 虚拟化 / 切页 / 重挂载后用户展开意图不再丢失。
+  const uiState = useStore((s) => s.flow.blockUiState[block.id])
+  const setBlockOpen = useStore((s) => s.setBlockOpen)
+  const userOpen: boolean | null = uiState?.userOpen ?? null
 
   if (!showThinking) return null
 
@@ -55,7 +58,7 @@ export function ReasoningBlock({ block, forceOpen = false }: ReasoningBlockProps
           type="button"
           className="react-reason__head select-none"
           aria-expanded={showFull}
-          onClick={() => setUserOpen(!showFull)}
+          onClick={() => setBlockOpen(block.id, !showFull)}
         >
           <span className="react-reason__label">{t('thought.label')}</span>
           {/* 来源徽标（G4：三种来源都有，none 也显式标注）+ 时长 */}

@@ -1314,6 +1314,7 @@
       "locate_card_tooltip": "定位到对话流中的计划卡片",
       "locate": "定位",
       "filter_all": "全部",
+      "filter_ended": "已结束",
       "filter_empty": "当前筛选下没有任务",
       "engine_tooltip": "引擎基于 act 结果自动设定该状态",
       "engine": "引擎",

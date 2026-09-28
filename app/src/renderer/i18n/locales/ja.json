@@ -1314,6 +1314,7 @@
       "locate_card_tooltip": "会話フロー内のプランカードに移動",
       "locate": "移動",
       "filter_all": "すべて",
+      "filter_ended": "終了",
       "filter_empty": "現在のフィルターでは項目がありません",
       "engine_tooltip": "エンジンが act 結果に基づいてこの状態を自動設定しました",
       "engine": "エンジン",

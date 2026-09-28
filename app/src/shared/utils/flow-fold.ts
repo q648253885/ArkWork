@@ -88,6 +88,29 @@ function runDuration(blocks: FlowBlock[]): number {
   return sum
 }
 
+/**
+ * v0.41.0（D210 P4-3）：折叠行尾的「结果信号」—— run 内**最后一个有结果摘要**
+ * 的工具块摘要（失败优先：run 内存在失败/守卫块时改取其错误信息）。
+ * 「先折叠后摘要」仍能一眼看到过程做成了什么；无工具结果 → ''。
+ * 按码点截断到 60 字（不劈代理对）。
+ */
+export function lastResultSummaryOf(blocks: FlowBlock[]): string {
+  let last = ''
+  let failedMsg = ''
+  for (const b of blocks) {
+    if (b.kind !== 'tool') continue
+    if (b.status === 'failed' || b.status === 'guarded') {
+      if (!failedMsg) failedMsg = (b.errorMessage ?? b.result?.summary ?? '').trim()
+      continue
+    }
+    const s = (b.result?.summary ?? '').trim()
+    if (s) last = s
+  }
+  const raw = failedMsg || last
+  const cps = Array.from(raw)
+  return cps.length > 60 ? `${cps.slice(0, 60).join('')}…` : raw
+}
+
 /** 由一段连续同类进程块构造 run（导出供测试与 TurnFooter 直接复用） */
 export function buildFoldRun(scope: FoldScope, blocks: FlowBlock[]): FlowFoldRun {
   const first = blocks[0]

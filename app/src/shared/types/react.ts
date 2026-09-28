@@ -24,6 +24,12 @@ export type ReActStepStatus = 'success' | 'failed' | 'cancelled' | 'running'
 export interface PlanContent {
   goal: string
   items: string[]
+  /**
+   * v0.41.0（D209）：与 items 按下标对齐的父引用（null = 顶级）。
+   * 由 run-setup 从账本投影（planItems[].parentId）透传，供 PlanBlock 渲染
+   * 子任务层级缩进 + 复合编号；缺省 = 旧数据，平铺渲染（零迁移）。
+   */
+  parentIds?: Array<string | null>
   useResources: Array<{ kind: 'skill' | 'kb' | 'expert'; id: string }>
   skipResources: Array<{ kind: 'skill' | 'kb'; id: string; reason: string }>
 }

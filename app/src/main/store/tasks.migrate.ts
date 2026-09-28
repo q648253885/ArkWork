@@ -128,6 +128,11 @@ function normalizePlanItem(raw: unknown, taskId: string, index: number): PlanIte
     ...(completedAt !== undefined ? { completedAt } : {}),
     ...(legacyStatus ? { legacyStatus } : {}),
     ...(source !== undefined ? { source } : {}),
+    // v0.41.0（D211）：**迁移层此前逐字段重建 PlanItem 时漏掉了 v0.39.0（D185）
+    // 新增的 parentId** —— 任务从盘上读一次，子任务层级就被静默剥掉（重启后
+    // TodoPanel 子任务全部回落平级，UI 验收实机抓到）。补上：合法字符串保留，
+    // 其余（undefined / 非字符串）一律归 null（顶级，与类型口径一致）。
+    parentId: typeof obj['parentId'] === 'string' && obj['parentId'] ? (obj['parentId'] as string) : null,
   }
   return { item, changed: structuralChanged }
 }

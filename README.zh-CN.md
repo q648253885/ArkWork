@@ -4,7 +4,7 @@
 
 > 本地优先的 AI Agent 工作台 — 让 ReAct 推理循环**可见、可控、可复用**。
 
-![Version](https://img.shields.io/badge/version-v0.31.0-blueviolet) ![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
+![Version](https://img.shields.io/badge/version-v0.41.0-blueviolet) ![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
 ![ArkWork 工作台 — 实时 ReAct 步骤流、ask_user 阶段门禁与计划清单](docs/screenshots/workbench-react-task.png)
 
@@ -12,30 +12,29 @@
 
 **[下载](https://github.com/q648253885/ArkWork/releases)** 预编译安装包（macOS Apple Silicon / Intel、Windows、Linux），或按下方指南从源码构建。
 
-## 最新版本 — v0.40.0
+## 最新版本 — v0.41.0
 
-> **让弱模型也能把任务清单跑起来** — 任务清单的生成 / 修改 / 完成确认 / 取消 / 重新规划，从此各自走一次「只谈任务」的独立调用，不再依赖模型能否输出复杂的结构化工具调用。
+> **说结束就结束，弱模型也能用正文调用工具** — 「就此结束」现在是真正的终局指令，不再被发回模型重新规划；Ollama qwen3.5 这类发不出原生工具调用的模型，获得一条「开思考 + 标准格式 + 引擎解析后代为执行」的正文降级通道。
 
-### v0.40.0 · 清单操作独立通道
+### v0.41.0 · 「就此结束」真正的硬终局
 
-- **五类操作各自一次独立请求** — `create` / `update` / `complete` / `cancel` / `replan` 各自一次**不带工具、短上下文**的窄请求：模型一次只回答一个问题，注意力不再被工具结果稀释。
+- **终局短语不再被当新指令** — 点击建议项或在输入框输入「就此结束」（四语言精确匹配）立即停止任务：完整取消语义 + 人话回执，不重排清单、不多跑一轮。此前手输的这句话会被当成新指令发回模型，任务继续空转。
 
-- **不依赖 function calling** — 输出走五层降级解析（严格 JSON → 代码块 → 修补 → 勾选清单 → 提纲列表）。实测 `qwen3.5:0.8b` 把同一段清单 JSON 说两遍、或用 `[running] 文本` 前缀，引擎都认。
+### v0.41.0 · 正文工具调用降级通道（Ollama qwen3.5）
 
-- **引擎不再要求「必须调用 task_plan」** — 强模型继续用这个快路径；弱模型不用它，清单照样推进。
+- **模型把工具调用写成正文时** — 部分 qwen3.5 端点从不返回原生 tool_calls，而是把 `{"tool": "file-reader", "path": "."}` 这样写在回复里。引擎现在能识别这类模型：**开启思考**（Ollama 把推理放进独立字段，正文保持可解析）+ 注入标准 JSON 契约 + 解析答复并**真实执行工具** —— 结果走与原生调用完全相同的执行/预算/观察回传链路。
 
-- **通道修复** — Ollama 类端点默认走原生 `/api/chat` 并关闭思考。此前默认落在 OpenAI 兼容层，在「多工具 + 长上下文」下会产出**空回合**（实测 `content=0字`、零工具调用），正是「任务一直在跑、清单纹丝不动」的源头。
+- **严格门控** — 仅对 Ollama 形态端点 + qwen3.5 模型激活，其余模型逐字节零变化。幻觉出的工具名被白名单拒绝；损坏 JSON 走共享修补解析器；重复块自动去重。
 
-- **空回合不再等于停摆** — 主循环遇到空响应时，先让清单推进一次；确实推不动，才优雅暂停并说清原因。
+### v0.41.0 · 任务清单与交互区打磨（对齐 ZCode）
 
-### v0.40.0 · 弱模型韧性
+- **已完成项归档出主视线** — 「全部」筛选只显示未完成项，完成项收进新的**「已结束」**分组（计数与列表口径一致）；子任务带缩进与复合编号（`3.1`），清单面板与对话流计划卡同步。
 
-- **不再「自证完成」** — 模型把某一项标成 `done` 却没有可核对结果时，引擎降级为待做并留下原因；完成必须由专门的确认步骤产出。
+- **交互区层次** — 过程叙述降调为小字（每轮最后一条阶段结论保持高亮）、过程组折叠行直接显示工具**实际做成了什么**（失败优先）、最终答复以主色边突出 —— 长轮次的视线次序变成：结论 > 阶段结论 > 过程。
 
-- **节流三件套** — 每轮预算上限 / 同类操作最小轮间隔 / 清单无变化不落库，额外调用不影响正常任务。
-
-> 验证：`typecheck` exit 0 · 累积用例 **2397 条 0 fail** · 版本文档门禁全绿 · 打包 `.app` + 本地 `qwen3.5:0.8b` **四轮真机验收**（逐轮抓出并修复 3 条静态审查发现不了的缺陷）。
-
+> 另在打包实机验收中修复：重启后子任务层级被迁移层静默抹平的缺陷。
+>
+> 实测：`typecheck` exit 0 · **2445 条累计用例，0 代码失败** · 版本文档门禁全绿 · 打包 `.app` 实机 UI 验收（归档 / 层级 / 深浅色 / 零失败资源）。
 ## 官方网站
 
 **[→ www.hellowl.com](https://www.hellowl.com/)** 是 ArkWork 的产品官网。它以真实应用截图展示工作台的视觉设计（ReAct 任务视图、帮助中心、设置与多语言），介绍四层记忆与「无云端 · 零遥测 · 纯文件」的设计理念，并提供 macOS / Windows / Linux 三平台的下载入口。点击上方链接即可从 GitHub 直接跳转到官网。

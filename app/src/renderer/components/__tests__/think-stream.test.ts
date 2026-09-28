@@ -65,10 +65,13 @@ const THINK = fnBlock(THOUGHT, 'ReasoningBlock')
  * ============================================================ */
 
 test('TC-THINK-001 ThinkBlock 展开态经解析链（用户意志最高 → 流式中展开 → 完成后折叠）', () => {
+  // v0.41.0（D210 P4-5）形态更新：userOpen 从组件 useState 迁入 store
+  // `flow.blockUiState`（与 ProcessFold 同模式）—— 虚拟化/切页后用户意图不再丢。
+  // **断言意图不变**：userOpen 语义仍是 boolean | null（null = 未手动干预）。
   assert.match(
     THINK,
-    /const \[userOpen, setUserOpen\] = useState<boolean \| null>\(null\)/,
-    'userOpen 应为 boolean | null（null = 未手动干预）',
+    /const userOpen: boolean \| null = uiState\?\.userOpen \?\? null/,
+    'userOpen 应读自 store blockUiState（boolean | null；null = 未手动干预）',
   )
   // v0.31.0 B1（C-8）：展开态由 `userOpen ?? isRunning` 升级为 resolveReasoningOpen 解析链
   // （用户意志 → 流式 → 最短可见 1200ms → 失败 → 视图策略）。**断言方向不变**：
@@ -92,15 +95,17 @@ test('TC-THINK-001 ThinkBlock 展开态经解析链（用户意志最高 → 流
  * ============================================================ */
 
 test('TC-THINK-002 用户手动切换写入 userOpen（手动优先于自动态）', () => {
+  // v0.41.0（D210 P4-5）形态更新：手动切换经 setBlockOpen 写 store
+  // （applyUserFoldToggle 落 userOpen 三态）——「手动优先于自动态」的意图不变。
   assert.match(
     THINK,
-    /onClick=\{\(\) => setUserOpen\(!showFull\)\}/,
-    '头部点击应 setUserOpen(!showFull)（手动切换后不再随 isRunning 自动切换）',
+    /onClick=\{\(\) => setBlockOpen\(block\.id, !showFull\)\}/,
+    '头部点击应 setBlockOpen(block.id, !showFull)（手动切换后不再随 isRunning 自动切换）',
   )
   assert.doesNotMatch(
     THINK,
-    /setShowFull/,
-    '不应残留旧的 setShowFull 直改形态',
+    /setShowFull|setUserOpen/,
+    '不应残留旧的直改形态（setShowFull / 组件态 setUserOpen）',
   )
 })
 

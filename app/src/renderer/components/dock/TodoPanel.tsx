@@ -14,12 +14,21 @@ import { Icon } from '../../icons'
 import { useStore, derivePlanItems } from '../../store'
 import { Tooltip, EmptyState } from '../ui'
 import type { PlanItemStatus, PlanItem, PlanItemSource } from '@shared/types/task'
-import { PLAN_STATUS_META, planStatusTextClass, planItemToolSteps } from '../../utils/plan-status'
+import {
+  PLAN_STATUS_META,
+  planStatusTextClass,
+  planItemToolSteps,
+  // v0.41.0（D209）：筛选口径 / 层级深度 / 复合编号（纯函数层，TC-TDP-001…005）
+  filterPlanItemIndices,
+  planItemDepths,
+  planItemNumbering,
+  isTerminalPlanStatus,
+  type PlanFilter,
+} from '../../utils/plan-status'
 import { ark } from '../../ipc/client'
 
 /** v0.17.0 F8 + v0.18.0：状态筛选顺序（全部 + 六态）v0.37.0：+ paused 共七态 */
 const FILTER_ORDER: PlanItemStatus[] = ['pending', 'running', 'paused', 'done', 'skipped', 'failed', 'cancelled']
-const TERMINAL: ReadonlySet<PlanItemStatus> = new Set(['done', 'failed', 'cancelled', 'skipped'])
 
 /** 行级有效状态 = optimisticOverlay（若存在） > planItem.status > 'pending' */
 function effectiveStatus(
@@ -94,19 +103,30 @@ export function TodoPanel() {
   const doneCount = states.filter((s) => s === 'done').length
   const planItemsLen = persistedItems?.length ?? 0
 
-  // v0.17.0 F8：状态筛选
-  const [filter, setFilter] = useState<'all' | PlanItemStatus>('all')
+  // v0.17.0 F8：状态筛选 —— v0.41.0（D209）重构口径：
+  //   · 'all'   = 仅未终态（pending/running/paused）—— replan/task_plan 后已完成项
+  //               归档进「已结束」，不再占据「全部」主视线（对齐 ZCode todo 收缩）；
+  //   · 'ended' = 全部终态（done/failed/cancelled/skipped）—— 归档位；
+  //   · 单态    = 精确匹配（既有行为）。
+  // 终态判据唯一事实源在 utils/plan-status（isTerminalPlanStatus），本文件不再自留一份。
+  const [filter, setFilter] = useState<PlanFilter>('all')
   const countBy = useMemo(() => {
     const m: Record<string, number> = {}
     for (const s of states) m[s] = (m[s] ?? 0) + 1
     return m
   }, [states])
-  const filteredIndices = useMemo(
-    () =>
-      items
-        .map((_, i) => i)
-        .filter((i) => filter === 'all' || states[i] === filter),
-    [items, states, filter],
+  const openCount = useMemo(() => items.length - states.filter((s) => isTerminalPlanStatus(s)).length, [items, states])
+  const endedCount = items.length - openCount
+  const filteredIndices = useMemo(() => filterPlanItemIndices(states, filter), [states, filter])
+
+  // v0.41.0（D209）：子任务层级 —— 深度与复合编号（旧数据 / 推断占位无 parentId → 全平铺）
+  const depths = useMemo(
+    () => planItemDepths(persistedItems ?? items.map((_, i) => ({ id: `row-${i}`, parentId: null }))),
+    [persistedItems, items],
+  )
+  const numbering = useMemo(
+    () => planItemNumbering(persistedItems ?? items.map((_, i) => ({ id: `row-${i}`, parentId: null }))),
+    [persistedItems, items],
   )
 
   // v0.18.0：目标优先取对话 plan 的 goal；无对话 plan 时回退任务标题（F2 真值源一致）
@@ -240,7 +260,7 @@ export function TodoPanel() {
         </Tooltip>
       </div>
 
-      {/* v0.17.0 F8：状态筛选 chips（全部 + 六态） */}
+      {/* v0.17.0 F8：状态筛选 chips —— v0.41.0（D209）：全部=未终态 + 新增「已结束」归档位 */}
       <div className="flex items-center gap-1 px-3 pt-2 flex-shrink-0 flex-wrap">
         <button
           onClick={() => setFilter('all')}
@@ -251,8 +271,27 @@ export function TodoPanel() {
               : 'text-text-tertiary hover:bg-bg-hover hover:text-text-primary'
           }`}
         >
-          {t('dock.todo.filter_all')}<span className="opacity-60">{items.length}</span>
+          {/* 计数与列表口径一致：全部 = 未终态数（列表也只显示未终态） */}
+          {t('dock.todo.filter_all')}<span className="opacity-60">{openCount}</span>
         </button>
+        {endedCount > 0 && (
+          <button
+            onClick={() => setFilter('ended')}
+            aria-pressed={filter === 'ended'}
+            className={`flex items-center gap-1 h-6 px-2 rounded-full text-2xs tabular transition-colors ${
+              filter === 'ended'
+                ? 'bg-bg-active text-text-primary'
+                : 'text-text-tertiary hover:bg-bg-hover hover:text-text-primary'
+            }`}
+          >
+            <span
+              className="w-1.5 h-1.5 rounded-full"
+              style={{ background: 'var(--text-faint)' }}
+            />
+            {t('dock.todo.filter_ended')}
+            <span className="opacity-60">{endedCount}</span>
+          </button>
+        )}
         {FILTER_ORDER.filter((st) => (countBy[st] ?? 0) > 0).map((st) => {
           const active = filter === st
           return (
@@ -324,13 +363,15 @@ export function TodoPanel() {
             const meta = PLAN_STATUS_META[st]
             const expanded = pItem ? expandedSet.has(pItem.id) : false
             const toolSteps = planItemToolSteps(steps, i)
-            const isTerminal = TERMINAL.has(st)
+            const isTerminal = isTerminalPlanStatus(st)
             const isOptimisticFlight = pItem
               ? planItemInFlight[task?.id ?? '']?.[pItem.id] === 'submitted'
               : false
             const source: PlanItemSource | undefined = pItem?.source
             const showEngineBadge =
               source === 'engine-decide' || source === 'engine-fail'
+            // v0.41.0（D209）：子任务缩进 + 复合编号（对齐账本投影的 `1.1` 观感）
+            const depth = depths[i] ?? 0
 
             const canMarkDone = !isTerminal && !!pItem
             const canRetry = st === 'failed' && !!pItem
@@ -346,9 +387,11 @@ export function TodoPanel() {
                   className={`flex items-start gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
                     st === 'running' ? 'bg-bg-active' : 'hover:bg-bg-hover'
                   } ${pItem ? 'cursor-pointer' : ''}`}
+                  style={depth > 0 ? { paddingLeft: 16 * depth + 8 } : undefined}
                   data-plan-row-id={pItem?.id}
                   data-plan-row-index={i}
                   data-plan-row-status={st}
+                  data-plan-row-depth={depth}
                   onClick={() => pItem && toggleExpand(pItem.id)}
                 >
                   {/* 状态点 */}
@@ -374,8 +417,11 @@ export function TodoPanel() {
                       ✕
                     </span>
                   ) : (
-                    <span className="flex-shrink-0 w-4 h-4 mt-0.5 rounded-full border border-border-default flex items-center justify-center text-2xs text-text-tertiary tabular">
-                      {i + 1}
+                    <span
+                      className="flex-shrink-0 min-w-4 h-4 mt-0.5 px-0.5 rounded-full border border-border-default flex items-center justify-center text-2xs text-text-tertiary tabular"
+                      title={numbering[i]}
+                    >
+                      {numbering[i] ?? i + 1}
                     </span>
                   )}
 

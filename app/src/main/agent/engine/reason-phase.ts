@@ -64,6 +64,13 @@ export interface ReasonPhaseArgs {
   pendingSystemHint: string | undefined
   memoryInjection: string
   alwaysOnContracts: AlwaysOnContracts
+  /**
+   * v0.41.0（D208）：Ollama qwen3.5 正文工具降级通道是否激活（loop 启动时按
+   * `isProseToolFallbackModel` 判定一次）。激活 → 请求级 `think:true`
+   * （思考走 ollama 独立字段，content 保持可解析，引擎从正文提取工具调用）。
+   * 未激活 → 不传 think，请求与 v0.40.0 逐字节一致（纪律㊵：默认零变化）。
+   */
+  proseToolFallback?: boolean
 }
 
 export async function runReasonPhase(
@@ -220,6 +227,8 @@ export async function runReasonPhase(
             temperature: task.config.temperature ?? agent.defaultConfig.temperature ?? 0.5,
             maxTokens: maxTokensOverride ?? task.config.maxTokens,
             signal: sig,
+            // v0.41.0（D208）：降级通道激活 → 请求级思考覆盖（TC-PTL-005）
+            think: args.proseToolFallback === true ? true : undefined,
           },
           {
             onText: (d) => {

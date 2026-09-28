@@ -142,6 +142,8 @@ import { buildFallbackAskUserQuestion, markRunningPlanItemFailed, discardIncompl
 //   拒绝计数唯一落点是账本 `resume.refusals`；被拒轮已生成的正文经 gate-channel 保底投递。
 import { guardFinish, recordRefusal } from './ledger-guard.js'
 import { refuseViaGate, emitTurnNote } from './gate-channel.js'
+// v0.41.0（D208）：Ollama qwen3.5 正文工具降级通道（提取器 / 谓词 / 契约提示）
+import { extractProseToolCalls, isProseToolFallbackModel, proseToolContractHint } from './prose-tool-call.js'
 // v0.38.0（D150）：本 run 工作性质分类 —— 只读白名单唯一事实源（纪律⑧）
 import { classifyRunWork, isReadonlyTool, isPlanWriteTool, normalizeResponseToolNames } from './work-class.js'
 // v0.38.0（D156）：阶段结论兜底投递策略（连续多轮无输出 → 请求进展）
@@ -575,6 +577,13 @@ export async function runReActLoop(
     // 连续 3 轮响应与基准同前缀 → 注入纠正指令 + endpoint unhealthy 计数（§3.3 泛化）
     const greetingGuard = createGreetingLoopGuard({ reference: task.input?.text ?? '' })
     const greetingEndpoint = (await getModel(opts.modelId))?.baseURL
+    // v0.41.0（D208）：Ollama qwen3.5 正文工具降级通道 —— **run 级一次判定**。
+    // 谓词默认关闭：非 ollama 形态 / 非 qwen3.5 模型，后续所有分支零变化
+    //（纪律㊵：安全默认与放行开关分离；影响面见 04-system-design §2.3）。
+    const proseToolFallback = isProseToolFallbackModel(await getModel(opts.modelId))
+    if (proseToolFallback) {
+      logger.info('Agent', 'prose tool fallback armed (ollama qwen3.5) — 正文工具降级通道已激活', task.id)
+    }
     while (iteration < startIter + maxIter) {
       iteration += 1
       if (signal.aborted) {
@@ -655,6 +664,8 @@ export async function runReActLoop(
         pendingSystemHint,
         memoryInjection,
         alwaysOnContracts,
+        // v0.41.0（D208）：降级通道激活 → 请求级 think:true（TC-PTL-005）
+        proseToolFallback,
       })
       pendingSystemHint = undefined  // reason 内已消费（原 L695 语义），防陈旧 hint 重复注入
       // ============================================================
@@ -734,6 +745,40 @@ export async function runReActLoop(
       planOpsHadProse = Boolean((response.content ?? '').trim() || (response.thought ?? '').trim())
       planOpsJustSucceeded = false
       normalizeResponseToolNames(response)
+      // ============================================================
+      // v0.41.0（D208）：正文工具降级通道 —— 合成动作**回灌点**。
+      //
+      // 位置即防线（TC-PTL-001）：必须在 `normalizeResponseToolNames` 之后
+      // （名字已归一），且在 `const action = response.action` **之前** ——
+      // 合成动作写回 response 后，与原生 tool_calls 走**同一条** Act / 预算 /
+      // observation 配对 / 门禁链路，零旁路（不进无工具分支、不碰 D179 固定序）。
+      //
+      // 触发条件三要素（TC-PTL-002）：谓词命中 + 无原生 action + 无 pendingActions
+      // —— 原生 tool_calls 永远优先，降级只兜「模型不会 function calling」的场。
+      // ============================================================
+      if (proseToolFallback && !response.action && (response.actions?.length ?? 0) === 0) {
+        const extracted = extractProseToolCalls(response.content)
+        if (extracted.calls.length > 0) {
+          const synthesized: ReActAction[] = extracted.calls.map((c) => ({ tool: c.tool, args: c.args }))
+          response.actions = synthesized
+          response.action = synthesized[0] ?? null
+          // `prose_` 前缀：observation 配对可归因（区分原生 tool_call id，TC-PTL-003）
+          response.toolCallIds = synthesized.map((_, i) => `prose_${iteration}_${i}`)
+          logger.warn(
+            'Agent',
+            `prose tool fallback: ${synthesized.map((a) => a.tool).join(', ')}` +
+              (extracted.invalid > 0 ? `（另有 ${extracted.invalid} 个无效调用已跳过）` : '') +
+              ' — 正文工具降级通道代为执行',
+            task.id,
+          )
+        } else if (extracted.invalid > 0) {
+          logger.warn(
+            'Agent',
+            `prose tool fallback: ${extracted.invalid} 个疑似工具调用因白名单/参数不合法被拒（宁缺毋滥）`,
+            task.id,
+          )
+        }
+      }
       // -------- 检查终止 --------
       // v0.14.x Task 1：以"是否确有工具调用"为准（collectActionsForIteration 会同时读
       // response.actions 与 response.action），防止适配器只回传 actions（未填 action 单
@@ -831,11 +876,15 @@ export async function runReActLoop(
               : `任务清单仍有 ${unfinishedCount} 项未完成（running/pending），而上一轮回复未调用任何工具。` +
                 `若这些项确已无需执行，请调用 task_complete 明确收尾；否则请继续调用工具完成剩余项，不要只输出文字。`
           // v0.36.0 F1.5：问候循环专属提示（优先于截断/未完成通用提示，已含【引擎提示】标签）
+          // v0.41.0（D208）：降级通道激活且非问候循环 → 提示替换为正文协议契约
+          //（TC-PTL-004：命中分支不得再出现"请发起真实工具调用"这类无效措辞）
           const hint = greetingLoopTriggered && !outputTruncated
             ? (pendingSystemHint ?? unfinishedHint)
-            : outputTruncated
-              ? truncatedHint + (unfinishedCount > 0 ? `\n${unfinishedHint}` : '')
-              : unfinishedHint
+            : proseToolFallback
+              ? proseToolContractHint()
+              : outputTruncated
+                ? truncatedHint + (unfinishedCount > 0 ? `\n${unfinishedHint}` : '')
+                : unfinishedHint
           logger.warn(
             'Agent',
             `no-tool turn with unfinished work (round ${consecutiveNoToolFinal}) — injected self-heal hint`,
@@ -864,9 +913,13 @@ export async function runReActLoop(
               return
             }
             pendingSystemHint = labelEngineHint(
-              `【重要】你上一轮把工具调用写成了正文文字（例如 \`${pseudoTool}(…)\`），` +
-                `这类文字引擎**无法执行**。请改为发起真实工具调用（用系统提供的工具 / 函数），` +
-                `不要用代码块演示调用，也不要复述你"将要"做什么。`,
+              // v0.41.0（D208）：降级通道激活 → 不再要求"发起真实工具调用"
+              //（对不会 function calling 的模型是无效指令），改给正文协议契约
+              proseToolFallback
+                ? proseToolContractHint()
+                : `【重要】你上一轮把工具调用写成了正文文字（例如 \`${pseudoTool}(…)\`），` +
+                  `这类文字引擎**无法执行**。请改为发起真实工具调用（用系统提供的工具 / 函数），` +
+                  `不要用代码块演示调用，也不要复述你"将要"做什么。`,
             )
             continue
           }
