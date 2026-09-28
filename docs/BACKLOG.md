@@ -225,6 +225,7 @@
 | L-40-04 | **「伪调用解析执行」只开放给清单** | Cline 范式的完整形态是「模型把调用写成正文 → 客户端解析并执行」。本版按 PRD S3 **刻意**只解析清单（纯文本结构、失败零副作用），未推广到 `shell` / `file-writer` 等有副作用工具 —— 误解析代价不可逆。推广需要「参数解析器 + 高风险工具白名单外 + 用户确认」三件套 | `agent/engine/pseudo-call.ts`、`agent/planning/ops/` | 下一版（需产品决策） | open |
 | L-40-05 | **`cancel` 操作目前无生产触发点** | `pickPlanOpsKind` 支持 `cancel`，但 `loop.ts` 两处接线都传 `cancelRequested: false`（取消路径的信号尚未接到 tick）。后果：用户取消任务时清单不会走「收尾形态」（不会再做的标 `skipped` + 留原因），仍停在原状态。**属接线缺失而非功能缺失** —— 判据与 prompt 已就绪且有真值表用例 | `agent/engine/loop.ts`、`planning/ops/policy.ts` | 下一版（补接线 + 接线契约用例） | open |
 | L-40-06 | **PlanOps 的「调用失败」仍借用 `skipped:'aborted'`** | 与 L-39-12 同族（类型未加 `'call-failed'`）。本模块已带**真实** `attempts`（1 = 端点直接报错 / 2 = 问了两遍都没问出清单），可区分两种失败，但**原因码**仍复用 `'aborted'`。无生产消费方（穷举确认），本版有意不扩面 | `planning/ops/types.ts`、`planning/ops/runner.ts` | 下一版（与 L-39-12 一并处理） | open |
+| L-40-07 | **`package-lock.json` 长期未同步（CI 从未成功产出安装包）** | v0.40.0 交付期发现：lock 的 version 停在 **0.28.1**、`packages[""]` 缺 `@codemirror/*` 全套与 `dugite` 等 → `npm ci` 必失败 → 历史上所有 Release 的 `assets=0`（最近一次成功产出还是 v0.30.1，v0.31.0 起全红）。已用 `npm install --package-lock-only` 补齐元数据并与 `package.json` 对齐（差异 0）。**但依赖树本身未重新解析** —— 若后续出现「本地能装、CI 装不上」或依赖漂移，需真实 `npm install` 重解析一次（会动 `node_modules`，须在干净副本上做）。**根治建议**：给 CI 加一条 `npm ci` 的预检，或在 pre-push 钩子里跑 `npm ci --dry-run` 形态的一致性校验 | `app/package-lock.json`、`.github/workflows/release.yml` | 下一版（若再出问题） | open |
 
 ---
 
