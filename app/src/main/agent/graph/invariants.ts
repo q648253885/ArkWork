@@ -30,6 +30,8 @@ import {
   type TaskGraph,
   type TaskNode,
 } from '@shared/types/graph'
+// v0.39.0（D186）：模型可见的清单控制面文案唯一事实源（hint 不得就地拼工具名）
+import { PLAN_TOOL_HINT } from '../ledger/hint.js'
 
 /* ============================================================
  * 变更描述（写入方声明"我改了什么"，供 I1–I7 判定）
@@ -96,7 +98,8 @@ export function transitionDenied(
   return {
     code: 'TRANSITION_DENIED',
     message: `不允许的状态转换：${from} → ${to}`,
-    hint: `${from} 只能转换到 [${allowed.join(', ')}]。若确实需要跳过中间态，请先用 task_update 把状态推进到合法前驱，或走 task_block 说明为何需要人工介入。`,
+    // v0.39.0（D186）：文案不得再指向已下架的 task_update / task_block
+    hint: `${from} 只能转换到 [${allowed.join(', ')}]。若确实需要跳过中间态，先把前驱项标完成（${PLAN_TOOL_HINT.update}）；若需要人工介入，把该项置为 blocked（${PLAN_TOOL_HINT.blocked}）。`,
     violatedBy: { nodeId, field: 'status', value: to },
   }
 }
@@ -262,7 +265,7 @@ export function checkI4(graph: TaskGraph): GraphWriteError | null {
         return violation(
           'I4',
           `节点 ${graph.nodes[id].key ?? id} 依赖了不存在的节点 ${dep}`,
-          `请把该依赖改为一个真实存在的节点 id，或调用 task_update 删除这条无效依赖。`,
+          `请把该依赖改为一个真实存在的节点 id，或${PLAN_TOOL_HINT.update}（把这条无效依赖从清单里去掉）。`,
           { nodeId: id, field: 'dependsOn', value: dep },
         )
       }
@@ -295,7 +298,7 @@ export function checkI4(graph: TaskGraph): GraphWriteError | null {
     return violation(
       'I4',
       `依赖图存在环，涉及节点：${inCycle.map((id) => graph.nodes[id].key ?? id).join(' → ')}`,
-      `移除成环的那条边（用 replan 的 relink 操作重设 dependsOn），环上的节点无法被调度。`,
+      `移除成环的那条边（${PLAN_TOOL_HINT.order}），环上的节点无法被调度。`,
       { field: 'dependsOn', value: inCycle },
     )
   }
@@ -342,7 +345,7 @@ export function checkI6(graph: TaskGraph): GraphWriteError | null {
       return violation(
         'I6',
         `节点 ${node.key ?? node.id} 为 needs_human，但没有 blockingQuestion`,
-        `调用 task_block 时必须给出具体问题（blockingQuestion）。若你其实不需要人介入，请改回 ready 继续执行；若需要人在几个方案间选择，请同时给出 blockingOptions（每个选项附代价说明）。`,
+        `置为 blocked 时必须写明具体问题（${PLAN_TOOL_HINT.blocked}）。若你其实不需要人介入，改回 ready 继续执行即可；若需要人在几个方案间选择，把候选方案一并写进该项的 note。`,
         { nodeId: node.id, field: 'blockingQuestion' },
       )
     }

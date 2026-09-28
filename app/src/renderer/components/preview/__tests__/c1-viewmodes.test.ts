@@ -11,6 +11,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+/** 注释剥离器唯一真源（v0.36.0 · D101 收敛；本文件原有朴素正则副本已退役） */
+import { stripComments } from '@shared/utils/source-guard'
 
 const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf-8')
 
@@ -19,11 +21,6 @@ const REGISTRY = read('../registry.ts')
 const EDITOR_PANEL = read('../../editor/EditorPanel.tsx')
 const EDITOR_HOST = read('../../editor/CodeEditorHost.tsx')
 const MARKDOWN_RENDERER = read('../renderers/MarkdownRenderer.tsx')
-
-/** 去掉注释后的源码：避免「注释里提到过」被误判为「实现里有」。 */
-function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
 
 describe('c1-viewmodes · TC-C1', () => {
   it('TC-C1-001 编辑器视图收敛：EditorViewMode 只剩 edit/render，VIEW_MODES.editor 无 split，EditorPanel 无分屏布局', () => {

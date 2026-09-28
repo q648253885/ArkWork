@@ -188,8 +188,9 @@ export function KbPanel() {
       {progress && (
         <div className="px-3 py-2 border-b border-border-subtle bg-bg-surface flex-shrink-0">
           <div className="flex items-center gap-2 text-xs">
-            {progress.status === 'parsing' && <Icon.Refresh width={16} height={16} className="animate-spin text-accent" />}
-            {progress.status === 'indexing' && <Icon.Refresh width={16} height={16} className="animate-spin text-accent" />}
+            {/* v0.36.3 D116：旋转 → 纯色呼吸（无 GPU 环境禁连续 transform） */}
+            {progress.status === 'parsing' && <Icon.Refresh width={16} height={16} className="breathe text-accent" />}
+            {progress.status === 'indexing' && <Icon.Refresh width={16} height={16} className="breathe text-accent" />}
             {progress.status === 'done' && <Icon.Check width={16} height={16} className="text-success" />}
             {progress.status === 'failed' && <Icon.X width={16} height={16} className="text-danger" />}
             <span className="text-text-primary truncate flex-1">{progress.name}</span>
@@ -322,7 +323,7 @@ function KbItemRow({
           {/* 状态徽标：解析中 / 已索引 / 失败 */}
           {isParsing && (
             <span className="flex items-center gap-0.5 text-2xs text-accent shrink-0" data-kb-status="parsing">
-              <Icon.Refresh width={16} height={16} className="animate-spin" />
+              <Icon.Refresh width={16} height={16} className="breathe" />
               {liveStatus === 'parsing' ? t('panel.kb.statusParsing') : t('panel.kb.statusIndexing')}
             </span>
           )}

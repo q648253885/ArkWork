@@ -56,12 +56,14 @@ interface Calls {
   fetch: string[]
   shell: string[]
   events: string[]
+  /** v0.36.0：git cap（op + args 原样记录，用于断言「网关只透传不解释」） */
+  git: Array<{ pluginId: string; op: string; args: Record<string, unknown> }>
 }
 
 function makeDeps(
   over: Partial<PluginGatewayDeps> & { permissions?: PluginPermission[] } = {},
 ): { deps: PluginGatewayDeps; calls: Calls } {
-  const calls: Calls = { read: [], write: [], list: [], fetch: [], shell: [], events: [] }
+  const calls: Calls = { read: [], write: [], list: [], fetch: [], shell: [], events: [], git: [] }
   const permissions = over.permissions ?? []
   const deps: PluginGatewayDeps = {
     permissionsOf: () => permissions,
@@ -106,6 +108,10 @@ function makeDeps(
     registerPanel: async () => ({ regId: 9 }),
     unregisterPanel: async () => {},
     postToClient: () => true,
+    gitRun: async (pluginId, op, args) => {
+      calls.git.push({ pluginId, op, args })
+      return { op, output: { stdout: '' } }
+    },
     resolveInWorkspace: async (rel) => {
       if (rel.includes('..')) {
         const e = new Error(`越界：${rel}`) as Error & { code?: string }
@@ -349,3 +355,66 @@ test('TC-PLG3-046 permissionsOf 返回 undefined（未知插件）→ 视为零�
     (err: unknown) => err instanceof RpcError && err.code === RPC_ERROR.E_PERMISSION_DENIED,
   )
 })
+
+/* ============================================================
+ * 七、git cap（★ v0.36.0 · F3.5）—— 网关只做权限闸门与透传
+ *
+ * 设计要点（04-system-design §3.5）：op 合法性、参数校验、审批分层与审计
+ * **终审在 git/service.ts**，网关不做镜像白名单 —— 镜像白名单是「两处真源」，
+ * 迟早分叉（改一处忘一处 → 要么越权要么误拒）。这里钉住这条分工。
+ * ============================================================ */
+
+test('TC-PLG3-050 git cap 与权限表对等：能力名恰为 git，所需权限恰为 git 权限位', () => {
+  assert.equal(CAP_PERMISSION.git, 'git', '缺了它 = 插件无法声明 git 能力')
+  const denied = checkCapPermission('git', [])
+  assert.equal(denied.ok, false)
+  assert.equal(denied.ok === false && denied.need, 'git')
+  assert.equal(denied.ok === false && denied.message.includes('git'), true, '拒绝原因要能直接给用户看')
+  assert.deepEqual(checkCapPermission('git', ['git']), { ok: true })
+})
+
+test('TC-PLG3-051 未声明 git 权限 → E_PERMISSION_DENIED，且**没有触达 git 服务**（拒绝先于执行）', async () => {
+  const { deps, calls } = makeDeps({ permissions: ['fs:workspace-read'] })
+  const gw = new PluginGateway(deps)
+  await assert.rejects(
+    () => gw.handleInvoke('test.cap', 'git', { op: 'status', args: {} }),
+    (err: unknown) => {
+      assert.ok(err instanceof RpcError)
+      assert.equal(err.code, RPC_ERROR.E_PERMISSION_DENIED)
+      assert.equal(err.data?.need, 'git')
+      return true
+    },
+  )
+  assert.deepEqual(calls.git, [], '被权限拦下的 git 调用不得落到服务层（否则审计里会出现幽灵记录）')
+})
+
+test('TC-PLG3-052 拿到权限 → op 与 args 原样透传（网关不解释参数、不做镜像白名单）', async () => {
+  const { deps, calls } = makeDeps({ permissions: ['git'] })
+  const gw = new PluginGateway(deps)
+  // 故意用「白名单外的 op」与「形状奇怪的 args」：网关层必须原样放行，
+  // 由 git/service.ts 终审报 E_GIT_UNKNOWN_OP —— 这样「谁能执行什么」只有一处真源。
+  const r = await gw.handleInvoke('test.cap', 'git', { op: 'totally-not-an-op', args: { files: ['a'], deep: { x: 1 } } })
+  assert.deepEqual(r, { op: 'totally-not-an-op', output: { stdout: '' } })
+  assert.equal(calls.git.length, 1)
+  assert.equal(calls.git[0]!.pluginId, 'test.cap', '审计归属必须是发起插件')
+  assert.equal(calls.git[0]!.op, 'totally-not-an-op')
+  assert.deepEqual(calls.git[0]!.args, { files: ['a'], deep: { x: 1 } })
+})
+
+test('TC-PLG3-053 git cap 缺 op → E_INTERNAL（不静默当成某个默认操作）', async () => {
+  const { deps, calls } = makeDeps({ permissions: ['git'] })
+  const gw = new PluginGateway(deps)
+  await assert.rejects(
+    () => gw.handleInvoke('test.cap', 'git', {}),
+    (err: unknown) => err instanceof RpcError && err.code === RPC_ERROR.E_INTERNAL,
+  )
+  assert.deepEqual(calls.git, [])
+})
+
+test('TC-PLG3-054 git cap 的 args 非法（非对象）→ 归一为空对象而不是原样丢给服务层', async () => {
+  const { deps, calls } = makeDeps({ permissions: ['git'] })
+  const gw = new PluginGateway(deps)
+  await gw.handleInvoke('test.cap', 'git', { op: 'status', args: 'not-an-object' })
+  assert.deepEqual(calls.git[0]!.args, {}, '服务层按 Record 取字段，收到字符串会静默得出错误参数')
+})
+

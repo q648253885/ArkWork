@@ -19,6 +19,7 @@ import { ark } from '../../ipc/client'
 import { friendlyError } from '../meta'
 import { isPluginViewRef, pluginViewTabsOf, type PanelTab } from '@shared/utils/panel-model'
 import type { PluginSource, PluginRuntimeStatus, PluginSummary } from '@shared/types/plugin'
+import type { PluginInstallZipResult } from '@shared/types/ipc'
 import type { AppState } from '../types'
 
 /** 能力页作用域两态（决定开关写哪一级偏好；`bundled` 归入「全局」显示） */
@@ -46,7 +47,9 @@ export interface PluginState {
   setPluginScope: (scope: PluginScopeFilter) => Promise<void>
   /** 启停；成功返回 true（失败会 pushToast，并把原因翻译成人话） */
   setPluginEnabled: (id: string, enabled: boolean, scope?: PluginScopeFilter) => Promise<boolean>
-  uninstallPlugin: (id: string) => Promise<boolean>
+  uninstallPlugin: (id: string, opts?: { purgeData?: boolean }) => Promise<boolean>
+  /** ★ v0.36.0（F3.2）：安装插件包（两段式；返回原始结果由面板驱动确认弹窗） */
+  installPlugin: (opts?: { zipPath?: string; confirmed?: boolean; overwrite?: boolean }) => Promise<PluginInstallZipResult>
   rescanPlugins: () => Promise<void>
   openPluginsDir: (scope?: PluginScopeFilter) => Promise<void>
   /** 导出内置样例到用户插件目录（作者脚手架，P1） */
@@ -145,10 +148,10 @@ export const pluginSlice: StateCreator<AppState, [], [], PluginState> = (set, ge
     }
   },
 
-  uninstallPlugin: async (id) => {
+  uninstallPlugin: async (id, opts) => {
     set({ pluginsBusy: true })
     try {
-      const res = await ark.plugin.uninstall({ id })
+      const res = await ark.plugin.uninstall({ id, ...(opts?.purgeData ? { purgeData: true } : {}) })
       if (!res.ok) {
         get().pushToast({
           type: 'warning',
@@ -161,13 +164,30 @@ export const pluginSlice: StateCreator<AppState, [], [], PluginState> = (set, ge
       await get().loadPlugins()
       await refreshSlotDerivations(get)
       await get().loadPluginRuntime()
-      get().pushToast({ type: 'success', message: `已卸载插件 ${id}`, duration: 4000 })
+      get().pushToast({ type: 'success', message: `已卸载插件 ${id}${opts?.purgeData ? '（含数据）' : ''}`, duration: 4000 })
       return true
     } catch (err) {
       get().pushToast({ type: 'danger', message: friendlyError(err), duration: 5000 })
       return false
     } finally {
       set({ pluginsBusy: false })
+    }
+  },
+
+  /** ★ v0.36.0（F3.2）：安装插件包。needsConfirm / 失败的确认交互由调用方（面板）接管 */
+  installPlugin: async (opts) => {
+    try {
+      const res = await ark.plugin.installZip(opts)
+      if (res.ok) {
+        await get().loadPlugins()
+        await refreshSlotDerivations(get)
+        await get().loadPluginRuntime()
+        get().pushToast({ type: 'success', message: `已安装插件 ${res.id ?? ''}（默认禁用，请在列表中启用）`, duration: 6000 })
+      }
+      return res
+    } catch (err) {
+      const out: PluginInstallZipResult = { ok: false, error: 'IPC_ERROR', message: friendlyError(err) }
+      return out
     }
   },
 

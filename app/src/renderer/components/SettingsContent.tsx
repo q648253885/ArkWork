@@ -17,6 +17,7 @@ import { useStore, type SettingsTab } from '../store'
 import { SectionLabel } from './ui'
 import { StepList } from './right/StepList'
 import { LogsView } from './right/LogsView'
+import { PermissionRulesPanel } from './panels/PermissionRulesPanel'
 import { Icon } from '../icons'
 import { ark } from '../ipc/client'
 import type { PermissionMode } from '@shared/types/permission'
@@ -197,8 +198,8 @@ function KnowledgeSection() {
 
 /* ============================================================
  * Permission Section — v0.15.0 权限模型（位于 Developer Tab 顶部）
- *  - 会话模式三选一（default / acceptEdits / plan）
- *  - 合并规则三栏（allow / ask / deny）+ 自定义 allow 规则输入
+ *  - 会话模式五选一（default / autoApprove / acceptEdits / plan / bypassPermissions）
+ *  - 规则列表：v0.36.0（F6.1 / P9）起外移到 <PermissionRulesPanel />
  * v0.28.0（F6）：扩为五态 —— autoApprove 直选；bypassPermissions 需二次确认
  * ============================================================ */
 // label/desc 为 i18n key（settings.permission.modeOptions.*）
@@ -210,22 +211,17 @@ const PERMISSION_OPTIONS: { id: PermissionMode; label: string; desc: string }[] 
   { id: 'bypassPermissions', label: 'settings.permission.modeOptions.bypassPermissions.label', desc: 'settings.permission.modeOptions.bypassPermissions.desc' },
 ]
 
-// label 为 i18n key（settings.permission.ruleGroups.*）
-const RULE_GROUPS: { key: 'allow' | 'ask' | 'deny'; label: string; cls: string; dot: string }[] = [
-  { key: 'allow', label: 'settings.permission.ruleGroups.allow', cls: 'bg-success-soft text-success border-success', dot: 'bg-success' },
-  { key: 'ask', label: 'settings.permission.ruleGroups.ask', cls: 'bg-warning-soft text-warning border-warning', dot: 'bg-warning' },
-  { key: 'deny', label: 'settings.permission.ruleGroups.deny', cls: 'bg-danger-soft text-danger border-danger', dot: 'bg-danger' },
-]
+/* ★ v0.36.0（F6.1 / P9）：原 `RULE_GROUPS`（三栏 chips 的 label→i18n 映射）随内联实现
+ *   一并删除 —— 规则展示已迁入 PermissionRulesPanel 的逐行形态，留着会变成
+ *   「两份行为配色表」，改了不生效的那份迟早骗人。
+ *   `settings.permission.ruleGroups.*` 键仍在用（PermissionRulesPanel 与
+ *   ToolConfirmLayer 取行为名），故**不是**孤儿键，不得按 §4.3 清理。 */
 
 function PermissionSection() {
   const { t } = useTranslation()
   const permissionMode = useStore((s) => s.permissionMode)
   const setPermissionMode = useStore((s) => s.setPermissionMode)
   const confirm = useStore((s) => s.confirm)
-  const permissionRules = useStore((s) => s.permissionRules)
-  const refreshPermissionRules = useStore((s) => s.refreshPermissionRules)
-  const addPermissionRule = useStore((s) => s.addPermissionRule)
-  const [ruleDraft, setRuleDraft] = useState('')
 
   // v0.28.0（F6）：bypass 需二次确认（danger 实心 + 默认焦点在取消），其余直切
   const handleSelectMode = async (mode: PermissionMode) => {
@@ -249,23 +245,6 @@ function PermissionSection() {
     }
     await setPermissionMode(mode)
   }
-
-  // 挂载时拉取一次合并规则；主进程广播 / setPermissionMode / addPermissionRule 会自动刷新
-  useEffect(() => {
-    void refreshPermissionRules()
-  }, [refreshPermissionRules])
-
-  const handleAddRule = async () => {
-    const rule = ruleDraft.trim()
-    if (!rule) return
-    await addPermissionRule(rule)
-    setRuleDraft('')
-  }
-
-  const totalRules =
-    (permissionRules?.allow.length ?? 0) +
-    (permissionRules?.ask.length ?? 0) +
-    (permissionRules?.deny.length ?? 0)
 
   return (
     <div>
@@ -301,69 +280,103 @@ function PermissionSection() {
           </div>
         </div>
 
-        {/* 合并规则三栏 */}
-        <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs text-text-secondary">{t('settings.permission.ruleMerged')}</span>
-            <span className="text-2xs text-text-tertiary">{t('settings.permission.ruleCount', { count: totalRules })}</span>
-          </div>
-          {totalRules === 0 ? (
-            <div className="text-xs text-text-tertiary py-3 text-center bg-bg-overlay rounded-md">
-              {t('settings.permission.noCustomRules')}
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {RULE_GROUPS.map((g) => {
-                const items = permissionRules?.[g.key] ?? []
-                return (
-                  <div key={g.key}>
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${g.dot}`} />
-                      <span className="text-2xs text-text-tertiary">{t(g.label)}</span>
-                      <span className="text-2xs text-text-tertiary">{items.length}</span>
-                    </div>
-                    {items.length === 0 ? (
-                      <div className="text-2xs text-text-tertiary pl-3">{t('settings.permission.none')}</div>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        {items.map((r, i) => (
-                          <span
-                            key={`${g.key}-${i}`}
-                            className={`px-2 py-0.5 rounded border font-mono text-2xs ${g.cls}`}
-                          >
-                            {r}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
+        {/* ★ v0.36.0（F6.1 / P9）：规则面板独立成组件 —— 三栏 chips 只读展示
+            升级为「逐行来源 + 逐行开关 + 逐行删除」，故不再在此处内联实现。 */}
+        <PermissionRulesPanel />
+      </div>
+    </div>
+  )
+}
 
-        {/* 自定义 allow 规则输入 */}
-        <div>
-          <div className="text-xs text-text-secondary mb-1.5">{t('settings.permission.customAllowRules')}</div>
-          <div className="flex items-center gap-2">
-            <input
-              value={ruleDraft}
-              onChange={(e) => setRuleDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleAddRule()
-              }}
-              className="input flex-1"
-              placeholder={t('settings.permission.addRulePlaceholder')}
-            />
-            <button
-              onClick={() => void handleAddRule()}
-              disabled={!ruleDraft.trim()}
-              className="flex items-center h-8 px-3 rounded-md text-xs text-accent hover:bg-accent-soft transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-ring"
-            >
-              {t('settings.permission.addAllowRule')}
-            </button>
+/* ============================================================
+ * Performance Section — v0.36.4（PERF-1 / D120）
+ *  - 性能模式三态：auto（按 GPU 自动判定）/ on（强制降级，低配 VM 用）/ off（误判逃生门）
+ *  - 轻量模型：任务标题等旁路轻任务专用（OpenCode small_model 同款）；空 = 用任务模型
+ * ============================================================ */
+const PERF_MODES: { id: 'auto' | 'on' | 'off'; labelKey: string; descKey: string }[] = [
+  { id: 'auto', labelKey: 'settings.performance.modeAuto', descKey: 'settings.performance.modeAutoDesc' },
+  { id: 'on', labelKey: 'settings.performance.modeOn', descKey: 'settings.performance.modeOnDesc' },
+  { id: 'off', labelKey: 'settings.performance.modeOff', descKey: 'settings.performance.modeOffDesc' },
+]
+
+function PerformanceSection() {
+  const { t } = useTranslation()
+  const models = useStore((s) => s.models)
+  const [perfMode, setPerfMode] = useState<'auto' | 'on' | 'off'>('auto')
+  const [lightModelId, setLightModelId] = useState('')
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const s = await ark.settings.get()
+        setPerfMode(s.perfMode ?? 'auto')
+        setLightModelId(s.lightweightModelId ?? '')
+      } finally {
+        setLoaded(true)
+      }
+    })()
+  }, [])
+
+  const patch = (p: Partial<{ perfMode: 'auto' | 'on' | 'off'; lightweightModelId: string }>) => {
+    void ark.settings.set(p)
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <SectionLabel>{t('settings.performance.title')}</SectionLabel>
+      </div>
+      <div className="rounded-md border border-border-subtle bg-bg-base p-3.5 space-y-3">
+        {/* 性能模式三态 */}
+        <div className="space-y-1.5">
+          <div className="text-sm text-text-primary font-medium">{t('settings.performance.modeTitle')}</div>
+          <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label={t('settings.performance.modeTitle')}>
+            {PERF_MODES.map((m) => {
+              const active = loaded && perfMode === m.id
+              return (
+                <button
+                  key={m.id}
+                  role="radio"
+                  aria-checked={active}
+                  title={t(m.descKey)}
+                  onClick={() => {
+                    setPerfMode(m.id)
+                    patch({ perfMode: m.id })
+                  }}
+                  className={`h-8 rounded-md text-xs transition-colors focus-ring ${
+                    active
+                      ? 'bg-bg-active text-text-primary font-medium'
+                      : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
+                  }`}
+                >
+                  {t(m.labelKey)}
+                </button>
+              )
+            })}
           </div>
+          <div className="text-2xs text-text-tertiary leading-relaxed">{t(perfMode === 'auto' ? 'settings.performance.modeAutoDesc' : perfMode === 'on' ? 'settings.performance.modeOnDesc' : 'settings.performance.modeOffDesc')}</div>
+        </div>
+        {/* 轻量模型 */}
+        <div className="space-y-1.5">
+          <div className="text-sm text-text-primary font-medium">{t('settings.performance.lightModelTitle')}</div>
+          <select
+            value={lightModelId}
+            onChange={(e) => {
+              setLightModelId(e.target.value)
+              patch({ lightweightModelId: e.target.value })
+            }}
+            className="w-full h-8 rounded-md border border-border-default bg-bg-base px-2 text-xs text-text-primary focus-ring"
+            aria-label={t('settings.performance.lightModelTitle')}
+          >
+            <option value="">{t('settings.performance.lightModelNone')}</option>
+            {models.filter((m) => m.enabled !== false).map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name || m.id}
+              </option>
+            ))}
+          </select>
+          <div className="text-2xs text-text-tertiary leading-relaxed">{t('settings.performance.lightModelDesc')}</div>
         </div>
       </div>
     </div>
@@ -372,12 +385,14 @@ function PermissionSection() {
 
 /* ============================================================
  * Developer Section — 高级：日志 / 图谱（原开发者 Tab）+ 压缩策略只读
+ * v0.36.4（PERF-1 / D120）：顶部插入 PerformanceSection（性能模式 + 轻量模型）
  * ============================================================ */
 function DeveloperSection() {
   const { t } = useTranslation()
   const [tab, setTab] = useState<'logs' | 'graph'>('logs')
   return (
     <section className="space-y-4">
+      <PerformanceSection />
       <PermissionSection />
       <div>
         <div className="flex items-center justify-between mb-2">

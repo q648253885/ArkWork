@@ -297,16 +297,28 @@ test('v0.9.1: parsePlanItems 对完整 12 步数组 → 12 项', () => {
   assert.equal(out![11], '执行子任务 12')
 })
 
-test('v0.9.1: READONLY_TOOLS 存在且含 file-reader', () => {
+test('v0.38.0: 只读白名单唯一事实源在 work-class.ts（isReadonlyTool）', () => {
+  // v0.38.1（D166 测试侧改写随新语义）：v0.38.0 纪律⑧ 删除 loop.ts 本地 READONLY_TOOLS
+  //（loop / registry / plan-tree-sync 三份语义漂移是 D150 温床），收敛为 work-class.ts 单源。
   const src = readFileSync(
-    fileURLToPath(new URL('../engine/loop.ts', import.meta.url)),
+    fileURLToPath(new URL('../engine/work-class.ts', import.meta.url)),
     'utf8',
   )
   assert.match(
     src,
-    /const\s+READONLY_TOOLS\s*=\s*new\s+Set\(\[\s*'file-reader'/,
-    'READONLY_TOOLS 应定义为 Set 且含 file-reader',
+    /export const READONLY_TOOLS = \[\s*'file-reader'/,
+    'READONLY_TOOLS 应定义且含 file-reader（数组 → READONLY_SET）',
   )
+  assert.match(
+    src,
+    /export function isReadonlyTool\(name: string\): boolean/,
+    '应导出 isReadonlyTool（唯一判定入口）',
+  )
+  const loopSrc = readFileSync(
+    fileURLToPath(new URL('../engine/loop.ts', import.meta.url)),
+    'utf8',
+  )
+  assert.match(loopSrc, /isReadonlyTool\(a\.tool\)/, 'loop.ts Act 路径应消费 isReadonlyTool')
 })
 
 test('v0.19.0: seed.ts 使用 syncBuiltinAgentsToLatest 统一同步内置 Agent 到最新版本', () => {
@@ -315,12 +327,22 @@ test('v0.19.0: seed.ts 使用 syncBuiltinAgentsToLatest 统一同步内置 Agent
     'utf8',
   )
   assert.match(src, /async\s+function\s+syncBuiltinAgentsToLatest/, 'seed.ts 应定义 syncBuiltinAgentsToLatest')
-  // v0.34.4（D66）：由 0.25.0 升到 0.34.4 —— 提示词 §6/§7 修正了
-  // 「创建 TodoWrite 清单」（该工具并不存在，真机导致模型编造 `todo-write` 与
-  // `item_index:-1`）→ 改为「清单由计划阶段生成，你只更新已有项」。
-  // syncBuiltinAgentsToLatest **只在 version 落后时同步**，因此改提示词必须同时升版本，
-  // 否则已装机器永远拿不到新提示词。
-  assert.match(src, /version:\s*'0\.34\.4'/, '@default.version 应升到 0.34.4（提示词修正需触发同步）')
+  // v0.38.1（D166 测试侧改写随新语义）：版本钉子不再写死具体号（v0.34.4 → 0.38.0，
+  // 此后每次提示词改写都会再升），只钉「≥0.34.4」单调语义：
+  // syncBuiltinAgentsToLatest 只在 version 落后时同步，因此改提示词必须同时升版本。
+  // 锚定 @default 定义块取 version（seed.ts 里另有标志文件版本等杂项 match，不可用首个）。
+  const defIdx = src.indexOf("id: '@default'")
+  assert.ok(defIdx >= 0, 'seed.ts 应定义 @default 内置 Agent')
+  const coderIdx = src.indexOf("id: '@coder'")
+  const defSrc = src.slice(defIdx, coderIdx > 0 ? coderIdx : undefined)
+  const ver = defSrc.match(/version:\s*'(\d+)\.(\d+)\.(\d+)'/)
+  assert.ok(ver, '@default 应带 version 字段')
+  const nums = ver!.slice(1).map(Number)
+  const [maj, min, pat] = [nums[0]!, nums[1]!, nums[2]!]
+  assert.ok(
+    maj > 0 || min > 34 || (min === 34 && pat >= 4),
+    `@default.version 应 ≥0.34.4（实得 ${ver![0]}；提示词修正需触发同步）`,
+  )
   assert.match(src, /systemSections/, '内置 Agent 应派生 systemSections')
   assert.match(src, /## 1\. 技能优先/, '@default.systemPrompt 应含技能优先段')
   assert.match(src, /## 2\. 工具选择层级/, '@default.systemPrompt 应含工具选择层级段')
@@ -411,6 +433,71 @@ test('v0.17.4: 文档驱动 prompt 的产物路径与 STAGE_GATES 正则对齐',
   }
 })
 
+/* ---------- 6.5 v0.36.5 D124：文档驱动 prompt 的 Tier-0 对话级出口 ---------- */
+
+test('v0.36.5 D124: 文档驱动 prompt 含 Tier-0 对话级出口（只读任务 → []）', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../engine/plan.ts', import.meta.url)),
+    'utf8',
+  )
+  const m = src.match(/const\s+PLAN_SYSTEM_PROMPT_DOC_DRIVEN\s*=\s*`([\s\S]*?)`/)
+  assert.ok(m, 'PLAN_SYSTEM_PROMPT_DOC_DRIVEN 应存在')
+  const prompt = m![1]
+  // 出口段存在且排在 10 阶段清单之前（头部评估，不是尾部补丁）
+  assert.match(prompt, /Tier-0 对话级出口/, '应包含 Tier-0 出口段标题')
+  assert.match(prompt, /只读任务/, '出口应覆盖问答/查询/检查/分析类只读任务')
+  assert.match(prompt, /输出 \[\]/, '出口动作必须是输出空数组（走 plan-fallback 单项路径）')
+  assert.match(prompt, /禁止为只读任务强行套用下方 10 阶段/, '应显式禁止只读任务套用 10 阶段')
+  const exitIdx = prompt.indexOf('Tier-0 对话级出口')
+  const stagesIdx = prompt.indexOf('**阶段清单（')
+  assert.ok(exitIdx >= 0 && stagesIdx > exitIdx, 'Tier-0 出口必须在 10 阶段清单之前（头部先评估）')
+  // 出口与既有锚点并存：文档驱动级定义 + 10 阶段措辞不丢（v0.17.4 既有用例继续兜底）
+  assert.match(prompt, /文档驱动级（产出清单）/, '应保留文档驱动级分支定义')
+})
+
+test('v0.36.5 D125: plan 注入前缀改中性权威（不再复读「请严格按此计划执行」）', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../engine/messages.ts', import.meta.url)),
+    'utf8',
+  )
+  assert.doesNotMatch(
+    src,
+    /请严格按此计划执行，每步完成后继续下一步/,
+    '历史 user 消息前缀不得再附加僵化执行指令（与 D12 replan 通道冲突）',
+  )
+  assert.match(
+    src,
+    /计划清单 — 初始计划快照（各项当前状态以「清单状态」消息为准）/,
+    '前缀应改为中性权威快照声明（对齐 ZCode formatTodoStateForModel）',
+  )
+})
+
+test('v0.36.5 D125: plan-constraint 段冲突句改写（sections.ts 与遗留 prompt-assembly 同步）', () => {
+  for (const rel of ['../prompt/sections.ts', '../prompt-assembly.ts']) {
+    const src = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
+    assert.doesNotMatch(
+      src,
+      /先用 ask_user 向用户确认/,
+      `${rel}：旧句「若计划需调整先用 ask_user」与 D12 replan 通道冲突，应改写`,
+    )
+    // v0.40.0（D202）：本条钉的是 D125 的**语义**（先同步、后执行），不是工具名。
+    // 原来把「用 task_plan 提交同步后的完整清单」整句钉死，而 D202 正是要把这类
+    // 硬性要求去掉 —— 弱模型做不到时会被判为「不用工具」→ 空转（evidence/04）。
+    // 清单维护的责任已移交引擎侧的清单操作通道，故判据放宽为两种写法都收，
+    // 「不许再提必须通过 task_plan」由 TC-OPS-020 反向钉死。
+    assert.match(
+      src,
+      /先按对话末尾『续聊指令与清单』规则(?:用 task_plan 提交同步后的完整清单|同步清单)/,
+      `${rel}：应改为「先同步、后执行」（语义判据，不绑定 task_plan 工具名）`,
+    )
+    assert.match(
+      src,
+      /未经用户批准不得整体作废/,
+      `${rel}：整体作废仍须经用户批准（D12 v2 不变量）`,
+    )
+  }
+})
+
 test('v0.17.4: generatePlan 在 react-core-skills 启用时选择文档驱动 prompt', () => {
   const src = readFileSync(
     fileURLToPath(new URL('../engine/plan.ts', import.meta.url)),
@@ -462,4 +549,70 @@ test('v0.17.4: 清单与阶段关联 hint 明确原型非编码', () => {
   )
   assert.match(src, /HTML 原型是设计文档的一部分.*不是编码步骤/, 'hint 应明确原型非编码')
   assert.match(src, /在系统设计.*冻结前.*禁止执行任何编码/, 'hint 应禁止系统设计冻结前编码')
+})
+
+test('v0.38.1（D168）①: plan prompt 收到「直接答案 JSON（task_complete=true）」按 Tier-0 显式空计划处理', () => {
+  // 实测 qwen3.5:0.8b 对 1+1 问答返回 {"answer":"1+1=2","task_complete":true} ——
+  // 原设计解析失败 → 兜底建清单 → 模型无力收尾 → 烧到迭代上限。语义上与 [] 同愿。
+  const src = readFileSync(fileURLToPath(new URL('../engine/plan.ts', import.meta.url)), 'utf8')
+  assert.match(src, /safeParseJsonObject\(rawStr\)/, '必须严格解析 JSON 对象（防误判宽松文本）')
+  assert.match(src, /asObj\['task_complete'\] === true/, '只认 task_complete === true 的显式表态')
+  assert.match(src, /onNull\?\.\(\{ explicitEmpty: true \}\)/, '必须按 Tier 0 显式空计划上报（不弹错误态）')
+  // 严格形态守卫：只对「{」开头做对象解析，数组路径（["1+1=2"] 会被当成 1 项清单）不受影响
+  assert.match(src, /rawStr\.startsWith\('\{'\)/, '只对对象形态做直接答案判定')
+})
+
+test('v0.38.1（D169）: 模型显式空清单（Tier 0）必须短路降级链，不得被精简重试强扭成清单', () => {
+  // 实测 qwen3.5:9b 对 1+1 问答两次正确回 []，仍被 4096 重试 + 精简「强制 3~5 步」
+  // 重试覆盖成 2 项清单后空转。sawExplicitEmpty 必须在每次 try 失败后立即短路。
+  const src = readFileSync(fileURLToPath(new URL('../engine/plan.ts', import.meta.url)), 'utf8')
+  // 短路点必须早于 4096 重试与精简重试（出现两次：planBig 前 + planSmall 前）
+  // v0.38.1（D170）：短路体改为回调 + return null 的多行形态（回调置 chatMode）
+  const shortCircuits =
+    src.match(/if \(sawExplicitEmpty\) \{\s*\n\s*onExplicitEmpty\?\.\(\)\s*\n\s*return null\s*\n\s*\}/g) ?? []
+  assert.ok(shortCircuits.length >= 2, `显式空短路必须覆盖两级重试（实测 ${shortCircuits.length} 处）`)
+  // 精简重试（PLAN_SYSTEM_PROMPT_RETRY）必须位于最后一个短路点之后
+  const lastShort = src.lastIndexOf('if (sawExplicitEmpty)')
+  const retryAt = src.indexOf('PLAN_SYSTEM_PROMPT_RETRY,')
+  assert.ok(retryAt > lastShort, '精简重试必须被显式空短路保护（模型已表态无需清单时不可达）')
+  // Tier-0 判定保持宽松匹配（宁可漏报也不误报的反向：[] 才算显式空）
+  assert.match(src, /onNull\?\.\(\{ explicitEmpty: \/\\\[\\s\*\\\]\/\.test\(String\(raw \?\? ''\)\) \}\)/, '[] 判定必须走既有正则口径')
+})
+
+test('v0.38.1（调研 G1）: task_plan 纪律教学固化 —— 完成即标记/唯一 doing/禁批量/只读不建项', () => {
+  // 对齐 opencode「Task Management」与 dsh todo_write 的共性状态机纪律：
+  // 一次一个进行中、完成即标记不批量、无清单任务不造项（尊重模型自主判断）。
+  // seed.ts §6 已具备全部要点（本轮调研核对结论：无需改 prompt，测试固化）。
+  const src = readFileSync(fileURLToPath(new URL('../../store/seed.ts', import.meta.url)), 'utf8')
+  assert.match(src, /同一时刻最多一项 doing/, '一次只允许一个进行中（opencode/dsh todo 同款状态机）')
+  assert.match(src, /禁止批量打标/, '完成即标记、不得批量（opencode Task Management 同款纪律）')
+  assert.match(src, /真正完成\*\*（该项状态改为 done）/, '「真正完成才标 done」语义必须在提示词中')
+  assert.match(src, /不要\*\*为了留痕而造项/, '只读问答不得为留痕造项（Tier-0 同源语义）')
+})
+
+test('v0.38.1（D170）: plan 显式空回调接线 —— run-setup 据此置 chatMode 对话级降级', () => {
+  // 实测：qwen3.5 对「你好」被兜底成单项清单后走完全套守卫链。D169 短路后
+  // 语义上应更进一步：显式空 = 模型说「这是纯对话」→ 答复即终局。
+  const planSrc = readFileSync(fileURLToPath(new URL('../engine/plan.ts', import.meta.url)), 'utf8')
+  assert.match(planSrc, /onExplicitEmpty\?: \(\) => void,/, 'generatePlan 签名必须声明 onExplicitEmpty 回调')
+  const calls = planSrc.match(/onExplicitEmpty\?\.\(\)/g) ?? []
+  assert.ok(calls.length >= 2, `两处短路点都必须调用回调（实测 ${calls.length} 处）`)
+  // run-setup 侧：置位 + 传递（loop 侧消费由 TC-STALLG-024 钉住）
+  const runSrc = readFileSync(fileURLToPath(new URL('../engine/run-setup.ts', import.meta.url)), 'utf8')
+  assert.match(runSrc, /chatMode: boolean/, 'PreparedRun 必须声明 chatMode（答复即终局）')
+  assert.match(runSrc, /chatMode = true/, 'plan 显式空回调必须置 chatMode = true')
+})
+
+test('v0.38.1（D172）: seed §6 收窄「不建清单」边界 —— 分析/调研类属实质工作应建轻量清单', () => {
+  // 实测 deepseek-flash 把「分析一下这个项目需要什么技术」判为只读问答不建清单
+  // （思考过程 "No task_plan change needed (read-only Q&A)"）。根因：§6「不调用」
+  // 边界写得太宽。修正为模型无关的统一纪律，不设 provider/模型名分支。
+  const src = readFileSync(fileURLToPath(new URL('../../store/seed.ts', import.meta.url)), 'utf8')
+  const hits = src.match(/分析、调研、评审、方案类请求属于实质工作/g) ?? []
+  assert.ok(hits.length >= 2, `@default 与 @coder 都要带该纪律（实测 ${hits.length} 处）`)
+  assert.match(src, /纯问候 \/ 闲聊 \/ 对已答复内容的简短确认/, '「不调用」边界必须收窄到纯问候/闲聊/简短确认')
+  // 版本钉子：改提示词必须升 version 触发 syncBuiltinAgentsToLatest 同步存量 Agent
+  // v0.38.1（D176）：§6/§7/§8 增成果产物（artifact）纪律 → 0.38.1 已被 BUILD7 消费，升 0.38.2
+  const versions = src.match(/version: '0\.38\.2'/g) ?? []
+  assert.ok(versions.length >= 3, `内置 Agent version 必须升至 0.38.2（实测 ${versions.length} 处）`)
 })

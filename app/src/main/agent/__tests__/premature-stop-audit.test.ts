@@ -32,11 +32,17 @@ const readSrc = (rel: string): string =>
 
 const loopSrc = readSrc('../engine/loop.ts')
 const reasonSrc = readSrc('../engine/reason-phase.ts')
+const engineContextSrc = readSrc('../engine/engine-context.ts')
 
 /* ---------- V2：每轮迭代同步最新清单 ---------- */
 
-test('V2: loop.ts 从 store 导入 getTask 用于每轮同步', () => {
-  assert.match(loopSrc, /import\s*\{[^}]*\bgetTask\b[^}]*\}\s*from\s*['"][^'']*store\/tasks/, '应已导入 getTask')
+test('V2: loop.ts 可引用 getTask（v0.36.0 起经 EngineContext barrel 收敛导入）', () => {
+  // v0.36.0 F1.6：engine 目录 12 文件的重复 import 块收敛为 engine-context.js barrel，
+  // loop.ts 对 getTask 的直接 import 从 store/tasks 变为 './engine-context.js'。
+  // 契约拆成两段：① loop.ts 导入块含 getTask 且源自 barrel；② barrel 从 store/tasks
+  // 再导出 getTask —— 链路任一环断裂都会让每轮同步失效，两段都必须锚住。
+  assert.match(loopSrc, /import\s*\{[^}]*\bgetTask\b[^}]*\}\s*from\s*['"][^'']*engine-context\.js['"]/ , 'loop 应经 barrel 导入 getTask')
+  assert.match(engineContextSrc, /export\s*\{[^}]*\bgetTask\b[^}]*\}\s*from\s*['"][^'']*store\/tasks\.js['"]/, 'barrel 应从 store/tasks 再导出 getTask')
 })
 
 test('V2: 每轮迭代开始前同步 fresh planItems 到本地 task 引用', () => {

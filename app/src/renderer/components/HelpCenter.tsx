@@ -1,8 +1,8 @@
 /* ============================================================
  * ArkWork — HelpCenter (Task 14)
- * 完整帮助系统：覆盖工作区 / 任务 / 并行执行 / 对话流 / 智能体 /
- * 技能 / 知识库 / 记忆 L1–L4 / 自动化 / Inspector / 模型设置 /
- * 快捷键总表 / 隐私与本地存储。每章末尾提供「现在去试试」跳转
+ * 完整帮助系统：覆盖工作区 / 任务 / 并行执行 / 对话流 / 文件工作台 / 智能体 /
+ * 技能 / 插件 / 工作台 / 知识库 / 记忆 L1–L4 / 自动化 / Inspector /
+ * 设置与权限 / 性能与本地存储 / 快捷键总表。每章末尾提供「现在去试试」跳转
  * 入口，复用 store.openModulePage / selectTask / setInspectorTab
  * / setCmdPaletteOpen / setQuickOpenOpen 等已有动作。
  *
@@ -117,6 +117,7 @@ export function HelpCenter() {
           t('help.sections.parallel.bullets.0'),
           t('help.sections.parallel.bullets.1'),
           t('help.sections.parallel.bullets.2'),
+          t('help.sections.parallel.bullets.3'),
         ],
         actions: [
           { kind: 'inspector', tab: 'todos', label: t('help.sections.parallel.actions.0') },
@@ -132,10 +133,29 @@ export function HelpCenter() {
           t('help.sections.conversation.bullets.0'),
           t('help.sections.conversation.bullets.1'),
           t('help.sections.conversation.bullets.2'),
+          t('help.sections.conversation.bullets.3'),
         ],
         actions: [
           { kind: 'composer', label: t('help.sections.conversation.actions.0') },
           { kind: 'newTask', label: t('help.sections.conversation.actions.1') },
+        ],
+      },
+      /* v0.36.3（R4 §5.1）：新增「文件工作台」—— CM6 编辑器 / 原子保存 / Goto Anything
+       * 此前只在「对话流」里顺带提到产物预览，编辑器本体（含只读原因卡）无独立章节。 */
+      {
+        id: 'files',
+        title: t('help.sections.files.title'),
+        icon: 'File',
+        summary: t('help.sections.files.summary'),
+        bullets: [
+          t('help.sections.files.bullets.0'),
+          t('help.sections.files.bullets.1'),
+          t('help.sections.files.bullets.2'),
+          t('help.sections.files.bullets.3'),
+        ],
+        actions: [
+          { kind: 'quickOpen', label: t('help.sections.files.actions.0') },
+          { kind: 'inspector', tab: 'files', label: t('help.sections.files.actions.1') },
         ],
       },
       {
@@ -167,6 +187,40 @@ export function HelpCenter() {
           { kind: 'module', page: 'skills', label: t('help.sections.skills.actions.0') },
         ],
       },
+      /* v0.36.3（R4 §5.1）：新增「插件」—— 装 / 卸 / 权限能力预览 / 沙箱 / 命令进 QuickAction */
+      {
+        id: 'plugins',
+        title: t('help.sections.plugins.title'),
+        icon: 'Plug',
+        summary: t('help.sections.plugins.summary'),
+        bullets: [
+          t('help.sections.plugins.bullets.0'),
+          t('help.sections.plugins.bullets.1'),
+          t('help.sections.plugins.bullets.2'),
+          t('help.sections.plugins.bullets.3'),
+          t('help.sections.plugins.bullets.4'),
+        ],
+        actions: [
+          { kind: 'module', page: 'skills', label: t('help.sections.plugins.actions.0') },
+          { kind: 'quickAction', label: t('help.sections.plugins.actions.1') },
+        ],
+      },
+      /* v0.36.3（R4 §5.1）：新增「工作台」—— 垂直工作台 Profile + 向导化配置 */
+      {
+        id: 'workbench',
+        title: t('help.sections.workbench.title'),
+        icon: 'Workspace',
+        summary: t('help.sections.workbench.summary'),
+        bullets: [
+          t('help.sections.workbench.bullets.0'),
+          t('help.sections.workbench.bullets.1'),
+          t('help.sections.workbench.bullets.2'),
+          t('help.sections.workbench.bullets.3'),
+        ],
+        actions: [
+          { kind: 'module', page: 'workbench', label: t('help.sections.workbench.actions.0') },
+        ],
+      },
       {
         id: 'kb',
         title: t('help.sections.kb.title'),
@@ -194,6 +248,7 @@ export function HelpCenter() {
           t('help.sections.memory.bullets.2'),
           t('help.sections.memory.bullets.3'),
           t('help.sections.memory.bullets.4'),
+          t('help.sections.memory.bullets.5'),
         ],
         actions: [
           { kind: 'module', page: 'memory', label: t('help.sections.memory.actions.0') },
@@ -234,37 +289,41 @@ export function HelpCenter() {
           { kind: 'inspector', tab: 'browser', label: t('help.sections.inspector.actions.4') },
         ],
       },
+      /* v0.36.3（R4 §5.1）：原「模型 / 设置」→「设置与权限」——
+       * 权限规则面板（四级来源 / 记住此选择）此前无章节，模型配置与权限是同一页的两件事。 */
       {
-        id: 'models',
-        title: t('help.sections.models.title'),
+        id: 'settings',
+        title: t('help.sections.settings.title'),
         icon: 'Settings',
-        summary: t('help.sections.models.summary'),
+        summary: t('help.sections.settings.summary'),
         bullets: [
-          t('help.sections.models.bullets.0'),
-          t('help.sections.models.bullets.1'),
-          t('help.sections.models.bullets.2'),
-          t('help.sections.models.bullets.3'),
-          t('help.sections.models.bullets.4'),
-          t('help.sections.models.bullets.5'),
+          t('help.sections.settings.bullets.0'),
+          t('help.sections.settings.bullets.1'),
+          t('help.sections.settings.bullets.2'),
+          t('help.sections.settings.bullets.3'),
+          t('help.sections.settings.bullets.4'),
+          t('help.sections.settings.bullets.5'),
         ],
         actions: [
-          { kind: 'module', page: 'settings', label: t('help.sections.models.actions.0') },
+          { kind: 'module', page: 'settings', label: t('help.sections.settings.actions.0') },
         ],
       },
+      /* v0.36.3（R4 §5.1）：原「隐私 / 本地存储」→「性能与本地存储」——
+       * 无 GPU 环境的动效纪律（只留纯色/透明度呼吸）与本地优先是同一个问题的两面。 */
       {
-        id: 'privacy',
-        title: t('help.sections.privacy.title'),
+        id: 'performance',
+        title: t('help.sections.performance.title'),
         icon: 'Lock',
-        summary: t('help.sections.privacy.summary'),
+        summary: t('help.sections.performance.summary'),
         bullets: [
-          t('help.sections.privacy.bullets.0'),
-          t('help.sections.privacy.bullets.1'),
-          t('help.sections.privacy.bullets.2'),
-          t('help.sections.privacy.bullets.3'),
-          t('help.sections.privacy.bullets.4'),
+          t('help.sections.performance.bullets.0'),
+          t('help.sections.performance.bullets.1'),
+          t('help.sections.performance.bullets.2'),
+          t('help.sections.performance.bullets.3'),
+          t('help.sections.performance.bullets.4'),
         ],
         actions: [
-          { kind: 'module', page: 'settings', label: t('help.sections.privacy.actions.0') },
+          { kind: 'module', page: 'settings', label: t('help.sections.performance.actions.0') },
         ],
       },
     ],
@@ -318,7 +377,8 @@ export function HelpCenter() {
       aria-modal="true"
       aria-label={t('help.title')}
       data-testid="help-center"
-      className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 backdrop-blur-sm"
+      /* v0.36.3 D116：去毛玻璃（backdrop-filter 在无 GPU 环境代价极高）→ 加深遮罩补偿可读性 */
+      className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/50"
       // Phase A Task 3：HelpCenter 背景不再点击关闭（防误触），仅 Esc 退出
       onMouseDown={(e) => e.stopPropagation()}
     >

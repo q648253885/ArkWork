@@ -110,10 +110,30 @@ export async function getAdapter(modelId: string): Promise<LlmAdapter> {
   return adapter
 }
 
+/**
+ * v0.38.0（D161）：是否「Ollama 形态」端点。
+ *
+ * 真实配置里 Ollama 常被登记成 `kind='openai'`（它确实是 OpenAI 兼容协议），
+ * 只有 baseURL 暴露了 11434。而 Ollama 对 qwen3 / qwen3.5 默认**开启思考**，
+ * 思考会压掉原生 tool_calls（详见 `openai.ts:thinkingExtrasFor` 注释）。
+ * 因此按端点形态兜底，而不是只看 kind —— 否则这条修复对真实用户配置无效。
+ */
+function isOllamaLikeEndpoint(model: LlmModel): boolean {
+  if (model.kind === 'ollama' || model.kind === 'vllm') return true
+  return /:11434\b/.test(model.baseURL ?? '')
+}
+
+/** 思考开关：模型显式配置优先；否则 Ollama 形态端点默认关闭（工具路由场景）。 */
+function resolveThink(model: LlmModel): boolean | undefined {
+  if (typeof model.think === 'boolean') return model.think
+  return isOllamaLikeEndpoint(model) ? false : undefined
+}
+
 function buildAdapter(model: LlmModel): LlmAdapter {
   const kind: LlmProviderKind = model.kind
   const apiKey = model.apiKey ?? ''
   const baseURL = model.baseURL
+  const think = resolveThink(model)
 
   switch (kind) {
     case 'openai':
@@ -126,6 +146,7 @@ function buildAdapter(model: LlmModel): LlmAdapter {
         name: model.name,
         provider: 'openai',
         baseURL,
+        think,
       })
 
     case 'anthropic':
@@ -147,6 +168,7 @@ function buildAdapter(model: LlmModel): LlmAdapter {
         baseURL: ollamaBase,
         name: model.name,
         provider: 'ollama',
+        think,
       })
     }
 
@@ -161,6 +183,7 @@ function buildAdapter(model: LlmModel): LlmAdapter {
         baseURL,
         name: model.name,
         provider: 'custom-openai',
+        think,
       })
     }
 

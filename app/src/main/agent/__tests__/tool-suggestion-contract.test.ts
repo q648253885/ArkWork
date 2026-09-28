@@ -71,11 +71,14 @@ test('TC-SUGG-003 ★ [D63] glob-search / grep-search 必须有自己的建议�
  * ② 反面：不得把「同族别的工具」也算成可恢复建议的前提说反
  * ============================================================ */
 
-test('TC-SUGG-004 [D63] todo-update 被拦 → 建议必须讲清真实契约（item_index 从 0、不许 -1）', () => {
+test('TC-SUGG-004 [D63/D154] 已下架清单工具（todo-update）被拦 → 建议必须指向 task_plan 单入口', () => {
+  // v0.38.1（D166 测试侧改写随新语义）：D154 下架 todo-update 后，建议契约从
+  // 「讲清 item_index 0-based」变为「指向 task_plan 单入口 + 禁止新造工具名」。
   const out = blockedSummary('todo-update')
-  assert.match(out, /item_index/, '必须提到 item_index')
-  assert.match(out, /从\s*0\s*开始|0 开始|0-based/i, '必须讲清 0-based')
-  assert.match(out, /不要用\s*-1|禁止|不要新造工具名/, '必须明确禁止 -1 与自造工具名')
+  assert.match(out, /已废弃/, '必须明确告知工具已废弃')
+  assert.match(out, /task_plan/, '必须指向唯一入口 task_plan')
+  assert.match(out, /完整清单/, '必须讲清 task_plan 的完整清单契约')
+  assert.match(out, /不要新造工具名/, '必须明确禁止自造工具名')
 })
 
 test('TC-SUGG-005 [D63] default 分支不得是"换一种方法"这类空话', () => {
@@ -117,13 +120,16 @@ test('TC-SUGG-008 ★ 建议表显式声明纪律⑩，且 file-reader 分支保
   assert.match(actSrc, /不得再建议 shell ls/, 'v0.17.x 的历史教训注释应保留')
 })
 
-test('TC-SUGG-009 [D63] 建议表覆盖清单：file-reader / glob / grep / todo-update 四类各有分支', () => {
+test('TC-SUGG-009 [D63/D154] 建议表覆盖清单：file-reader / glob / grep / task_plan + 下架守卫各有分支', () => {
+  // v0.38.1（D166 测试侧改写随新语义）：D154 后下架工具不再逐个 case（内联清单会随
+  // 下架名单扩容静默漏项），统一走 isRetiredPlanTool 守卫；task_plan 自己有专属分支。
   const body = actSrc.slice(
     actSrc.indexOf('const suggestionFor = (t: string)'),
     actSrc.indexOf('if (!ok) {'),
   )
   assert.ok(body.length > 0, '应能切出 suggestionFor 函数体')
-  for (const key of ["case 'file-reader':", "case 'glob-search':", "case 'grep-search':", "case 'todo-update':", "case 'todo_update':"]) {
+  assert.match(body, /isRetiredPlanTool\(t\)/, '下架清单工具应走唯一守卫（纪律⑧，不逐个 case）')
+  for (const key of ["case 'file-reader':", "case 'glob-search':", "case 'grep-search':", "case 'task_plan':"]) {
     assert.ok(body.includes(key), `建议表应含 ${key}`)
   }
 })

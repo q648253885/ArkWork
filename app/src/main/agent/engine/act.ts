@@ -3,45 +3,46 @@
  * 由 engine.ts 纯移动而来（行区间 2416-3010）。
  */
 
-import type { Task, PlanItem, PlanItemStatus } from '@shared/types/task'
-import type {
-  ReActEvent,
-  ReActAction,
-  ReActStep,
-  PlanContent,
-} from '@shared/types/react'
-import type { Agent } from '@shared/types/agent'
-import { getAdapter, getModel } from '../../llm/registry.js'
-import type { LlmMessage, LlmTool, LlmCompleteResponse } from '../../llm/adapter.js'
-// agent-context-compaction-robustness：LLM 调用健壮性（120s 超时 / 中止短路 / 重试分级）
-import { callLlmWithRetry, withLlmTimeout, isContextOverflowError } from '../llm-call.js'
-import { invokeSkill, skillToLlmTool, skillToolName, listSkills, getSkill, type SkillContext } from '../registry.js'
-// ★ v0.35.0：插件工具名的命名空间判定（**零依赖纯模块** ——
-// 不 import 插件运行时，否则会把 utilityProcess 等 Electron 依赖拖进引擎模块图）
-import { isPluginToolName } from '@shared/utils/plugin-tool-name'
-// ★ v0.35.0：插件控制工具（宿主侧，管理插件本身）—— 判定来自零依赖纯模块
-import { isPluginControlTool } from '@shared/utils/plugin-tool-name'
-// v0.19.0 M1：系统提示词组装器（收敛 parts.push 硬拼逻辑）
-import { buildSystemSections, renderSystemPrompt, buildPersonalitySegment } from '../prompt-assembly.js'
-// v0.25.0 F1：提示词契约层（契约注册 + always-on 技能段 + 契约装配 + 门禁状态机）
-import { collectAlwaysOnSections, assembleSystemPrompt } from '../prompt/sections.js'
 import {
+  type Task,
+  type PlanItem,
+  type PlanItemStatus,
+  type ReActEvent,
+  type ReActAction,
+  type ReActStep,
+  type PlanContent,
+  type Agent,
+  getAdapter,
+  getModel,
+  type LlmMessage,
+  type LlmTool,
+  type LlmCompleteResponse,
+  callLlmWithRetry,
+  withLlmTimeout,
+  isContextOverflowError,
+  invokeSkill,
+  skillToLlmTool,
+  skillToolName,
+  listSkills,
+  getSkill,
+  type SkillContext,
+  isPluginToolName,
+  isPluginControlTool,
+  buildSystemSections,
+  renderSystemPrompt,
+  buildPersonalitySegment,
+  collectAlwaysOnSections,
+  assembleSystemPrompt,
   collectGateSpecs,
   initGateStates,
   checkGateBeforeAdvance,
   confirmGate,
   findGateForStageDoc,
   isDocDrivenAgent,
-} from '../prompt/gates.js'
-import type { GateSpec } from '@shared/types/agent'
-// v0.34.4（D67）：未知工具名的「你是不是想用 X」（纯函数，见 shared/utils/tool-name-hint.ts）
-import { unknownToolError } from '@shared/utils/tool-name-hint.js'
-// v0.19.0 M2：唯一真源会话事件日志（Reason/Act/tool 事件落盘 session.jsonl）
-import { appendSessionEvent } from '../session-log.js'
-// v0.19.0 M3：轮次/步骤收件箱 + 停止候选钩子（turn/step 语义）
-import { drainContinuations } from '../inbox.js'
-import { emitTurnStopping } from '../turn-stopping.js'
-import {
+  type GateSpec,
+  appendSessionEvent,
+  drainContinuations,
+  emitTurnStopping,
   matchStageGate,
   isCoreSkillsEnabled,
   buildGateBlockObservation,
@@ -50,17 +51,19 @@ import {
   matchForbiddenWritePath,
   matchForbiddenShellCommand,
   type StageGate,
-} from '../../skills/builtin/react-core-skills/stage-gates.js'
-import { appendL1, listEnabledL1, listL1, totalTokens } from '../../memory/l1-working.js'
-import { persistRawL2 } from '../../memory/l2-file.js'
-import { logger } from '../../system/logger.js'
-import { genId } from '@shared/utils/id'
-import { isNoisePlanItem } from '@shared/utils/plan-noise'
-import { describeAction } from '@shared/utils/action-description'
-import { createHash } from 'node:crypto'
-import { updateTask, getTask } from '../../store/tasks.js'
-import { getAgent } from '../../store/agents.js'
-import {
+  appendL1,
+  listEnabledL1,
+  listL1,
+  totalTokens,
+  persistRawL2,
+  logger,
+  genId,
+  isNoisePlanItem,
+  describeAction,
+  createHash,
+  updateTask,
+  getTask,
+  getAgent,
   broadcastStep,
   broadcastTaskStatus,
   broadcastToolProgress,
@@ -69,24 +72,26 @@ import {
   broadcastPlanListSnapshot,
   broadcastTextDelta,
   type ToolProgress,
-} from '../events.js'
-// v0.27.0 R1：流式管道（completeWithStream 静默降级 + text-delta 增量泵）
-import { completeWithStream, createTextDeltaPump, type TextDeltaPump } from '../llm-stream.js'
-import { getWorkspaceDir } from '../../store/db.js'
-import { saveCheckpoint, checkpointId } from '../../checkpoint/store.js'
-// v0.8.0 记忆系统钩子
-import { applyPending, getCuratedSnapshot } from '../../memory/l3-curated.js'
-import { archiveTaskL1, initArchiveIndex } from '../../memory/l3-archive.js'
-import { getProfile, synthesizeFromTaskL1 } from '../../memory/l4-profile.js'
-import { evaluateDistillTrigger, autoPromoteDistill, getDistillMetrics } from '../../memory/distill.js'
-import { runForSkillForge } from '../../memory/skill-forge.js'
-import { compressMemory } from '../../ipc/memory.js'
-// v0.15.0：统一压缩路径——自动压缩与 Turn Phase-0 均走两阶段 compact()（联动 L3b + 压缩后蒸馏）
-import { compactTask } from '../../memory/compaction.js'
-import { createMemoryPhase0 } from '../../memory/compaction-hook.js'
-import type { CompressPolicy } from '@shared/types/memory'
-// agent-context-compaction-robustness：上下文预算与分层压缩纯工具模块
-import {
+  completeWithStream,
+  createTextDeltaPump,
+  type TextDeltaPump,
+  getWorkspaceDir,
+  saveCheckpoint,
+  checkpointId,
+  applyPending,
+  getCuratedSnapshot,
+  archiveTaskL1,
+  initArchiveIndex,
+  getProfile,
+  synthesizeFromTaskL1,
+  evaluateDistillTrigger,
+  autoPromoteDistill,
+  getDistillMetrics,
+  runForSkillForge,
+  compressMemory,
+  compactTask,
+  createMemoryPhase0,
+  type CompressPolicy,
   estimatePayloadTokens,
   estimatePayloadTokensDetailed,
   estimateTextTokens,
@@ -97,21 +102,21 @@ import {
   MAX_OBSERVATION_CONTENT,
   MICRO_COMPACT_PLACEHOLDER,
   OBSERVATION_TRUNCATED_MARK,
-} from '../context.js'
-import { getMemoryConfig, getSettings } from '../../ipc/settings.js'
-// v0.8.0 知识库钩子
-import { listKb, listEnabledKb } from '../../kb/store.js'
-import { searchKb, initKbIndex } from '../../kb/index.js'
-import { readFile } from 'node:fs/promises'
-// Task 6：上下文占比可视化与下钻
-import {
+  getMemoryConfig,
+  getSettings,
+  listKb,
+  listEnabledKb,
+  searchKb,
+  initKbIndex,
+  readFile,
   computeContextBreakdown,
   type ContextBreakdownInput,
   type ContextBreakdownResult,
   type ContextToolEntry,
   type ContextSkillInstruction,
-} from '../context-breakdown.js'
-
+} from './engine-context.js'
+// v0.34.4（D67）：未知工具名的「你是不是想用 X」（纯函数，见 shared/utils/tool-name-hint.ts）
+import { unknownToolError } from '@shared/utils/tool-name-hint.js'
 import { safeSlice } from './broadcast.js'
 import { injectSkillInstruction } from './skills.js'
 import { sanitizePlanItemText } from './plan-parser.js'
@@ -120,7 +125,14 @@ import { decidePlanAdvance } from './gates.js'
 import { syncPostAct } from '../graph/sync.js'
 import { renderGraphErrorForModel } from '../graph/invariants.js'
 import { recordMetric } from '../graph/metrics.js'
-import { applyPlanItemStatuses } from '../graph/plan-sync.js'
+// v0.38.0（D154）：任务清单控制面收敛 —— task_plan 的差异算法（纯函数）与投递出口
+import { isDraftStatus, DRAFT_STATUSES, type PlanDraftItem } from '../ledger/plan-diff.js'
+import type { LedgerArtifact } from '../ledger/types.js'
+import { emitTurnNote } from './gate-channel.js'
+import { isPlanTool, isRetiredPlanTool } from './work-class.js'
+// v0.38.1（D177）：清单落库共享管线（task_plan 与正则清单回退共用）
+import { commitPlanDraft } from './plan-commit-pipeline.js'
+import type { LedgerItemStatus } from '../ledger/types.js'
 
 /* ============================================================
  * v0.30.0：从 Act 参数中提取"漂移检测 / 验证匹配"所需的结构化信息
@@ -232,6 +244,12 @@ export function buildObservationSummary(
    * 不许退化成"换一种方法"这类空话（D63 同族：glob-search 落 default → 空话 →
    * 模型弹回 file-reader，两个已耗尽工具乒乓）。 */
   const suggestionFor = (t: string): string => {
+    // v0.38.0（D154）：已下架的历史清单工具名 —— 判断走唯一守卫（纪律⑧）。
+    // 不得再逐个 `case`：内联清单会随下架名单扩容而静默漏项
+    // （v0.38.0 实现时正是漏了 task_update / task_get / task_list）。
+    if (isRetiredPlanTool(t)) {
+      return '\n\n💡 替代建议：该工具已废弃 —— 任务清单控制面已收敛为单一入口 task_plan。请改用 task_plan 提交你当前认为正确的**完整清单**（引擎自动算差异）。不要新造工具名。'
+    }
     switch (t) {
       case 'web-search':
         return '\n\n💡 替代建议：1) 用 fetch-url 直接访问可能包含答案的网站 2) 用 shell 执行 curl 检查网络连通性 3) 基于已有知识推理并说明信息缺口。'
@@ -247,11 +265,12 @@ export function buildObservationSummary(
       case 'glob-search':
       case 'grep-search':
         return '\n\n💡 替代建议：1) 换**更精确**的 pattern（如 "docs/**/*.md"、"src/**/*.ts"），不要再用 "**/*" 2) 改用 file-reader({ path: "<具体子目录>" }) 逐层列出 3) 若已拿到文件清单，**停止列举、直接读文件或开始产出**。'
-      case 'todo-update':
-      case 'todo_update':
-        // D66：模型常把「创建清单」当成该工具的职责。这里把真实契约讲清楚，
-        // 而不是让它继续猜（真机曾出现 item_index=-1 与编造 todo-write 两种动作）。
-        return '\n\n💡 替代建议：清单由**计划阶段**生成，本工具只更新**已有项**：item_index 从 0 开始。请用 todo_update({ item_index: 0, status: "done", comment: "…" })。不要新造工具名，不要用 -1。'
+      case 'task_plan':
+        // v0.38.0（D154）：清单控制面唯一入口。失败时把契约再讲一遍 ——
+        // 常见失败是 items 为空 / status 用了非法值（如 "completed"）。
+        return '\n\n💡 替代建议：用 task_plan({ items: [{ text: "要做什么", status: "todo|doing|done|skipped|blocked", note: "可选" }, …] }) 提交**完整**清单；items 必须非空数组，status 只接受那 5 个值。'
+      case 'turn_note':
+        return '\n\n💡 替代建议：turn_note({ text: "1–3 句具体结论" }) —— text 不能为空，写"已确认 X，接下来做 Y"，不要写"正在处理中"。'
       case 'task_complete':
       case 'ask_user':
         return ''
@@ -325,8 +344,14 @@ export function buildObservationSummary(
     return `${header}\n\nstdout:\n${out}${str(r.stdout).length > 800 ? '\n… (truncated)' : ''}${err ? `\n\nstderr:\n${err}${str(r.stderr).length > 400 ? '\n… (truncated)' : ''}` : ''}`
   }
   if (tool === 'delegate-agent') {
-    const r = result as { agentId: string; taskId: string; status: string; summary: string; iterations: number }
-    return `[delegate-agent] 委派给 @${r.agentId}（子任务 ${r.taskId}）· status=${r.status} · ${r.iterations} iterations\n\n摘要：\n${str(r.summary)}`
+    // v0.36.0 F4.1：targets 数组化 —— 每个委派目标逐行呈现
+    const r = result as { results?: Array<{ agentId: string; taskId: string | null; status: string; summary: string; iterations: number }> }
+    const items = r.results ?? []
+    const lines = items.map((it, i) =>
+      `${i + 1}. @${it.agentId}（子任务 ${it.taskId ?? '未创建'}）· status=${it.status} · ${it.iterations} iterations\n   摘要：${safeSlice(str(it.summary), 400)}`,
+    )
+    const header = items.length === 1 ? '[delegate-agent] 委派 1 个子任务' : `[delegate-agent] 并行委派 ${items.length} 个子任务`
+    return `${header}\n\n${lines.join('\n\n')}`
   }
   if (tool === 'session-search') {
     const r = result as { query: string; total: number; hits: Array<{ taskTitle: string; snippet: string; createdAt: number }> }
@@ -345,6 +370,35 @@ export function buildObservationSummary(
  *  - executeAct：单条 act 的实际执行包装（错误隔离，单条失败不阻塞同组其它 act）
  *  - toFinishedProgress：act 完成后构造用于广播的 ToolProgress
  * ============================================================ */
+/**
+ * v0.37.0：清单概览渲染（反馈给 LLM，让它看到更新后的**账本**状态）。
+ * 相比 v0.18.x 的五档 mark，新增 `paused`（中断待续）与 `verifying`（待验收）——
+ * 这两个状态此前无符号，模型会把"暂停"误读成"没开始"从而重做（D131 同源）。
+ */
+function renderOverview(items: ReadonlyArray<{ status: string; text: string }>): string {
+  return items
+    .map((p, i) => {
+      const mark =
+        p.status === 'done'
+          ? '[x]'
+          : p.status === 'running'
+            ? '[~]'
+            : p.status === 'paused'
+              ? '[‖]'
+              : p.status === 'verifying'
+                ? '[?]'
+                : p.status === 'failed'
+                  ? '[!]'
+                  : p.status === 'skipped'
+                    ? '[-]'
+                    : p.status === 'cancelled'
+                      ? '[·]'
+                      : '[ ]'
+      return `${mark} ${i + 1}. ${p.text}`
+    })
+    .join('\n')
+}
+
 export function collectActionsForIteration(response: LlmCompleteResponse): ReActAction[] {
   if (response.actions && response.actions.length > 0) return response.actions
   if (response.action) return [response.action]
@@ -393,6 +447,12 @@ export interface ActExecutionResult {
   durationMs: number
   ok: boolean
   errorMessage?: string
+  /**
+   * v0.39.0（W2）：失败分类短码（`timeout` / `notfound` / `permission` / `parse` /
+   * `context` / `exit` …）。供规划通道的失败摘要挑选**建议话术**（见 digest.ts）——
+   * 模型在失败面前最需要的是"下一步该换什么"，不是更长的一串红字。
+   */
+  failureCode?: string
   additionalSystemHint?: string
 }
 
@@ -489,197 +549,222 @@ export async function executeAct(
       }
     }
 
-    // v0.17.5：todo_update — LLM 主动更新清单状态（对齐 Claude Code TodoWrite）。
-    // 引擎层不再全凭感觉自动打标，改为 LLM 每完成一个阶段操作后主动调用本工具。
-    // 在 invokeSkill 之前拦截（todo_update 是控制类工具，不走普通 skill 调用）。
-    if (action.tool === 'todo-update' || action.tool === 'todo_update') {
+    // v0.37.0（PRD F7）：set-task-mode —— **模型自选**任务模式。
+    // 与 todo-update 同族（控制类工具，不走普通 skill 调用，必须在 invokeSkill 之前拦截）。
+    // UI 不提供任何模式选择入口，声明权归模型；引擎只在模型未声明时兜底推导。
+    if (action.tool === 'set-task-mode' || action.tool === 'set_task_mode') {
       const args = (action.args ?? {}) as Record<string, unknown>
-      const itemIndex = typeof args.item_index === 'number' ? args.item_index : Number(args.item_index)
-      const status = String(args.status ?? '')
-      const comment = typeof args.comment === 'string' ? args.comment : ''
-      const VALID_STATUSES = new Set(['done', 'running', 'pending', 'skipped', 'failed', 'cancelled'])
-      const planItems = ctx.task.planItems ?? []
+      const rawMode = String(args.mode ?? '').trim()
+      const reason = typeof args.reason === 'string' ? args.reason.slice(0, 200) : ''
+      const valid = rawMode === 'chat' || rawMode === 'plan' || rawMode === 'spec'
       const durationMs = Date.now() - actStartedAt
-
-      // 校验：索引越界或状态非法 → 返回失败，让 LLM 下一轮修正。
-      // v0.24.x：清单为空时宽容 —— 自动追加被引用项（以 comment 或占位文本），
-      // 避免 LLM 因"清单共 0 项"反复报错死循环。
-      // v0.30.0 D9：本分支是「清单为空」的宽容兜底，追加项**尚无对应图节点**；plan-sync 只桥接
-      //            已有节点的状态变更（§4.7 的 planItemId === nodeId 不变量），无「建节点」原语，
-      //            故此处保留 v0.29 直写（详见 04-system-design.md §10.6 的偏离记录）。
-      if (planItems.length === 0 && itemIndex === 0) {
-        const nowAppend = Date.now()
-        const appended: PlanItem = {
-          id: `plan_append_${nowAppend}`,
-          text: sanitizePlanItemText(comment || '执行任务'),
-          status: (status === 'done' ? 'done' : 'running') as PlanItem['status'],
-          createdAt: nowAppend,
-          updatedAt: nowAppend,
-        }
-        if (status === 'done' || status === 'failed' || status === 'skipped' || status === 'cancelled') {
-          appended.completedAt = nowAppend
-        }
-        planItems.push(appended)
-        await updateTask(placeholder.taskId, { planItems })
-        broadcastPlanItemStatus(placeholder.taskId, [
-          {
-            planItemId: appended.id,
-            index: 0,
-            fromStatus: 'pending',
-            status: appended.status,
-            source: 'todo-update',
-            reason: comment || '清单为空自动追加',
-            ts_iteration: ctx.iteration,
-          },
-        ])
-        return {
-          completedStep: { ...placeholder, result: { item_index: 0, status, overview: `[~] 1. ${appended.text}` }, resultSummary: `清单为空，已自动追加第 1 项：${appended.text}`, durationMs, status: 'success' },
-          result: { item_index: 0, status, overview: `[~] 1. ${appended.text}` },
-          resultSummary: `清单为空，已自动追加第 1 项：${appended.text}`,
-          durationMs,
-          ok: true,
-        }
-      }
-      if (!Number.isInteger(itemIndex) || itemIndex < 0 || itemIndex >= planItems.length) {
-        const errMsg = `todo_update 参数非法：item_index=${itemIndex} 越界（清单共 ${planItems.length} 项，索引 0~${planItems.length - 1}）`
-        logger.warn('Agent', errMsg, placeholder.taskId)
+      if (!valid) {
+        const errMsg = `set-task-mode 参数非法：mode=${rawMode || '(空)'}（合法值 chat / plan / spec）`
         return {
           completedStep: { ...placeholder, result: { error: errMsg }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg, softFail: true },
           result: { error: errMsg }, resultSummary: errMsg, durationMs, ok: false, errorMessage: errMsg,
         }
       }
-      if (!VALID_STATUSES.has(status)) {
-        const errMsg = `todo_update 参数非法：status=${status}（合法值 done/running/pending/skipped/failed/cancelled）`
-        logger.warn('Agent', errMsg, placeholder.taskId)
-        return {
-          completedStep: { ...placeholder, result: { error: errMsg }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg, softFail: true },
-          result: { error: errMsg }, resultSummary: errMsg, durationMs, ok: false, errorMessage: errMsg,
-        }
-      }
-
-      // v0.25.0 F1：门禁拦截 —— 标 done 时若存在与该条目关联的 pending gate，
-      // 拦截返回 softFail + 行动指令（不 throw）。LLM 据此调 ask_user 完成确认，
-      // 用户答复后下一轮 run 由 pendingGateBlock 消费写回 gateStates。
-      // 失败/取消/跳过不拦截（仅「done」代表阶段真正完成 → 才需要门禁通过）。
-      if (status === 'done') {
-        const itemText = planItems[itemIndex]?.text ?? String(args.item_index ?? '')
-        const gateBlock = checkGateBeforeAdvance(ctx.task, itemText)
-        if (gateBlock) {
-          logger.warn(
-            'Agent',
-            `todo_update blocked by gate ${gateBlock.gateId} on item=${itemIndex}`,
-            placeholder.taskId,
-          )
-          // 写 pendingGateBlock 供下次 run 入口消费
-          ctx.task.pendingGateBlock = { gateId: gateBlock.gateId }
-          await updateTask(placeholder.taskId, { pendingGateBlock: ctx.task.pendingGateBlock })
-          const errMsg = gateBlock.instruction
-          return {
-            completedStep: { ...placeholder, result: { error: errMsg, gateId: gateBlock.gateId }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg, softFail: true },
-            result: { error: errMsg, gateId: gateBlock.gateId },
-            resultSummary: errMsg,
-            durationMs,
-            ok: false,
-            errorMessage: errMsg,
-          }
-        }
-      }
-
-      // 更新目标项 + 自动推进（标 done 时把下一项标 running）
-      const target = planItems[itemIndex]
-      const fromStatus = target.status
-      target.status = status as PlanItem['status']
-      target.updatedAt = Date.now()
-      // v0.18.0 F4：记录 source 字段（LLM 主动调用 todo_update，不带"引擎"徽标）
-      target.source = 'todo-update'
-      if (status === 'done' || status === 'failed' || status === 'skipped' || status === 'cancelled') {
-        target.completedAt = Date.now()
-      }
-      // v0.24.x fix：记录是否自动推进了下一项。原代码在第二个 if 里重新判断
-      // planItems[itemIndex+1].status === 'pending'，但该状态已在上面被改成 'running'，
-      // 导致「下一项标 running」的 patch 永远不广播 —— 清单只能 done 当前项、下一项卡在 pending。
-      let advancedNext = false
-      if (status === 'done' && itemIndex + 1 < planItems.length && planItems[itemIndex + 1].status === 'pending') {
-        planItems[itemIndex + 1].status = 'running'
-        planItems[itemIndex + 1].updatedAt = Date.now()
-        advancedNext = true
-      }
-      // v0.30.0 D9：有图任务写图（唯一真相），镜像与广播由 graph/store.saveGraph 统一补发；
-      //            无图任务（tier 0/1）保持 v0.29 直写。
-      if (ctx.task.graphId) {
-        const updates: { planItemId: string; to: PlanItemStatus }[] = [
-          { planItemId: target.id, to: status as PlanItemStatus },
-        ]
-        if (advancedNext) {
-          updates.push({ planItemId: planItems[itemIndex + 1].id, to: 'running' })
-        }
-        await applyPlanItemStatuses(
-          { taskId: placeholder.taskId, graphId: ctx.task.graphId, iteration: ctx.iteration ?? 0 },
-          updates,
-          'todo-update',
-          comment || undefined,
-        )
-      } else {
-        await updateTask(placeholder.taskId, { planItems })
-      }
-
-      // v0.18.0 F1：todo_update 拦截后也通过 patch 通道广播；
-      // 多项变更（done → 自动推进下一项）走串行 N 次广播（version 自增）。
-      broadcastPlanItemStatus(placeholder.taskId, [
-        {
-          planItemId: target.id,
-          index: itemIndex,
-          fromStatus,
-          status: status as PlanItem['status'],
-          source: 'todo-update',
-          reason: comment || undefined,
-          ts_iteration: ctx.iteration,
-        },
-      ])
-      if (advancedNext) {
-        const next = planItems[itemIndex + 1]
-        broadcastPlanItemStatus(placeholder.taskId, [
-          {
-            planItemId: next.id,
-            index: itemIndex + 1,
-            fromStatus: 'pending',
-            status: 'running',
-            source: 'todo-update',
-            reason: 'todo-update 后自动推进',
-            ts_iteration: ctx.iteration,
-          },
-        ])
-      }
-
-      // 构造清单概览（反馈给 LLM，让它知道更新后的状态）
-      // v0.18.x fix: 复用 engine-decision 同款五档 mark（done/running/failed/skipped/pending），
-      // 之前 LLM 主动 todo_update 写 failed 时会落到默认 [ ] 分支，跟路径 B 的 [!] 符号不一致。
-      const overview = planItems.map((p, i) => {
-        const mark =
-          p.status === 'done'
-            ? '[x]'
-            : p.status === 'running'
-              ? '[~]'
-              : p.status === 'failed'
-                ? '[!]'
-                : p.status === 'skipped'
-                  ? '[-]'
-                  : p.status === 'cancelled'
-                    ? '[·]'
-                    : '[ ]'
-        return `${mark} ${i + 1}. ${p.text}`
-      }).join('\n')
-      const summary = `已更新清单第 ${itemIndex + 1} 项为「${status}」${comment ? `：${comment}` : ''}\n当前清单：\n${overview}`
-      logger.info('Agent', `todo_update: item=${itemIndex} status=${status}`, placeholder.taskId)
+      const { setMode } = await import('../ledger/engine.js')
+      const res = await setMode(placeholder.taskId, rawMode, 'model', reason || '模型自选')
+      const summary = res.ok
+        ? `任务模式已由模型设为 ${rawMode}（${reason || '未给理由'}），账本 r${res.revision}`
+        : `任务模式写入失败：${res.error?.message ?? '未知原因'}`
       return {
-        completedStep: { ...placeholder, result: { item_index: itemIndex, status, overview }, resultSummary: summary, durationMs, status: 'success' },
-        result: { item_index: itemIndex, status, overview },
+        completedStep: { ...placeholder, result: { mode: rawMode, ok: res.ok }, resultSummary: summary, durationMs, status: res.ok ? 'success' : 'failed', errorMessage: res.ok ? undefined : summary },
+        result: { mode: rawMode, ok: res.ok },
+        resultSummary: summary,
+        durationMs,
+        ok: res.ok,
+        errorMessage: res.ok ? undefined : summary,
+      }
+    }
+
+    // ============================================================
+    // v0.38.0（D154）：`task_plan` —— 任务清单的**唯一控制入口**。
+    //
+    // 收敛前模型侧有 11 个清单工具、两套定位语义（图工具按 node_id、账本工具按
+    // item_index），且语义重叠（都能新增）→ 模型没有唯一正确答案可选，现场形态是
+    // 「判断摇摆 / 用一个工具冒充另一个」。现在只有一个动作：
+    // **提交你当前认为正确的完整清单**，差异由 `diffPlan`（纯函数）计算。
+    //
+    // 控制类工具 → 必须在 invokeSkill 之前拦截。
+    // ============================================================
+    if (action.tool === 'task_plan') {
+      const args = (action.args ?? {}) as Record<string, unknown>
+      const durationMs = Date.now() - actStartedAt
+      const reason = typeof args.reason === 'string' ? args.reason.slice(0, 200) : ''
+
+      // ---------- ① 形状校验（失败即回**可执行** observation，不静默丢弃） ----------
+      const rawItems = args.items
+      const shapeErrors: string[] = []
+      const draft: PlanDraftItem[] = []
+      if (!Array.isArray(rawItems) || rawItems.length === 0) {
+        shapeErrors.push('items 必须是非空数组')
+      } else {
+        rawItems.forEach((it, i) => {
+          const o = (it ?? {}) as Record<string, unknown>
+          const text = typeof o.text === 'string' ? o.text.trim() : ''
+          if (!text) {
+            shapeErrors.push(`第 ${i + 1} 项缺少 text`)
+            return
+          }
+          if (!isDraftStatus(o.status)) {
+            shapeErrors.push(
+              `第 ${i + 1} 项 status=${String(o.status)} 非法（合法值：${DRAFT_STATUSES.join(' / ')}）`,
+            )
+            return
+          }
+          // v0.38.1（D176）：成果产物声明（可选；done 项缺声明会被完成门禁 ARTIFACT 拦下）
+          const rawArt = (o.artifact ?? undefined) as Record<string, unknown> | undefined
+          let artifact: LedgerArtifact | undefined
+          if (rawArt) {
+            const p = typeof rawArt.path === 'string' ? rawArt.path.trim() : ''
+            const check = typeof rawArt.check === 'string' ? rawArt.check.trim() : ''
+            if (rawArt.kind === 'file' || rawArt.kind === 'dir') {
+              if (!p) {
+                shapeErrors.push(`第 ${i + 1} 项 artifact.kind=${rawArt.kind} 需要 path（相对工作区）`)
+                return
+              }
+              artifact = { path: p, kind: rawArt.kind, check: check || undefined }
+            } else if (rawArt.kind === 'command') {
+              if (!check) {
+                shapeErrors.push(`第 ${i + 1} 项 artifact.kind=command 需要 check（校验方式说明）`)
+                return
+              }
+              artifact = { path: p, kind: 'command', check }
+            } else {
+              shapeErrors.push(`第 ${i + 1} 项 artifact.kind=${String(rawArt.kind)} 非法（file / dir / command）`)
+              return
+            }
+          }
+          draft.push({
+            text,
+            status: o.status,
+            note: typeof o.note === 'string' && o.note.trim() ? o.note.trim().slice(0, 200) : undefined,
+            ...(artifact ? { artifact } : {}),
+          })
+        })
+      }
+      if (shapeErrors.length > 0) {
+        const errMsg = `task_plan 参数非法：${shapeErrors.slice(0, 3).join('；')}。请重新提交**完整**清单（items 非空，status 用 todo/doing/done/skipped/blocked）。`
+        logger.warn('Agent', errMsg, placeholder.taskId)
+        return {
+          completedStep: { ...placeholder, result: { error: errMsg }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg, softFail: true },
+          result: { error: errMsg }, resultSummary: errMsg, durationMs, ok: false, errorMessage: errMsg,
+        }
+      }
+
+      // ---------- ②–⑦ 落库管线（v0.38.1 / D177 收敛到共享模块） ----------
+      //   建账 → diffPlan → plan-commit → touch-sync → 图对账 → 阶段结论，
+      //   与 D177 正则清单回退共用同一条管线（纪律⑧：单一实现，不漂移）。
+      const committed = await commitPlanDraft({
+        task: ctx.task,
+        iteration: ctx.iteration ?? 0,
+        draft,
+        reason,
+        source: 'task-plan',
+      })
+      if (!committed.ok) {
+        const errMsg = `task_plan 被任务清单引擎拒绝：${committed.errorMessage ?? '未知原因'}`
+        logger.warn('Agent', errMsg, placeholder.taskId)
+        return {
+          completedStep: { ...placeholder, result: { error: errMsg }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg, softFail: true },
+          result: { error: errMsg }, resultSummary: errMsg, durationMs, ok: false, errorMessage: errMsg,
+        }
+      }
+      const led = await import('../ledger/engine.js')
+      const fresh = await led.loadLedger(placeholder.taskId)
+      const freshItems = fresh?.items ?? []
+      const diff = committed.diff!
+      const graphSyncDegraded = committed.graphSyncDegraded
+
+      // ---------- ⑧ observation：把引擎算出的差异回给模型，便于它确认自己的改动 ----------
+      const overview = renderOverview(freshItems.map((it) => ({ status: it.status, text: it.text })))
+      const protectedText =
+        diff.protectedIds.length > 0 ? `\n（已保留 ${diff.protectedIds.length} 项已完成 / 终态清单项，不会回退）` : ''
+      const warnText = diff.warnings.length > 0 ? `\n\n⚠️ 引擎自动纠正：${diff.warnings.join('；')}` : ''
+      const degradeText = graphSyncDegraded
+        ? `\n\n⚠️ 注意：任务图通道本次未同步（清单账本已记录，以账本为准）。已完成项不要重做。`
+        : ''
+      const summary =
+        diff.changed === 0
+          ? `清单已检视，无需变化（共 ${freshItems.length} 项）。\n当前清单：\n${overview}`
+          : `清单已更新（${diff.summary}）${protectedText}。\n当前清单：\n${overview}${warnText}${degradeText}`
+      // 落库日志已由共享管线输出（`${source}(ledger): changed=…`），此处不再重复
+      return {
+        completedStep: { ...placeholder, result: { changed: diff.changed, items: freshItems.length }, resultSummary: summary, durationMs, status: 'success' },
+        result: { changed: diff.changed, items: freshItems.length, overview },
         resultSummary: summary,
         durationMs,
         ok: true,
       }
     }
 
+    // ============================================================
+    // v0.38.0（D154 / FR9.1）：**旧清单工具名的迁移兜底**。
+    //
+    // 9 个清单工具已下架（改由 `task_plan` 单入口承担）。历史会话 / 未刷新工具表的
+    // 模型仍可能调旧名 —— 这里必须给出**可执行**的替代指引，绝不静默失败、
+    // 也绝不退化成"直写 planItems"的第二条写入通道（纪律⑨）。
+    //
+    // 唯一事实源：`work-class.ts` 的 `RETIRED_PLAN_TOOLS`（纪律⑧）—— 此前是内联
+    // if 链，漏了 `task_update` / `task_get` / `task_list`，它们会掉进 registry 的
+    // `No handler for builtin skill` 静默路径（模型拿不到任何可执行指引）。
+    // ============================================================
+    if (isRetiredPlanTool(action.tool)) {
+      const durationMs = Date.now() - actStartedAt
+      const errMsg =
+        `[deprecated-tool] 「${action.tool}」已废弃（v0.38.0：任务清单控制面收敛为单一入口）。\n` +
+        `请改用 task_plan 提交你当前认为正确的**完整清单**（不是增量）：\n` +
+        `  task_plan({ items: [ { text: "要做什么", status: "todo|doing|done|skipped|blocked", note: "可选说明" }, … ] })\n` +
+        `引擎会与当前清单比对，自动计算新增 / 状态变化 / 删除，并保留已完成项。\n` +
+        `判断「清单无需变化」时，提交与现在**相同**的清单即可（引擎会记录你已做过检视）。`
+      logger.warn('Agent', `deprecated tool called: ${action.tool}`, placeholder.taskId)
+      return {
+        completedStep: { ...placeholder, result: { error: errMsg, deprecated: action.tool }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg, softFail: true },
+        result: { error: errMsg, deprecated: action.tool },
+        resultSummary: errMsg,
+        durationMs,
+        ok: false,
+        errorMessage: errMsg,
+      }
+    }
+
+    // ============================================================
+    // v0.38.0（D156）：`turn_note` —— 阶段结论（给用户的输出，不是工具副作用）。
+    //   P7 触发点②：模型每得出一个中间结论 / 完成一个小任务就投一条，用户在长任务
+    //   里能看到进展，而不是"思考 8 轮，然后一次性给最终结果"。
+    //   与 `task_complete` 的区别：它**不结束本轮**，只是把结论投进交互区。
+    //   **不写 L1**：输出不是输入（否则会被当成上下文/用户消息反复回灌）。
+    // ============================================================
+    if (action.tool === 'turn_note') {
+      const args = (action.args ?? {}) as Record<string, unknown>
+      const durationMs = Date.now() - actStartedAt
+      const text = typeof args.text === 'string' ? args.text.trim() : ''
+      if (!text) {
+        const errMsg = 'turn_note 参数非法：text 不能为空。请写 1–3 句具体结论（"已确认 X，接下来做 Y"）。'
+        return {
+          completedStep: { ...placeholder, result: { error: errMsg }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg, softFail: true },
+          result: { error: errMsg }, resultSummary: errMsg, durationMs, ok: false, errorMessage: errMsg,
+        }
+      }
+      await emitTurnNote({
+        taskId: placeholder.taskId,
+        iteration: ctx.iteration ?? 0,
+        text: text.slice(0, 1000),
+        via: 'model',
+      })
+      const summary = `已向用户投递阶段结论（${Math.min(text.length, 1000)} 字）。`
+      logger.info('Agent', `turn_note emitted (${text.length} chars)`, placeholder.taskId)
+      return {
+        completedStep: { ...placeholder, result: { note: text.slice(0, 200) }, resultSummary: summary, durationMs, status: 'success' },
+        result: { note: text.slice(0, 200) },
+        resultSummary: summary,
+        durationMs,
+        ok: true,
+      }
+    }
     // 找到 skill id：按 LLM 工具名匹配（v0.6.1：兼容 SkillHub 中文名技能，见 skillToolName）
     // ★ v0.35.0：插件工具（`plugin__<pluginId>__<name>`）。
     // 走独立分支而不是塞进 skill 路径：它的**执行边界在另一个进程**，
@@ -847,30 +932,56 @@ export async function executeAct(
       // 文案实话实说：E2 ask 事件目前不暂停执行，这里是让模型自纠/调方向；
       // 用户可在对话流看到该提示并随时介入。
       if (syncRes.driftHardText) {
-        resultSummary += `\n\n[drift-alert] 检测到持续偏离（本提示对同一任务只提请一次；请自纠或用 replan 调整方向）：\n${syncRes.driftHardText}`
+        resultSummary += `\n\n[drift-alert] 检测到持续偏离（本提示对同一任务只提请一次；请自纠或用 task_plan 调整清单方向）：\n${syncRes.driftHardText}`
       }
     } catch (syncErr) {
       // Sync 是增强不是关键路径：任何异常都不允许让 act 失败
       logger.warn('Agent', `graph-sync skipped: ${(syncErr as Error).message}`, placeholder.taskId)
     }
-  } else if (ctx.task.planItems && ctx.task.planItems.length > 0 && action.tool !== 'todo-update' && action.tool !== 'todo_update') {
+  } else if (ctx.task.planItems && ctx.task.planItems.length > 0 && !isPlanTool(action.tool)) {
     try {
-      const { planItems: nextItems, decisions } = decidePlanAdvance(
+      const { decisions } = decidePlanAdvance(
         ctx.task.planItems,
         action.tool,
         ok,
         errorMessage,
       )
       if (decisions.length > 0) {
-        ctx.task.planItems = nextItems
-        // 1) 把 source 字段写到 planItem（v0.18.0 新增），便于 Renderer 端显示"引擎"徽标
-        for (const d of decisions) {
-          const item = nextItems[d.index]
-          if (!item) continue
-          item.source = d.after === 'failed' ? 'engine-fail' : 'engine-decide'
+        // ============================================================
+        // v0.37.0（缺陷 D132）：无图任务（tier 0/1）的引擎判定也走账本。
+        // 此前这里 `updateTask({ planItems: nextItems })` 直写，与 todo_update
+        // （账本通道）形成两条写入通道 —— 同轮内后者覆盖前者，正是"清单与真相
+        // 不一致"的第二种形态（对比 §4.2）。现在统一经 ledger.mutate 串行落盘。
+        // ============================================================
+        const ledX = await import('../ledger/engine.js')
+        const { toPlanItems } = await import('../ledger/project.js')
+        const applyDecision = async (d: (typeof decisions)[number]): Promise<void> => {
+          const item = ctx.task.planItems?.[d.index]
+          if (!item) return
+          const source = d.after === 'failed' ? 'engine-fail' : 'engine-decide'
+          const op =
+            d.after === 'done'
+              ? ({ kind: 'advance', fromItemId: item.id, source, note: d.reason } as const)
+              : ({ kind: 'set-status', itemId: item.id, to: d.after, source, note: d.reason, force: true } as const)
+          let r = await ledX.mutate(placeholder.taskId, op, { actor: 'engine-decide' })
+          if (!r.ok && r.error?.code === 'NOT_FOUND') {
+            try {
+              await ledX.ensureLedger(ctx.task, { seedFromPlanItems: true })
+              r = await ledX.mutate(placeholder.taskId, op, { actor: 'engine-decide' })
+            } catch (err) {
+              logger.warn('Agent', `engine-decision 建账失败：${(err as Error).message}`, placeholder.taskId)
+            }
+          }
+          if (!r.ok) {
+            logger.warn('Agent', `engine-decision 被账本拒绝：${r.error?.message ?? '未知'}`, placeholder.taskId)
+          }
         }
-        // 2) 持久化（落盘后再广播）
-        await updateTask(placeholder.taskId, { planItems: nextItems })
+        // 1) 串行落账（账本内 per-task 锁保证不丢更新）
+        for (const d of decisions) await applyDecision(d)
+        // 2) 以账本为准回读，作为本轮后续展示的唯一依据
+        const fresh = await ledX.loadLedger(placeholder.taskId)
+        const nextItems = fresh ? toPlanItems(fresh) : (ctx.task.planItems ?? [])
+        ctx.task.planItems = nextItems
         // 3) 单条 patch 广播（F1 通道激活）；多 decisions 串行 N 次 + version 单调自增
         for (const d of decisions) {
           const item = nextItems[d.index]
@@ -880,8 +991,8 @@ export async function executeAct(
               planItemId: item.id,
               index: d.index,
               fromStatus: d.before,
-              status: d.after,
-              source: d.after === 'failed' ? 'engine-fail' : 'engine-decide',
+              status: item.status,
+              source: item.status === 'failed' ? 'engine-fail' : 'engine-decide',
               reason: d.reason,
               ts_iteration: ctx.iteration,
             },
@@ -943,8 +1054,29 @@ export async function executeAct(
     durationMs,
     ok,
     errorMessage,
+    // v0.39.0（W2）：失败短码 —— 只在失败时给，供规划通道挑建议话术
+    failureCode: ok ? undefined : classifyFailureCode(errorMessage),
     additionalSystemHint: skillCtx.additionalSystemHint,
   }
+}
+
+/**
+ * v0.39.0（W2）：把一条失败消息归到少数几类短码。
+ *
+ * 为什么只要短码：失败摘要喂给规划模型时，原文已经截断到 160 字了；真正决定
+ * 「该给什么建议」的是**类别**（超时该拆小、权限该换位置、解析失败该换结构），
+ * 而不是具体报错文本。分类失败返回 `undefined` —— 摘要侧有兜底建议。
+ */
+export function classifyFailureCode(message?: string): string | undefined {
+  const m = String(message ?? '')
+  if (!m.trim()) return undefined
+  if (/timeout|超时|timed?\s*out/i.test(m)) return 'timeout'
+  if (/not\s*found|不存在|没有找到|enoent/i.test(m)) return 'notfound'
+  if (/permission|权限|denied|eacces|禁止/i.test(m)) return 'permission'
+  if (/parse|json|解析|unexpected token/i.test(m)) return 'parse'
+  if (/context|上下文|overflow|过长|too long/i.test(m)) return 'context'
+  if (/exit\s*(code)?\s*\d+|non-zero|命令.*失败|command failed/i.test(m)) return 'exit'
+  return undefined
 }
 
 export function toFinishedProgress(step: ReActStep, groupId: string): ToolProgress {

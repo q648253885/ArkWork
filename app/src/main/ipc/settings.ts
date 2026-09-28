@@ -11,7 +11,7 @@ import { getArkworkDir } from '../store/db.js'
 import { setCachedUiLocale } from '../i18n/messages.js'
 import { pickWorkspace, ensureWorkspace, assertWorkspaceWritable } from '../fs/workspace.js'
 import { setWorkspaceDir } from '../store/db.js'
-import { resetTaskCollection } from '../store/tasks.js'
+import { resetTaskCollection, reconcileStaleTasks } from '../store/tasks.js'
 // ★ v0.35.0：工作区切换时重算插件运行时（workspace 级插件随工作区拆/建）
 import { onWorkspaceSwitchedPluginRuntime } from '../plugins/bootstrap.js'
 import { logger } from '../system/logger.js'
@@ -48,12 +48,20 @@ async function readSettings(): Promise<AppSettings> {
 /**
  * v0.8.0：供 engine 读取记忆配置（自动压缩开关与阈值）。
  * 缺省值：autoCompress=true, compressThreshold=24000。
+ * v0.36.0 F1.3：compressThreshold 不再是绝对触发阈值 —— 仅当用户显式设置时
+ * （compressThresholdSet=true）作为模型窗口公式的**覆盖上限**（见
+ * compaction.resolveAutoCompactThreshold）；未设置时完全由模型窗口驱动。
  */
-export async function getMemoryConfig(): Promise<{ autoCompress: boolean; compressThreshold: number }> {
+export async function getMemoryConfig(): Promise<{
+  autoCompress: boolean
+  compressThreshold: number
+  compressThresholdSet: boolean
+}> {
   const s = await readSettings()
   return {
     autoCompress: s.memory?.autoCompress ?? true,
     compressThreshold: s.memory?.compressThreshold ?? 24_000,
+    compressThresholdSet: s.memory?.compressThreshold !== undefined,
   }
 }
 
@@ -130,6 +138,18 @@ export function registerSettingsHandlers(): void {
     // v0.4.0-rev2：重置 task collection 单例，确保后续 listTasks/createTask 读取新工作区的 tasks.json
     resetTaskCollection()
     await ensureWorkspace()
+    // v0.38.0（D163）：**陈旧任务回收必须跟工作区走**。
+    // 启动链路里的 reconcileStaleTasks（index.ts）跑在 renderer 恢复上次工作区
+    // **之前** —— 那时 workspaceDir 还是 default（空壳），真实工作区的
+    // running 任务一条都回收不到，UI 重开后卡在虚假的「运行中 / 正在思考」
+    // （实机复现：T-20260926-48411u 重启后仍 running）。工作区一旦激活，
+    // 这里的回收才是真正对着用户数据的；paused 不动（有 checkpoint，可续跑）。
+    try {
+      const fixed = await reconcileStaleTasks()
+      if (fixed > 0) logger.info('System', `[workspace] activate 后回收 ${fixed} 个陈旧 running 任务`)
+    } catch (err) {
+      logger.warn('System', `[workspace] activate 后回收失败（不阻断）：${String(err)}`)
+    }
     // ★ v0.35.0：工作区级插件随工作区切换（先拆旧工作区来源的插件进程，再扫新目录）。
     // 放在 ensureWorkspace 之后：扫描需要新工作区的 `.arkwork/plugins/` 已在盘上。
     // 失败只 warn —— 插件是附加能力，绝不能拦住「切换工作区」这个基本操作。

@@ -7,11 +7,23 @@
  * ============================================================ */
 import type { LogEntry } from '@shared/types/ipc'
 import type { LlmCompleteResponse } from '../llm/adapter.js'
+// v0.36.0 F1.4：错误分类单一真源（retryableError / isContextOverflowError / LlmTimeoutError
+// 移入 llm/error-classify.ts，此处再导出保持既有 import 路径不破坏）
+import { retryableError, isContextOverflowError, LlmTimeoutError } from '../llm/error-classify.js'
+// v0.36.0 F1.4：重试统一走 fault-tolerance/retry-core.ts（纯模块 —— 不能 import
+// retry-with-backoff.ts，否则 i18n 模块图会拖进本文件的零依赖单测环境）
+import { retryCore } from '../fault-tolerance/retry-core.js'
+
+export { retryableError, isContextOverflowError, LlmTimeoutError }
 
 type LogSource = LogEntry['source']
 
-/** polish4 §D1.3：retry backoff 序列（单位 ms，最多重试 RETRY_BACKOFF_MS.length 次） */
-export const RETRY_BACKOFF_MS = [500, 2000]
+/**
+ * polish4 §D1.3：retry backoff 序列（单位 ms）。
+ * v0.36.0 F1.4：与 fault-tolerance 统一为 [500,2000,4000]×3（默认 3 次尝试，
+ *  delays 500/2000 与历史一致，末位 4000 供调用方传入更长序列时使用）。
+ */
+export const RETRY_BACKOFF_MS = [500, 2000, 4000]
 
 /**
  * 惰性加载 logger：llm-call.ts 必须保持零静态依赖（logger → store/db → electron
@@ -27,37 +39,10 @@ function warnLog(source: LogSource, message: string, taskId?: string): void {
 }
 
 /**
- * polish4 §D1.3：识别可重试错误（rate limit / network / length / empty）。
- * 注意：`aborted` 不在其中——用户中止（SDK 抛 "The user aborted a request."）
- * 必须立即上抛，绝不无效重试。
- */
-export function retryableError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err)
-  return /rate.?limit|429|timeout|network|fetch failed|ENOTFOUND|ETIMEDOUT|length|empty response/i.test(
-    msg,
-  )
-}
-
-/**
- * v0.15.0 Task 2 SubTask 2.5 — Layer 3 Reactive Fallback 触发判定。
- * context 超限类错误：上下文超过模型窗口上限（如 Anthropic context_length_exceeded、
- * OpenAI maximum context length / token limit），需要激进压缩后重试一次。
- */
-export function isContextOverflowError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err)
-  // thinking 模型（如 deepseek-v4-flash）上下文膨胀常以「超时」而非 context_length 报错，
-  // 需一并纳入 Reactive Fallback 触发判定，否则会按原 payload 重试 → 同样超时 → 任务卡死。
-  if (err instanceof LlmTimeoutError) return true
-  return /context\s*length|context_length|context\s*window|token\s*limit|maximum\s*context|too\s*many\s*tokens/i.test(msg)
-}
-
-/**
  * LLM 调用超时错误。
  * message 含 "timeout" 子串（retryableError 按 timeout 匹配 → 可重试）。
+ * v0.36.0：类定义移至 llm/error-classify.ts（上方再导出）。
  */
-export class LlmTimeoutError extends Error {
-  name = 'LlmTimeoutError'
-}
 
 /**
  * 120s 超时包装：
@@ -141,7 +126,9 @@ export function isIncompleteLlmResponse(r: {
 
 /**
  * polish4 §D1.3：retryable 错误自动重试，backoff 序列逐次递增，最多重试 backoffMs.length 次。
- * signal 中止短路：循环顶部检查 + catch 内检查——用户中止绝不进入下一次重试。
+ * signal 中止短路：调用前 / 调用期间 / backoff 等待期间 —— 用户中止绝不进入下一次重试。
+ * v0.36.0 F1.4：循环体收敛至 fault-tolerance/retry-core.ts（统一退避 [500,2000,4000]×3），
+ * 本函数保留原签名与日志口径。
  * @param backoffMs 可注入的自定义 backoff 序列（测试可传 [1] 加速），默认 RETRY_BACKOFF_MS
  */
 export async function callLlmWithRetry(
@@ -149,21 +136,15 @@ export async function callLlmWithRetry(
   signal?: AbortSignal,
   backoffMs: number[] = RETRY_BACKOFF_MS,
 ): Promise<LlmCompleteResponse> {
-  let lastErr: unknown
-  for (let attempt = 0; attempt <= backoffMs.length; attempt++) {
-    // 调用前短路：signal 已中止（如调用期间用户 Esc/停止）→ 立即上抛，不再重试
-    if (signal?.aborted) throw lastErr ?? new Error('The user aborted a request.')
-    try {
-      return await fn()
-    } catch (err) {
-      lastErr = err
-      // 调用期间用户中止（SDK 同步触发 signal）→ 不重试
-      if (signal?.aborted) break
-      if (!retryableError(err) || attempt === backoffMs.length) break
-      const delay = backoffMs[attempt]
-      warnLog('Agent', `LLM call failed (retry ${attempt + 1}/${backoffMs.length} in ${delay}ms): ${(err as Error).message}`)
-      await new Promise<void>((r) => setTimeout(r, delay))
-    }
-  }
-  throw lastErr
+  return retryCore(fn, {
+    maxAttempts: backoffMs.length + 1,
+    backoffMs,
+    signal,
+    isRetryable: retryableError,
+    onRetry: (attempt, delay, err) => {
+      warnLog('Agent', `LLM call failed (retry ${attempt}/${backoffMs.length} in ${delay}ms): ${(err as Error).message}`)
+    },
+    // 中止语义与历史一致：优先上抛此前捕获的错误；一次都没调用过则抛标准中止文案
+    onAborted: (lastErr) => lastErr ?? new Error('The user aborted a request.'),
+  })
 }

@@ -146,7 +146,13 @@ export async function persist(
     saved = await saveGraph(graph, { revision, taskId: ctx.taskId })
   } catch (err) {
     // ★ 落盘失败不允许让任务失败：内存里保持新状态，日志告警
-    logger.warn('Agent', `sync: 图落盘失败（内存状态保留）${(err as Error).message}`, ctx.taskId)
+    // v0.36.4（D119）：db 层已带重试 + 直写兜底；走到这里的失败附人话提示与写入路径
+    logger.warn(
+      'Agent',
+      `sync: 图落盘失败（内存状态保留，重启会丢）${(err as Error).message}` +
+        ` —— Windows 下常见于杀毒软件/同步盘（OneDrive 等）占用文件，建议将其加入排除列表`,
+      ctx.taskId,
+    )
     saved = graph
   }
   graphCache.set(saved.id, saved)

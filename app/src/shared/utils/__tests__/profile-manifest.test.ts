@@ -358,15 +358,17 @@ test('TC-PMF-022 parseManifest 解析 ui.theme.light / .dark', () => {
   assert.deepEqual(loose.ui.theme, { light: { '--a': '#fff' }, dark: {} })
 })
 
-test('TC-PMF-023 parseManifest 解析 ui.previewRenderers（Record<string,string>）', () => {
-  const p = must(baseRaw({ ui: { previewRenderers: { kchart: 'table', md: 'code' } } }))
-  assert.deepEqual(p.ui.previewRenderers, { kchart: 'table', md: 'code' })
-  // 非法键被拦
-  const bad = parseManifest(baseRaw({ ui: { previewRenderers: { 'K.CHART': 'table' } } }), 'user')
-  assert.ok(
-    bad.issues.some((i) => i.level === 'error' && String(i.path).includes('previewRenderers') && String(i.path).includes('K.CHART')),
-    JSON.stringify(bad.issues),
-  )
+test('TC-PMF-023 ★ v0.36.0（D5）：ui.previewRenderers 已删 → 只给一条 warning，字段不进结果', () => {
+  const { profile, issues } = parseManifest(baseRaw({ ui: { previewRenderers: { kchart: 'table', md: 'code' } } }), 'user')
+  assert.ok(profile, JSON.stringify(issues))
+  assert.equal((profile.ui as Record<string, unknown>).previewRenderers, undefined, '字段不得进入解析结果')
+  const warn = issues.find((i) => i.path === '$.ui.previewRenderers')
+  assert.ok(warn && warn.level === 'warning', `必须给「已删除」的 warning：${JSON.stringify(issues)}`)
+  // 兼容纪律：无论内容多离谱（非法键、非字符串值）都只 warn —— 为一堆即将丢弃的值
+  // 报 error 会让老用户的台激活不了，那是最糟的兼容形态（破坏性却无收益）。
+  const bad = parseManifest(baseRaw({ ui: { previewRenderers: { 'K.CHART': 42 } } }), 'user')
+  assert.equal(bad.issues.filter((i) => i.level === 'error').length, 0, JSON.stringify(bad.issues))
+  assert.equal(bad.issues.filter((i) => i.path === '$.ui.previewRenderers').length, 1, '只报一条，不按元素刷屏')
 })
 
 test('TC-PMF-024 parseManifest 解析 ui.homeModule 为 module:<id>（不被闭集拒绝）', () => {
@@ -397,13 +399,13 @@ test('TC-PMF-026 dockPanels[].slot 不是 inspector → error（解析期 V1 拦
   assert.equal((r.profile?.ui.dockPanels ?? []).length, 0)
 })
 
-test('TC-PMF-027 V2：previewRenderers 值不在 RendererKind 白名单 → error', () => {
+test('TC-PMF-027 ★ v0.36.0（D5）：V2 不再校验 previewRenderers —— 校验规则随插槽一并删除', () => {
+  // 原用例守「值不在 RendererKind 白名单 → error」。字段与插槽同批删除后，
+  // 这条的**唯一正确形态**是「V2 层不再对它说任何话」——
+  // 若还留一条 V2 error，等于「字段删了、门还在」，旧 manifest 会被无谓拦死。
   const p = must(baseRaw({ ui: { previewRenderers: { kchart: '3d' } } }))
-  const hit = validateReferences(p, PANEL_CTX).find((i) => i.path === '$.ui.previewRenderers.kchart')
-  assert.ok(hit)
-  assert.equal(hit!.level, 'error')
-  const ok = must(baseRaw({ ui: { previewRenderers: { kchart: 'table' } } }))
-  assert.equal(validateReferences(ok, PANEL_CTX).some((i) => String(i.path).includes('previewRenderers')), false)
+  const refs = validateReferences(p, PANEL_CTX)
+  assert.equal(refs.some((i) => String(i.path).includes('previewRenderers')), false, JSON.stringify(refs))
 })
 
 test('TC-PMF-028 V2：theme token 键非法 → error；值非法 → error（各一条）', () => {
@@ -429,15 +431,18 @@ test('TC-PMF-029 V5 落地：两个面板同 position → error，消息同时�
   assert.ok(hit!.message.includes('父包或本包'), '合并后无法区分来源 → 提示语必须说明')
 })
 
-test('TC-PMF-030 previewRenderers 合并语义：ui 层浅覆盖，child 整体接管（无冲突可报）', () => {
-  // 实现决策：previewRenderers 是 Record（同对象内键天然唯一），继承合并采用
-  // 「child 有值即整体覆盖」—— 因此「同扩展名冲突」在 manifest 层不可构造。
-  // 这条把守的是该决策本身：合并后 child 的表完整生效，parent 的键不残留。
-  const parent = must(baseRaw({ id: 'wb.parent', ui: { previewRenderers: { kchart: 'table', extra: 'code' } } }))
-  const child = must(baseRaw({ id: 'wb.child', extends: 'wb.parent', ui: { previewRenderers: { kchart: 'svg' } } }))
+test('TC-PMF-030 ui 层浅覆盖语义：child 有值即整体接管（parent 的键不残留）', () => {
+  // ★ v0.36.0（D5）：原用例用 `previewRenderers`（Record）把守「child 整体覆盖」这条
+  // 实现决策。字段随插槽删除后，把守点**迁移到仍在的 ui 字段**上 ——
+  // 决策本身没变（mergeProfile 的 `{ ...parent.ui, ...definedOnly(child.ui) }`），
+  // 用例不能被删掉，否则这条决策就没人守了。
+  const parent = must(baseRaw({ id: 'wb.parent', ui: { theme: { light: { '--a': '#111' } } } }))
+  const child = must(baseRaw({ id: 'wb.child', extends: 'wb.parent', ui: { theme: { light: { '--b': '#222' } } } }))
   const merged = mergeProfile(parent, child)
-  assert.deepEqual(merged.ui.previewRenderers, { kchart: 'svg' })
-  assert.equal(validateReferences(merged, PANEL_CTX).some((i) => String(i.path).includes('previewRenderers')), false)
+  assert.deepEqual(merged.ui.theme, { light: { '--b': '#222' }, dark: {} }, 'child 整体接管，parent 的 --a 不得残留')
+  // 反向：child 未声明 theme 时 parent 的值必须留下（否则「浅覆盖」变成了「有则清空」）
+  const childBare = must(baseRaw({ id: 'wb.child2', extends: 'wb.parent', ui: { composerChips: ['x'] } }))
+  assert.deepEqual(mergeProfile(parent, childBare).ui.theme, { light: { '--a': '#111' }, dark: {} })
 })
 
 test('TC-PMF-031 V5：单台内 dockPanels 同 panelRef 重复声明 → error', () => {

@@ -12,7 +12,7 @@
  *
  * 终版契约（D12 v2）：
  *   - 引擎续聊分支**禁止清空重建**（无 generatePlan / _regen / graphId 置空 / planItems 直写）；
- *   - 5 处 ask_user 暂停点打 pendingAskUser 标记；run-setup 先捕获 isReplyContinuation 再消费；
+ *   - 4 处 ask_user 暂停点打 pendingAskUser 标记（v0.39.0 D188 起：原 P8 计划闸门暂停点已随死分支删除，现为禁止回潮断言）；run-setup 先捕获 isReplyContinuation 再消费；
  *   - replanHint 分叉：答复型（清单不变）vs 新指令型（task_create 挂树 / replan 待批准）。
  *
  * 手法：源码契约（readFileSync + 正则）—— prepareRun 依赖 LLM/存储/Electron，
@@ -121,20 +121,33 @@ test('TC-REGEN-002 isReplyContinuation 判定存在且先于标记消费（消�
  * TC-REGEN-003 五处 ask_user 暂停点打标；手动暂停不打标
  * ============================================================ */
 
-test('TC-REGEN-003 五处 ask_user 暂停点写 pendingAskUser；abort.ts（手动暂停）不写', () => {
+test('TC-REGEN-003 四处 ask_user 暂停点写 pendingAskUser；abort.ts（手动暂停）不写', () => {
   // 1) turn-end.pauseViaAskUser（LLM 主动提问）
   assert.match(
     TURN_END,
     /pendingAskUser: \{ question, askedAt: Date\.now\(\) \}/,
     'pauseViaAskUser 暂停时应写 pendingAskUser（仅在 continueTurnIfInjected 未续跑时）',
   )
-  // 2-5) loop.ts 四处：预算中断 / P8 计划闸门 / 阶段门禁直推 / 迭代上限
+  // 2-4) loop.ts 三处：预算中断 / 阶段门禁直推 / 迭代上限（+ 停滞 / 伪调用两个命名暂停helper）
   const loopMarks = LOOP.match(/pendingAskUser:/g) ?? []
   assert.ok(loopMarks.length >= 4, `loop.ts 应有 ≥4 处打标，实测 ${loopMarks.length}`)
   assert.match(LOOP, /预算中断也属 ask_user 暂停/, '预算中断暂停点应打标')
-  assert.match(LOOP, /pendingAskUser: \{ question: '计划已提交，等待批准'/, 'P8 计划闸门暂停点应打标')
   assert.match(LOOP, /pendingAskUser: \{ question: gate\.question/, '阶段门禁直推暂停点应打标')
   assert.match(LOOP, /askUser\.maxIterQuestion/, '迭代上限暂停点应打标（答复=继续/结束）')
+  /**
+   * v0.39.0（D188）：原「P8 计划闸门暂停点」断言**反转**为禁止回潮（纪律㉛）。
+   *
+   * 该暂停块由 `planGateHit`（`a.tool === 'submit_plan' && r.ok`）驱动，而 `submit_plan`
+   * 已随 v0.38.0（D154）下架 → 判据**恒假**，暂停从未执行，日志却写着"闸门触发"。
+   * D188 删除了整条死分支；「是否让任务在此阻塞」是未决产品语义（L-39-01），
+   * 恢复时**必须读活的闸门状态** `getPlanApproval(task.id)?.state === 'pending'`，
+   * 而不是任何工具名。此断言钉住"死标记不得回潮"。
+   */
+  assert.doesNotMatch(
+    LOOP,
+    /pendingAskUser: \{ question: '计划已提交，等待批准'/,
+    'P8 死分支的待批标记不得回潮（D188）；恢复暂停须读活闸门状态（L-39-01）',
+  )
   // 用户手动暂停（Esc/停止）不打标 —— 那之后的首条输入就是新指令，应触发清单重评
   assert.doesNotMatch(
     ABORT,
@@ -144,7 +157,7 @@ test('TC-REGEN-003 五处 ask_user 暂停点写 pendingAskUser；abort.ts（手�
 })
 
 /* ============================================================
- * TC-REGEN-004 replanHint 分叉：答复型（清单不变）vs 新指令型（三选一）
+ * TC-REGEN-004 replanHint 分叉：答复型（清单不变）vs 新指令型（先判断后作答 · D154 两选一）
  * ============================================================ */
 
 test('TC-REGEN-004 replanHint 按 isReplyContinuation 分叉（答复型 / 新指令型）', () => {
@@ -152,20 +165,40 @@ test('TC-REGEN-004 replanHint 按 isReplyContinuation 分叉（答复型 / 新�
   assert.match(CONT, /isReplyContinuation\s*\n?\s*\?/, 'replanHint 应以 isReplyContinuation 三元分叉')
   assert.match(CONT, /## 答复型续聊/, '应存在答复型 hint（门禁/ask_user 答复）')
   assert.match(CONT, /任务清单保持不变/, '答复型 hint 应明确清单不变')
-  // 新指令型分支：三选一 —— 子任务挂树 / add-only / 真切换待批准
+  // 新指令型分支（v0.38.0 D154 收敛语义）：先判断，后作答，task_plan 单入口两选一
   assert.match(CONT, /## 续聊指令与清单/, '应存在新指令型 hint')
+  assert.match(CONT, /先判断，后作答/, '新指令型 hint 应声明「先判断，后作答」硬性顺序（D154）')
   assert.match(
     CONT,
-    /task_create 新建节点（parent_id 挂到相关节点下/,
-    '新指令型 hint 应引导子任务用 task_create 挂树（parent_id，第 1 级自动应用）',
+    /是否产生了需要跟踪的新工作/,
+    '新指令型 hint 应引导模型先判断输入是否产生新工作（取代代理变量预判，D155 input_judgement）',
   )
-  assert.match(CONT, /add-only 补丁（第 1 级自动应用）/, '独立追加应引导 replan add-only（第 1 级）')
   assert.match(
     CONT,
-    /remove\+add 重构补丁[\s\S]{0,80}第 2 级[\s\S]{0,40}等待用户批准/,
-    '真正切换任务应引导 replan 重构补丁 → 第 2 级待用户批准（清空必须经批准）',
+    /用 task_plan 提交你更新后的\*\*完整清单\*\*/,
+    '需要新工作时用 task_plan 提交完整清单（引擎自动比对，D154 单入口）',
   )
-  assert.match(CONT, /禁止未经批准擅自整体作废/, '新指令型 hint 应禁止模型擅自清空清单')
+  assert.match(
+    CONT,
+    /清单无需变化：用 task_plan 提交与现在\*\*相同\*\*的清单/,
+    '只读问答也要提交相同清单（记录「已检视」，完成门禁据此放行）',
+  )
+  // v0.38.1（D166 测试侧改写随新语义）：v0.30.2 的三选一文案（task_create 挂树 /
+  // replan add-only / remove+add）已随 D154 工具收敛整体移除，不得回潮。
+  const hintSlice = CONT.slice(CONT.indexOf('const replanHint'), CONT.indexOf('pendingSystemHint'))
+  assert.ok(hintSlice.length > 0, '应能截取 replanHint 文案段')
+  assert.doesNotMatch(
+    hintSlice,
+    /task_create 新建|add-only 补丁|remove\+add|todo_update/,
+    'D154 后 hint 文案不得再出现已下架工具的旧引导（模型没有唯一答案可选）',
+  )
+  // ---- 快照注入：答复型不加快照（D12 v2 不变量）；新指令型权威快照经 messages.ts
+  //      L1 每轮注入（D138），run-setup 仅在无账本时用树快照兜底（v0.37.0 收口）。
+  assert.match(
+    CONT,
+    /isReplyContinuation \? '' : renderPlanTreeSnapshot/,
+    '答复型续聊不得注入树快照（清单保持不变，D12 v2 不变量）',
+  )
 })
 
 /* ============================================================

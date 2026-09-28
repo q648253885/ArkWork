@@ -12,10 +12,12 @@
  * Phase A Task 3：点击背景不再关闭 —— 必须显式选择「拒绝 / 允许执行」按钮；
  *   Esc 仍可作为快速取消入口（dismissed 语义保留）。
  * ============================================================ */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore, friendlyError } from '../store'
 import { Icon } from '../icons'
+import { RULE_BEHAVIORS, suggestRuleFromCommand } from '@shared/utils/permission-rule'
+import type { PermissionRuleBehavior } from '@shared/types/permission'
 
 const RISK_META: Record<string, { label: string; cls: string; dot: string }> = {
   low:    { label: 'toolconfirm.riskLow', cls: 'bg-success-soft text-success', dot: 'bg-success' },
@@ -31,8 +33,25 @@ export function ToolConfirmLayer() {
   const addPermissionRule = useStore((s) => s.addPermissionRule)
   const pushToast = useStore((s) => s.pushToast)
   const [session, setSession] = useState(false)
-  const [alwaysAllow, setAlwaysAllow] = useState(false)
+  /**
+   * ★ v0.36.0（F6.1 / P9）：「记住此选择（生成规则）」
+   *
+   * 与旧「总是允许」的差别（两处，都是用户实测反馈的痛点）：
+   *   ① 旧实现固定写 `Bash(<完整命令>)` —— 只覆盖那一次调用，用户下次跑
+   *      同一命令的变体还要再点一次，很快就把「记住」当成没用；
+   *   ② 旧实现只能写 allow，用户想「以后别再让我看到 rm -rf」没有出口。
+   * 现在：建议到**子命令**粒度、行为可选 allow/ask/deny，且**先把规则原样显示出来**
+   * 再写 —— 用户按下之前就知道会落地成什么（不搞「你点了我就替你决定」）。
+   */
+  const [remember, setRemember] = useState(false)
+  const [rememberBehavior, setRememberBehavior] = useState<PermissionRuleBehavior>('allow')
   const denyRef = useRef<HTMLButtonElement>(null)
+
+  /** 由这次被拦下的调用推出的规则建议（无命令则空串） */
+  const suggestedRule = useMemo(
+    () => (req?.command ? suggestRuleFromCommand(req.command) : ''),
+    [req?.command],
+  )
 
   // 打开时聚焦「拒绝」（默认安全），并监听 Esc → 关闭对话框（不算「用户拒绝」，reason='dismissed'）
   useEffect(() => {
@@ -61,16 +80,12 @@ export function ToolConfirmLayer() {
     e.stopPropagation()
   }
 
-  // v0.15.0：允许执行；勾选「总是允许此命令」则把 Bash(<command>) 写入 allow 规则，
-  // 后续同一条命令不再确认（失败由 store 兜底 toast）。
+  // v0.15.0 / ★ v0.36.0（F6.1）：允许执行；勾选「记住此选择」则把**建议规则**
+  // 按所选行为写入本工作区配置，后续命中该规则的调用不再确认（失败由 store 兜底 toast）。
   const handleAllow = async () => {
-    if (alwaysAllow && isShell && req.command) {
-      try {
-        await addPermissionRule(`Bash(${req.command.trim()})`)
-        pushToast({ type: 'success', message: t('toolconfirm.addedAllowRule'), duration: 2500 })
-      } catch (e) {
-        pushToast({ type: 'danger', message: friendlyError(e, t('toolconfirm.addAllowRuleFailed')), duration: 0 })
-      }
+    if (remember && suggestedRule) {
+      await addPermissionRule(suggestedRule, rememberBehavior)
+      pushToast({ type: 'success', message: t('toolconfirm.ruleRemembered', { rule: suggestedRule }), duration: 2500 })
     }
     respondConfirm(req.requestId, true, session, 'allowed')
   }
@@ -163,46 +178,73 @@ export function ToolConfirmLayer() {
           )}
         </div>
 
-        {/* 底部：会话记忆 + 总是允许 + 操作 */}
-        <div className="flex items-center gap-3 px-5 py-3.5 border-t border-border-subtle bg-bg-surface">
+        {/* 底部：会话记忆 + 记住此选择（生成规则） + 操作 */}
+        <div className="px-5 py-3.5 border-t border-border-subtle bg-bg-surface">
           {isShell && (
-            <div className="flex items-center gap-3">
-              {req.command && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                {suggestedRule && (
+                  <label className="flex items-center gap-1.5 text-2xs text-text-secondary cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={remember}
+                      onChange={(e) => setRemember(e.target.checked)}
+                      className="accent-accent"
+                    />
+                    {t('toolconfirm.remember')}
+                  </label>
+                )}
+                {remember && (
+                  <select
+                    aria-label={t('toolconfirm.rememberBehavior')}
+                    value={rememberBehavior}
+                    onChange={(e) => setRememberBehavior(e.target.value as PermissionRuleBehavior)}
+                    className="input h-6 px-1.5 text-2xs w-20"
+                  >
+                    {RULE_BEHAVIORS.map((b) => (
+                      <option key={b} value={b}>
+                        {t(`settings.permission.ruleGroups.${b}`)}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <label className="flex items-center gap-1.5 text-2xs text-text-secondary cursor-pointer select-none">
                   <input
                     type="checkbox"
-                    checked={alwaysAllow}
-                    onChange={(e) => setAlwaysAllow(e.target.checked)}
+                    checked={session}
+                    onChange={(e) => setSession(e.target.checked)}
                     className="accent-accent"
                   />
-                  {t('toolconfirm.alwaysAllow')}
+                  {t('toolconfirm.noAskSession')}
                 </label>
+              </div>
+              {/* 规则预览：按下「允许」之前就把要写入的原文摆出来 */}
+              {remember && suggestedRule && (
+                <div className="flex items-center gap-1.5 text-2xs text-text-tertiary">
+                  <span>{t('toolconfirm.rememberPreview')}</span>
+                  <code className="font-mono px-1.5 py-0.5 rounded bg-bg-base text-text-secondary">
+                    {suggestedRule}
+                  </code>
+                </div>
               )}
-              <label className="flex items-center gap-1.5 text-2xs text-text-secondary cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={session}
-                  onChange={(e) => setSession(e.target.checked)}
-                  className="accent-accent"
-                />
-                {t('toolconfirm.noAskSession')}
-              </label>
             </div>
           )}
           <div className="flex-1" />
-          <button
-            ref={denyRef}
-            onClick={() => respondConfirm(req.requestId, false, false, 'denied')}
-            className="btn-ghost"
-          >
-            {t('toolconfirm.deny')}
-          </button>
-          <button
-            onClick={() => void handleAllow()}
-            className={req.risk === 'high' ? 'btn-danger' : 'btn-primary'}
-          >
-            {t('toolconfirm.allow')}
-          </button>
+          <div className="flex items-center justify-end gap-3 mt-3">
+            <button
+              ref={denyRef}
+              onClick={() => respondConfirm(req.requestId, false, false, 'denied')}
+              className="btn-ghost"
+            >
+              {t('toolconfirm.deny')}
+            </button>
+            <button
+              onClick={() => void handleAllow()}
+              className={req.risk === 'high' ? 'btn-danger' : 'btn-primary'}
+            >
+              {t('toolconfirm.allow')}
+            </button>
+          </div>
         </div>
         {/* Phase A Task 3：明确告知用户关闭方式（按 Esc 或选择上方按钮） */}
         <div className="text-2xs text-text-tertiary text-center px-5 pb-3 -mt-1">

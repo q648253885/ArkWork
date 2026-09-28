@@ -11,9 +11,35 @@
  *  - BrowserWindow.webContents.send   → window.ts 广播链
  *  - WebContentsView（空壳类）        → view-manager / skills-zip-export 具名导入
  *  ============================================================ */
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+/**
+ * 测试进程独占的 userData 根（D98）。
+ *
+ * 为什么不能再用固定 `/tmp/arkwork-test-userData`：`node --test` **按文件并行**
+ * ——每个测试文件是独立进程，却共用同一个固定路径。于是任何一个套件
+ * `rm -rf` 这个根（如 skills-zip-export 的 after）或清某个子目录，都会把
+ * **同时段运行的另一个套件**的夹具抽走，报 `ENOENT`：单跑全绿、全量偶红。
+ *
+ * 现在默认每个进程 `mkdtempSync` 一个专属根，退出时自清 —— 跨套件零耦合。
+ * 需要固定/跨进程复用路径时，设 `ARKWORK_TEST_USERDATA` 覆盖（设了就不自清）。
+ */
+const TEST_USERDATA_ROOT =
+  process.env.ARKWORK_TEST_USERDATA || mkdtempSync(join(tmpdir(), 'arkwork-test-userData-'))
+if (!process.env.ARKWORK_TEST_USERDATA) {
+  process.on('exit', () => {
+    try {
+      rmSync(TEST_USERDATA_ROOT, { recursive: true, force: true })
+    } catch {
+      /* 退出清理失败不影响测试结论 */
+    }
+  })
+}
 
 export const app = {
-  getPath: (name) => `/tmp/arkwork-test-${name}`,
+  getPath: (name) => (name === 'userData' ? TEST_USERDATA_ROOT : `/tmp/arkwork-test-${name}`),
   isPackaged: false,
   dock: undefined,
   whenReady: async () => {},

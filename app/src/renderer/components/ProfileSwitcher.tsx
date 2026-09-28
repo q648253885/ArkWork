@@ -5,10 +5,15 @@
  *
  * 交互契约（三条）：
  *  ① **一眼看得出当前是哪个台**：chip 常驻显示图标 + 台名，不折叠成纯图标；
- *  ② **降级必须可见**：右上角橙点 + 下拉底部逐条列出未生效能力
+ *  ② **降级必须可见**：chip 上的红/橙点 + 菜单顶部一条**激活结果横幅**
  *     （「永不静默半死」G5 —— 折叠起来就等于没有）；
  *  ③ **切换结果可追溯**：失败给出首个 error 原因 toast，报告留在 store 里，
  *     下拉顶部的「为什么没切过去」可以再追问一次。
+ *
+ * ★ v0.36.0（F5.1）：「降级明细下拉」→「激活结果横幅」。原实现把明细塞在菜单
+ * **底部**、文案是「降级 N 项 >」——用户实测反馈这是黑话（「降级」是宿主内部术语，
+ * 而且藏在列表下面根本看不见）。现在：**一行结果横幅置顶**（「已激活 X · N 项未生效」），
+ * 点开才展开逐条明细。
  *
  * ⚠️ 无 emoji 图标（项目硬规范）：manifest 声明的是宿主 `Icon` 键名，
  * 这里做的是**白名单查表**，未知键回落 `Layers`，绝不动态渲染字符串。
@@ -27,8 +32,8 @@ function profileIcon(name?: string) {
   return table[key] ?? Icon.Box
 }
 
-/** 快照五层（顺序即 presentation 顺序；缺一层就是装配链路断了） */
-const SNAPSHOT_LAYERS = ['agents', 'tools', 'ui', 'data', 'auto'] as const
+/** 快照三层（顺序即 presentation 顺序；★ v0.36.0 D5：原五层） */
+const SNAPSHOT_LAYERS = ['agents', 'tools', 'ui'] as const
 
 /** 降级层名 → i18n key 后缀（`profile.degraded.layer.*`） */
 function layerKey(layer: string): string {
@@ -39,10 +44,6 @@ function layerKey(layer: string): string {
       return 'tools'
     case 'ui':
       return 'ui'
-    case 'data':
-      return 'data'
-    case 'auto':
-      return 'auto'
     default:
       return 'unknown'
   }
@@ -149,6 +150,45 @@ export function ProfileSwitcher() {
             </button>
           )}
 
+          {/* ★ v0.36.0（F5.1）：**激活结果横幅**（原「降级明细下拉」的替代物）。
+              一行说清结果（已激活谁 / 几项没生效），点开才展开逐条明细 ——
+              明细列在列表底部是用户实测反馈的「看不见」形态，且「降级」是内部黑话。 */}
+          {degradedCount > 0 && (
+            <div className="profile-switcher__banner border-b border-border-subtle bg-warning-soft">
+              <button
+                type="button"
+                onClick={() => setShowDegraded((v) => !v)}
+                aria-expanded={showDegraded}
+                className="profile-switcher__banner-line w-full flex items-center gap-1.5 px-3 py-2 text-2xs text-warning text-left hover:bg-bg-hover"
+              >
+                <Icon.Warning width={12} height={12} className="flex-shrink-0" aria-hidden />
+                <span className="truncate flex-1">
+                  {blocking > 0
+                    ? t('profile.banner.blocking', { name: active?.name ?? activeId, count: blocking })
+                    : t('profile.banner.partial', { name: active?.name ?? activeId, count: degradedCount })}
+                </span>
+                <Icon.ChevronDown
+                  width={11}
+                  height={11}
+                  className={`flex-shrink-0 transition-transform ${showDegraded ? 'rotate-180' : ''}`}
+                  aria-hidden
+                />
+              </button>
+              {showDegraded && (
+                <ul className="profile-switcher__degraded-list px-3 pb-2 space-y-1">
+                  {degraded.map((d, i) => (
+                    <li key={`${d.layer}:${d.ref}:${i}`} className="text-2xs text-text-tertiary">
+                      <span className={d.blocking ? 'text-danger' : 'text-text-secondary'}>
+                        [{t(`profile.degraded.layer.${layerKey(d.layer)}`)}] {d.ref}
+                      </span>
+                      <span className="text-text-faint"> — {d.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           <div className="profile-switcher__list max-h-[320px] overflow-y-auto py-1">
             {profiles.length === 0 && (
               <div className="px-3 py-4 text-xs text-text-faint text-center">{t('profile.list.empty')}</div>
@@ -185,39 +225,6 @@ export function ProfileSwitcher() {
               )
             })}
           </div>
-
-          {/* 降级明细：默认折叠成一行，展开后逐条（层 / 引用 / 原因） */}
-          {degradedCount > 0 && (
-            <div className="border-t border-border-subtle">
-              <button
-                type="button"
-                onClick={() => setShowDegraded((v) => !v)}
-                aria-expanded={showDegraded}
-                className="profile-switcher__degraded-toggle w-full flex items-center gap-1.5 px-3 py-2 text-2xs text-warning hover:bg-bg-hover"
-              >
-                <Icon.Warning width={12} height={12} aria-hidden />
-                <span>{t('profile.degraded.count', { count: degradedCount })}</span>
-                <Icon.ChevronDown
-                  width={11}
-                  height={11}
-                  className={`ml-auto transition-transform ${showDegraded ? 'rotate-180' : ''}`}
-                  aria-hidden
-                />
-              </button>
-              {showDegraded && (
-                <ul className="profile-switcher__degraded-list px-3 pb-2 space-y-1">
-                  {degraded.map((d, i) => (
-                    <li key={`${d.layer}:${d.ref}:${i}`} className="text-2xs text-text-tertiary">
-                      <span className={d.blocking ? 'text-danger' : 'text-text-secondary'}>
-                        [{t(`profile.degraded.layer.${layerKey(d.layer)}`)}] {d.ref}
-                      </span>
-                      <span className="text-text-faint"> — {d.reason}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
 
           {/* 该台声明的首页模块入口（无任务时的稳定落点）。
               v0.33.0：homeModule 放宽为开放引用（内置名 或 `module:<id>`），

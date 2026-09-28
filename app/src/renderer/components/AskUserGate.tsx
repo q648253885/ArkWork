@@ -77,7 +77,14 @@ export function AskUserGate({ question, suggestions, onAnswer, onStop }: AskUser
     }
     if (e.key === 'Enter') {
       e.preventDefault()
-      answer(suggestions[selected]?.label ?? '')
+      const selectedSuggestion = suggestions[selected]
+      // v0.38.1（D171）：同点击 —— finish 类建议走停止通道，不当答复发送
+      if (selectedSuggestion?.action === 'finish') {
+        useStore.getState().clearAskUser()
+        onStop()
+        return
+      }
+      answer(selectedSuggestion?.label ?? '')
       return
     }
     const digit = Number(e.key)
@@ -118,7 +125,17 @@ export function AskUserGate({ question, suggestions, onAnswer, onStop }: AskUser
                   key={s.id}
                   role="radio"
                   aria-checked={active}
-                  onClick={() => answer(s.label)}
+                  onClick={() => {
+                    // v0.38.1（D171）：`action === 'finish'`（就此结束）走停止任务通道，
+                    // 不再把 label 文本当答复发给模型 —— 弱模型不调 task_complete 时
+                    // 用户点「就此结束」却继续空转（实测 qwen3.5:9b 循环暂停）。
+                    if (s.action === 'finish') {
+                      useStore.getState().clearAskUser()
+                      onStop()
+                      return
+                    }
+                    answer(s.label)
+                  }}
                   onMouseEnter={() => setSelected(i)}
                   title={s.description || undefined}
                   className={`w-full flex items-center gap-2.5 px-3 h-9 rounded-md border text-left text-xs transition-colors focus-ring ${

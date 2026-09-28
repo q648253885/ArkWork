@@ -10,6 +10,8 @@ import { existsSync } from 'node:fs'
 import { reconcileOrphanRunning } from './agent/runner.js'
 import { getUiLocale, tFor } from './i18n/messages.js'
 import { logger } from './system/logger.js'
+// v0.36.4（PERF-1）：进程级性能降级开关（流式攒批等消费）
+import { setPerfLiteActive } from './system/perf-mode.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -19,15 +21,31 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 //   ① 始终写一行 `gpu status` 日志（诊断用，用户回报日志即可判定渲染后端）；
 //   ② 软件渲染（或 ARK_PERF_LITE=1）→ 给 <html> 注入 .perf-lite，
 //      由 globals.css 抑制全部连续动画/过渡（见该处注释）。
+// v0.36.4（PERF-1）：
+//   ③ 设置页「性能模式」三态（auto/on/off）合并判定——打包版用户不碰环境变量
+//      也能强制开/关；'off' 是自动判定误判时的逃生门；
+//   ④ VM 漏判修补：SwiftShader 在部分虚拟机上报 `overridden` 而非 `software`，
+//      gl=disabled 也一并计入软件渲染；
+//   ⑤ 判定结果写入 main/system/perf-mode（进程级），供流式攒批等消费。
 // 注入走 executeJavaScript 而非 IPC：避免为一次性降级改动 preload 契约。
 async function applyPerformanceMode(win: BrowserWindow): Promise<void> {
   try {
     const status = app.getGPUFeatureStatus() as unknown as Record<string, string>
     const softwareRendering =
-      /software/i.test(status['gpu_compositing'] ?? '') ||
-      /software/i.test(status['gl'] ?? '') ||
-      /disabled/i.test(status['gpu_compositing'] ?? '')
-    const forceLite = process.env.ARK_PERF_LITE === '1'
+      /software|overridden/i.test(status['gpu_compositing'] ?? '') ||
+      /software|overridden|disabled/i.test(status['gl'] ?? '')
+    const envLite = process.env.ARK_PERF_LITE === '1'
+    // 设置三态（读取失败按 auto 处理 —— 降级判定绝不能影响启动）
+    let perfMode: 'auto' | 'on' | 'off' = 'auto'
+    try {
+      const { getSettings } = await import('./ipc/settings.js')
+      perfMode = (await getSettings()).perfMode ?? 'auto'
+    } catch {
+      /* 读不到设置按 auto */
+    }
+    const perfLite =
+      perfMode === 'on' || (perfMode !== 'off' && (softwareRendering || envLite))
+    setPerfLiteActive(perfLite)
     logger.info(
       'System',
       `gpu status ${JSON.stringify({
@@ -36,11 +54,12 @@ async function applyPerformanceMode(win: BrowserWindow): Promise<void> {
         gl_renderer: status['gl_renderer'],
         video_decode: status['video_decode'],
         softwareRendering,
-        perfLite: softwareRendering || forceLite,
-        source: forceLite ? 'env' : softwareRendering ? 'auto' : 'none',
+        perfLite,
+        perfMode,
+        source: perfMode !== 'auto' ? 'settings' : envLite ? 'env' : softwareRendering ? 'auto' : 'none',
       })}`,
     )
-    if (softwareRendering || forceLite) {
+    if (perfLite) {
       await win.webContents.executeJavaScript(
         "document.documentElement.classList.add('perf-lite')",
       )

@@ -1,18 +1,23 @@
 /* ============================================================
- * ArkWork — 随包示例插件单测（v0.34.0 · P4 建立；v0.34.1 · P6 重写）
- * 规格来源：docs/versions/v0.34.1/04-system-design.md §5 / §5.1
+ * ArkWork — 随包示例插件单测（v0.34.0 · P4 建立；v0.34.1 · P6 重写；
+ *                        v0.36.0 · F3.5 随「股票退役 → Git Manager 登场」再重写）
+ * 规格来源：docs/versions/v0.36.0/04-system-design.md §3.5
  *
- * ★ v0.34.1 重写原因（用户裁决）：
- *   v0.34.0 的四个示例是**假数据演示件**（插件指南 / 运行时指标 / 工作区数据表 /
- *   .kchart 渲染器），它们证明了机制能跑，却也让人误以为「插件就是放示例表格的」。
- *   现全部删除，只保留一个**真实功能插件**：股票行情（多面板 + 联网取数 + 行点击）。
+ * ★ v0.36.0 重写原因（用户裁决：「删除股票插件，开发一个 git 管理插件」）：
+ *   股票行情插件移入退役名单（RETIRED_SAMPLE_PLUGIN_IDS），唯一随包示例改为
+ *   **代码插件** ark.plugin.git-manager（Host 半 + 自带界面 + git 封闭白名单）。
+ *   原股票专属用例（D62 派生 secid 端到端 / push2 主机回归锁）随之退役 ——
+ *   派生字段机制由 panel-http.test.ts 的合成 spec 用例继承，机制不丢。
  *
- * 本组钉住四件缺一不可的事：
+ * 本组钉住五件缺一不可的事：
  *   ① **清单合法** —— 唯一示例必须过 VP1–VP6 且**零 warning**（官方示范不能自带坏数据）；
- *   ② **默认启用** —— 真实功能插件默认就该可见（假数据示例才默认禁用）；
+ *   ② **代码插件四要素** —— main Host 半 / provides.views / provides.commands /
+ *      git 权限声明与引擎门槛，一个都不能少；
  *   ③ **按 id 补写且永不覆盖用户改动** —— 已存在且被改过的一字不改；缺失的补写；
- *      ★ v0.34.2：**未被改动过的副本要能随版本升级**（否则修正永远送不到存量机器）；
- *   ④ **退役清理** —— 四个假数据示例的残留目录会被显式删除，不留垃圾。
+ *      未被改动过的副本要能随版本升级（否则修正永远送不到存量机器）；
+ *   ④ **随包文件载荷（files）** —— main.js / panel.html 逐字节落盘、升级可送达、
+ *      用户改过不覆盖；载荷也有指纹（D88：清单没变但代码变了，同样要送达）；
+ *   ⑤ **退役清理** —— 股票插件等退役示例的残留目录被显式删除，不留垃圾。
  *
  * 运行（cwd=app）：node scripts/run-tests.mjs sample-plugins
  * ============================================================ */
@@ -22,6 +27,7 @@ import { createHash } from 'node:crypto'
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   RAW_SAMPLE_PLUGINS,
   SAMPLE_PLUGIN_IDS,
@@ -39,32 +45,42 @@ import {
   SEED_STRING_MIGRATIONS,
   SEED_SIDECAR,
 } from '../seed.js'
-import { RETIRED_PANEL_REFS } from '../migrate.js'
 import { parsePluginManifest } from '@shared/utils/plugin-manifest'
-import { mapHttpResponse } from '@shared/utils/panel-http'
-import { applyTemplate, VLIB_COMPONENTS, type HttpSourceSpec } from '@shared/types/vlib'
 
 /** 每个用例独立临时目录（互不污染，可并发） */
 function tmpPluginDir(): string {
   return mkdtempSync(join(tmpdir(), 'arkwork-sample-plugins-'))
 }
 
-const STOCK = 'ark.plugin.stock'
+const GIT = 'ark.plugin.git-manager'
+
+/** 现行随包清单的落盘文本（剥离 files 载荷 —— 与 seed.ts 的 manifestTextOf 同口径） */
+function bundledTextOf(id: string): string {
+  const { files: _files, ...manifest } = rawManifestOf(id)!
+  return seedTextOf(manifest)
+}
+
+/** 造一份「旧版随包清单文本」：只把 version 倒推（归一化比对会抹掉 version 差异 → 判未改动） */
+function legacyTextOf(id: string): string {
+  const { files: _files, ...manifest } = rawManifestOf(id)!
+  return seedTextOf({ ...manifest, version: '0.9.9' })
+}
 
 /* ============================================================
  * 1. 清单合法性（坏样本会误导所有照着样例写插件的用户）
  * ============================================================ */
 
-test('TC-SMPL-001 随包示例恰为 1 个真实插件（假数据演示件已全部下线）', () => {
-  assert.equal(SAMPLE_PLUGIN_MANIFESTS.length, 1, 'v0.34.1 起只保留一个真实功能示例')
+test('TC-SMPL-001 随包示例恰为 1 个真实插件（股票已退役，Git Manager 接棒）', () => {
+  assert.equal(SAMPLE_PLUGIN_MANIFESTS.length, 1, 'v0.36.0 起唯一示例 = Git 管理代码插件')
   assert.equal(RAW_SAMPLE_PLUGINS.length, 1)
   assert.equal(SAMPLE_PLUGIN_IDS.size, 1)
-  assert.equal(SAMPLE_PLUGIN_MANIFESTS[0]!.id, STOCK)
+  assert.equal(SAMPLE_PLUGIN_MANIFESTS[0]!.id, GIT)
 })
 
 test('TC-SMPL-002 示例清单再跑一遍 VP1–VP6 仍零 error 零 warning（同一校验路径）', () => {
   for (const raw of RAW_SAMPLE_PLUGINS) {
-    const r = parsePluginManifest(raw)
+    const { files: _files, ...manifest } = raw
+    const r = parsePluginManifest(manifest)
     assert.ok(r.manifest, `示例插件 ${String(raw.id)} 未过校验：${JSON.stringify(r.issues)}`)
     assert.equal(r.issues.filter((i) => i.level === 'error').length, 0)
     // v0.34.0 D54：示例自身也不得出现「含模板占位符」告警（否则等于官方示范坏数据）
@@ -76,95 +92,52 @@ test('TC-SMPL-002 示例清单再跑一遍 VP1–VP6 仍零 error 零 warning（
   }
 })
 
-test('TC-SMPL-003 示例是 panel 类，且 provides 与 kind 自洽（多面板形态）', () => {
+test('TC-SMPL-003 示例是 panel 类，且 provides 与 kind 自洽（代码视图形态）', () => {
   const m = SAMPLE_PLUGIN_MANIFESTS[0]!
   assert.equal(m.kind, 'panel')
-  // v0.34.1：多面板插件用 provides.panels；VP2 允许二者其一
-  const panels = m.provides.panels ?? []
-  assert.ok(panels.length > 0, '多面板示例必须提供 provides.panels')
-  assert.ok(m.provides[m.kind] || panels.length > 0, 'provides 必须含自身 kind 那一项（VP2）')
+  // v0.36.0：面板类插件允许携带代码视图（VP2 二者其一）；本示例走 provides.views
+  const views = m.provides.views ?? []
+  assert.ok(views.length > 0, 'Git Manager 必须提供 provides.views（自带界面）')
+  const v = views[0]!
+  assert.equal(v.viewRef, 'view:git', 'viewRef 必须带 view: 前缀（与运行期注册一致）')
+  assert.equal(v.renderer, 'panel.html', '代码视图必须有 Client 半入口')
+  assert.equal(v.placement, 'dock', '边界纪律：插件视图只能 dock/float')
 })
 
 /* ============================================================
- * 2. 真实功能示例的三项能力点（这就是「接入范例」的价值）
+ * 2. 代码插件示例的四要素（这就是「代码插件接入范例」的价值）
  * ============================================================ */
 
-test('TC-SMPL-004 示例覆盖「单面板 + http 联网取数 + 派生列」三类能力', () => {
+test('TC-SMPL-004 代码插件四要素：main / views / commands / 权限与引擎门槛', () => {
   const m = SAMPLE_PLUGIN_MANIFESTS[0]!
-  const panels = m.provides.panels ?? []
-  // ★ v0.35.0（D75）：三面板 → 单面板。原「个股详情」「日K线」被用户点名为废弃项，
-  //   已从随包示例摘除（见 TC-SMPL-026 的回归锁）
-  assert.equal(panels.length, 1, 'D75 后只保留「自选股」一个面板')
-  const refs = panels.map((p) => p.panelRef)
-  assert.deepEqual(refs, ['panel:stock-quotes'])
-
-  // ① http 数据源：真实联网，且只允许 https
-  for (const p of panels) {
-    assert.equal(p.data.kind, 'http', `${p.panelRef} 必须是 http 源（真实数据）`)
-    const url = String((p.data.http as { url?: string } | undefined)?.url ?? '')
-    assert.match(url, /^https:\/\//, `${p.panelRef} 的 url 必须是 https`)
-  }
-
-  // ② 行点击**必须不存在**：它唯一的指向就是那两个废弃面板，
-  //    留着 = 用户点一行什么都不会发生（比没有交互更难排查）
-  assert.equal(panels[0]!.interact, undefined, 'D75 后不得再声明 interact.onRowClick')
-
-  // ③ 派生列仍在：secid 不再驱动浮窗，但它仍是「行级标识」的表达范例
-  //    （未来任何个股级视图/工具都能直接复用；TC-SMPL-023/025 继续把守其解析正确性）
-  const quotes = panels[0]!.data.http as { derive?: Record<string, string>; pollMs?: number }
-  assert.deepEqual(quotes.derive, { secid: '{{f13}}.{{f12}}' }, '派生列必须保留')
-
-  // ④ 轮询间隔不低于宿主下限（否则宿主夹取，等于作者意图失真）
-  if (quotes.pollMs) assert.ok(quotes.pollMs >= 3000, 'pollMs 应 ≥3000')
+  assert.equal(m.main, 'main.js', '必须有 Host 半入口（工具/命令/视图注册都在它里面）')
+  assert.ok((m.provides.views ?? []).length > 0, '必须有代码视图')
+  assert.ok((m.provides.commands ?? []).some((c) => c.id === 'git.status'), '必须有 QuickAction 命令')
+  // 权限闭集：git 能力 + 视图注册，缺一不可也不可多
+  assert.deepEqual([...(m.permissions ?? [])].sort(), ['git', 'views.register'])
+  // 引擎门槛：ctx.ark.git 是 v0.36.0 引入的能力，低于它的宿主必须拒绝激活
+  assert.equal(
+    (m.engines as { arkwork?: string } | undefined)?.arkwork,
+    '^0.36.0',
+    'engines.arkwork 必须声明 ^0.36.0（git 能力门槛）',
+  )
 })
 
-test('TC-SMPL-013 ★ 取数主机回归锁：自选股不得再用 push2 主机（实测 ERR_EMPTY_RESPONSE）', () => {
-  // 依据：v0.34.2 D56-b 实测（Electron net.fetch + 系统代理）
-  //   push2.eastmoney.com   ulist.np / stock/get → net::ERR_EMPTY_RESPONSE（×3）
-  //   push2delay.eastmoney.com 同接口 → 200 + 合法 JSON
-  // 这条用例把「主机选择」钉住 —— 换回 push2 会让面板在真机上直接打不开，
-  // 而单测/CI 环境根本发现不了（密闭环境不联网）。
-  const m = SAMPLE_PLUGIN_MANIFESTS[0]!
-  const panels = m.provides.panels ?? []
-  const urls = panels.map((p) => String((p.data.http as { url?: string } | undefined)?.url ?? ''))
-
-  for (const u of urls) {
-    assert.doesNotMatch(
-      u,
-      /^https:\/\/push2\.eastmoney\.com/,
-      `不得使用 push2 主机（实测不可达）：${u}`,
-    )
+test('TC-SMPL-013 ★ 随包文件载荷与清单分离：files 不进 plugin.json（VP 校验面干净）', () => {
+  // v0.36.0：`files` 是 seed 的落盘载荷，不是清单字段。写进清单既污染用户副本，
+  // 也会让 VP 校验白白面对一个它不认识的顶层键。这条用例把「分离」钉死。
+  for (const raw of RAW_SAMPLE_PLUGINS) {
+    const onDisk = JSON.parse(bundledTextOf(String(raw.id))) as Record<string, unknown>
+    assert.equal('files' in onDisk, false, '落盘后的 plugin.json 不得含 files 字段')
+    // 载荷必须真实存在且为字符串（否则落盘会产出空文件）
+    const files = raw.files as Record<string, string> | undefined
+    assert.ok(files, `${String(raw.id)} 必须携带 files 载荷`)
+    for (const [name, content] of Object.entries(files ?? {})) {
+      assert.ok(typeof content === 'string' && content.length > 0, `随包文件 ${name} 不得为空`)
+    }
+    assert.ok('main.js' in (files ?? {}), 'Host 半源码必须随包携带')
+    assert.ok('panel.html' in (files ?? {}), 'Client 半页面必须随包携带')
   }
-  const quotes = urls.find((u) => u.includes('ulist.np'))!
-  assert.match(quotes, /^https:\/\/push2delay\.eastmoney\.com\//, '自选股走 push2delay')
-  // ★ v0.35.0（D75）：detail / kline 两条 URL 已随面板一起摘除，
-  //   「它们不得复活」由 TC-SMPL-026 单独把守（这里不再断言不存在的东西）
-})
-
-/**
- * ★ v0.35.0（D75）退役回归锁。
- *
- * 这条用例存在的理由：那两个面板被摘除是**用户指令**（「删除废弃的侧边栏插件」）。
- * 写代码的人很容易在后续版本里「顺手把删掉的面板加回来」（它们看着挺有用），
- * 而加回来不会有任何测试变红 —— 除非有这么一条锁。
- *
- * 同时把守「摘除必须连带摘掉引用它的 interact」—— 半摘（删了面板留了交互）
- * 会造出一个「点了没反应」的死交互，比完整保留更难排查。
- */
-test('TC-SMPL-026 ★ D75 退役锁：两个废弃面板不得复活，且不得遗留指向它们的交互', () => {
-  const m = SAMPLE_PLUGIN_MANIFESTS[0]!
-  const refs = (m.provides.panels ?? []).map((p) => p.panelRef)
-  for (const retired of RETIRED_PANEL_REFS) {
-    assert.ok(!refs.includes(retired), `废弃面板 ${retired} 不得重新出现在随包示例里`)
-  }
-  // 全清单任意深度都不得残留对废弃 ref 的引用（interact / 未来的新字段都覆盖）
-  const text = JSON.stringify(RAW_SAMPLE_PLUGINS)
-  for (const retired of RETIRED_PANEL_REFS) {
-    assert.ok(!text.includes(retired), `清单里不得残留 ${retired} 的任何引用`)
-  }
-  // `CandleChart` 组件本身**不退役**（Q4 裁决）—— 它仍应是合法白名单组件，
-  // 只是随包示例不再用它（这里断言白名单仍在，防止有人把「删示例」误做成「删组件」）
-  assert.ok(VLIB_COMPONENTS.includes('CandleChart'), 'CandleChart 应保留在组件白名单里')
 })
 
 /* ============================================================
@@ -184,13 +157,14 @@ test('TC-SMPL-006 ★ 真实功能示例 enabledByDefault=true（假数据示例
  * 4. 来源判定与导出接口
  * ============================================================ */
 
-test('TC-SMPL-007 isSamplePlugin 按 id 判定，且与导出清单同源', () => {
+test('TC-SMPL-007 isSamplePlugin 按 id 判定，且与导出清单同源（含股票退役判定）', () => {
   for (const raw of RAW_SAMPLE_PLUGINS) assert.equal(isSamplePlugin(String(raw.id)), true)
   assert.equal(isSamplePlugin('local.demo'), false, '用户自建插件不得被误判为随包示例')
   assert.equal(isSamplePlugin(''), false)
   assert.equal(isSamplePlugin('ark.plugin.not-exists'), false)
-  // 退役的假数据示例**不再**被认作随包示例（否则会以 bundled 身份复活）
+  // 退役示例（含 v0.36.0 的股票插件）**不再**被认作随包示例（否则会以 bundled 身份复活）
   for (const id of RETIRED_SAMPLE_PLUGIN_IDS) assert.equal(isSamplePlugin(id), false)
+  assert.ok(RETIRED_SAMPLE_PLUGIN_IDS.includes('ark.plugin.stock'), '股票插件必须在退役名单里')
 })
 
 test('TC-SMPL-008 导出接口：已知 id 取回同一份，未知 id 返回 null（不抛错）', () => {
@@ -198,26 +172,29 @@ test('TC-SMPL-008 导出接口：已知 id 取回同一份，未知 id 返回 nu
   assert.deepEqual(sampleManifestForExport(first.id), first, '导出必须与内存同一份（同源）')
   assert.equal(sampleManifestForExport('no.such.plugin'), null)
   assert.equal(rawManifestOf('no.such.plugin'), null)
-  assert.ok(rawManifestOf(STOCK), '可编辑副本必须能取到（落盘用）')
+  assert.ok(rawManifestOf(GIT), '可编辑副本必须能取到（落盘用）')
 })
 
 /* ============================================================
  * 5. 落盘：按 id 补写 + 永不覆盖 + 退役清理
  * ============================================================ */
 
-test('TC-SMPL-009 空目录首启 → 落盘 1 份，目录名/id/文件名三者一致', () => {
+test('TC-SMPL-009 空目录首启 → 落盘 1 份（清单 + 随包文件），目录名/id/文件名三者一致', () => {
   const dir = tmpPluginDir()
   try {
     const res = ensureSamplePlugins(dir)
     assert.equal(res.seeded, true, '空目录应执行落盘')
-    assert.deepEqual(res.written, [STOCK])
+    assert.deepEqual(res.written, [GIT])
     const subdirs = readdirSync(dir)
-    assert.deepEqual(subdirs, [STOCK], '目录名必须等于插件 id')
-    const file = join(dir, STOCK, 'plugin.json')
+    assert.deepEqual(subdirs, [GIT], '目录名必须等于插件 id')
+    const file = join(dir, GIT, 'plugin.json')
     assert.ok(existsSync(file))
     const written = JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>
-    assert.equal(written.id, STOCK)
+    assert.equal(written.id, GIT)
     assert.ok(parsePluginManifest(written).manifest, '落盘后必须仍合法（不能被序列化改坏）')
+    // v0.36.0：随包文件同时落盘（没有它们，代码插件就是一个空壳）
+    assert.ok(existsSync(join(dir, GIT, 'main.js')), 'Host 半必须落盘')
+    assert.ok(existsSync(join(dir, GIT, 'panel.html')), 'Client 半必须落盘')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -232,22 +209,22 @@ test('TC-SMPL-010 ★ 按 id 补写：已有示例一字不改，缺失的补写
     writeFileSync(join(userDir, 'plugin.json'), '{"id":"local.mine"}', 'utf-8')
 
     ensureSamplePlugins(dir)
-    const stockFile = join(dir, STOCK, 'plugin.json')
-    writeFileSync(stockFile, '{"id":"ark.plugin.stock","name":"用户改过"}', 'utf-8')
+    const gitFile = join(dir, GIT, 'plugin.json')
+    writeFileSync(gitFile, `{"id":"${GIT}","name":"用户改过"}`, 'utf-8')
 
     // 删掉示例 → 下次启动必须补回（旧策略「目录有插件就整批跳过」做不到这点）
-    rmSync(join(dir, STOCK), { recursive: true, force: true })
+    rmSync(join(dir, GIT), { recursive: true, force: true })
     const res = ensureSamplePlugins(dir)
-    assert.deepEqual(res.written, [STOCK], '缺失的示例必须补写')
-    assert.ok(existsSync(stockFile))
+    assert.deepEqual(res.written, [GIT], '缺失的示例必须补写')
+    assert.ok(existsSync(gitFile))
 
     // 已存在的用户副本不被覆盖
-    writeFileSync(stockFile, '{"id":"ark.plugin.stock","name":"用户改过"}', 'utf-8')
+    writeFileSync(gitFile, `{"id":"${GIT}","name":"用户改过"}`, 'utf-8')
     const res2 = ensureSamplePlugins(dir)
     assert.deepEqual(res2.written, [], '已存在则一字不改')
     assert.equal(
-      readFileSync(stockFile, 'utf-8'),
-      '{"id":"ark.plugin.stock","name":"用户改过"}',
+      readFileSync(gitFile, 'utf-8'),
+      `{"id":"${GIT}","name":"用户改过"}`,
       '绝不覆盖用户文件',
     )
     assert.equal(
@@ -267,14 +244,14 @@ test('TC-SMPL-011 目录不存在 → 递归创建后落盘（不因目录缺失
     assert.equal(existsSync(dir), false)
     const res = ensureSamplePlugins(dir)
     assert.equal(res.seeded, true)
-    assert.deepEqual(res.written, [STOCK])
+    assert.deepEqual(res.written, [GIT])
     assert.ok(existsSync(dir), '应递归创建目录')
   } finally {
     rmSync(parent, { recursive: true, force: true })
   }
 })
 
-test('TC-SMPL-012 ★ 退役清理：四个假数据示例的残留目录被删除，用户插件不动', () => {
+test('TC-SMPL-012 ★ 退役清理：股票插件等退役示例的残留目录被删除，用户插件不动', () => {
   const dir = tmpPluginDir()
   try {
     for (const id of RETIRED_SAMPLE_PLUGIN_IDS) {
@@ -296,55 +273,47 @@ test('TC-SMPL-012 ★ 退役清理：四个假数据示例的残留目录被删�
     for (const id of RETIRED_SAMPLE_PLUGIN_IDS) {
       assert.equal(existsSync(join(dir, id)), false, `${id} 不得复活`)
     }
-    assert.ok(existsSync(join(dir, STOCK, 'plugin.json')), '新示例必须落盘')
+    assert.ok(existsSync(join(dir, GIT, 'plugin.json')), '新示例必须落盘')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
 /* ============================================================
- * 6. v0.34.2（D57）：未改动副本随版本升级（修正必须送得到存量机器）
+ * 6. 未改动副本随版本升级（修正必须送得到存量机器）
  * ============================================================ */
 
-/** 造一份「旧版随包内容」：把现用主机名倒推回退役主机名（即 v0.34.1 落盘的文本） */
-function legacyTextOf(id: string): string {
-  const raw = rawManifestOf(id)!
-  let text = seedTextOf(raw)
-  for (const [oldText, newText] of SEED_STRING_MIGRATIONS) text = text.split(newText).join(oldText)
-  return text
-}
-
-test('TC-SMPL-014 ★ 存量机器路径：无副文件 + 仅差退役主机 → 判定「未改动」并升级（修正送达）', () => {
+test('TC-SMPL-014 ★ 存量机器路径：无副文件 + 仅差 version → 判定「未改动」并升级（修正送达）', () => {
   const dir = tmpPluginDir()
-  const sub = join(dir, STOCK)
+  const sub = join(dir, GIT)
   const file = join(sub, 'plugin.json')
   try {
     mkdirSync(sub, { recursive: true })
-    const legacy = legacyTextOf(STOCK)
-    assert.notEqual(legacy, seedTextOf(rawManifestOf(STOCK)!), '旧文本必须与新版不同（否则用例空转）')
+    const legacy = legacyTextOf(GIT)
+    assert.notEqual(legacy, bundledTextOf(GIT), '旧文本必须与新版不同（否则用例空转）')
     writeFileSync(file, legacy, 'utf-8')
 
     const res = ensureSamplePlugins(dir)
-    assert.deepEqual(res.upgraded, [STOCK], '仅主机不同的旧副本必须被升级 —— 否则修正永远送不到')
-    assert.equal(readFileSync(file, 'utf-8'), seedTextOf(rawManifestOf(STOCK)!), '升级后内容 = 新版随包内容')
+    assert.deepEqual(res.upgraded, [GIT], '仅差 version 的旧副本必须被升级 —— 否则修正永远送不到')
+    assert.equal(readFileSync(file, 'utf-8'), bundledTextOf(GIT), '升级后内容 = 新版随包内容')
     assert.ok(existsSync(join(sub, SEED_SIDECAR)), '升级后必须补写指纹副文件')
     const side = JSON.parse(readFileSync(join(sub, SEED_SIDECAR), 'utf-8')) as { hash: string; version: string }
     // 绑到清单自身的 version（而非硬编码字面量）—— 断言的是「副文件如实记录了
     // 落盘那一版的版本号」这条不变量；硬编码会让每次版本号 +1 都制造一次假红。
-    assert.equal(side.version, String(rawManifestOf(STOCK)!.version), '副文件记录插件版本（人可读凭据）')
+    assert.equal(side.version, String(rawManifestOf(GIT)!.version), '副文件记录插件版本（人可读凭据）')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('TC-SMPL-015 ★ 用户改过的副本（改过数据源/自选股）→ 一字不改，且不误判为升级', () => {
+test('TC-SMPL-015 ★ 用户改过的副本（改过标题）→ 一字不改，且不误判为升级', () => {
   const dir = tmpPluginDir()
-  const sub = join(dir, STOCK)
+  const sub = join(dir, GIT)
   const file = join(sub, 'plugin.json')
   try {
     mkdirSync(sub, { recursive: true })
-    // 用户把自选股改成了自己的清单（真实用法，见 sample-plugins.ts 注释）
-    const mine = legacyTextOf(STOCK).replace('1.600519,0.000001', '0.002415,1.600036')
+    // 用户把展示标题改成了自己的（真实用法 —— plugin.json 是用户副本）
+    const mine = legacyTextOf(GIT).replace('"Git 管理"', '"我的 Git"')
     writeFileSync(file, mine, 'utf-8')
 
     const res = ensureSamplePlugins(dir)
@@ -358,21 +327,21 @@ test('TC-SMPL-015 ★ 用户改过的副本（改过数据源/自选股）→ �
 
 test('TC-SMPL-016 副文件指纹匹配（正常升级路径）→ 覆盖 + 刷新指纹；再跑一次幂等', () => {
   const dir = tmpPluginDir()
-  const sub = join(dir, STOCK)
+  const sub = join(dir, GIT)
   const file = join(sub, 'plugin.json')
   const sideFile = join(sub, SEED_SIDECAR)
   try {
     mkdirSync(sub, { recursive: true })
-    const legacy = legacyTextOf(STOCK)
+    const legacy = legacyTextOf(GIT)
     writeFileSync(file, legacy, 'utf-8')
     writeFileSync(
       sideFile,
-      `${JSON.stringify({ hash: createHash('sha256').update(legacy, 'utf8').digest('hex'), version: '1.0.0', seededAt: '2026-01-01T00:00:00.000Z' })}\n`,
+      `${JSON.stringify({ hash: createHash('sha256').update(legacy, 'utf8').digest('hex'), version: '0.9.9', seededAt: '2026-01-01T00:00:00.000Z' })}\n`,
       'utf-8',
     )
 
     const first = ensureSamplePlugins(dir)
-    assert.deepEqual(first.upgraded, [STOCK])
+    assert.deepEqual(first.upgraded, [GIT])
     const after = readFileSync(file, 'utf-8')
 
     // 幂等：内容已是最新 → 不再写 plugin.json、不再报升级
@@ -389,191 +358,353 @@ test('TC-SMPL-017 首启落盘即建立指纹；副文件放在插件自己目�
   const dir = tmpPluginDir()
   try {
     ensureSamplePlugins(dir)
-    assert.ok(existsSync(join(dir, STOCK, SEED_SIDECAR)), '首启就该有指纹（否则下次无法判定未改动）')
-    assert.deepEqual(readdirSync(dir), [STOCK], 'plugins/ 根目录只能有插件目录')
+    assert.ok(existsSync(join(dir, GIT, SEED_SIDECAR)), '首启就该有指纹（否则下次无法判定未改动）')
+    assert.deepEqual(readdirSync(dir), [GIT], 'plugins/ 根目录只能有插件目录')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
 test('TC-SMPL-018 isUntouchedCopy 真值表：坏 JSON / 坏指纹 / 空指纹一律按「用户副本」保守处理', () => {
-  const raw = rawManifestOf(STOCK)!
-  const bundled = seedTextOf(raw)
-  const legacy = legacyTextOf(STOCK)
+  const raw = rawManifestOf(GIT)!
+  const bundled = bundledTextOf(GIT)
+  const legacy = legacyTextOf(GIT)
+  const { files: _files, ...manifest } = raw
 
   assert.equal(isUntouchedCopy(bundled, raw, null), true, '内容一致 → 未改动')
-  assert.equal(isUntouchedCopy(legacy, raw, null), true, '仅差退役主机 → 视为未改动（存量路径）')
+  assert.equal(isUntouchedCopy(legacy, raw, null), true, '仅差 version → 视为未改动（存量路径）')
   // 空白差异不算改动：判定是 **JSON 语义级**（格式化工具重排不该被当成用户编辑）
   assert.equal(isUntouchedCopy(`${legacy} `, raw, null), true, '空白/缩进差异不是用户改动')
   assert.equal(isUntouchedCopy(`${JSON.stringify(JSON.parse(legacy))}`, raw, null), true, '重排后语义不变 → 未改动')
   // 语义差异才算改动
-  assert.equal(isUntouchedCopy('{"id":"ark.plugin.stock"}', raw, null), false, '用户简写副本 → 不动')
-  assert.equal(isUntouchedCopy(legacy.replace('"自选股"', '"我的自选"'), raw, null), false, '改了标题 → 用户副本')
+  assert.equal(isUntouchedCopy(`{"id":"${GIT}"}`, raw, null), false, '用户简写副本 → 不动')
+  assert.equal(isUntouchedCopy(legacy.replace('"Git 管理"', '"我的 Git"'), raw, null), false, '改了标题 → 用户副本')
   assert.equal(isUntouchedCopy('not json at all', raw, null), false, '坏 JSON → 不动（不抛错）')
   assert.equal(isUntouchedCopy('{}', raw, {}), false, '空指纹字段不构成凭据')
 
   // 指纹路径真正要覆盖的场景：**未来版本语义变更**时，仍能凭指纹认出
   // 「这是随包写下的旧内容」→ 升级（否则每改一次字段就得再补一条迁移规则）
-  const oldSemantic = JSON.stringify({ ...raw, version: '1.0.0' }, null, 2) + '\n'
+  const oldSemantic = JSON.stringify({ ...manifest, version: '0.9.9' }, null, 2) + '\n'
   const oldHash = createHash('sha256').update(oldSemantic, 'utf8').digest('hex')
   assert.equal(isUntouchedCopy(oldSemantic, raw, { hash: oldHash }), true, '指纹匹配 → 未改动（语义不同也升级）')
   assert.equal(
-    isUntouchedCopy(oldSemantic.replace('"自选股"', '"我的自选"'), raw, { hash: oldHash }),
+    isUntouchedCopy(oldSemantic.replace('"Git 管理"', '"我的 Git"'), raw, { hash: oldHash }),
     false,
     '指纹不匹配 + 语义也不同 → 用户改过，绝不动',
   )
 })
 
-test('TC-SMPL-019 退役主机迁移映射必须是非空且新旧不同（否则归一化比对会退化成恒真）', () => {
+test('TC-SMPL-019 迁移映射表必须是非空且新旧不同（否则归一化比对会退化成恒真）', () => {
+  // v0.36.0：股票插件退役后，表里存量条目不再有消费对象 —— 但**机制**保留：
+  // 未来对 Git Manager 的文案/主机类修正仍走这张表（漏声明 = 存量收不到修正）。
   assert.ok(SEED_STRING_MIGRATIONS.length > 0)
   for (const [from, to] of SEED_STRING_MIGRATIONS) {
     assert.notEqual(from, to)
     assert.ok(from.length > 0)
     assert.ok(to.length > 0)
   }
-  // 方向 [旧, 新] 必须能被反过来用于「造旧副本」（见 legacyTextOf）
-  const bundled = seedTextOf(rawManifestOf(STOCK)!)
-  assert.notEqual(legacyTextOf(STOCK), bundled, '迁移表必须真的能把新内容还原成旧样子')
 })
 
-/* ---------- 上一版官方副本夹具（v0.34.1 落盘原文） ---------- */
+/* ============================================================
+ * 7. v0.36.0：随包文件载荷（files）的落盘语义
+ * ============================================================ */
 
-const FIXTURE_V0341 = readFileSync(new URL('./fixtures/sample-plugins.v0.34.1.json', import.meta.url), 'utf-8')
-
-test('TC-SMPL-020 ★ 迁移声明完整性：拿 v0.34.1 官方副本原文判定「未改动」必须成立', () => {
-  // 这条用例是**静默失败模式的把守者**：只要有人改了随包示例的内容（URL/文案/字段）
-  // 却忘了在 SEED_STRING_MIGRATIONS 里声明，本用例就会红 ——
-  // 否则存量机器上那份「原封未动」的副本会被误判成用户副本，修正永远送不到，
-  // 而 CI 里一切全绿（v0.34.2 真实踩过：D56-b 主机迁移 + 描述文案两处改动）。
-  const raw = rawManifestOf(STOCK)!
-  assert.equal(
-    isUntouchedCopy(FIXTURE_V0341, raw, null),
-    true,
-    '上一版官方副本必须被判为「未改动」→ 可升级；否则用户永远拿不到本次修正',
-  )
-  // 反向：夹具本身确实不是新版内容（否则用例空转）
-  assert.notEqual(FIXTURE_V0341, seedTextOf(raw), '夹具应与新版内容不同')
-})
-
-test('TC-SMPL-021 ★ 端到端：v0.34.1 官方副本 → ensure 升级到新版（修正真的送达）', () => {
+test('TC-SMPL-020 ★ files 逐字节落盘：main.js / panel.html 与字面量完全一致（序列化不得改坏代码）', () => {
   const dir = tmpPluginDir()
-  const sub = join(dir, STOCK)
-  const file = join(sub, 'plugin.json')
   try {
-    mkdirSync(sub, { recursive: true })
-    writeFileSync(file, FIXTURE_V0341, 'utf-8')
-
-    const res = ensureSamplePlugins(dir)
-    assert.deepEqual(res.upgraded, [STOCK], '必须升级')
-    const after = readFileSync(file, 'utf-8')
-    assert.equal(after, seedTextOf(rawManifestOf(STOCK)!))
-    assert.doesNotMatch(after, /push2\.eastmoney\.com/, '升级后不得残留实测不可达的主机')
-    assert.match(after, /push2delay\.eastmoney\.com/, '升级后必须是实测可用的主机')
+    ensureSamplePlugins(dir)
+    const raw = rawManifestOf(GIT)!
+    const files = raw.files as Record<string, string>
+    for (const [name, content] of Object.entries(files)) {
+      assert.equal(readFileSync(join(dir, GIT, name), 'utf-8'), content, `随包文件 ${name} 必须逐字节一致`)
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('TC-SMPL-022 用户改过自选股清单（在官方副本基础上）→ 绝不被升级覆盖', () => {
+test('TC-SMPL-021 ★ 端到端：旧版副本 + 缺失的 main.js → 升级后清单与文件同时送达', () => {
   const dir = tmpPluginDir()
-  const sub = join(dir, STOCK)
+  const sub = join(dir, GIT)
   const file = join(sub, 'plugin.json')
   try {
     mkdirSync(sub, { recursive: true })
-    const mine = FIXTURE_V0341.replace('1.600519,0.000001', '0.002415,1.600036')
-    assert.notEqual(mine, FIXTURE_V0341)
-    writeFileSync(file, mine, 'utf-8')
+    writeFileSync(file, legacyTextOf(GIT), 'utf-8')
 
     const res = ensureSamplePlugins(dir)
+    assert.deepEqual(res.upgraded, [GIT], '必须升级')
+    assert.equal(readFileSync(file, 'utf-8'), bundledTextOf(GIT))
+    // 升级路径会无条件重写随包文件 —— 「修正送达」对代码插件同样成立
+    assert.ok(existsSync(join(sub, 'main.js')), '升级必须补齐随包文件')
+    const files = rawManifestOf(GIT)!.files as Record<string, string>
+    assert.equal(readFileSync(join(sub, 'main.js'), 'utf-8'), files['main.js'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('TC-SMPL-022 ★ 用户改过随包文件（main.js）但清单未动 → 只补缺失，不覆盖用户代码', () => {
+  const dir = tmpPluginDir()
+  const sub = join(dir, GIT)
+  const mainFile = join(sub, 'main.js')
+  try {
+    ensureSamplePlugins(dir)
+    const userCode = '// 用户改过：我的定制版'
+    writeFileSync(mainFile, userCode, 'utf-8')
+
+    const res = ensureSamplePlugins(dir)
+    assert.deepEqual(res.written, [], '清单已是最新 → 不写')
     assert.deepEqual(res.upgraded, [])
-    assert.equal(readFileSync(file, 'utf-8'), mine, '用户清单必须原封不动')
+    assert.deepEqual(res.refreshed, [], '指纹记录的哈希 ≠ 磁盘内容 = 用户副本 → 不同步（D88）')
+    assert.equal(readFileSync(mainFile, 'utf-8'), userCode, '指纹不命中 = 用户改过 → 绝不覆盖用户的 main.js')
+    assert.equal(readFileSync(join(sub, 'plugin.json'), 'utf-8'), bundledTextOf(GIT))
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
 /* ============================================================
- * D62 ★ 行点击参数链端到端钉：出厂清单 → 派生 secid → 详情 URL
+ * 8. v0.36.0 · D88：载荷指纹 —— 「清单没变、代码变了」这一格
  *
- * 为什么放在这组：D62 是一条**只有把「出厂清单的真实形状」喂进映射器**
- * 才会暴露的缺陷。单元用例（TC-PHTTP-005）恰好把 `f13` 也写进了 columns，
- * 于是永远看不到「derive 引用了未投影字段」这条真实路径。
- * 本组用**清单自身的 spec** 驱动映射器，形状与线上完全一致。
+ * 实机 B3 冒烟发现：指纹副文件只记 plugin.json 的哈希，载荷文件不在指纹里
+ * ⇒ 修好随包插件源码、重建、重跑，磁盘副本**纹丝不动**，同一个 TypeError
+ * 反复复现。根因是「清单已是最新」分支只补缺失文件、从不升级已存在的载荷。
+ * 这两条用例把该格的两种结局钉死：官方旧副本要送达，用户副本要保住。
  * ============================================================ */
 
-/** 东方财富 ulist.np 的真实响应形状（f13 是**数字**市场码，且未被声明进 columns） */
-const EASTMONEY_ULIST = {
-  rc: 0,
-  data: {
-    total: 2,
-    diff: [
-      { f2: 1257.12, f3: -0.78, f4: -9.86, f12: '600519', f13: 1, f14: '贵州茅台', f18: 1266.98 },
-      { f2: 11.7, f3: 0.78, f4: 0.09, f12: '000001', f13: 0, f14: '平安银行', f18: 11.61 },
-    ],
+/** 把插件目录的载荷指纹改成「磁盘当前内容」的哈希（模拟：磁盘那份就是上一版官方副本） */
+function stampPayloadHash(sub: string, name: string, content: string): void {
+  const sideFile = join(sub, SEED_SIDECAR)
+  const side = JSON.parse(readFileSync(sideFile, 'utf-8')) as { files?: Record<string, string> }
+  side.files = { ...(side.files ?? {}), [name]: createHash('sha256').update(content, 'utf8').digest('hex') }
+  writeFileSync(sideFile, `${JSON.stringify(side, null, 2)}\n`, 'utf-8')
+}
+
+test('TC-SMPL-023 ★ D88：清单未动但载荷是旧版官方副本 → 载荷必须被同步（修正可达）', () => {
+  const dir = tmpPluginDir()
+  const sub = join(dir, GIT)
+  const mainFile = join(sub, 'main.js')
+  try {
+    ensureSamplePlugins(dir) // 首启：落盘 + 建指纹
+    const bundled = (rawManifestOf(GIT)!.files as Record<string, string>)['main.js']!
+
+    // 模拟「上一版随包内容」：磁盘上是一份**旧版官方副本**，指纹里记的就是它
+    const older = '// 上一版随包 main.js（未含本版修复）'
+    assert.notEqual(older, bundled, '旧版内容必须与新版不同（否则用例空转）')
+    writeFileSync(mainFile, older, 'utf-8')
+    stampPayloadHash(sub, 'main.js', older)
+
+    const res = ensureSamplePlugins(dir)
+    assert.deepEqual(res.refreshed, [GIT], '清单没变但载荷变了 —— 必须报告「载荷已同步」')
+    assert.deepEqual(res.upgraded, [], '清单不该被写（它与新版一致）')
+    assert.deepEqual(res.written, [])
+    assert.equal(res.seeded, true, '载荷同步也算「本次执行了落盘动作」')
+    assert.equal(readFileSync(mainFile, 'utf-8'), bundled, '官方旧副本必须被新版覆盖 —— 否则修正永远送不到')
+    // 指纹要跟着更新，否则下次又判定不出来（漏更新 = 每次启动都重复覆盖）
+    const after = JSON.parse(readFileSync(join(sub, SEED_SIDECAR), 'utf-8')) as { files?: Record<string, string> }
+    assert.equal(after.files?.['main.js'], createHash('sha256').update(bundled, 'utf8').digest('hex'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('TC-SMPL-024 ★ D88：幂等 —— 载荷已是最新时不重复同步、不重复报账', () => {
+  const dir = tmpPluginDir()
+  try {
+    ensureSamplePlugins(dir)
+    // 紧接的第二次启动：清单与载荷都已是新版 → 什么账都不该报
+    const res = ensureSamplePlugins(dir)
+    assert.deepEqual(res.refreshed, [])
+    assert.deepEqual(res.upgraded, [])
+    assert.deepEqual(res.written, [])
+    assert.equal(res.seeded, false, '无事可做时 seeded 必须为 false（否则启动日志每次都说「做了事」）')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('TC-SMPL-025 ★ D88：指纹缺该文件记录（存量副文件）→ 按「随包本体」同步（宁可送达不可静默）', () => {
+  const dir = tmpPluginDir()
+  const sub = join(dir, GIT)
+  const mainFile = join(sub, 'main.js')
+  try {
+    ensureSamplePlugins(dir)
+    const bundled = (rawManifestOf(GIT)!.files as Record<string, string>)['main.js']!
+    // 模拟本特性之前的存量副文件：只有 plugin.json 的 hash，没有 files 字段
+    writeFileSync(mainFile, '// 旧版落下的官方副本', 'utf-8')
+    const sideFile = join(sub, SEED_SIDECAR)
+    const side = JSON.parse(readFileSync(sideFile, 'utf-8')) as Record<string, unknown>
+    delete side.files
+    writeFileSync(sideFile, `${JSON.stringify(side, null, 2)}\n`, 'utf-8')
+
+    const res = ensureSamplePlugins(dir)
+    assert.deepEqual(res.refreshed, [GIT], '指纹缺失时按随包本体处理 —— 修正是第一优先级')
+    assert.equal(readFileSync(mainFile, 'utf-8'), bundled)
+    // 同步后必须补上文件指纹，从此可区分官方副本与用户副本
+    const after = JSON.parse(readFileSync(sideFile, 'utf-8')) as { files?: Record<string, string> }
+    assert.ok(after.files?.['main.js'], '同步后必须补写载荷指纹（否则永远回到「无法区分」状态）')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+/* ============================================================
+ * 9. v0.36.0 · D91/D92：竖排栏标签与图标 —— 升级可达性 + 与渲染层的契约
+ *
+ * 实机复验发现的两处「单测全绿但界面不对」：
+ *   D91 竖排栏标签「Git Man…」内容 52px / 渲染 37px → 被裁切（栏宽 44px）
+ *   D92 插件声明 icon:'GitBranch'，图标集里只有 'Branch' → 静默退化成圆点
+ * 修完代码不算完：**存量安装必须收得到**（否则用户机器上还是白点 + 截断标签）。
+ * ============================================================ */
+
+/**
+ * ★ 冻结夹具：v0.36.0 出厂时随包落盘的官方副本**逐字原文**。
+ *
+ * 为什么要冻结而不是「拿现行清单倒推」：倒推出来的副本按构造就能被归一化命中，
+ * 用例会**空转通过**，等于没有把守（v0.34.2 之后股票插件退役、原把守者失效，
+ * 空窗期就是这么来的）。冻结件取自真实机器的 `{userData}/arkwork-data/plugins/
+ * ark.plugin.git-manager/plugin.json`，是「上一版官方副本」最忠实的样本。
+ *
+ * 维护方式：本版若再改随包内容 → 在这里**追加一份新的冻结件**（旧的保留，
+ * 它代表更早的存量用户），并在 `SEED_STRING_MIGRATIONS` 里补上对应条目。
+ */
+const V0360_FROZEN_OFFICIAL_GIT = `{
+  "schemaVersion": "1.1",
+  "id": "ark.plugin.git-manager",
+  "name": "Git 管理",
+  "version": "1.0.0",
+  "author": "ArkWork",
+  "description": "工作区 Git 状态、暂存、提交、历史与推送（封闭白名单操作，写操作需宿主确认）",
+  "kind": "panel",
+  "main": "main.js",
+  "renderer": "panel.html",
+  "enabledByDefault": true,
+  "engines": {
+    "arkwork": "^0.36.0"
   },
-}
-
-/** 出厂清单某面板的 http 规格（缺失即抛 —— 用例前提不成立时应当**响亮失败**） */
-function httpSpecOf(ref: string): HttpSourceSpec {
-  const p = (SAMPLE_PLUGIN_MANIFESTS[0]!.provides.panels ?? []).find((x) => x.panelRef === ref)
-  assert.ok(p, `出厂清单必须有 ${ref}`)
-  assert.ok(p!.data.http, `${ref} 必须是 http 数据源`)
-  return p!.data.http!
-}
-
-test('TC-SMPL-023 ★ D62 回归：出厂「自选股」spec 必须派生出可用的 secid（f13 不在 columns 里）', () => {
-  const quotes = httpSpecOf('panel:stock-quotes')
-  // 前提断言：本用例的有效性依赖「derive 引用的字段确实没被投影展示」
-  const colKeys = (quotes.columns ?? []).map((c) => c.key)
-  assert.ok(!colKeys.includes('f13'), '前提：f13（市场码）本就不该出现在展示列里')
-  assert.match(String(quotes.derive?.secid), /\{\{f13\}\}/, '前提：secid 模板确实引用 f13')
-
-  const res = mapHttpResponse(EASTMONEY_ULIST, quotes)
-  assert.equal(res.rows.length, 2)
-  // 缺陷现象：secid 退化成字面量 '{{f13}}.600519' → 详情接口 data:null → 空面板
-  for (const r of res.rows) {
-    assert.doesNotMatch(String(r.secid), /\{\{/, `secid 不得残留未解析占位符：${String(r.secid)}`)
+  "permissions": [
+    "git",
+    "views.register"
+  ],
+  "provides": {
+    "views": [
+      {
+        "viewRef": "view:git",
+        "title": "Git Manager",
+        "icon": "GitBranch",
+        "renderer": "panel.html",
+        "placement": "dock"
+      }
+    ],
+    "commands": [
+      {
+        "id": "git.status",
+        "title": "Git: 刷新状态"
+      }
+    ]
   }
-  assert.equal(res.rows[0]!.secid, '1.600519', '沪市市场码 1')
-  assert.equal(res.rows[1]!.secid, '0.000001', '深市市场码 0')
-  assert.doesNotMatch(String(res.note), /未解析/, '解析成功时不得报「未解析」噪音')
-})
+}
+`
 
-test('TC-SMPL-024 ★ D62 机制守卫：派生 secid 代入 URL 模板必须零 {{…}} 残留（消费者已随 D75 退役）', () => {
-  // ★ D75 背景（本用例从「端到端」降级为「机制级」的原因）：
-  //   原先消费「派生 secid」的两个面板 —— `panel:stock-detail`（个股详情）与
-  //   `panel:stock-kline`（日K线）—— 已被用户点名为废弃项并摘除，随包清单里
-  //   再没有任何 URL 模板引用 secid。于是这条 D62 用例的**原始诉求**（拿出厂
-  //   清单的真实形状喂进映射器、钉死详情/K线 URL 被完全替换）已无随包载体。
-  //
-  //   但 D62 钉住的**机制**（`derive` 产出的字段代入 `applyTemplate` 必须完全
-  //   替换、零 `{{…}}` 残留）仍然通用 —— 未来的插件照样会这么用。故此处刻意
-  //   保留该 ID、改为**机制级**守卫，而不是连机制一起悄悄丢掉。
-  const quotes = httpSpecOf('panel:stock-quotes')
-  const rows = mapHttpResponse(EASTMONEY_ULIST, quotes).rows
-  const secid = String(rows[0]!.secid)
-  assert.equal(secid, '1.600519', '前提：derive 必须先产出正确的 secid（沪市市场码 1）')
+test('TC-SMPL-026 ★ 冻结的 v0.36.0 官方副本（无指纹 / 未改动）→ 判未改动并升级（迁移表把守者）', () => {
+  const raw = rawManifestOf(GIT)!
+  // ① 纯判定层：无副文件的存量副本必须被判为「未改动」，否则修正永远送不到
+  assert.equal(
+    isUntouchedCopy(V0360_FROZEN_OFFICIAL_GIT, raw, null),
+    true,
+    '上一版官方副本被判成「用户副本」= 迁移条目漏声明 = 整批存量用户收不到修正',
+  )
 
-  // 模板用「未来插件会写的样子」（secid 走 query，与东方财富真实接口同形）。
-  // 这不是替身断言：applyTemplate 是否残留占位符只取决于入参，与 URL 真伪无关。
-  const tpl = 'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={{secid}}&klt=101'
-  const resolved = applyTemplate(tpl, { secid })
-  assert.doesNotMatch(resolved, /\{\{[\w.-]+\}\}/, `URL 模板必须被完全替换，实际：${resolved}`)
-  assert.match(resolved, /secid=1\.600519(&|$)/, '必须带上真实 secid')
+  // ② 端到端：真落盘 + 真升级 + 清单里确实换成新值
+  const dir = tmpPluginDir()
+  const sub = join(dir, GIT)
+  const file = join(sub, 'plugin.json')
+  try {
+    mkdirSync(sub, { recursive: true })
+    writeFileSync(file, V0360_FROZEN_OFFICIAL_GIT, 'utf-8')
 
-  // 反向钉：退役面板确实不再提供任何 URL 模板（否则上面的「机制级」说法不成立）
-  const refs = (SAMPLE_PLUGIN_MANIFESTS[0]!.provides.panels ?? []).map((p) => p.panelRef)
-  for (const retired of RETIRED_PANEL_REFS) {
-    assert.ok(!refs.includes(retired), `退役面板 ${retired} 不得重新出现`)
+    const res = ensureSamplePlugins(dir)
+    assert.deepEqual(res.upgraded, [GIT], '必须升级')
+    const onDisk = JSON.parse(readFileSync(file, 'utf-8')) as {
+      provides: { views: Array<{ title: string; icon: string }> }
+    }
+    const v = onDisk.provides.views[0]!
+    assert.equal(v.title, 'Git', 'D91：竖排栏标签已收敛为 3 字以内')
+    assert.equal(v.icon, 'Branch', 'D92：图标名已换成图标集里真实存在的那个')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('TC-SMPL-025 ★ D62 回归：响应缺 f13 时，note 必须点名「派生字段未解析」（不静默空面板）', () => {
-  const quotes = httpSpecOf('panel:stock-quotes')
-  // 模拟接口字段变更（或模板字段名拼错）：f13 消失
-  const broken = { rc: 0, data: { diff: [{ f2: 1, f12: '600519', f14: '贵州茅台' }] } }
-  const res = mapHttpResponse(broken, quotes)
-  assert.match(String(res.rows[0]!.secid), /\{\{f13\}\}/, '未命中变量按 applyTemplate 语义原样保留')
-  assert.match(String(res.note), /未解析/, 'note 必须把人话原因说出来')
-  assert.match(String(res.note), /secid/, 'note 必须点名是哪个派生字段')
+test('TC-SMPL-027 ★ D91：随包插件声明的 view.title 必须装得进竖排栏（≤3 字）', async () => {
+  const { RAIL_LABEL_MAX_CHARS } = await import('../../../renderer/utils/label-guard.js')
+  for (const raw of RAW_SAMPLE_PLUGINS) {
+    for (const v of (raw.provides as { views?: Array<{ title: string }> }).views ?? []) {
+      assert.ok(
+        v.title.length <= RAIL_LABEL_MAX_CHARS,
+        `随包插件 ${String(raw.id)} 的视图标题「${v.title}」(${v.title.length} 字) 超过竖排栏预算 ` +
+          `${RAIL_LABEL_MAX_CHARS} —— 官方示范不能自带会被截断的数据`,
+      )
+    }
+  }
+})
+
+test('TC-SMPL-028 ★ D92：随包插件声明的图标名必须存在于渲染层图标集（写错会静默变圆点）', () => {
+  const iconsSource = readFileSync(
+    join(fileURLToPath(new URL('../../../renderer/', import.meta.url)), 'icons.tsx'),
+    'utf-8',
+  )
+  const known = new Set(
+    [...iconsSource.matchAll(/^ {2}([A-Z][A-Za-z0-9]*):\s*\(?/gm)].map((m) => m[1]!),
+  )
+  assert.ok(known.size >= 50, `图标集解析异常：只认出 ${known.size} 个名字`)
+
+  for (const raw of RAW_SAMPLE_PLUGINS) {
+    const declared: string[] = []
+    for (const v of (raw.provides as { views?: Array<{ icon?: string }> }).views ?? []) {
+      if (v.icon) declared.push(v.icon)
+    }
+    // Host 半运行期注册的那份也必须一致（作者最容易只改清单、忘了 main.js）
+    const mainJs = (raw.files as Record<string, string> | undefined)?.['main.js'] ?? ''
+    for (const m of mainJs.matchAll(/icon:\s*'([^']+)'/g)) declared.push(m[1]!)
+
+    assert.ok(declared.length > 0, `随包插件 ${String(raw.id)} 应至少声明一个图标`)
+    for (const name of declared) {
+      assert.ok(
+        known.has(name),
+        `图标名「${name}」不在渲染层图标集中（${String(raw.id)}）—— ` +
+          '界面上会静默退化成一颗圆点，且控制台只在运行时才告警',
+      )
+    }
+  }
+})
+
+test('TC-SMPL-029 ★ D94：随包插件引用的 CSS 变量必须在宿主主题契约内（契约外 = 主题失配）', async () => {
+  // 宿主只把 PLUGIN_THEME_TOKENS 白名单内的令牌经桥发给插件；契约外的名字宿主
+  // 不下发，插件就会落到自己写的浅色兜底值 —— 实机表现：深色主题下按钮/输入框
+  // 是一块块白底（D94，靠截图肉眼发现）。这条用例把「随包示范不得引用契约外
+  // 令牌」钉死，谁再往 panel.html 里塞自造令牌名就红。
+  // ★ D96：从 shared 取契约（原名在 renderer/utils/plugin-theme.ts，
+  //   那边依赖 window/document，main 侧 import 它会把 DOM 拖进 node 端的
+  //   类型域 —— tsconfig.node.json 无 DOM lib，直接 4 个 TS2304/TS2584）。
+  const { PLUGIN_THEME_TOKENS } = await import('@shared/utils/plugin-theme-tokens.js')
+  const contract = new Set<string>(PLUGIN_THEME_TOKENS)
+  assert.ok(contract.has('--bg-surface-2'), '契约自检：背景阶梯应在白名单内')
+
+  const offenders: string[] = []
+  for (const raw of RAW_SAMPLE_PLUGINS) {
+    const files = (raw.files as Record<string, string> | undefined) ?? {}
+    for (const [name, content] of Object.entries(files)) {
+      for (const m of content.matchAll(/var\(\s*(--[a-z0-9-]+)/gi)) {
+        const token = m[1]!
+        if (!contract.has(token)) offenders.push(`${String(raw.id)}/${name}: ${token}`)
+      }
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    '随包插件引用了主题契约之外的 CSS 变量 —— 宿主不会下发它们，深浅色主题下会失配：\n' +
+      offenders.join('\n'),
+  )
 })

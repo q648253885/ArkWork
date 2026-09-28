@@ -112,11 +112,6 @@ export function getSpecsIndexPath(): string {
   return join(getSpecsDir(), 'index.json')
 }
 
-/** 默认 policy 配置：{specs}/config.json */
-export function getSpecsConfigPath(): string {
-  return join(getSpecsDir(), 'config.json')
-}
-
 /**
  * 目录穿越防护。
  * graphId / nodeId 会参与路径拼接，必须过白名单正则
@@ -335,13 +330,26 @@ export async function saveGraph(
   }
 
   // 3) 追加 Revision + 更新 updatedAt，再原子写
+  // v0.36.4（D122）：写图失败**不再中断后续步骤**。原实现在这里抛错 → 上层
+  // persist catch → 第 ⑥ 步 planItems 镜像 + graphId 回写被整体跳过 → tasks.json
+  // 里该任务始终没有 graphId、planItems 停留在创建时全 pending → 续聊时
+  // needsGraphMigration 误判「未建图」用过期清单重建第二张图 → 模型重做已完成
+  // 任务（用户实测）。内存图仍是唯一真相，镜像必须把真相续传到 tasks.json。
+  // 形状校验失败（第 2 步）仍然抛 —— 坏图不允许流出。
   const next: TaskGraph = { ...graph, updatedAt: Date.now() }
   if (options?.revision) {
     const seq = (next.revisions.at(-1)?.seq ?? 0) + 1
     next.revisions = [...next.revisions, { ...options.revision, seq, at: Date.now() }]
   }
   next.graphRevision = (graph.graphRevision ?? 0) + 1
-  await getDoc(graph.id).write(next)
+  try {
+    await getDoc(graph.id).write(next)
+  } catch (err) {
+    logger.warn(
+      'Agent',
+      `graph ${graph.id}: graph.json 落盘失败（内存状态保留，镜像照常回写）：${(err as Error).message}`,
+    )
+  }
 
   // 5) 渲染 graph.md（失败不阻断主流程 —— 它只是给人看的产物）
   try {
@@ -352,15 +360,40 @@ export async function saveGraph(
     logger.warn('Agent', `graph ${graph.id}: graph.md 渲染失败：${(err as Error).message}`)
   }
 
-  // 6) 重算 planItems 镜像（唯一写入点）
+  // 6) 重算 planItems 镜像
+  //
+  // v0.37.0（缺陷 D132）：这里曾是**第三个** `planItems` 写入者 ——
+  // 图每次 saveGraph 都用图的重算结果覆盖 `Task.planItems`，而账本也在写同一字段，
+  // 谁后写谁赢（诊断 §2 L3 的同轮并行写）。收敛方案：
+  //   · 有账本 → 图状态**单向下推**到账本（mirror 算子，账本终态项不动），
+  //             由账本投影回写 `planItems`（唯一写入者）；
+  //   · 无账本 → 保持 v0.30 直写（旧任务 / 建账前的兼容路径）。
   if (options?.taskId) {
     try {
       const planItems = mirrorPlanItems(next)
-      await updateTask(options.taskId, {
-        graphId: next.id,
-        graphRevision: next.graphRevision,
-        planItems,
-      })
+      const { loadLedger: readLedger, mutate: ledgerMutate } = await import('../ledger/engine.js')
+      const ledger = await readLedger(options.taskId)
+      if (ledger && ledger.items.length > 0) {
+        await ledgerMutate(
+          options.taskId,
+          {
+            kind: 'mirror',
+            items: planItems.map((p) => ({ nodeId: p.id, to: p.status as 'pending' | 'running' | 'paused' | 'done' | 'failed' | 'cancelled' | 'skipped' })),
+            reason: `任务图镜像同步（graph r${next.graphRevision}）`,
+          },
+          { actor: 'graph-mirror' },
+        )
+        await updateTask(options.taskId, {
+          graphId: next.id,
+          graphRevision: next.graphRevision,
+        })
+      } else {
+        await updateTask(options.taskId, {
+          graphId: next.id,
+          graphRevision: next.graphRevision,
+          planItems,
+        })
+      }
       // 镜像写入处显式补广播（通道 A ←→ 通道 B 同帧一致，见 §4.7 / §10.6 步骤 3+4）
       mirrorWrittenHook?.(options.taskId, planItems)
     } catch (err) {

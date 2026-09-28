@@ -75,8 +75,26 @@ function jsonHandler(payload: unknown) {
   }
 }
 
-function openaiAdapterOf(url: string, provider: 'openai' | 'ollama' | 'custom-openai' = 'openai'): OpenAIAdapter {
-  return new OpenAIAdapter({ apiKey: 'test', defaultModel: 'test-model', baseURL: `${url}/v1`, provider })
+/**
+ * 构造一个走 **OpenAI 兼容 `/v1` 通道**的 adapter。
+ *
+ * v0.40.0（D199）：`think` 默认改为 `true`。
+ *
+ * 原因：D199 把「Ollama 形态端点是否走原生 `/api/chat`」的默认值从
+ * 「必须显式 `think===false`」放宽为「只要不是显式 `think===true`」。本文件的
+ * 用例全部使用 `jsonHandler({choices:[…]})` 这种 **OpenAI `/v1` 响应形态**，
+ * 意图是钉住「各协议的 `/v1` 响应怎么被归一化」，**不是**钉住路由。
+ * 若不显式声明，provider='ollama' 的用例会改走原生通道，得到与题意无关的
+ * 结果（实测 TC-PS-003/004/006/008/009 五条因此变红）。
+ *
+ * 路由本身由 `ollama-native.test.ts` 的 TC-ON-001 / TC-OPS-016 / TC-OPS-017 覆盖。
+ */
+function openaiAdapterOf(
+  url: string,
+  provider: 'openai' | 'ollama' | 'custom-openai' = 'openai',
+  think = true,
+): OpenAIAdapter {
+  return new OpenAIAdapter({ apiKey: 'test', defaultModel: 'test-model', baseURL: `${url}/v1`, provider, think })
 }
 
 const REQ = { system: 'sys', messages: [{ role: 'user' as const, content: '你好' }], maxTokens: 512 }

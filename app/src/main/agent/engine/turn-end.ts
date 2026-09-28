@@ -4,90 +4,117 @@
  * - pauseViaAskUser：ask_user 分支（参数兜底校验 + 配对 observation + continuation 注入判定）
  */
 
-import type { Task } from '@shared/types/task'
-import type { ReActAction } from '@shared/types/react'
-import type { Agent } from '@shared/types/agent'
-import type { LlmCompleteResponse } from '../../llm/adapter.js'
-import { logger } from '../../system/logger.js'
-import { updateTask, getTask } from '../../store/tasks.js'
-import { broadcastTaskStatus } from '../events.js'
+import {
+  type Task,
+  type ReActAction,
+  type Agent,
+  type LlmCompleteResponse,
+  logger,
+  updateTask,
+  broadcastTaskStatus,
+  appendL1,
+} from './engine-context.js'
 import { emitEvent, emitProgress, safeSlice } from './broadcast.js'
 import { appendPairedControlObservations } from './act.js'
 import { runDoneMemoryHooks } from './memory-hooks.js'
-import { buildFallbackAskUserQuestion, sealGraphForTaskOutcome, discardIncompletePlanItems } from './gates.js'
-import { unfinishedTaskNodes } from '../graph/migrate.js'
+import { buildFallbackAskUserQuestion, sealGraphForTaskOutcome } from './gates.js'
 import { continueTurnIfInjected } from './abort.js'
+// v0.37.0：统一完成门禁（账本版）+ 账本收口
+// v0.38.0（D150/D151/D152/D153）：判定（ledger-guard）与投递（gate-channel）分离；
+//   判据改为客观事实（workClass + touchedTree），拒绝计数唯一落点是账本。
+// v0.39.0（D178/D183）：门禁放行后的在途项收口走 `forceCloseOpenItems`。
+import { guardFinish, recordRefusal, forceCloseOpenItems } from './ledger-guard.js'
+import { refuseViaGate, emitTurnNote } from './gate-channel.js'
+import type { WorkClass } from './work-class.js'
+import { sealLedger } from '../ledger/engine.js'
 // v0.30.0：完成语义（Sync · S3 Write + S4 Gate）—— 用"验收通过"替代"模型宣称"
 import { syncModelClaim } from '../graph/sync.js'
-import { appendL1 } from '../../memory/l1-working.js'
 import { getUiLocale, tFor } from '../../i18n/messages.js'
 
 export interface TurnEndCtx {
   task: Task
   agent: Agent
   modelId: string
+  /**
+   * v0.38.0（D150）：本 run 的工作性质（`classifyRunWork(toolsThisRun)` 的结果）。
+   * 缺省 `'mutating'` —— 旧调用方（含测试）不传时按保守侧处理，只跳过「零写树」判定，
+   * 不跳过 UNFINISHED。
+   */
+  workClass?: WorkClass
+  /**
+   * v0.38.0（D150）：本 run 是否触碰过任务清单（`touchesPlanTree` 累计）。
+   * 缺省 `true` —— 与 v0.37.0 的 UNFINISHED 语义对齐（只判「清单是否有在途项」）。
+   */
+  touchedTree?: boolean
 }
 
-/**
- * v0.32.1（缺陷 D39）：`task_complete` 前的**未完成项守卫**每轮 run 允许的拒绝次数。
+/* ────────────────────────────────────────────────────────────────
+ * v0.39.0（D183）：**已删除** v0.32.1 的 D39「第二套完成守卫」
  *
- * 为什么需要拒绝而不是直接接受：任务要标 `done`、清单里却留着 4 条 `ready`
- * （从未执行）—— 用户在任务面板看到的是「已完成的任务 + 4 条待执行」，与 D36 同源的
- * 另一种「任务态 ↔ 清单态不一致」。这与 v0.28.1 在「无工具调用」分支的既有裁决同向
- * （清单有未完成项时**不静默收尾**，先让模型自处）。
+ *   `MAX_COMPLETE_REFUSALS` + `refuseCompletionForLeftovers`
+ *   + 「图侧 unfinishedTaskNodes」/「扁平 planItems」两套 leftover 判据
  *
- * 为什么必须**有上限**：模型可能反复坚持「已完成」。超过上限后接受完成，
- * 但要求清单与终态自洽 —— 剩余项收成 `cancelled`（附原因），而不是把矛盾留在界面上。
- */
-export const MAX_COMPLETE_REFUSALS = 2
+ * 删除理由（与 D151 同型，缺一都不足以解释现场）：
+ *   ① 它与 v0.38.0 的统一账本门禁 `guardFinish` **串联**：门禁先按
+ *      `workClass + touchedTree` 拒一轮（账本 `resume.refusals` 上限 2），
+ *      放行后再由 D39 用 run 局部 `completeRefusals` 又拒一轮（上限 2）
+ *      → 单 run 最多 2 + 3 次拒绝，且第二套**不写账本**，现场无人能解释；
+ *   ② 判据不同源：门禁读账本在途项，D39 读图节点/内存 planItems（v0.36.4 的
+ *      「双通道对账」就是在给这个不同源打补丁，补丁本身又引入新的静默放行）；
+ *   ③ 兜底自相矛盾：超限后 `discardIncompletePlanItems` 把未执行项收成
+ *      `cancelled`（作废），而账本门禁超限后是「放行 + 收口」——两条路径对
+ *      同一形态给出相反结论。
+ *
+ * 替代实现：门禁放行后统一由 `forceCloseOpenItems` 一次性收口在途项
+ * （与 loop.ts 最终答复分支同口径，D178）；拒绝计数只有账本 `resume.refusals`
+ * 一处，判据只有 `guardFinish` 一条。
+ * ──────────────────────────────────────────────────────────────── */
+
+/* ────────────────────────────────────────────────────────────────
+ * v0.38.0（D150/D151/D152/D153）：**已删除** v0.36.6 的 D128 专用通道
+ *
+ *   `refuseCompletionForTreeSync` + `emitTreeSyncRefusal`
+ *
+ * 删除理由（三条，缺一都不足以解释现场）：
+ *   ① 判据是代理变量：`treeSyncDebt = pendingTreeSync && !treeTouchedThisRun`，
+ *      而 `pendingTreeSync` 由 `startIter > 0 && !isReplyContinuation && graphId`
+ *      推出 —— 三个条件都不读用户输入内容，纯只读提问被判"新指令型续聊"（D150）；
+ *   ② 计数与账本叠加：本通道用 run 局部 `completeRefusals === 0`、账本门禁用
+ *      `resume.refusals`（上限 2），且本通道**不调** `recordRefusal`（账本留不下痕迹）
+ *      → 单 run 稳定 `1 + 2 = 3` 次拒绝，与现场"连续三轮"精确吻合（D151）；
+ *   ③ 投递即吞答复：拒绝时 `return true` 早退、不投 `task_complete` 事件，
+ *      而 UI 的答复正文正是靠它投递 → 用户看不到任何答复（D152）。
+ *
+ * 替代实现：统一走 `gate-channel.ts` 的 `refuseViaGate`（system 指令 + 用户通告）
+ * 与 `emitTurnNote`（被拒轮已生成的正文保底投递），判据由 `guardFinish`
+ * 按 `workClass` + `touchedTree` 客观裁决。
+ * ──────────────────────────────────────────────────────────────── */
 
 /**
- * v0.32.1（缺陷 D39）：拒绝一次 `task_complete` —— 补配对 observation + 一条指令性
- * user message，告诉模型「清单还有哪些项没终态」以及它的两个选择。
+ * v0.39.0（D197）：`task_complete` 的 summary 兜底 —— **永不输出空串**。
  *
- * 与 `verifyTrigger` 的处理方式完全同构（同样要补配对 observation，否则 assistant 的
- * tool_calls 悬空，下次 assembleMessages 重建消息时服务端会 400）。
+ * 此前两处收尾都是 `(action.args.summary as string) ?? safeSlice(response.thought, 500)`：
+ * 模型既没给 summary、`thought` 又是空串时（全空回合的特征），兜底链**两级全空**，
+ * 于是 `event.summary === ''` 一路传到渲染层，用户看到一条**空白的「答复」**而任务
+ * 已被标完成（实机证据见 `reason-phase.ts` 的 D197 注释）。
+ *
+ * 兜底顺序（单一事实源，loop 与 turn-end 共用）：
+ *   ① 模型显式 summary（trim 后非空）
+ *   ② 本轮正文 thought（截 500 字）
+ *   ③ 常量占位 —— 保证「完成」这件事在 UI 上永远有一句话可读
  */
-async function refuseCompletionForLeftovers(args: {
-  taskId: string
-  iteration: number
-  pendingActions: ReActAction[]
-  pendingActionIds: string[]
-  leftovers: ReadonlyArray<{ key?: string; id: string; status: string; title?: string }>
-  priorRefusals: number
-}): Promise<void> {
-  const { taskId, iteration, pendingActions, pendingActionIds, leftovers, priorRefusals } = args
-  const list = leftovers
-    .map((n) => `  · ${n.key ?? n.id}（${n.status}）${(n.title ?? '').slice(0, 40)}`)
-    .join('\n')
-  await appendPairedControlObservations({
-    taskId,
-    iteration,
-    actions: pendingActions,
-    actionIds: pendingActionIds,
-    controlTool: 'task_complete',
-    controlContent: `[task_complete] 已受理，但任务清单仍有 ${leftovers.length} 项未收口`,
-    skipPrefix: '[skipped] 等待清单收口，跳过：',
-  })
-  await appendL1({
-    taskId,
-    role: 'user',
-    kind: 'user_message',
-    iteration,
-    content:
-      `[unfinished-plan] 任务清单仍有 ${leftovers.length} 项没有终态，因此**不能**判定完成：\n` +
-      `${list}\n` +
-      `请二选一（不要重复调用 task_complete，它不会让未执行的项变成完成）：\n` +
-      `  ① 继续调用工具把这些项做完；或\n` +
-      `  ② 若确认它们已无需执行，用 todo-update 把它们显式标记为 cancelled（或 skipped），` +
-      `说明理由，然后再调用 task_complete。`,
-  })
-  logger.info(
-    'Agent',
-    `task_complete 被拦截：清单仍有 ${leftovers.length} 项未收口（第 ${priorRefusals + 1}/${MAX_COMPLETE_REFUSALS} 次）`,
-    taskId,
-  )
+/* @@ARKWORK-PURE:START@@ */
+export function resolveCompleteSummary(
+  args: Record<string, unknown> | undefined,
+  thought: string | undefined,
+): string {
+  const explicit = typeof args?.summary === 'string' ? args.summary.trim() : ''
+  if (explicit) return explicit
+  const fromThought = safeSlice(thought ?? '', 500).trim()
+  if (fromThought) return fromThought
+  return '任务已完成（模型未附文字总结）'
 }
+/* @@ARKWORK-PURE:END@@ */
 
 export async function finishViaTaskComplete(
   ctx: TurnEndCtx,
@@ -96,10 +123,68 @@ export async function finishViaTaskComplete(
   pendingActions: ReActAction[],
   pendingActionIds: string[],
   iteration: number,
-  /** 本轮 run 内已被拒绝的次数（由 loop.ts 维护；缺省 0 —— 单次调用语义不变） */
-  priorRefusals = 0,
 ): Promise<boolean> {
   const { task, agent, modelId } = ctx
+
+  // ============================================================
+  // v0.38.0（D150/D151/D152/D153）：**统一账本完成门禁**。
+  //
+  // 此前这里是两个并列守卫（D128 续聊零写树 + D134 清单未收口），判据全是代理变量、
+  // 计数源有两套，叠加出"连续三轮被拦且不服告"的现场。现在只剩一条：
+  //   · 判据客观 —— `workClass`（本 run 实际调过哪些工具）+ `touchedTree`（是否写过清单）；
+  //   · 计数单一 —— 账本 `resume.refusals`，上限 `MAX_LEDGER_REFUSALS`；
+  //   · 投递分离 —— 拒绝理由经 `refuseViaGate` 走 system 指令 + 用户通告两条通道，
+  //     被拒轮模型**已经写好的正文**经 `emitTurnNote` 保底投给用户（治 D152）。
+  // ============================================================
+  const verdict = await guardFinish({
+    taskId: task.id,
+    iteration,
+    workClass: ctx.workClass ?? 'mutating',
+    touchedTree: ctx.touchedTree ?? true,
+  })
+  if (!verdict.allow) {
+    await appendPairedControlObservations({
+      taskId: task.id,
+      iteration,
+      actions: pendingActions,
+      actionIds: pendingActionIds,
+      controlTool: 'task_complete',
+      controlContent: `[task_complete] 已受理，但任务清单未收口（${verdict.code}）`,
+      skipPrefix: '[skipped] 等待清单收口，跳过：',
+    })
+    await recordRefusal(task.id)
+    await refuseViaGate({
+      taskId: task.id,
+      iteration,
+      code: verdict.code,
+      message: verdict.message,
+      refusals: verdict.refusals,
+    })
+    // D152 保底：被拒不等于"用户不该看到答案" —— 把模型本轮已生成的正文投出去。
+    await emitTurnNote({
+      taskId: task.id,
+      iteration,
+      text: (action.args.summary as string) ?? safeSlice(response.thought, 500),
+      via: 'gate-refusal',
+    })
+    return true
+  }
+
+  // ============================================================
+  // v0.39.0（D183）：**删除第二套完成守卫**。
+  //
+  // 这里原本在 `guardFinish` 之后又用 `MAX_COMPLETE_REFUSALS=2` + run 局部
+  // `completeRefusals` 再拦一轮，且不走账本计数 —— 与门禁串联后单 run 最多
+  // 产出 2 + 3 次拒绝，重演 D151「两套计数叠加、无人能解释」的教训。
+  // 现在只有**一条**判据（guardFinish）与**一个**计数（账本 `resume.refusals`）。
+  // 在途项的处理统一为：放行后一次性收口（与 loop 最终答复分支同口径，D178）。
+  // ============================================================
+  if (verdict.leftovers.length > 0) {
+    await forceCloseOpenItems(
+      task.id,
+      `完成门禁放行（${verdict.reason}）：收口 ${verdict.leftovers.length} 项在途任务`,
+    )
+  }
 
   // ============================================================
   // v0.30.0：完成语义变更 —— "完成"由验证结果判定，不再由模型宣称判定
@@ -156,65 +241,6 @@ export async function finishViaTaskComplete(
     if (claim.gateError) {
       logger.info('Agent', `task_complete 被门禁拒绝：${claim.gateError.message}`, task.id)
     }
-
-    // ============================================================
-    // v0.32.1（缺陷 D39）：**完成前守卫** —— 清单还有未收口项时不静默收尾。
-    //
-    // 真实环境实测形态（模型自建 10 项计划 → 执行 3 项 → 取消 3 项 → 直接 task_complete）：
-    //   任务 `done` ✅ ｜ 图 `completed` ✅ ｜ **清单里 4 项仍是 `ready`（从未执行）** ❌
-    // 用户在任务面板看到「已完成的任务 + 4 条待执行」，无从判断这些项到底做没做。
-    //
-    // 策略（与 v0.28.1 在「无工具调用」分支的既有裁决同向）：
-    //   ① 前 MAX_COMPLETE_REFUSALS 次 → **拒绝收尾**，把未完成项列给模型，要求其二选一：
-    //      继续执行，或显式用 `todo-update` 标记取消/跳过（留下「这是模型主动不做」的痕迹）；
-    //   ② 超过上限仍坚持 → 接受完成，但**必须让清单与终态自洽**：剩余项收成 `cancelled`
-    //      （附原因 + 告警日志），而不是把矛盾留在界面上。
-    // ============================================================
-    const leftovers = claim.graph ? unfinishedTaskNodes(claim.graph) : []
-    if (leftovers.length > 0) {
-      if (priorRefusals < MAX_COMPLETE_REFUSALS) {
-        await refuseCompletionForLeftovers({
-          taskId: task.id,
-          iteration,
-          pendingActions,
-          pendingActionIds,
-          leftovers,
-          priorRefusals,
-        })
-        return true // 不结束任务，回到循环顶部让模型自处
-      }
-      logger.warn(
-        'Agent',
-        `task_complete 连续 ${priorRefusals} 次被拒后仍坚持完成：把剩余 ${leftovers.length} 项收为 cancelled` +
-          `（${leftovers.map((n) => n.key ?? n.id).join(', ')}）`,
-        task.id,
-      )
-      await discardIncompletePlanItems(task, '任务完成：模型坚持收尾，剩余未执行项收为 cancelled')
-    }
-  } else {
-    // 无图任务（tier 0/1）：同一守卫，判据换成扁平清单 —— 必须**读一次最新的**
-    // planItems（内存里的 task 对象可能在若干轮 todo-update 之后已过期）。
-    const fresh = await getTask(task.id)
-    const pending = (fresh?.planItems ?? []).filter((p) => p.status === 'running' || p.status === 'pending')
-    if (pending.length > 0) {
-      if (priorRefusals < MAX_COMPLETE_REFUSALS) {
-        await refuseCompletionForLeftovers({
-          taskId: task.id,
-          iteration,
-          pendingActions,
-          pendingActionIds,
-          leftovers: pending.map((p) => ({ id: p.id, status: p.status, title: p.text })),
-          priorRefusals,
-        })
-        return true
-      }
-      logger.warn(
-        'Agent',
-        `task_complete 连续 ${priorRefusals} 次被拒后仍坚持完成：把剩余 ${pending.length} 项收为 cancelled`,
-        task.id,
-      )
-      await discardIncompletePlanItems(task, '任务完成：模型坚持收尾，剩余未执行项收为 cancelled')
-    }
   }
 
   // v0.14.0 修复：task_complete 由模型以 tool_calls 形式触发，但本分支直接完成
@@ -235,7 +261,8 @@ export async function finishViaTaskComplete(
   await emitEvent(task.id, {
     type: 'task_complete',
     iteration,
-    summary: (action.args.summary as string) ?? safeSlice(response.thought, 500),
+    // v0.39.0（D197）：summary 兜底链的第三级（常量占位）见 resolveCompleteSummary
+    summary: resolveCompleteSummary(action.args, response.thought),
     // v0.15.0 Task 7：透传 Agent 附带的建议（由 LLM 真实生成，不再前端硬编码映射）
     suggestions: Array.isArray(action.args.suggestions)
       ? (action.args.suggestions as Array<{ label: string; description?: string; recommended?: boolean }>)
@@ -258,6 +285,7 @@ export async function finishViaTaskComplete(
   // 图侧已经是自洽的终态，不会出现「任务已完成、清单还在跑」的一帧。
   // 收口本身失败不抛（只告警），因此不会连带阻塞任务完成。
   await sealGraphForTaskOutcome(task, 'completed', '任务完成（task_complete）')
+  await sealLedger(task.id, 'completed', '任务完成（task_complete）')
   await updateTask(task.id, { status: 'done', completedAt: Date.now() })
   broadcastTaskStatus({ ...task, status: 'done', completedAt: Date.now() })
   // Task 9：task_complete 工具分支同样推进到完成态

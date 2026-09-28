@@ -24,6 +24,10 @@ export type MemoryKind =
   | 'profile_observation'    // 被识别为画像观察的片段
   | 'distilled_skill_ref'    // 指向蒸馏产出的技能
   | 'artifact_ref'           // 指向 L2 产物（与预览浮窗联动）
+  // v0.38.0：引擎→模型的控制指令通道（role='system'，文案须显式禁止复述；
+  // 与 user_message 分离的原因见 D153：混用会让模型把指令原文复述进答复正文）
+  | 'gate_hint'              // 完成门禁拦截指令
+  | 'input_judgement'        // 新输入的「请先判断」指令
 
 export interface MemoryItem {
   id: string
@@ -82,6 +86,12 @@ export interface UserProfile {
   traits: ProfileTrait[]
   observations: ProfileObservation[]
   history: Array<{ version: number; snapshot: string; archivedAt: number }>
+  /**
+   * ★ v0.36.3：L4 周期合成记账（设计文档 §4.2「L4 定期写入口径」）。
+   * 画像不该每次 task-done 无脑重写 —— 距上次 ≥24h 或累计 ≥5 个任务才合成一次。
+   */
+  lastSynthesizedAt?: number
+  tasksSinceSynthesis?: number
 }
 
 export interface ProfileTrait {

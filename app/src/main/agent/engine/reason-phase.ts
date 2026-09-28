@@ -45,6 +45,16 @@ import { persistAbortedReason } from './abort.js'
 import { labelEngineHint } from './hints.js'
 import type { AlwaysOnContracts } from './run-setup.js'
 
+/**
+ * v0.39.0（D197）：同一轮对「全空回合」的**补试上限**（瞬时毛刺就地消化）。
+ *
+ * 总调用次数 = 首轮 1 + 补试 `EMPTY_RETRY_LIMIT`。对外报数一律用
+ * `EMPTY_RESPONSE_ATTEMPTS`（loop 的暂停文案与守卫用例都从这里取），
+ * **唯一事实源在本文件**（纪律⑧：计数不许两处各写一份）。
+ */
+export const EMPTY_RETRY_LIMIT = 2
+export const EMPTY_RESPONSE_ATTEMPTS = EMPTY_RETRY_LIMIT + 1
+
 export interface ReasonPhaseArgs {
   task: Task
   agent: Agent
@@ -58,7 +68,7 @@ export interface ReasonPhaseArgs {
 
 export async function runReasonPhase(
   args: ReasonPhaseArgs,
-): Promise<{ response: LlmCompleteResponse }> {
+): Promise<{ response: LlmCompleteResponse; emptyExhausted: boolean }> {
   const { task, agent, modelId, signal, iteration, memoryInjection, alwaysOnContracts } = args
   let pendingSystemHint = args.pendingSystemHint
   await emitEvent(task.id, { type: 'reason_start', iteration })
@@ -73,9 +83,29 @@ export async function runReasonPhase(
       // v0.30.0 D9：有图任务写图（唯一真相），镜像/广播由 saveGraph 补发；无图保持 v0.29 直写。
       if (task.graphId) await markPlanItemInProgress({ taskId: task.id, graphId: task.graphId, iteration }, item.id)
       else {
-        item.status = 'running'
-        item.updatedAt = Date.now()
-        await updateTask(task.id, { planItems: task.planItems })
+        // v0.37.0（D132）：首轮「第一项置 running」也走账本 ——
+        // 这是无图任务的清单**第一次**写入，若直写 tasks.json，其后所有写都进账本，
+        // 两者立刻分叉（诊断 §2 L2）。账本缺失时先补建（seedFromPlanItems）再写。
+        try {
+          const ledR = await import('../ledger/engine.js')
+          let res = await ledR.mutate(
+            task.id,
+            { kind: 'set-status', itemId: item.id, to: 'running', source: 'engine-start', note: '首轮自动置为执行中' },
+            { actor: 'reason-phase' },
+          )
+          if (!res.ok && res.error?.code === 'NOT_FOUND') {
+            await ledR.ensureLedger(task, { seedFromPlanItems: true })
+            res = await ledR.mutate(
+              task.id,
+              { kind: 'set-status', itemId: item.id, to: 'running', source: 'engine-start', note: '首轮自动置为执行中' },
+              { actor: 'reason-phase' },
+            )
+          }
+          const fresh = await ledR.loadLedger(task.id)
+          if (fresh) task.planItems = (await import('../ledger/project.js')).toPlanItems(fresh)
+        } catch (err) {
+          logger.warn('Agent', `首轮清单推进失败（账本）：${(err as Error).message}`, task.id)
+        }
       }
     }
   }
@@ -223,6 +253,9 @@ export async function runReasonPhase(
     )
 
   let response: LlmCompleteResponse
+  // v0.39.0（D197）：补试用尽仍是「全空回合」→ 本回合无任何可交付内容，
+  // 交回 loop 走优雅暂停。此标志是**唯一出口**，不得用它去放行收尾。
+  let emptyExhausted = false
   try {
     response = await callLlmWithRetry(() => callTurnLlm(), signal)
 
@@ -230,13 +263,56 @@ export async function runReasonPhase(
     // 端点偶发返回「全空回合」—— content/thought/actions 全空（只吐一对空
     // `<think></think>`、网关毛刺、流被无声掐断后 D35 归 interrupted 等）。
     // 若原样放行会烧掉一个迭代并进入无工具守卫的提示注入循环，实测连烧
-    // 100+ 轮。此处最多补试 2 次（瞬时毛刺就地消化）；finish=length 交给
-    // 下方专用重试（提额 8192），不在此消耗补试次数。
+    // 100+ 轮。此处最多补试 EMPTY_RETRY_LIMIT 次（瞬时毛刺就地消化）；
+    // finish=length 交给下方专用重试（提额 8192），不在此消耗补试次数。
     if (response.finishReason !== 'length' && !signal.aborted && isIncompleteLlmResponse(response)) {
-      for (let emptyRetry = 1; emptyRetry <= 2; emptyRetry++) {
-        logger.warn('Agent', `empty LLM response (no content/thought/action) — empty-retry ${emptyRetry}/2`, task.id)
+      for (let emptyRetry = 1; emptyRetry <= EMPTY_RETRY_LIMIT; emptyRetry++) {
+        logger.warn(
+          'Agent',
+          `empty LLM response (no content/thought/action) — empty-retry ${emptyRetry}/${EMPTY_RETRY_LIMIT}`,
+          task.id,
+        )
         response = await callLlmWithRetry(() => callTurnLlm(), signal)
         if (signal.aborted || response.finishReason === 'length' || !isIncompleteLlmResponse(response)) break
+      }
+
+      // ============================================================
+      // v0.39.0（D197）：补试**用尽**仍是空回合 —— 补上此前缺失的第三级处置。
+      //
+      // 缺陷形状（实机证据 `logs.jsonl` / task T-20260927-152m5e）：
+      //   empty-retry 1/2 → 2/2 → 第三次 POST ← 4096+57 tokens（仍空）
+      //   → `ledger r15 by=seal:completed` ⇒ 用户看到一条**空白的「答复」**，
+      //     而任务已被标完成。
+      //
+      // 为什么会走到成功分支：下面那条判定链对空响应**全部成立** ——
+      //   无工具调用 ✓（空回合本来就没有）+ 清单无未完成项 ✓ + 未截断 ✓
+      // 于是 `guardFinish` 放行，收尾时 `summary` 取 `response.thought` = ''。
+      // 根因是这里**只写了补试、没写补试用尽的出路**：非 finish=length 的
+      // 分支没有 else，空响应原样流到收尾。
+      //
+      // 为什么必须「停」而不是「放行 + 占位」（与 v0.15.0 Task 5 的 length
+      // 分支不同）：`llm-call.ts` 给 `isIncompleteLlmResponse` 的语义是
+      // 「必须重试或失败，**不能算完成**」—— 空回合既没有正文可交付、也没有
+      // 动作可执行，判它完成就是假成功。length 分支之所以能占位，是因为那里
+      // **确有思考内容**（模型想完了但预算烧尽），而这里是端点一个字符都没给。
+      // ============================================================
+      if (!signal.aborted && response.finishReason !== 'length' && isIncompleteLlmResponse(response)) {
+        emptyExhausted = true
+        // 诊断必须能指认来源（纪律㉖）：把端点「到底给了什么」如实记下来。
+        // content / reasoning / actions 三空时，唯一可分辨的就是 finishReason
+        // 与 token 数 —— 「57 tokens 的空回合」与「0 tokens 的空回合」根因不同
+        // （前者多为被丢弃的畸形 tool_call，后者是端点真没吐字），
+        // 不记这两个数字，事后无法归因。
+        logger.warn(
+          'Agent',
+          `empty LLM response exhausted after ${EMPTY_RESPONSE_ATTEMPTS} attempts` +
+            ` (finish=${response.finishReason}, content=${response.content.length}ch,` +
+            ` reasoning=${(response.reasoningContent ?? '').length}ch,` +
+            ` actions=${response.actions?.length ?? 0},` +
+            ` malformedToolCalls=${response.malformedToolCallCount ?? 0},` +
+            ` outTokens=${response.tokensOut}) — 交回 loop 优雅暂停（禁止收尾）`,
+          task.id,
+        )
       }
     }
 
@@ -403,5 +479,5 @@ export async function runReasonPhase(
       ` ⏱ ${durationMs}ms`,
     task.id,
   )
-  return { response }
+  return { response, emptyExhausted }
 }

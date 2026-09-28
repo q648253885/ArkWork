@@ -3,6 +3,9 @@
     "title": "Something went wrong while rendering",
     "retry": "Retry"
   },
+  "notice": {
+    "gateBlocked": "〈System〉"
+  },
   "flow": {
     "showResult": "View result",
     "hideResult": "Hide",
@@ -16,6 +19,7 @@
     "openFile": "Click to open this file",
     "fold": {
       "thinking": "Thinking process",
+      "thinkingCount": "Thought {{n}} time(s)",
       "tools": "Tool calls",
       "running": "Running",
       "sep": ", ",
@@ -141,6 +145,39 @@
     },
     "permission": {
       "title": "Permissions",
+      "rules": {
+        "title": "Permission rules",
+        "listTitle": "Active rules",
+        "count": "{{count}} rules",
+        "loading": "Reading rules…",
+        "loadFailed": "Could not read the rules — the file may not be readable",
+        "retry": "Retry",
+        "emptyTitle": "No custom rules yet",
+        "emptyHint": "If a run gets stopped by a permission prompt, tick \"Remember this choice\" there and a rule will show up here. You can also add one below.",
+        "addTitle": "Add a rule",
+        "toolLabel": "Tool",
+        "patternLabel": "Path or command (glob)",
+        "patternPlaceholder": "e.g. git diff:* or src/**/*.ts",
+        "behaviorLabel": "Behavior",
+        "add": "Add",
+        "preview": "Will write",
+        "toolScopeHint": "Only {{tools}} goes through rule matching today; file tools are guarded separately by protected paths and are not listed here.",
+        "enabled": "On",
+        "disabled": "Off",
+        "readonly": "read-only",
+        "readonlyHint": "This rule comes from a config file; changes made here would be overwritten on the next read. Edit that file directly.",
+        "remove": "Remove",
+        "scope": {
+          "managed": "managed",
+          "local": "this workspace",
+          "project": "project",
+          "user": "personal",
+          "managedHint": "Delivered by your administrator; not editable",
+          "localHint": "Rules you added in this workspace — can be toggled and removed",
+          "projectHint": "From <workspace>/.arkwork/settings.json — edit that file directly",
+          "userHint": "From ~/.arkwork/settings.json — edit that file directly"
+        }
+      },
       "fastSwitchHint": "Shift+Tab to switch quickly",
       "sessionMode": "Session mode",
       "ruleMerged": "Merged rules",
@@ -273,6 +310,19 @@
       "previewSuccess": "Success",
       "previewWarning": "Warning",
       "previewError": "Error"
+    },
+    "performance": {
+      "title": "Performance & Local Deployment",
+      "modeTitle": "Performance mode",
+      "modeAuto": "Auto",
+      "modeAutoDesc": "Detect by GPU status; automatically suppresses animations and slows streaming on software rendering / VMs",
+      "modeOn": "On",
+      "modeOnDesc": "Force performance degradation: suppress all continuous animations and throttle streaming — recommended for low-end VMs",
+      "modeOff": "Off",
+      "modeOffDesc": "Force disable degradation (escape hatch when auto-detection misfires)",
+      "lightModelTitle": "Lightweight model (side tasks)",
+      "lightModelNone": "None (use task model)",
+      "lightModelDesc": "Used for lightweight side calls like task titles; with a large local thinking model, pick a small model for instant responses without loading the main model"
     }
   },
   "toast": {
@@ -515,7 +565,12 @@
     "ctxUsage": "{{used}} / {{total}} tokens ({{pct}}%, cap {{window}}) {{cache}}",
     "cachePrefixHit": "Cache {{pct}}% · {{hit}} / {{total}}",
     "compressHintInline": "Context over limit, compress recommended",
-    "compressHint": "/compress"
+    "compressHint": "/compress",
+    "agentFilterPlaceholder": "Filter agents…",
+    "agentFilterEmpty": "No matching agent",
+    "agentSectionGlobal": "Built-in / Global",
+    "agentSectionWorkspace": "Workspace",
+    "manageAgents": "Manage agents…"
   },
   "editors": {
     "close": "Close",
@@ -867,6 +922,11 @@
       "title": "Files",
       "stats": "{{files}} files · {{folders}} folders",
       "refreshTooltip": "Refresh",
+      "expandAll": "Expand All",
+      "expandAllDesc": "Expand all loaded folders (deeper levels load on expand)",
+      "collapseAll": "Collapse All",
+      "collapseAllDesc": "Collapse all expanded folders",
+      "loading": "Loading…",
       "searchPlaceholder": "Search files…",
       "empty": {
         "title": "No files yet",
@@ -1610,6 +1670,7 @@
       "toggleRight": "Collapse or expand right panel",
       "openSettings": "Open Settings",
       "export": "Export Current Conversation",
+      "copyConversation": "Copy current conversation",
       "returnTask": "Return to Task"
     },
     "placeholder": {
@@ -1676,6 +1737,12 @@
       "subtitle": "Profiles · Plugins · Diagnostics — configuration & plugin plug/unplug"
     }
   },
+  "taskAnchor": {
+    "title": "Task anchor",
+    "goal": "Core task",
+    "doing": "Working on",
+    "intent": "User intent"
+  },
   "conversationflow": {
     "loadingAgent": "Loading Agent…",
     "executing": "Executing…",
@@ -1686,7 +1753,26 @@
     "planStepAria": "Plan step {{index}}: {{text}} (status: {{status}})",
     "steps": "Step flow",
     "foldedTurns": "… {{count}} earlier rounds folded (click to expand)",
-    "collapseTurns": "Collapse {{count}} earlier rounds"
+    "collapseTurns": "Collapse {{count}} earlier rounds",
+    "subagent": {
+      "title": "Running {{count}} sub-agents in parallel",
+      "progress": "{{finished}}/{{total}} finished",
+      "settledAll": "All finished",
+      "settledWithFailures": "{{failed}} of {{total}} failed",
+      "concurrencyCap": "limit 4",
+      "cancel": "Cancel",
+      "retry": "Retry this sub-task",
+      "waiting": "Waiting for a model slot…",
+      "expand": "Expand",
+      "collapse": "Collapse",
+      "status": {
+        "queued": "Queued",
+        "running": "Running",
+        "done": "Done",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
+    }
   },
   "browserchrome": {
     "nav": {
@@ -1898,7 +1984,11 @@
     "noAskSession": "Don't ask again in this session",
     "deny": "Deny",
     "allow": "Allow",
-    "closeHint": "Esc to close"
+    "closeHint": "Esc to close",
+    "remember": "Remember this choice",
+    "rememberBehavior": "Behavior to remember",
+    "rememberPreview": "Will write rule",
+    "ruleRemembered": "Rule remembered: {{rule}}"
   },
   "markdown": {
     "copied": "Copied",
@@ -2053,10 +2143,20 @@
   "plantatus": {
     "waiting": "Pending",
     "running": "In progress",
+    "paused": "Paused (resumable)",
     "done": "Done",
     "failed": "Failed",
     "cancelled": "Cancelled",
     "skipped": "Skipped"
+  },
+  "ledger": {
+    "modeLabel": "Task mode",
+    "modeChat": "Chat",
+    "modePlan": "Plan",
+    "modeSpec": "Spec",
+    "modeTooltip": "Chosen by the model based on task complexity — no manual switch",
+    "resumeBar": "Resume point",
+    "openCount": "{{n}} not closed"
   },
   "help": {
     "title": "ArkWork Help Center",
@@ -2140,11 +2240,12 @@
       },
       "parallel": {
         "title": "Parallel execution",
-        "summary": "Independent tool calls run in parallel automatically; progress is shown per tool without overwriting each other.",
+        "summary": "Independent work in the same turn is started concurrently: tool calls run in parallel and sub-agents run side by side, each showing its own progress.",
         "bullets": {
-          "0": "A single Agent inference can trigger multiple tool calls, which the engine executes concurrently.",
-          "1": "Operations with dependencies (write-then-read) still run serially to avoid race conditions.",
-          "2": "The plan card and the right-side list share the same planItems source, preventing premature ticking."
+          "0": "A single Agent inference can trigger multiple tool calls, which the engine executes concurrently, with per-tool progress that never overwrites each other.",
+          "1": "Splittable sub-tasks are delegated to parallel sub-agents; each keeps its own step stream and artifacts without blocking the others.",
+          "2": "Operations with dependencies (write-then-read) still run serially to avoid race conditions.",
+          "3": "The plan card and the right-side list share the same planItems source, preventing premature ticking."
         },
         "actions": {
           "0": "Open Inspector · Todos",
@@ -2153,15 +2254,30 @@
       },
       "conversation": {
         "title": "Conversation",
-        "summary": "The conversation stream carries user messages, plans, tool results, and Agent replies; it is scrollable and can lock focus.",
+        "summary": "The conversation is organised in three layers: prose (your messages and Agent replies), process (thinking / tool calls / observations), and collapsible process groups.",
         "bullets": {
-          "0": "User messages and Agent replies are stacked in reverse chronological order; tool calls appear as collapsible cards.",
-          "1": "While an Agent is running, human-readable descriptions like \"running command…\" appear at the top of the conversation (mapped by tool type).",
-          "2": "The Composer supports multi-line input; long tasks can be paused, resumed, or cancelled."
+          "0": "The prose layer keeps only human-readable content; the process layer holds thinking, tool calls, and observations, collapsed by default for easy reading.",
+          "1": "Consecutive process steps are grouped automatically with a summary (turn range, step count, duration); expanding shows everything, collapsing loses nothing.",
+          "2": "Tool calls appear as cards with human-readable descriptions while running (e.g. \"reading file…\"); failed cards can be retried in place.",
+          "3": "The Composer supports multi-line input; long tasks can be paused, resumed, or cancelled, and the context usage of the turn is shown to the right of the input."
         },
         "actions": {
           "0": "Focus the Composer",
           "1": "Create a task to start a conversation"
+        }
+      },
+      "files": {
+        "title": "File workbench",
+        "summary": "Workspace files open, edit, and save directly in the app: syntax highlighting and find-and-replace in the editor, atomic writes on save, and in-place notice of on-disk conflicts.",
+        "bullets": {
+          "0": "Jump by name with QuickOpen; the Files tab in the right dock shows the whole workspace tree, and clicking a file opens it in the editor.",
+          "1": "The editor supports syntax highlighting, multiple cursors, find-and-replace, and line operations; saving is atomic (write a temp file, then replace) so no half-written files are left behind.",
+          "2": "When a file changes on disk, a conflict banner appears: compare the diffs and either keep your changes or take the disk version — nothing is overwritten silently.",
+          "3": "Files inside the workspace are readable and writable; files outside it (for example referenced by absolute path) open read-only with the reason shown, and writes are rejected."
+        },
+        "actions": {
+          "0": "Open QuickOpen (jump by name)",
+          "1": "Open Inspector · Files"
         }
       },
       "agents": {
@@ -2189,6 +2305,34 @@
           "0": "Open the capability center"
         }
       },
+      "plugins": {
+        "title": "Plugins",
+        "summary": "Plugins extend ArkWork with commands, panels, and code views; the permissions and capabilities they request are listed before install, and private data can be purged on uninstall.",
+        "bullets": {
+          "0": "Create, install (pick a zip package), and uninstall plugins under the Plugins tab of the capability page; the permission and capability list is previewed before anything is written to disk.",
+          "1": "Commands contributed by plugins appear in QuickAction and can be triggered directly; contributed panels and views show up as tabs in the right dock.",
+          "2": "Code plugins run in a separate host process and are constrained by a capability allowlist; a validation failure or crash only affects that plugin.",
+          "3": "Uninstalling can also \"delete plugin data\", clearing the plugin's private key-value store; load status and failure reasons are listed per plugin.",
+          "4": "The Plugins page embeds both a usage guide and a development guide, including a minimal example that passes validation as-is."
+        },
+        "actions": {
+          "0": "Open capability center · Plugins",
+          "1": "Open QuickAction to see plugin commands"
+        }
+      },
+      "workbench": {
+        "title": "Workbench",
+        "summary": "The workbench hosts your configuration: declare a way of working as a workbench profile, and switching it changes the layout and the enabled capabilities.",
+        "bullets": {
+          "0": "Each profile declares layout, enabled plugins and skills, right-dock tabs, and theme; duplicate a built-in profile and adapt it as needed.",
+          "1": "Wizard-based configuration: creating and editing a profile steps through layout and capabilities — no JSON to hand-write.",
+          "2": "Activating applies its declarations; \"what was declared\" and \"what actually took effect\" are shown side by side on one page, with degradations and validation issues explained in place.",
+          "3": "Profiles and activation reports can be exported and imported, so the same way of working can be synced across machines."
+        },
+        "actions": {
+          "0": "Open the workbench center"
+        }
+      },
       "kb": {
         "title": "Knowledge base",
         "summary": "Parses PDF / TXT / Markdown / DOCX into searchable text (SQLite FTS5); the kb_query tool returns matched passages.",
@@ -2205,13 +2349,14 @@
       },
       "memory": {
         "title": "Memory L1 – L4",
-        "summary": "ArkWork maintains four layers of memory with automatic distillation; the raw layer is cleaned up automatically.",
+        "summary": "Memory settles layer by layer from task to workspace to cross-workspace: raw evidence stays in the lower layers, and long-term content is only derived into the curated layer at wrap-up.",
         "bullets": {
-          "0": "L1 working memory: temporary entries within the current conversation context.",
-          "1": "L2 file memory: facts, quotes, and command records extracted within a conversation.",
-          "2": "L3 curated memory: topics / reusable passages across conversations, searchable and injectable.",
-          "3": "L4 identity memory: long-term user preferences and persona, updated slowly.",
-          "4": "When thresholds are met (topic count / reuse rate / L2 size), distillation runs automatically; the manual \"move to knowledge base\" UI has been removed."
+          "0": "L1 working memory: the turn-by-turn entries of the current task (messages / thinking / tool observations) — the single source of raw evidence; distillation never deletes it.",
+          "1": "L2 file memory: large results and step artifacts are spilled to files and read back on demand, never resident in context.",
+          "2": "L3a curated memory: project memory lives in the workspace (travels with the project), user preferences stay in the global agent space (shared across workspaces).",
+          "3": "L3b archive: at wrap-up, L1 is archived into searchable historical entries while the originals are kept.",
+          "4": "L4 user profile: long-term cross-workspace preferences, synthesised in batches on a cycle (first run / 24 hours / 5 tasks) rather than rewritten every time.",
+          "5": "Wrap-up consolidation: when a task ends, the model distils long-term content from L1 / L2 into a staging area that takes effect on the next run; on failure nothing is written at all."
         },
         "actions": {
           "0": "Open the Memory page"
@@ -2231,14 +2376,14 @@
       },
       "inspector": {
         "title": "Inspector",
-        "summary": "Five fixed tabs on the right: Todos / Context / Files / Logs / Browser.",
+        "summary": "The right dock slides out on demand: six built-in tabs (Todos / Context / Files / Logs / Browser / Terminal), and plugins can contribute their own panels and views.",
         "bullets": {
-          "0": "Clicking the active tab again collapses it; after collapsing, clicking any tab re-expands it (no more \"stuck\" state).",
+          "0": "Collapse or expand the right dock by shortcut; clicking the active tab also collapses it, and after collapsing any tab re-expands it (no more \"stuck\" state).",
           "1": "Todos: syncs planItems in real time; a single source of truth.",
-          "2": "Context: read-only view of the KB / memory snippets and token budget injected into the current task; editable from L2 in the memory center.",
-          "3": "Files: workspace file browser (the fake \"favorite\" button has been removed).",
-          "4": "Logs: tool call / permission / error stream; copyable in one click.",
-          "5": "Browser: embedded BrowserPanel links with PreviewWindow."
+          "2": "Context: read-only view of the knowledge-base / memory snippets and context usage injected into the task; memory entries are edited in the memory center.",
+          "3": "Files: the workspace tree; clicking a file opens it in the editor, and Agent-generated artifacts appear there too.",
+          "4": "Logs: tool call / permission / error stream; copyable in one click for troubleshooting.",
+          "5": "Browser and Terminal: embedded browsing panel and terminal; plugin-contributed panels and views appear as extra tabs."
         },
         "actions": {
           "0": "Open Todos",
@@ -2248,30 +2393,30 @@
           "4": "Open Browser"
         }
       },
-      "models": {
-        "title": "Models / Settings",
-        "summary": "Settings page has five sections: Models / Workspace / Appearance / Shortcuts / Advanced.",
+      "settings": {
+        "title": "Settings and permissions",
+        "summary": "Settings is organised by tab: Models / Workspace / Knowledge / Appearance / Advanced (permission rules and diagnostics live under Advanced).",
         "bullets": {
-          "0": "Models: choose default / fallback models and configure API keys; supports OpenAI, Anthropic, and local Ollama.",
-          "1": "Workspace: choose the workspace root, default KB, and file ignore rules.",
-          "2": "Appearance: theme (light / dark / system) + font density.",
-          "3": "Shortcuts: a read-only list of all current shortcuts (synced with HelpCenter).",
-          "4": "Advanced: experimental toggles, log level, auto-update channel.",
-          "5": "The current model is shown only in the Composer; other locations (TopBar / StatusBar / task header) have been consolidated."
+          "0": "Models: choose default and fallback models and configure API keys; supports OpenAI, Anthropic, and compatible endpoints such as local Ollama / vLLM.",
+          "1": "Workspace: switch the current workspace (one folder is one workspace), the default knowledge base, and file ignore rules.",
+          "2": "Appearance: light / dark / follow system plus font density; changes apply immediately with no restart.",
+          "3": "Permission rules: listed by four sources (managed / this workspace / project config / personal config), each toggleable, with matches traceable in the logs.",
+          "4": "\"Remember this choice\" on the approval overlay writes the decision as a rule (into this workspace by default), so similar calls no longer interrupt you.",
+          "5": "Advanced: log / graph diagnostics, read-only compression strategy, and experimental toggles; the current model is shown only in the Composer."
         },
         "actions": {
           "0": "Open Settings"
         }
       },
-      "privacy": {
-        "title": "Privacy / Local Storage",
-        "summary": "ArkWork is local-first by default: tasks / conversations / memory are stored as local JSON, and knowledge-base indexes live in local SQLite (FTS5) and the filesystem.",
+      "performance": {
+        "title": "Performance and local storage",
+        "summary": "ArkWork makes performance trade-offs for machines without a discrete GPU while staying local-first: motion is limited to solid-colour and opacity breathing, and your data stays on this machine by default.",
         "bullets": {
-          "0": "Data directory: in development userData is redirected to app/.dev-data; in packaged builds it lives in the system userData (macOS: ~/Library/Application Support/ArkWork).",
-          "1": "The app data root is <userData>/arkwork-data: tasks / agents / skills / models / memory are all persisted there as JSON.",
-          "2": "Current workspace: <userData>/arkwork-data/workspace/default (switchable under Settings · Workspace); task memory lives at <workspaceDir>/.arkwork/memory/<taskId>.",
-          "3": "Model calls are made using API keys you explicitly configure; ArkWork never uploads your conversation content.",
-          "4": "Export or clear workspace data in one click; all changes can be found under Settings → Advanced."
+          "0": "Motion discipline: only cheap effects such as opacity changes and solid-colour breathing; no blur, translation, or continuous repaint animations.",
+          "1": "Frosted glass (background blur) has been removed entirely; overlays now use solid-colour layering to avoid per-frame compositing cost without a GPU.",
+          "2": "When the system enables \"reduce motion\" ArkWork degrades automatically, and software rendering also triggers a performance-lite mode that makes the UI static.",
+          "3": "Data directory: in development it is redirected to app/.dev-data; in packaged builds it lives in the system user data directory with arkwork-data as the app data root.",
+          "4": "Conversations, memory, and knowledge-base indexes are all stored locally; model calls use only the API keys you configure, and your conversation content is never uploaded."
         },
         "actions": {
           "0": "Open Settings · Advanced"
@@ -2304,7 +2449,9 @@
       "sessionSearch": "Search history",
       "taskComplete": "Complete task",
       "askUser": "Ask user",
-      "todoUpdate": "Update checklist"
+      "todoUpdate": "Update checklist",
+      "taskPlan": "Update task list",
+      "turnNote": "Add a note"
     },
     "argKey": {
       "path": "Path",
@@ -2582,11 +2729,20 @@
       "editMarkdownSoon": "Coming soon",
       "reject": "Reject with note",
       "approve": "Approve & run",
+      "approveSelected": "Approve selected & start",
+      "keepOnly": "Keep plan only",
+      "keepOnlyHint": "Keeps the plan with ACs frozen without starting execution; you can start it later from the task panel",
+      "approveNoneHint": "Select at least one plan item before approving",
+      "itemCheckbox": "Select this plan item",
+      "editItemHint": "Click the title to edit inline: Enter to commit, Esc to cancel",
+      "editedBadge": "Edited",
+      "itemsEmpty": "This plan has no selectable structure items (milestones / tasks) yet — you can approve and run, or send it back for the Planner to refine.",
       "rejectReason": "Rejection reason (injected to the Planner as a note)",
       "rejectPlaceholder": "Explain what to change…",
       "confirmReject": "Confirm rejection",
       "cancel": "Cancel",
       "approvedFold": "Plan approved ({{tasks}} tasks · {{acs}} acceptance criteria) · ACs frozen",
+      "approvedSelectedFold": "Plan approved ({{approved}}/{{total}} items approved · {{acs}} acceptance criteria) · ACs frozen",
       "rejectedFold": "Plan rejected — waiting for the Planner to re-plan",
       "rejectedNote": "My note: {{note}}",
       "errorBanner": "Plan generation failed (three-stage fallback exhausted) — degraded to direct execution, task not blocked",
@@ -2602,7 +2758,7 @@
       "acceptDegraded": "Accept degraded, run directly",
       "acceptDegradedHint": "Manually confirming the degraded mode isn't supported yet; it ships in v0.30.1",
       "degradedEntryNote": "These entries ship in v0.30.1; the task already continues with the flat checklist",
-      "nodeFocusHint": "This node is now located in the task panel",
+      "dismissDegraded": "Dismiss this card",
       "failed": "Action failed, please retry"
     }
   },
@@ -2699,13 +2855,11 @@
       "ok": "Activated {{name}} ({{id}} v{{version}}) · {{ms}}ms",
       "failed": "Activation failed",
       "stillActive": "Still active: {{name}}",
-      "layers": "Composition layers",
+      "layers": "Three layers",
       "layer": {
         "agents": "Agents",
         "tools": "Tools & skills",
-        "ui": "UI",
-        "data": "Data",
-        "auto": "Automation"
+        "ui": "UI"
       },
       "degraded": "Degradations & warnings",
       "issues": "Validation issues",
@@ -2750,10 +2904,12 @@
         "agents": "Agents",
         "tools": "Tools",
         "ui": "UI",
-        "data": "Data",
-        "auto": "Automation",
         "unknown": "Unknown"
       }
+    },
+    "banner": {
+      "partial": "{{name}} · {{count}} capabilities not active",
+      "blocking": "{{name}} · {{count}} required capabilities missing"
     }
   },
   "keybind": {
@@ -2822,6 +2978,30 @@
       "deleteActiveHint": "The active profile cannot be deleted (switch first)",
       "deleteAria": "Delete {{name}}"
     },
+    "wizard": {
+      "title": "New profile",
+      "step": {
+        "template": "Template",
+        "agent": "Agent",
+        "capabilities": "Plugins & skills",
+        "name": "Name"
+      },
+      "templateHint": "Start from a template - it brings a ready set of skills and panels you can change later",
+      "agentHint": "Choose a default agent, or skip binding — you can add one later in the editor",
+      "noAgent": "No agent",
+      "noAgentHint": "The workbench still works; bind one later",
+      "capHint": "Check the plugin panels and skills to enable (you can leave it empty for now)",
+      "nameLabel": "Name",
+      "idLabel": "ID",
+      "idHint": "Lowercase letters, digits and hyphens, shaped group.name (e.g. my.notes)",
+      "back": "Back",
+      "next": "Next",
+      "finish": "Finish & activate",
+      "creating": "Creating…",
+      "created": "Created and activated \"{{name}}\"",
+      "createFailed": "Creation failed - check the name and ID",
+      "loadFailed": "Could not load the template profile"
+    },
     "editor": {
       "title": "Edit profile",
       "close": "Close",
@@ -2829,6 +3009,22 @@
       "loading": "Reading profile manifest…",
       "loadFailed": "Failed to read the profile manifest",
       "notFound": "Profile not found; it may already be deleted",
+      "agentTitle": "Agent",
+      "agentHint": "Pick a default agent and check the others this profile enables",
+      "agentDefaultAria": "Set as default agent: {{id}}",
+      "agentInclude": "Enable",
+      "noAgents": "This profile declares no agent - add one under Advanced, or clone from another profile",
+      "capTitle": "Plugins & skills",
+      "capHint": "Your choices decide what the model may use and what the UI may mount",
+      "skillsTitle": "Skills (for the model)",
+      "noSkills": "No skills declared",
+      "skillAdd": "Add",
+      "skillAddPlaceholder": "Skill name, e.g. S-core.plan",
+      "pluginsTitle": "Plugin panels (for the UI)",
+      "pluginFilterHint": "Checked = show this plugin's panels in the workbench (applies immediately); checking all equals the default state",
+      "pluginFilterFailed": "Failed to save plugin configuration",
+      "noPlugins": "No enabled plugin contributions - enable some in Abilities -> Plugins",
+      "dockTitle": "Layout",
       "cloneFail.not-found": "Source profile not found",
       "cloneFail.id-exists": "The clone target id already exists",
       "cloneFail.invalid": "Clone result failed validation",
@@ -2838,13 +3034,19 @@
         "dockPanels": "Dock plugin panels",
         "ui": "Interface",
         "data": "Memory scope",
-        "theme": "Theme token overrides"
+        "theme": "Theme token overrides",
+        "identity": "Identity",
+        "advanced": "Advanced",
+        "advancedHint": "Inheritance, UI preferences, theme and memory - rarely needed"
       },
       "name": "Name",
       "version": "Version",
       "icon": "Icon (host whitelist)",
       "iconNone": "Follow default",
       "description": "Description",
+      "extends": "Extends (advanced)",
+      "extendsHint": "Single inheritance, depth up to 2: this profile merges the parent's fields then applies its own. Leave blank to stand alone.",
+      "extendsPlaceholder": "Parent profile id, e.g. wb.base",
       "dockBuiltinHint": "Pick and order built-in panels (order = ui.dockTabs; keep at least one)",
       "moveUp": "Move up",
       "remove": "Remove",
@@ -2857,7 +3059,9 @@
       "composerChips": "Composer quick chips",
       "composerChipsHint": "Comma separated, up to 5",
       "memoryNamespace": "Memory namespace",
+      "memoryNamespaceHint": "This profile's memory lives in its own namespace, isolated from other profiles. Leave blank to use the default.",
       "shareCoreProfile": "Share core memory profile",
+      "shareCoreProfileHint": "When checked, this profile shares your curated core profile (preferences, habits). Unchecked means fully isolated.",
       "themeHint": "Only existing tokens may be overridden (keys like --x-y; values limited to colors or px/rem/em/%)",
       "addToken": "Add token",
       "saveIssues": "Save failed validation — fix the issues below and retry",
@@ -2937,7 +3141,87 @@
       "scaffoldKind": "Kind",
       "scaffoldCreate": "Generate and open",
       "scaffoldCancel": "Cancel",
-      "scaffoldIdRequired": "Enter a plugin id and display name first"
+      "scaffoldIdRequired": "Enter a plugin id and display name first",
+      "backToList": "Back to list",
+      "guideBtn": "Plugin guide",
+      "guideUsage": "Usage",
+      "guideDev": "Development",
+      "install": "Install",
+      "installZip": "Install plugin package (.zip)",
+      "installConfirmTitle": "Install plugin",
+      "installCapabilities": "Contributed capabilities",
+      "installPermissions": "Requested permissions",
+      "installPermissionHint": "Permissions are denied by default: the plugin can only use what it declares. Make sure you trust its origin before enabling.",
+      "installNoPermissions": "This plugin requests no permissions",
+      "installOverwrite": "Overwrite the existing plugin with the same id",
+      "installDisabledHint": "Newly installed plugins are disabled by default: review its permissions in the list, then enable.",
+      "installCancel": "Cancel",
+      "installConfirm": "Install",
+      "uninstallConfirmTitle": "Uninstall plugin",
+      "uninstallConfirmBody": "Uninstall \"{{id}}\"? The plugin directory will be deleted.",
+      "uninstallConfirm": "Uninstall",
+      "uninstallPurge": "Also delete plugin data (private storage)",
+      "commandsHint": "Trigger from the {{kbd}} palette with the / prefix",
+      "errNoFile": "No file selected",
+      "errCancelled": "Cancelled",
+      "errExtractFailed": "Extraction failed; the package may be corrupt",
+      "errManifestInvalid": "Manifest validation failed",
+      "errEnginesMismatch": "Host version does not satisfy the plugin's requirement",
+      "errEntryMissing": "The package is missing required files",
+      "errAlreadyExists": "A plugin with the same id already exists",
+      "errIoError": "File I/O failed",
+      "errIpcError": "Communication with the main process failed",
+      "errUnknown": "Install failed",
+      "guide": {
+        "usage": {
+          "title": "How to use plugins",
+          "intro": "The full flow from installing a zip package to uninstalling. A plugin package is a .zip containing plugin.json.",
+          "install": {
+            "title": "Install a package",
+            "body": "Click \"Install\" and pick a .zip → preview its info, capabilities and permissions → confirm. Newly installed plugins are disabled by default."
+          },
+          "enable": {
+            "title": "Enable the plugin",
+            "body": "Flip the switch in the list. Mind the scope: \"workspace\" applies to the current workspace only, \"global\" applies everywhere."
+          },
+          "command": {
+            "title": "Run commands and open views",
+            "body": "Press {{kbd}} to open the palette, type / to filter commands, press Enter to run. Code views contributed by plugins appear as Inspector tabs."
+          },
+          "uninstall": {
+            "title": "Uninstall",
+            "body": "Expand the plugin detail → \"Uninstall\" → confirm. Checking \"also delete plugin data\" removes its private storage too."
+          },
+          "notes": {
+            "title": "Safety notes",
+            "body": "Permissions are denied by default (plugins can only use declared capabilities); packages are capped at 64MB / 2000 entries; reinstalling the same id requires \"Overwrite\"."
+          }
+        },
+        "dev": {
+          "title": "How to develop plugins",
+          "intro": "A plugin is a folder: plugin.json is required; main.js (host half) and index.html (client half) are optional. Build a minimal command plugin from scratch below.",
+          "scaffold": {
+            "title": "Start from the scaffold (recommended)",
+            "body": "Click \"New plugin\", fill in id and name, and get a runnable skeleton (plugin.json + main.js + index.html + renderer.js + README). The template passes validation out of the box — just edit the logic."
+          },
+          "manifest": {
+            "title": "Write the manifest (plugin.json)",
+            "body": "Commands go under provides.commands (id + title). Declaring commands requires a host entry (main), otherwise validation rejects it:"
+          },
+          "host": {
+            "title": "Listen for commands (main.js)",
+            "body": "The host half exports apply(ctx). The event name is command:<command id>; listening for an undeclared command throws immediately (never silently):"
+          },
+          "package": {
+            "title": "Package as zip",
+            "body": "Compress the plugin folder into a .zip (plugin.json must be inside; a single top-level folder is recommended). Then click \"Install\" on this page."
+          },
+          "verify": {
+            "title": "Verify and debug",
+            "body": "After install it is disabled → enable it → {{kbd}} and / to run the command. The \"runtime diagnostics\" in the detail shows load time and the last error; after editing main.js, hit \"Rescan\"."
+          }
+        }
+      }
     },
     "diag": {
       "slotsTitle": "Slot registry (9 kinds)",
@@ -2967,5 +3251,18 @@
       "themeCount": "light {{light}} · dark {{dark}}",
       "themeHint": "Only existing tokens are overridden; tokens the host removed are dropped automatically (see the activation report)."
     }
+  },
+  "answerLayer": {
+    "conclusion": "Conclusion",
+    "changes": "Changes",
+    "verification": "Verification",
+    "next": "Next steps",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "missingConclusion": "No conclusion given (the model skipped this section — ask directly if needed)",
+    "missingChanges": "No change list given (ask which files were touched)",
+    "missingVerification": "No verification provided — this is NOT the same as verified; adopt with care",
+    "missingNext": "No next step stated",
+    "layerHint": "Delivery summary (Conclusion / Changes / Verification / Next steps; verification details collapsed by default)"
   }
 }

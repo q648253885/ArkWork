@@ -4,6 +4,7 @@
  * 纯函数模块：除 plan-noise 外零依赖。
  */
 import { isNoisePlanItem } from './plan-noise.js'
+import type { PlanItem } from '../types/task.js'
 
 /** 从 LLM 回复中解析步骤数组（容忍代码块围栏 / 前后缀文本，过滤噪声项） */
 /**
@@ -101,4 +102,41 @@ export function isPhaseHeader(text: string): boolean {
   const actionVerbs =
     /调研|搜索|写|实现|开发|编码|测试|部署|打包|封装|接入|初始化|创建|搭建|执行|产出|读取|列出|修复|补|跑|运行|完成|确认|导出|下载|配置|定位|输出|联调|排查|修改/i
   return !actionVerbs.test(afterPrefix)
+}
+
+/**
+ * v0.36.5（D125）：把 PlanItem 树渲染为给 LLM 看的内联快照（编号 + 状态 + 终态标记）。
+ * 用途：① run-setup 续聊 hint 内联整棵树（重评基准）；② loop 段末陈旧提醒（D126）。
+ * 纯函数零依赖（PlanItem 仅 type-only import），真值表可穷尽单测。
+ *
+ * 输出样例：
+ *   1. [x] 阶段 1：调研开源项目
+ *   2. [▶] 阶段 2：编写 PRD
+ *   3. [ ] 阶段 3：编写交互文档
+ *   4. [✗已取消] 旧步骤
+ *
+ * 约定：空清单返回 ''（调用方自行决定是否拼接）；单行超 60 字截断加省略号；
+ * 超过 30 项截断并注明剩余数量（续聊挂树后清单可能超过 generatePlan 的 12 上限）。
+ */
+export function renderPlanTreeSnapshot(planItems: PlanItem[]): string {
+  if (planItems.length === 0) return ''
+  const MARK: Record<string, string> = {
+    pending: '[ ]',
+    running: '[▶]',
+    done: '[x]',
+    failed: '[✗失败]',
+    cancelled: '[✗已取消]',
+    skipped: '[✗跳过]',
+  }
+  const MAX_ITEMS = 30
+  const lines = planItems.slice(0, MAX_ITEMS).map((p, i) => {
+    const mark = MARK[p.status] ?? '[ ]'
+    const text = p.text.replace(/\s*\n+\s*/g, ' ').trim()
+    const shown = text.length > 60 ? text.slice(0, 60).trimEnd() + '…' : text
+    return `${i + 1}. ${mark} ${shown}`
+  })
+  if (planItems.length > MAX_ITEMS) {
+    lines.push(`…（其余 ${planItems.length - MAX_ITEMS} 项略）`)
+  }
+  return lines.join('\n')
 }

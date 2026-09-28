@@ -34,6 +34,27 @@ export interface ReActAction {
   args: Record<string, unknown>
 }
 
+/** v0.36.0（F4.1）：并行子 agent 运行五态（P5 卡片状态点） */
+export type SubagentRunStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
+
+/** v0.36.0（F4.1）：task:subagent-progress 事件载荷 */
+export interface SubagentProgressPayload {
+  iteration: number
+  /** 父任务 id（事件落在父 session.jsonl） */
+  parentTaskId: string
+  /** 子任务 id（每次委派独立；重试产生新 childTaskId） */
+  childTaskId: string
+  agentId: string
+  agentName?: string
+  objective?: string
+  /** 子任务所用模型 id（当前恒继承父任务；P5 卡模型徽标数据源） */
+  modelId?: string
+  status: SubagentRunStatus
+  /** 子任务最近一步摘要（渲染端由 task:step 回流回填，事件侧仅终态携带） */
+  stepSummary?: string
+  durationMs?: number
+}
+
 export interface ReActStep {
   id: string
   taskId: string
@@ -148,14 +169,45 @@ export type ReActEvent =
       summary: string
       // v0.15.0 Task 7：Agent 完成任务时可附带建议下一步，由 LLM 自行生成（不再硬编码映射）。
       // 缺省 / undefined / 空数组 → 前端不渲染 SuggestionCards
-      suggestions?: Array<{ label: string; description?: string; recommended?: boolean }>
+      // v0.38.1（D171）：补 action 字段（与 conversation.Suggestion 对齐）
+      suggestions?: Array<{ label: string; description?: string; recommended?: boolean; action?: 'finish' }>
+    }
+  // v0.38.0（A5/D156）：阶段结论 —— 长任务中途向用户展示「当前结论 / 下一步」。
+  // 与 task_complete 的区别：turn_note 是过程输出（可多次），task_complete 是终局（一次）。
+  // 与 L1 的关系：**不写入 L1**（给用户的输出不是给模型的输入，FR3.5）。
+  | {
+      type: 'turn_note'
+      /**
+       * 所属任务 id。**必须携带**：`task:event` 通道是多任务共享的，
+       * 渲染层要把它路由到正确的任务的投影（靠"当前选中任务"猜会把结论
+       * 串到别的会话里）。与 `plan_start` / `task_progress` 同口径。
+       */
+      taskId: string
+      iteration: number
+      text: string
+      // v0.39.0（U2）：'plan-revision' = 规划通道改过清单（引擎重排，不是模型自己说的）
+      via: 'model' | 'plan-commit' | 'gate-refusal' | 'engine-stop' | 'plan-revision'
+    }
+  // v0.38.0（A9/D153）：完成门禁拦截通告 —— **面向用户的人话**。
+  // 与 gate_hint（L1 系统指令）是两条通道：此处 text 不得复述指令原文，
+  // 也不得出现 [tree-sync-required] / [unfinished-plan] 等内部标记（FR7.3）。
+  | {
+      type: 'gate_blocked'
+      /** 所属任务 id（理由同 turn_note） */
+      taskId: string
+      iteration: number
+      /** v0.38.1（D176）：新增 ARTIFACT —— 成果产物核对拒绝 */
+      code: 'TREE_SYNC' | 'UNFINISHED' | 'ARTIFACT'
+      refusals: number
+      max: number
+      text: string
     }
   | {
       type: 'ask_user'
       iteration: number
       question: string
       /** Task 4：Agent 附带的建议选项（可选）；前端收到后渲染 SuggestionCards */
-      suggestions?: Array<{ label: string; description?: string; recommended?: boolean }>
+      suggestions?: Array<{ label: string; description?: string; recommended?: boolean; action?: 'finish' }>
     }
   | { type: 'task_failed'; iteration: number; error: string }
   | { type: 'task_paused'; iteration: number }
@@ -198,6 +250,15 @@ export type ReActEvent =
       category: 'facts' | 'skill' | 'observations'
       /** 蒸馏完成后的轻量提示文案（如"已自动合并到知识库"） */
       message: string
+    }
+  // v0.36.0（F1.2）：记忆转化管线事件 —— L1→L2→L3→L4 每一步的落点与结果。
+  // 为什么要有它：此前四步散在一个大函数的 try/catch 里，「哪一步没跑到」
+  // 在 UI 上完全不可见（记忆静默丢步是最贵的一类故障）。
+  | {
+      type: 'memory_pipeline'
+      iteration: number
+      trigger: 'turn' | 'task-done' | 'user-memorize'
+      steps: Array<{ stage: string; ok: boolean; skipped: boolean; detail: string }>
     }
   // v0.15.x：每轮 LLM 调用前报告真实 payload token 用量（system + messages + tools + memory injection）
   | {
@@ -287,3 +348,11 @@ export type ReActEvent =
    * 对话流内联卡 `PlanApprovalCard` 订阅它做增量刷新（`graph:update` kind='plan'）。
    */
   | { type: 'graph_plan_gate'; taskId: string; graphId: string; plan: PlanApproval }
+  /* ============================================================
+   * v0.36.0（F4.1）：子 agent 并行执行进度事件 —— delegate-agent 广播到父任务
+   * （broadcast + 落父 session.jsonl）。渲染层据此维护并行组卡片（P5 五态）。
+   *  - childTaskId：子任务 id（重试产生新 childTaskId，卡片按其 upsert）；
+   *    校验失败未建子任务时为主进程合成的稳定伪 id（delegate-preflight-*）。
+   *  - stepSummary：子任务最近一步人类可读摘要（渲染端由 task:step 回流回填）。
+   * ============================================================ */
+  | { type: 'task:subagent-progress' } & SubagentProgressPayload

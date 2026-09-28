@@ -74,10 +74,16 @@ test('loop.ts: 无工具调用分支同时检查「截断」与「未完成清�
   assert.match(loopSrc, /const\s+outputTruncated\s*=\s*response\.finishReason\s*===\s*['"]length['"]/, '应识别 finish=length 截断')
   assert.match(
     loopSrc,
-    /const\s+unfinishedCount\s*=\s*\(task\.planItems\s*\?\?\s*\[\]\)\.filter\(\s*\(?\s*p\s*\)?\s*=>\s*p\.status\s*===\s*['"]running['"]\s*\|\|\s*p\.status\s*===\s*['"]pending['"]/,
-    '应统计 running/pending 未完成项',
+    /const\s+unfinishedCount\s*=\s*chatMode\s*\?\s*0\s*:\s*\(task\.planItems\s*\?\?\s*\[\]\)\.filter\(\s*\(?\s*p\s*\)?\s*=>\s*p\.status\s*===\s*['"]running['"]\s*\|\|\s*p\.status\s*===\s*['"]pending['"]/,
+    '应统计 running/pending 未完成项（v0.38.1 D170：对话级任务 chatMode 短路为 0——「答复即终局」，不再被守卫暂停）',
   )
-  assert.match(loopSrc, /if\s*\(\s*outputTruncated\s*\|\|\s*unfinishedCount\s*>\s*0\s*\)\s*\{/, '应基于截断/未完成项进入守卫')
+  assert.match(
+    loopSrc,
+    /if\s*\(\s*outputTruncated\s*\|\|\s*unfinishedCount\s*>\s*0(\s*\|\|\s*greetingLoopTriggered)?\s*\)\s*\{/,
+    '应基于截断/未完成项进入守卫（v0.36.0 扩展：问候循环触发同样进入提示路径）',
+  )
+  // v0.36.0 F1.5：greetingLoopTriggered 时绝不走「最终答复」收尾
+  assert.match(loopSrc, /greetingLoopTriggered/, '问候循环守卫触发标记应存在')
 })
 
 test('loop.ts: 守卫路径只注入瞬时提示并 continue，不标 done 也不暂停', () => {
@@ -93,7 +99,7 @@ test('loop.ts: 守卫路径只注入瞬时提示并 continue，不标 done 也�
   )
   assert.match(loopSrc, /pendingSystemHint\s*=\s*labelEngineHint\(hint\)/, '应走瞬时通道并以引擎提示标签标注')
   // 守卫块内不得出现 paused / ask_user / task_complete 终止语义
-  const guardStart = loopSrc.indexOf('if (outputTruncated || unfinishedCount > 0)')
+  const guardStart = loopSrc.indexOf('if (outputTruncated || unfinishedCount > 0')
   const guardEnd = loopSrc.indexOf('// 模型未调用工具，且清单无未完成项、输出未被截断')
   assert.ok(guardStart >= 0 && guardEnd > guardStart, '守卫块应存在且位于 done 分支之前')
   const guardBlock = loopSrc.slice(guardStart, guardEnd)

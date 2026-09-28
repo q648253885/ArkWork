@@ -21,7 +21,17 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import { countTokens } from '../token-counter.js'
-import { computeCompaction, computeTwoStageCompactionPlan, compact, extractKeyEntities, buildSummary } from '../compaction.js'
+import {
+  computeCompaction,
+  computeTwoStageCompactionPlan,
+  compact,
+  extractKeyEntities,
+  buildSummary,
+  resolveAutoCompactThreshold,
+  resolveModelMaxTokens,
+  getAutoCompactThreshold,
+  DEFAULT_MODEL_MAX_TOKENS,
+} from '../compaction.js'
 import { appendL1, listL1, listEnabledL1, clearL1 } from '../l1-working.js'
 import { setWorkspaceDir } from '../../store/db.js'
 import type { L1Snapshot, MemoryItem } from '@shared/types/memory'
@@ -213,4 +223,33 @@ test('extractKeyEntities: 英文停用词过滤与词频', () => {
   assert.ok(ents.includes('database'))
   assert.ok(!ents.includes('the'))
   assert.ok(!ents.includes('and'))
+})
+
+/* ============================================================
+ * v0.36.0 F1.3 — 压缩预算单一真源（resolveAutoCompactThreshold）
+ * ============================================================ */
+
+test('resolveAutoCompactThreshold: 无覆盖时等于模型窗口公式阈值', () => {
+  for (const window of [32_000, 128_000, 180_000, 200_000]) {
+    assert.equal(resolveAutoCompactThreshold(window), getAutoCompactThreshold(window))
+  }
+})
+
+test('resolveAutoCompactThreshold: 用户显式阈值仅作覆盖上限（cap = min）', () => {
+  // 大窗口：公式阈值 > 用户 cap → 取 cap
+  assert.equal(resolveAutoCompactThreshold(180_000, 24_000), 24_000)
+  // 小窗口：公式阈值 < 用户 cap → 取公式阈值（cap 不放大触发面）
+  const smallWindowThreshold = getAutoCompactThreshold(32_000)
+  assert.equal(resolveAutoCompactThreshold(32_000, 24_000), Math.min(smallWindowThreshold, 24_000))
+  // cap 为 0/负值 → 视为未设置
+  assert.equal(resolveAutoCompactThreshold(180_000, 0), getAutoCompactThreshold(180_000))
+  assert.equal(resolveAutoCompactThreshold(180_000, -5), getAutoCompactThreshold(180_000))
+})
+
+test('resolveModelMaxTokens: 无 modelId / 解析失败回落 DEFAULT_MODEL_MAX_TOKENS(180_000)', async () => {
+  assert.equal(DEFAULT_MODEL_MAX_TOKENS, 180_000)
+  assert.equal(await resolveModelMaxTokens(undefined), 180_000)
+  assert.equal(await resolveModelMaxTokens(''), 180_000)
+  // 不存在的模型 ID → getModel 返回 null → 回落
+  assert.equal(await resolveModelMaxTokens('@nonexistent-model-for-test'), 180_000)
 })

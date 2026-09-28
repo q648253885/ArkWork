@@ -20,7 +20,9 @@ export function SearchMatchesView({ result }: { result: SearchMatches }) {
         <div key={f.path}>
           {/* D21：命中文件可点击（此前是死文本） */}
           <FileLink path={f.path} className="text-2xs" />
-          <pre className="mt-0.5 text-2xs font-mono text-text-tertiary bg-fill-secondary rounded-md border border-border-default px-2 py-1 overflow-x-auto max-h-40 whitespace-pre-wrap m-0 select-text">
+          {/* v0.36.0（B11/P4-b）：命中行提级 text-text-primary（工具输出结果=信号，
+              与过程日志的 tertiary 拉开层级） */}
+          <pre className="mt-0.5 text-2xs font-mono text-text-primary bg-fill-secondary rounded-md border border-border-default px-2 py-1 overflow-x-auto max-h-40 whitespace-pre-wrap m-0 select-text">
             {f.matches.map((m) => `${m.lineNumber}: ${m.line}`).join('\n')}
           </pre>
         </div>

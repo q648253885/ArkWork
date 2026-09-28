@@ -112,12 +112,15 @@ export function buildSystemSections(ctx: SystemPromptContext): PromptSection[] {
       order: ORDER.planConstraint,
       text:
         `## 计划执行约束\n` +
-        `你已生成了计划清单，必须严格按此计划执行（当前进度见对话中的「清单状态」消息）。\n` +
+        `你已生成了计划清单，必须严格按**当前生效**计划执行（各项当前状态以对话中的「清单状态」消息为准）。\n` +
         `每步 Reason 必须在开头声明"正在执行计划第 N 步：xxx"。` +
-        `完成一个阶段性操作后，必须调用 todo-update 工具标记该步为 done 并说明下一步，` +
+        // v0.38.1（D166）：与 prompt/sections.ts 同步改写 —— 旧工具名已下架（D154），
+        // 本函数为遗留兼容路径，两份文案保持一致。
+        `阶段性操作完成后，必须通过 task_plan 提交**完整最新清单**（把该步标为 done）并说明下一步，` +
         `禁止全凭感觉推进或批量打标。` +
-        `发现偏离计划或需跳过某步时，也调用 todo-update（skipped/failed）+ 说明原因。` +
-        `若发现计划本身需调整，先用 ask_user 向用户确认。`,
+        `发现偏离计划或需跳过某步时，同样通过 task_plan 把该项标为 skipped/failed + 说明原因。` +
+        `用户追加新指令或实际情况与计划不符时，先按对话末尾『续聊指令与清单』规则用 task_plan 提交同步后的完整清单，` +
+        `再继续执行；未经用户批准不得整体作废。`,
     })
   }
 

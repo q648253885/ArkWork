@@ -27,7 +27,7 @@
  *   而 GUI 应用从 Dock 启动时**没有 shell 环境变量** —— 于是「浏览器能开、
  *   面板打不开」。选栈由 `pickFetch()` 决定，方向用单测钉死（TC-PFCH 组）。
  * ============================================================ */
-import { ipcMain, net } from 'electron'
+import { ipcMain } from 'electron'
 import { logger } from '../system/logger.js'
 
 /** 响应体大小上限（字节）—— 面板数据是给人看的，2MB 绰绰有余 */
@@ -55,27 +55,11 @@ export interface PanelFetchResult {
   error?: string
 }
 
-/** 取数函数签名（便于注入与单测） */
-export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
-
-/**
- * 选一条取数栈。
- *
- * **必须优先 `net.fetch`**：它走 Chromium 网络栈 → 遵循系统代理 / PAC / 证书策略；
- * 全局 fetch 走 Node undici → **不读系统代理**（见文件头实测证据）。
- * 只在 Electron net 不可用时（如纯 Node 单测）才回落。
- *
- * @param netModule 注入点（缺省取真实 `electron.net`），单测用它断言选栈方向
- */
-export function pickFetch(netModule?: { fetch?: unknown }): { impl: FetchLike; via: 'net' | 'global' } {
-  const holder = netModule ?? (net as unknown as { fetch?: unknown } | undefined)
-  const candidate = holder?.fetch
-  if (typeof candidate === 'function') {
-    // 绑定到 holder：net.fetch 依赖内部 session 上下文，脱离对象调用会丢上下文
-    return { impl: (candidate as FetchLike).bind(holder) as FetchLike, via: 'net' }
-  }
-  return { impl: fetch as unknown as FetchLike, via: 'global' }
-}
+/** 取数函数签名与选栈逻辑已抽到 `net/fetch-stack.ts`（v0.36.0，插件网关共用同一真源）；
+ *  这里 re-export 保持既有 import 面稳定（panel-fetch 用例仍从本模块取符号）。 */
+import { pickFetch, type FetchLike } from '../net/fetch-stack.js'
+export { pickFetch }
+export type { FetchLike }
 
 /**
  * 把底层网络错误翻译成**用户能行动**的话。

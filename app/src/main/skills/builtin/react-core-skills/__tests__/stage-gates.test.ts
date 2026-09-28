@@ -99,8 +99,14 @@ test('engine.ts: 在 act 循环后插入 stage-gates 分支', () => {
   // v0.27.0 R2：stage-gates 集成断言仍锚定在主循环 loop.ts
   const enginePath = fileURLToPath(new URL('../../../../agent/engine/loop.ts', import.meta.url))
   const engineSrc = readFileSync(enginePath, 'utf-8')
-  // 必须 import stage-gates 模块
-  assert.match(engineSrc, /from\s+['"`].*stage-gates\.js['"`]/)
+  // v0.36.0 F1.6：loop.ts 的重复 import 块已收敛进 EngineContext barrel，直接
+  // from stage-gates.js 的语句不复存在；集成契约拆成两段：① loop.ts 导入块含
+  // matchStageGate 且源自 barrel；② barrel 从 stage-gates.js 再导出 —— 任一环断裂
+  // 都会让门禁分支失联，比单锚一条 import 语句更严。
+  const barrelPath = fileURLToPath(new URL('../../../../agent/engine/engine-context.ts', import.meta.url))
+  const barrelSrc = readFileSync(barrelPath, 'utf-8')
+  assert.match(engineSrc, /import\s*\{[^}]*\bmatchStageGate\b[^}]*\}\s*from\s*['"`][^'"`]*engine-context\.js['"`]/, 'loop 应经 barrel 导入 matchStageGate')
+  assert.match(barrelSrc, /export\s*\{[^}]*\bmatchStageGate\b[^}]*\}\s*from\s*['"`][^'"`]*stage-gates\.js['"`]/, 'barrel 应从 stage-gates 再导出 matchStageGate')
   // 必须有 stageGateHit 状态变量
   assert.match(engineSrc, /let\s+stageGateHit/)
   // 必须有 if (stageGateHit) 分支触发暂停 + ask_user

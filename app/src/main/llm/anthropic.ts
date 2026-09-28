@@ -14,6 +14,8 @@ import type {
   LlmTool,
 } from './adapter.js'
 import { extractSayMarker } from './say-marker.js'
+// v0.36.0 F1.5：协议归一化单一真源（finish_reason 映射表）
+import { normalizeFinishReason, type FinishReason } from './normalize.js'
 import type { ReActAction } from '@shared/types/react'
 
 export interface AnthropicOptions {
@@ -275,22 +277,11 @@ function safeJsonParse(s: string): unknown {
  *
  * **导出仅为可测性**（v0.32.1 缺陷 D35 回归），与 `openai.ts` 的同名修正对齐：
  * 缺终止帧必须是 `'interrupted'`，不能兜底成 `'stop'`。
+ * v0.36.0 F1.5：映射表收敛至 llm/normalize.ts（anthropic 词表 + 缺省 interrupted），
+ * 此处保留薄包装（兼容既有 import 与行为用例）。
  */
 export function mapFinishReason(
   reason: string | null | undefined,
-): 'stop' | 'tool_calls' | 'length' | 'content_filter' | 'interrupted' {
-  switch (reason) {
-    case 'end_turn':
-    case 'stop_sequence':
-      return 'stop'
-    case 'tool_use':
-      return 'tool_calls'
-    case 'max_tokens':
-      return 'length'
-    case 'content_filter':
-      return 'content_filter'
-    default:
-      // 对齐 openai.ts 的同名修正（缺陷 D35）：缺终止帧 ≠ 正常说完。
-      return 'interrupted'
-  }
+): FinishReason {
+  return normalizeFinishReason('anthropic', reason)
 }

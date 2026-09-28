@@ -4,38 +4,43 @@
  * Reason→reason-phase.ts、终止收尾→turn-end.ts、中断→abort.ts（均纯移动）。
  */
 
-import type { Task, PlanItem } from '@shared/types/task'
-import type {
-  ReActEvent,
-  ReActAction,
-  ReActStep,
-  PlanContent,
-} from '@shared/types/react'
-import type { Agent } from '@shared/types/agent'
-import { getAdapter, getModel } from '../../llm/registry.js'
-import type { LlmMessage, LlmTool, LlmCompleteResponse } from '../../llm/adapter.js'
-// agent-context-compaction-robustness：LLM 调用健壮性（120s 超时 / 中止短路 / 重试分级）
-import { callLlmWithRetry, withLlmTimeout, isContextOverflowError } from '../llm-call.js'
-import { invokeSkill, skillToLlmTool, skillToolName, listSkills, getSkill, type SkillContext } from '../registry.js'
-// v0.19.0 M1：系统提示词组装器（收敛 parts.push 硬拼逻辑）
-import { buildSystemSections, renderSystemPrompt, buildPersonalitySegment } from '../prompt-assembly.js'
-// v0.25.0 F1：提示词契约层（契约注册 + always-on 技能段 + 契约装配 + 门禁状态机）
-import { collectAlwaysOnSections, assembleSystemPrompt } from '../prompt/sections.js'
 import {
+  type Task,
+  type PlanItem,
+  type ReActEvent,
+  type ReActAction,
+  type ReActStep,
+  type PlanContent,
+  type Agent,
+  getAdapter,
+  getModel,
+  type LlmMessage,
+  type LlmTool,
+  type LlmCompleteResponse,
+  callLlmWithRetry,
+  withLlmTimeout,
+  isContextOverflowError,
+  invokeSkill,
+  skillToLlmTool,
+  skillToolName,
+  listSkills,
+  getSkill,
+  type SkillContext,
+  buildSystemSections,
+  renderSystemPrompt,
+  buildPersonalitySegment,
+  collectAlwaysOnSections,
+  assembleSystemPrompt,
   collectGateSpecs,
   initGateStates,
   checkGateBeforeAdvance,
   confirmGate,
   findGateForStageDoc,
   isDocDrivenAgent,
-} from '../prompt/gates.js'
-import type { GateSpec } from '@shared/types/agent'
-// v0.19.0 M2：唯一真源会话事件日志（Reason/Act/tool 事件落盘 session.jsonl）
-import { appendSessionEvent } from '../session-log.js'
-// v0.19.0 M3：轮次/步骤收件箱 + 停止候选钩子（turn/step 语义）
-import { drainContinuations } from '../inbox.js'
-import { emitTurnStopping } from '../turn-stopping.js'
-import {
+  type GateSpec,
+  appendSessionEvent,
+  drainContinuations,
+  emitTurnStopping,
   matchStageGate,
   isCoreSkillsEnabled,
   buildGateBlockObservation,
@@ -44,20 +49,20 @@ import {
   matchForbiddenWritePath,
   matchForbiddenShellCommand,
   type StageGate,
-} from '../../skills/builtin/react-core-skills/stage-gates.js'
-import { appendL1, listEnabledL1, listL1, totalTokens } from '../../memory/l1-working.js'
-// v0.31.0 D22：瞬时提示通道标签（技能体 vs 引擎提示，两类不得共用标签）
-import { labelEngineHint, labelSkillHint } from './hints.js'
-import { persistRawL2 } from '../../memory/l2-file.js'
-import { logger } from '../../system/logger.js'
-import { genId } from '@shared/utils/id'
-import { isNoisePlanItem } from '@shared/utils/plan-noise'
-import { describeAction, describeActionKey } from '@shared/utils/action-description'
-import { getUiLocale, tFor } from '../../i18n/messages.js'
-import { createHash } from 'node:crypto'
-import { updateTask, getTask } from '../../store/tasks.js'
-import { getAgent } from '../../store/agents.js'
-import {
+  appendL1,
+  listEnabledL1,
+  listL1,
+  totalTokens,
+  persistRawL2,
+  logger,
+  genId,
+  isNoisePlanItem,
+  describeAction,
+  describeActionKey,
+  createHash,
+  updateTask,
+  getTask,
+  getAgent,
   broadcastStep,
   broadcastTaskStatus,
   broadcastToolProgress,
@@ -66,24 +71,26 @@ import {
   broadcastPlanListSnapshot,
   broadcastTextDelta,
   type ToolProgress,
-} from '../events.js'
-// v0.27.0 R1：流式管道（completeWithStream 静默降级 + text-delta 增量泵）
-import { completeWithStream, createTextDeltaPump, type TextDeltaPump } from '../llm-stream.js'
-import { getWorkspaceDir } from '../../store/db.js'
-import { saveCheckpoint, checkpointId } from '../../checkpoint/store.js'
-// v0.8.0 记忆系统钩子
-import { applyPending, getCuratedSnapshot } from '../../memory/l3-curated.js'
-import { archiveTaskL1, initArchiveIndex } from '../../memory/l3-archive.js'
-import { getProfile, synthesizeFromTaskL1 } from '../../memory/l4-profile.js'
-import { evaluateDistillTrigger, autoPromoteDistill, getDistillMetrics } from '../../memory/distill.js'
-import { runForSkillForge } from '../../memory/skill-forge.js'
-import { compressMemory } from '../../ipc/memory.js'
-// v0.15.0：统一压缩路径——自动压缩与 Turn Phase-0 均走两阶段 compact()（联动 L3b + 压缩后蒸馏）
-import { compactTask } from '../../memory/compaction.js'
-import { createMemoryPhase0 } from '../../memory/compaction-hook.js'
-import type { CompressPolicy } from '@shared/types/memory'
-// agent-context-compaction-robustness：上下文预算与分层压缩纯工具模块
-import {
+  completeWithStream,
+  createTextDeltaPump,
+  type TextDeltaPump,
+  getWorkspaceDir,
+  saveCheckpoint,
+  checkpointId,
+  applyPending,
+  getCuratedSnapshot,
+  archiveTaskL1,
+  initArchiveIndex,
+  getProfile,
+  synthesizeFromTaskL1,
+  evaluateDistillTrigger,
+  autoPromoteDistill,
+  getDistillMetrics,
+  runForSkillForge,
+  compressMemory,
+  compactTask,
+  createMemoryPhase0,
+  type CompressPolicy,
   estimatePayloadTokens,
   estimatePayloadTokensDetailed,
   estimateTextTokens,
@@ -94,28 +101,60 @@ import {
   MAX_OBSERVATION_CONTENT,
   MICRO_COMPACT_PLACEHOLDER,
   OBSERVATION_TRUNCATED_MARK,
-} from '../context.js'
-import { getMemoryConfig, getSettings } from '../../ipc/settings.js'
-// v0.8.0 知识库钩子
-import { listKb, listEnabledKb } from '../../kb/store.js'
-import { searchKb, initKbIndex } from '../../kb/index.js'
-import { readFile } from 'node:fs/promises'
-// Task 6：上下文占比可视化与下钻
-import {
+  getMemoryConfig,
+  getSettings,
+  listKb,
+  listEnabledKb,
+  searchKb,
+  initKbIndex,
+  readFile,
   computeContextBreakdown,
   type ContextBreakdownInput,
   type ContextBreakdownResult,
   type ContextToolEntry,
   type ContextSkillInstruction,
-} from '../context-breakdown.js'
-
+} from './engine-context.js'
+// v0.36.0 F1.5：问候循环守卫 + endpoint unhealthy 计数（协议层泛化，设计 §3.3）
+import { createGreetingLoopGuard, markEndpointUnhealthy } from '../../llm/normalize.js'
+// v0.31.0 D22：瞬时提示通道标签（技能体 vs 引擎提示，两类不得共用标签）
+import { labelEngineHint, labelSkillHint } from './hints.js'
+// v0.38.1（D177）：无工具答复的正则清单提取回退（与 task_plan 共用落库管线）
+// v0.39.0：正文解析统一走规划通道的解析器（纪律⑧：一份语义，不许两份实现）
+import { parsePlannerOutput } from '../planning/parse.js'
+import { shouldCommitRegexDraft, initPlannerState, shouldRunPlanner, notePlannerRun, draftFingerprint } from '../planning/policy.js'
+// v0.40.0（O1–O7）：清单操作通道 —— 清单的推进不再只依赖模型发起 `task_plan` tool_call
+import { initPlanOpsState } from '../planning/ops/policy.js'
+import { planOpsTick } from './plan-ops-tick.js'
+// v0.39.0（W2 · F7）：失败摘要采集 + 阈值重排
+import { pushFailureDigest } from '../planning/digest.js'
+import { runPlannerPass, getPlannerModelId } from '../planning/runner.js'
+import { PLANNER_FAILURE_THRESHOLD } from '../planning/types.js'
+import type { PlannerFailureDigest, PlannerRequestItem } from '../planning/types.js'
+import { loadLedger } from '../ledger/engine.js'
+import { forceCloseOpenItems } from './ledger-guard.js'
+import { commitPlanDraft } from './plan-commit-pipeline.js'
+import { getUiLocale, tFor } from '../../i18n/messages.js'
 import { safeSlice, emitEvent, emitProgress } from './broadcast.js'
 import { emitContextSizeReport } from './context.js'
 import { buildFallbackAskUserQuestion, markRunningPlanItemFailed, discardIncompletePlanItems, isProductiveTool, decidePlanAdvance, emitPlanStatus, sealGraphForTaskOutcome, reopenGraphForTaskRun } from './gates.js'
+// v0.37.0：统一完成门禁（覆盖最终答复路径）+ 账本收口
+// v0.38.0（D150/D151/D152/D153）：判定（ledger-guard）与投递（gate-channel）分离；
+//   拒绝计数唯一落点是账本 `resume.refusals`；被拒轮已生成的正文经 gate-channel 保底投递。
+import { guardFinish, recordRefusal } from './ledger-guard.js'
+import { refuseViaGate, emitTurnNote } from './gate-channel.js'
+// v0.38.0（D150）：本 run 工作性质分类 —— 只读白名单唯一事实源（纪律⑧）
+import { classifyRunWork, isReadonlyTool, isPlanWriteTool, normalizeResponseToolNames } from './work-class.js'
+// v0.38.0（D156）：阶段结论兜底投递策略（连续多轮无输出 → 请求进展）
+import { createNotePolicyState, advanceNotePolicy, MAX_ROUNDS_WITHOUT_NOTE } from './turn-note-policy.js'
+import { sealLedger } from '../ledger/engine.js'
 // v0.34.0（D52）：零产出轮终局守卫（小模型空转 ≤6 轮即优雅暂停）
 import { isStalledRound, planSignature, advanceStallCounter, isStallTerminal, MAX_STALLED_ROUNDS } from './stall.js'
+// v0.38.0（D160）：伪工具调用检测 —— 模型把调用"演"成正文而非原生 tool_calls。
+import { detectPseudoToolCallInTurn, PSEUDO_CALL_STOP_ROUNDS } from './pseudo-call.js'
 import { tryGeneratePlan, generatePlan } from './plan.js'
-import { findPlanItemForStage } from './plan-parser.js'
+import { findPlanItemForStage, renderPlanTreeSnapshot } from './plan-parser.js'
+// v0.36.5（D126）：段末任务树陈旧提醒（对齐 ZCode todo_reminder）
+import { shouldRemindTreeSync, touchesPlanTree, TREE_SYNC_REMIND_INTERVAL } from './plan-tree-sync.js'
 import { applyStageGateAdvance } from '../graph/plan-sync.js'
 import { injectSkillInstruction, broadcastSkillAutoLoaded } from './skills.js'
 import { buildObservationSummary, collectActionsForIteration, appendPairedControlObservations, executeAct, toFinishedProgress } from './act.js'
@@ -124,8 +163,8 @@ import { buildMemoryInjection, buildKbStatusLine, autoRecallKb, maybeAutoCompres
 import type { ActContext, ActExecutionResult } from './act.js'
 import { isPhaseHeader } from './plan-parser.js'
 import { prepareRun } from './run-setup.js'
-import { runReasonPhase } from './reason-phase.js'
-import { finishViaTaskComplete, pauseViaAskUser } from './turn-end.js'
+import { runReasonPhase, EMPTY_RESPONSE_ATTEMPTS } from './reason-phase.js'
+import { finishViaTaskComplete, pauseViaAskUser, resolveCompleteSummary } from './turn-end.js'
 import { handleAbort, continueTurnIfInjected } from './abort.js'
 
 /* ============================================================
@@ -138,7 +177,7 @@ export interface RunOptions {
   agent: Agent
   modelId: string
   signal: AbortSignal
-  /** 最大迭代数（默认 25） */
+  /** 最大迭代数（缺省 200；取值链见循环内 budget 解析） */
   maxIterations?: number
   /** 本运行是否已被新一次运行接管——被接管后退出时不再写入任务状态（v0.8.1） */
   stale?: () => boolean
@@ -181,18 +220,17 @@ const MAX_ALL_EXHAUSTED_ROUNDS = 3
 // 提示让模型自愈；连续达到该阈值后提示升级为强指令（继续调工具 / task_complete
 // 二选一）。不打扰用户——用户无从判断引擎内部状态；失控由 maxIterations 兜底。
 const MAX_CONSECUTIVE_NO_TOOL = 2
-const READONLY_TOOLS = new Set([
-  'file-reader',
-  'glob-search',
-  'grep-search',
-  'web-search',
-  'fetch-url',
-  'session-search',
-  'kb-search',
-])
+// v0.38.1（D168）②：无工具「纯答复」轮的优雅暂停阈值 —— 在强提示
+// （MAX_CONSECUTIVE_NO_TOOL）之后仍给 2 轮自纠机会，连满即转人工。
+// 实测 0.8b 级模型对提示自愈无响应（say 非空 → stall 计数每轮归零、
+// D160 伪调用守卫也不触发），原设计只能烧到 maxIterations（60 轮 ≈ 10 分钟假执行）。
+const NO_TOOL_STOP_ROUNDS = 4
+// v0.38.0（纪律⑧）：本地 `READONLY_TOOLS` 已删除 —— 只读白名单唯一事实源在
+// `work-class.ts`，全仓只许调 `isReadonlyTool()` / `classifyRunWork()`。
+// （此前 loop / registry / plan-tree-sync 各有一份，三份语义漂移是 D150 的温床。）
 
 function getToolCategoryLimit(tool: string, readonlyLimit: number, defaultLimit: number): number {
-  return READONLY_TOOLS.has(tool) ? readonlyLimit : defaultLimit
+  return isReadonlyTool(tool) ? readonlyLimit : defaultLimit
 }
 
 // v0.16.3：调用签名 key = MD5(toolName + args)
@@ -219,7 +257,137 @@ async function pauseForStalledRounds(task: Task, iteration: number, rounds: numb
     question,
     suggestions: [
       { label: tFor(getUiLocale(), 'suggest.resumeRun.label'), description: tFor(getUiLocale(), 'suggest.resumeRun.desc') },
-      { label: tFor(getUiLocale(), 'suggest.finishHere.label'), description: tFor(getUiLocale(), 'suggest.finishHere.desc') },
+      { label: tFor(getUiLocale(), 'suggest.finishHere.label'), description: tFor(getUiLocale(), 'suggest.finishHere.desc'), action: 'finish' },
+    ],
+  })
+  await updateTask(task.id, {
+    status: 'paused',
+    pendingAskUser: { question, askedAt: Date.now() },
+  })
+  broadcastTaskStatus({ ...task, status: 'paused' })
+}
+
+/**
+ * v0.38.0（D160）：**「模型没在用工具调用」的优雅暂停 + 人话说明**。
+ *
+ * 与 `pauseForStalledRounds` 同形态（paused + ask_user，进度保留、可继续），
+ * 但**原因必须讲清楚**：不是"没产出"，而是"模型把工具调用写成了正文"。
+ * 用户据此能做出正确决策（换支持 function calling 的模型 / 关闭思考模式 /
+ * 就此结束），而不是对着一堆"正在执行…"的假动作干等。
+ *
+ * 纪律⑨：静默退化是复合缺陷的粘合剂 —— 这条路径必须在诊断通道留人话。
+ */
+async function pauseForPseudoToolCalls(task: Task, iteration: number, tool: string): Promise<void> {
+  // 纯文本（不含 Markdown / 反引号）：交互区原样渲染，带标记会显示成 `**` 噪音。
+  const question =
+    `已停止：模型连续 ${PSEUDO_CALL_STOP_ROUNDS} 轮没有发起真实工具调用，` +
+    `而是把调用写成了正文（例如 ${tool}(…)）—— 这类文字引擎无法执行。\n` +
+    `这通常表示当前模型 / 端点未启用工具调用（function calling）能力。` +
+    `可尝试：换用支持工具调用的模型，或在 Ollama 侧关闭「思考 / 推理」模式后重试。`
+  logger.warn(
+    'Agent',
+    `model emits pseudo tool calls instead of native tool_calls (${tool}) for ${PSEUDO_CALL_STOP_ROUNDS} rounds — paused`,
+    task.id,
+  )
+  await emitEvent(task.id, { type: 'max_iterations_reached', iteration })
+  // 人话正文**额外**走 turn_note（NoteBlock）：实测 ask_user 卡片只渲染建议按钮，
+  // 正文不显示 —— 只靠它等于仍然静默（纪律⑨）。NoteBlock 是已验证可见的通道。
+  await emitTurnNote({ taskId: task.id, iteration, text: question, via: 'engine-stop' })
+  await emitEvent(task.id, {
+    type: 'ask_user',
+    iteration,
+    question,
+    suggestions: [
+      { label: '换个模型重试', description: '改用支持工具调用（function calling）的模型后重新运行本任务' },
+      { label: '就此结束', description: '保留当前进度，不再自动执行', action: 'finish' },
+    ],
+  })
+  await updateTask(task.id, {
+    status: 'paused',
+    pendingAskUser: { question, askedAt: Date.now() },
+  })
+  broadcastTaskStatus({ ...task, status: 'paused' })
+}
+
+/**
+ * v0.39.0（D197）：**「端点连续空响应」的优雅暂停 + 人话说明**。
+ *
+ * 与 `pauseForStalledRounds` / `pauseForPseudoToolCalls` 同形态
+ * （paused + ask_user，进度保留、可继续），但**这不是「模型没产出」，而是
+ * 「端点一个字符都没给」**：reason 阶段首轮 + 补试共 `EMPTY_RESPONSE_ATTEMPTS`
+ * 次调用全部返回「content / thought / actions 全空」。
+ *
+ * 为什么必须停：空回合既没有正文可交付、也没有动作可执行。此前补试用尽后
+ * 没有第三级处置，空响应顺着「未调工具 + 清单无未完成项 + 未截断」三条判定
+ * 一路走到成功分支，用**空 summary**把任务封成 completed —— 用户看到一条
+ * 空白的「答复」，却没有任何可继续的入口（实机证据见 reason-phase.ts D197）。
+ *
+ * 纪律⑨：静默退化是复合缺陷的粘合剂 —— 这条路径必须在诊断通道留人话。
+ */
+async function pauseForEmptyResponses(task: Task, iteration: number, attempts: number): Promise<void> {
+  // 纯文本（不含 Markdown / 反引号）：交互区原样渲染，带标记会显示成 `**` 噪音。
+  const question =
+    `已停止：模型连续 ${attempts} 次返回空响应（既无正文、也无工具调用），本轮没有任何内容可交付。\n` +
+    `这通常是推理端点侧的问题（模型服务重启 / 上下文超限 / 思考模式空转），不是任务本身出错 —— 任务不会被标记完成。\n` +
+    `可尝试：确认模型服务正常后点「继续」重试；或就此结束，保留已有进度。`
+  logger.warn(
+    'Agent',
+    `empty response for ${attempts} consecutive attempts — paused (no content / no tool call)`,
+    task.id,
+  )
+  await emitEvent(task.id, { type: 'max_iterations_reached', iteration })
+  // 人话正文额外走 turn_note（NoteBlock）：ask_user 卡片只渲染建议按钮（同 D160）。
+  await emitTurnNote({ taskId: task.id, iteration, text: question, via: 'engine-stop' })
+  await emitEvent(task.id, {
+    type: 'ask_user',
+    iteration,
+    question,
+    suggestions: [
+      { label: tFor(getUiLocale(), 'suggest.resumeRun.label'), description: tFor(getUiLocale(), 'suggest.resumeRun.desc') },
+      { label: tFor(getUiLocale(), 'suggest.finishHere.label'), description: tFor(getUiLocale(), 'suggest.finishHere.desc'), action: 'finish' },
+    ],
+  })
+  await updateTask(task.id, {
+    status: 'paused',
+    pendingAskUser: { question, askedAt: Date.now() },
+  })
+  broadcastTaskStatus({ ...task, status: 'paused' })
+}
+
+/**
+ * v0.38.1（D168）②：**「模型只用文字答复、不按清单收尾」的优雅暂停 + 人话说明**。
+ *
+ * 与 `pauseForPseudoToolCalls` 同形态（paused + ask_user，进度保留、可继续）。
+ * 差异：伪调用守卫管「把调用写成正文」；本守卫管「连调用都不写、纯聊天」——
+ * 引擎的提示自愈对能力不足的模型无效，烧到 maxIterations 只会让用户对着
+ * 「正在执行…」干等十分钟。转人工并讲清原因（纪律⑨）。
+ */
+async function pauseForNoToolAnswerStall(
+  task: Task,
+  iteration: number,
+  openCount: number,
+  rounds: number,
+): Promise<void> {
+  // 纯文本（不含 Markdown / 反引号）：交互区原样渲染，带标记会显示成 `**` 噪音。
+  const question =
+    `已停止：模型连续 ${rounds} 轮只输出文字答复，未调用任何工具，清单仍有 ${openCount} 项未完成。\n` +
+    `这通常表示当前模型较弱，无法按提示完成清单收尾（task_plan / task_complete）。\n` +
+    `可尝试：换用更强的模型后重试；或就此结束 —— 模型的答复已保留在对话中。`
+  logger.warn(
+    'Agent',
+    `model keeps answering in prose without tool calls for ${rounds} rounds (${openCount} open items) — paused`,
+    task.id,
+  )
+  await emitEvent(task.id, { type: 'max_iterations_reached', iteration })
+  // 人话正文额外走 turn_note（NoteBlock）：ask_user 卡片只渲染建议按钮（同 D160）。
+  await emitTurnNote({ taskId: task.id, iteration, text: question, via: 'engine-stop' })
+  await emitEvent(task.id, {
+    type: 'ask_user',
+    iteration,
+    question,
+    suggestions: [
+      { label: '换个模型重试', description: '改用更强的模型后重新运行本任务' },
+      { label: '就此结束', description: '保留当前进度与答复，不再自动执行', action: 'finish' },
     ],
   })
   await updateTask(task.id, {
@@ -255,7 +423,7 @@ async function pauseForBudgetExhausted(task: Task, iteration: number, rounds: nu
     question,
     suggestions: [
       { label: tFor(getUiLocale(), 'suggest.resumeRun.label'), description: tFor(getUiLocale(), 'suggest.resumeRun.desc') },
-      { label: tFor(getUiLocale(), 'suggest.finishHere.label'), description: tFor(getUiLocale(), 'suggest.finishHere.desc') },
+      { label: tFor(getUiLocale(), 'suggest.finishHere.label'), description: tFor(getUiLocale(), 'suggest.finishHere.desc'), action: 'finish' },
     ],
   })
   await updateTask(task.id, {
@@ -303,16 +471,42 @@ export async function runReActLoop(
   // v0.28.1 fix：连续「无工具调用但清单未完成/输出被截断」计数。用于把注入的
   // 自愈提示从温和版升级为强指令版；有工具调用时归零。
   let consecutiveNoToolFinal = 0
-  // v0.32.1（D39）：当轮 run 内 `task_complete` 因「清单仍有未收口项」被拒的次数。
-  // 上限见 turn-end.MAX_COMPLETE_REFUSALS —— 超限后接受完成，但剩余项会被收成 cancelled，
-  // 保证「任务终态 ↔ 清单」自洽（不会把「已完成 + 4 条待执行」留在界面上）。
-  let completeRefusals = 0
+  // v0.39.0（D183）：**已删除** `completeRefusals` —— 它就是 D151 现场「1+2=3 三次
+  // 拒绝」的那一半。拒绝计数的唯一落点是账本 `resume.refusals`（`guardFinish` 读写），
+  // run 局部计数此后**不得**再出现在任何完成判定里。
+  // v0.38.0（D150）：本 run 实际调用过的全部工具名（客观事实来源）。
+  // 完成门禁据此判 `workClass`，取代此前的三个代理变量（startIter / isReplyContinuation / graphId）。
+  const toolsThisRun: string[] = []
+  // v0.38.0（D156）：阶段结论兜底节流状态（连续 N 轮无输出 → 请求进展）。
+  let notePolicy = createNotePolicyState()
   // v0.34.0（D52）：连续「零产出轮」计数 —— 判定见 stall.ts。
   // 用户实测：小模型每轮都成功调只读工具、内容全空，既有保护（无工具调用 /
   // 同签名 / 只读提示）一个都不触发，直到 maxIterations=200（≈100 分钟）。
   let consecutiveStalledRounds = 0
   // v0.34.x：上一轮叙述签名（freshNarrative 的重复检测基准）
   let prevNarrativeSig = ''
+  // v0.38.0（D160）：连续「无工具调用 + 正文出现伪调用」计数。
+  // 判据**独立于** `consecutiveStalledRounds` —— 后者把"一直在说话"算作有产出
+  // （hasSayOutput → 计数归零），而伪调用正是"一直在说话但没真动作"，
+  // 因此必须单独计：实机 qwen3.5:9b 空转 21 轮，stall 守卫一次都没触发。
+  let consecutivePseudoNoTool = 0
+  /** v0.39.0（D182）：本 run 已由「文本解析回退」代为落库的次数（上限 MAX_REGEX_COMMITS_PER_RUN） */
+  let regexCommits = 0
+  /**
+   * v0.39.0（F1）：本 run 的规划通道预算与冷却状态（纯数据结构，policy.ts 管判定）。
+   * 每 run 归零 —— 预算是「这一次 run 最多烧几次额外调用」，不是跨 run 配额。
+   */
+  let plannerState = initPlannerState()
+  /**
+   * v0.39.0（W2 · F7）：本 run 的失败摘要环形缓冲。
+   * 同一 itemId + tool 的重复失败会累加 `attempts`，连满 PLANNER_FAILURE_THRESHOLD
+   * 次即触发一次「换回合重排」—— 触发后清空，把机会留给**新的**连续失败。
+   */
+  let failureDigest: PlannerFailureDigest[] = []
+  /** v0.39.0（D180）：完成门禁拒绝计数**写入失败**的连续次数（有界放行兜底用） */
+  let refusalWriteFailures = 0
+  /** 连续写失败达此次数即认为门禁计数已失能 → 有界放行（D180） */
+  const MAX_REFUSAL_WRITE_FAILURES = 2
 
   // 标记任务为 running
   await updateTask(task.id, { status: 'running', startedAt: Date.now() })
@@ -349,10 +543,38 @@ export async function runReActLoop(
     // 首轮 Plan 生成与续聊 plan-regen）抽至 run-setup.ts（纯移动，行为不变）。
     const prepared = await prepareRun({ task, agent, modelId: opts.modelId, signal })
     const { startIter, memoryInjection, alwaysOnContracts, docDriven, coreSkillsEnabled, allowedStage } = prepared
+    // v0.38.1（D170）：对话级任务 —— 首轮 plan 时模型显式回 `[]`（Tier 0），
+    // 模型的正文答复即为最终答复（答复即终局），不把兜底占位项当「未完成工作」。
+    const chatMode = prepared.chatMode
     let pendingSystemHint = prepared.pendingSystemHint
     let iteration = startIter
     // v0.9.x：连续"只读探索"轮数（>=3 时注入产出提示，防空工作区无限探索）
     let consecutiveReadOnly = 0
+    // v0.36.5（D126）：距上次写树动作（v0.38.0 起 = task_plan）的轮数。
+    // 达阈值 → 段末注入陈旧提醒 + 树快照（ZCode todo_reminder 对应物），
+    // 触发后归零防刷屏。跨 run 不持久 —— 中断/续聊场景由 run-setup 续聊 hint（D125）负责重评。
+    //
+    // v0.38.0（D150/D151）：**删除** v0.36.6 的「新指令型续聊 → 欠账满额启动」——
+    // `pendingTreeSync` 由 `startIter > 0 && !isReplyContinuation && graphId` 三个代理变量
+    // 推出，把纯只读提问误判为"新指令型续聊"（现场连续三轮被拦的根因）。
+    // 现在统一从 0 起算，续聊与首轮同待遇；是否"零写树"由 `treeTouchedThisRun` 客观记录。
+    let itersSinceTreeTouch = 0
+    let treeTouchedThisRun = false
+    // v0.40.0（O2）：清单操作通道的 run 级预算与「上一轮事实」信号。
+    // 状态放在循环外：预算必须跟「一次 run」绑定，而轮内的 `continue` 有十几处，
+    // 任何一处跳过都会让预算/冷却失真（D179 同族病根：判定块被埋在分支里）。
+    let planOpsState = initPlanOpsState()
+    let planOpsJustSucceeded = false
+    // v0.40.0（真机修正）：弱模型「只用正文干活」也必须算进展信号。
+    // 实测（`T-20260928-4t5z6k` + 本地 0.8b）：只看 `planOpsJustSucceeded` 时，
+    // `plan-ops` 日志**零命中** —— 模型从不调工具 → 恒 false；也不是空回合 →
+    // 一路烧到 D168 的 6 轮暂停，清单停在初始 4 项。
+    let planOpsHadProse = false
+    let planOpsLastEvent = ''
+    // v0.36.0 F1.5：问候循环守卫 —— 基准 = 用户原始输入（task.input.text），
+    // 连续 3 轮响应与基准同前缀 → 注入纠正指令 + endpoint unhealthy 计数（§3.3 泛化）
+    const greetingGuard = createGreetingLoopGuard({ reference: task.input?.text ?? '' })
+    const greetingEndpoint = (await getModel(opts.modelId))?.baseURL
     while (iteration < startIter + maxIter) {
       iteration += 1
       if (signal.aborted) {
@@ -372,10 +594,59 @@ export async function runReActLoop(
         logger.warn('Agent', `planItems sync skipped: ${(syncErr as Error).message}`, task.id)
       }
 
+      // ============================================================
+      // v0.40.0（O2 · 缺陷 D200）：轮首「清单推进」tick。
+      //
+      // 补的是 v0.39.0 留下的**夹缝**：规划通道只管「生成」，而正文解析回退
+      // （下方 `!action && pendingActions.length === 0` 分支）的前提是「本轮
+      // **零**工具调用」。于是最高频的真实情形 —— 模型调了 `file-reader`
+      // 却没调 `task_plan` —— 两条路都不覆盖，清单纹丝不动。
+      //
+      // 放在**轮首**而不是轮末：轮内有十几处 `continue`（伪调用 / 停滞 /
+      // 文本解析各自早退），放在轮末会被它们整片跳过；轮首只依赖「上一轮的
+      // 客观事实」，不受本轮怎么结束影响。
+      //
+      // 三条自限（缺一即变成"又多烧一次 token"）：
+      //   ① 受每 run 预算（MAX_PLAN_OPS_PER_RUN）硬约束，且预算判定优先于一切豁免；
+      //   ② 失败静默回落 —— 主循环**照常**往下走，清单维护是增强不是前置条件；
+      //   ③ 用户中止（AbortError）原样上抛 —— 吞掉它会让「停止」按钮失灵。
+      // ============================================================
+      try {
+        const tick = await planOpsTick({
+          task,
+          round: iteration,
+          modelId: opts.modelId,
+          signal,
+          state: planOpsState,
+          signals: {
+            failedCount: failureDigest.reduce((m, f) => Math.max(m, f.attempts ?? 0), 0),
+            staleRounds: itersSinceTreeTouch,
+            justSucceeded: planOpsJustSucceeded,
+            hadProse: planOpsHadProse,
+            cancelRequested: false,
+            emptyRound: false,
+          },
+          event: planOpsLastEvent || '（本轮之前尚无进展记录）',
+        })
+        planOpsState = tick.state
+        if (tick.changed) {
+          // tick 真的写了账本 → 视同「本 run 触碰过清单」（与 D126 同口径，
+          // 避免陈旧提醒刚被 tick 解决完又立刻触发一遍）
+          itersSinceTreeTouch = 0
+          treeTouchedThisRun = true
+        }
+      } catch (tickErr) {
+        if (signal.aborted) {
+          await handleAbort(task, iteration, stale)
+          return
+        }
+        logger.warn('Agent', `plan-ops tick skipped: ${(tickErr as Error).message}`, task.id)
+      }
+
       // -------- Reason --------
       // Reason 主体（消息组装 / system 契约装配 / 流式 LLM 调用 / 重试与
       // Reactive Fallback 压缩 / reasoning 落盘广播）→ reason-phase.ts（F7 纯移动）
-      const { response } = await runReasonPhase({
+      const { response, emptyExhausted } = await runReasonPhase({
         task,
         agent,
         modelId: opts.modelId,
@@ -386,6 +657,83 @@ export async function runReActLoop(
         alwaysOnContracts,
       })
       pendingSystemHint = undefined  // reason 内已消费（原 L695 语义），防陈旧 hint 重复注入
+      // ============================================================
+      // v0.39.0（D197）：补试用尽仍是「全空回合」→ **就地终止本 run**。
+      //
+      // 这里是唯一的拦截点，位置刻意放在**完成门禁之前**：再往下走，
+      // 空响应会满足「未调工具 ✓ + 清单无未完成项 ✓ + 未截断 ✓」三条判定，
+      // `guardFinish` 对它天然放行，于是被当成「最终答复」收尾 ——
+      // `summary` 取 `response.thought`（空）→ 用户看到一条空白的「答复」
+      // 而任务已被标 completed（实机证据见 reason-phase.ts 的 D197 注释）。
+      //
+      // 语义依据：`llm-call.ts` 给 `isIncompleteLlmResponse` 的定义就是
+      // 「必须重试或失败，**不能算完成**」—— 空回合无正文可交付、无动作可执行。
+      // ============================================================
+      if (emptyExhausted) {
+        // ============================================================
+        // v0.40.0（O7 · 缺陷 D201）：空回合**先给清单一次推进机会**，再决定暂停。
+        //
+        // 此前空响应等价于「清单永久停摆」—— 这是「任务在跑但清单不动」的
+        // 最坏形态。现在先用上一轮的既有事实例行维护一次清单：
+        //   · 清单动了 → 说明任务仍有可推进的东西，**继续跑**；
+        //   · 清单没动 → 走既有 `pauseForEmptyResponses` 优雅暂停（**不旁路** D197）。
+        //
+        // 为什么不会变成无限循环：`force` 只豁免「轮间隔」，**不豁免预算**
+        // （`shouldRunPlanOps` 里预算判定排在豁免之前）。预算用尽后 tick 恒
+        // `changed=false`，控制流自然落到下面的暂停。
+        // ============================================================
+        let advancedByOps = false
+        try {
+          const tick = await planOpsTick({
+            task,
+            round: iteration,
+            modelId: opts.modelId,
+            signal,
+            state: planOpsState,
+            signals: {
+              failedCount: failureDigest.reduce((m, f) => Math.max(m, f.attempts ?? 0), 0),
+              staleRounds: itersSinceTreeTouch,
+              justSucceeded: planOpsJustSucceeded,
+              hadProse: planOpsHadProse,
+              cancelRequested: false,
+              emptyRound: true,
+            },
+            event: planOpsLastEvent || '模型本轮返回了空响应（既无正文、也无工具调用）',
+          })
+          planOpsState = tick.state
+          advancedByOps = tick.changed
+          if (tick.changed) {
+            itersSinceTreeTouch = 0
+            treeTouchedThisRun = true
+            logger.warn(
+              'Agent',
+              `empty response but plan advanced via plan-ops (${tick.kind}) — 继续下一轮（不暂停）`,
+              task.id,
+            )
+          }
+        } catch (opsErr) {
+          if (signal.aborted) {
+            await handleAbort(task, iteration, stale)
+            return
+          }
+          logger.warn('Agent', `plan-ops empty-round advance skipped: ${(opsErr as Error).message}`, task.id)
+        }
+        if (advancedByOps) continue
+        await pauseForEmptyResponses(task, iteration, EMPTY_RESPONSE_ATTEMPTS)
+        return
+      }
+      // v0.38.0（D159）：工具名归一化 —— **唯一摄取点**（任何分支 / 统计之前）。
+      // 实机证据（2026-09-25 22:33 现场）：模型偶发把引擎自有下划线名写成连字符
+      // （`task-plan`），未归一时 act 拦截分支不认 → 掉进 registry 报错 →
+      // classifyRunWork 误判 mutating → 完成门禁误拦（连续三轮被拒）。
+      // v0.40.0（真机修正 · 信号采集点 A）：本轮「有没有正文」必须在这里记，
+      // 不能挪到 Act 之后 —— 无工具分支（下方 `!action && pendingActions.length === 0`）
+      // 有十几处 `continue`，一旦跳过 Act 之后的采集点，弱模型的每一轮都采不到信号，
+      // 清单维护通道就永远不会被触发（真机实测的原始病态）。
+      // 同时把 `planOpsJustSucceeded` 复位：本轮的成败由下方 Act 分支重新置位。
+      planOpsHadProse = Boolean((response.content ?? '').trim() || (response.thought ?? '').trim())
+      planOpsJustSucceeded = false
+      normalizeResponseToolNames(response)
       // -------- 检查终止 --------
       // v0.14.x Task 1：以"是否确有工具调用"为准（collectActionsForIteration 会同时读
       // response.actions 与 response.action），防止适配器只回传 actions（未填 action 单
@@ -413,7 +761,42 @@ export async function runReActLoop(
         response.toolCallIds && response.toolCallIds.length === pendingActions.length
           ? response.toolCallIds
           : pendingActions.map((_, i) => `call_${iteration}_${i}`)
+
+      // v0.36.0 F1.5：问候循环守卫观测（在无工具/有工具两分支之前）。
+      // 触发 → 注入纠正指令（下一轮 Reason 生效）+ endpoint unhealthy 计数；
+      // 无工具时由下方 no-tool 分支接管（greetingLoopTriggered 进入提示路径，
+      // 不再误判为「最终答复」→ 防 greeting 被当成 task done 的收尾）。
+      let greetingLoopTriggered = false
+      if (greetingGuard) {
+        const verdict = greetingGuard.observe(response.content ?? '')
+        if (verdict.repeated) {
+          greetingLoopTriggered = true
+          const unhealthy = markEndpointUnhealthy(greetingEndpoint, opts.modelId)
+          logger.warn(
+            'Agent',
+            `greeting-loop guard: response repeats first user message (endpoint unhealthy count: ${unhealthy})`,
+            task.id,
+          )
+        }
+      }
+      if (greetingLoopTriggered) {
+        const greetingUnfinished = (task.planItems ?? []).some(
+          (p) => p.status === 'running' || p.status === 'pending' || p.status === 'paused',
+        )
+        pendingSystemHint = labelEngineHint(
+          '你已连续多轮回复与用户第一条消息重复的内容（疑似问候循环）。请停止复述问候语，' +
+            '阅读系统提示与任务清单，直接推进当前任务：调用工具执行未完成项，或给出针对任务的实质回复。' +
+            (greetingUnfinished ? '' : '若任务确已完成，调用 task_complete 并在 summary 中说明。'),
+        )
+      }
       if (!action && pendingActions.length === 0) {
+        // v0.38.1（D177）：正则清单提取回退 —— 用户裁决「要有策略让小模型也能完成任务
+        // 生成 / 替换」。实机 qwen3.5:9b（S2 ⚠️）在重上下文下不发起原生 tool_calls，
+        // 而把任务清单直接写成正文（fenced JSON / 编号列表）→ 引擎解析出 0 个动作 →
+        // 清单永远建立不起来。此处用纯函数提取器扫描无工具答复：能提取出清单草案就
+        // 走与 task_plan **同一条**落库管线（plan-regex 管线，纪律⑧）代为登记，然后
+        // 注入提示让模型继续执行。changed=0（重复提交同一清单）不 continue —— 落回
+        // 既有守卫链，防止「提交 → 再解析 → 再提交」的无限循环。
         // v0.28.1 fix：无工具调用的回合并不总是「最终答复」。
         // 1) finish=length 且无 action → 工具调用大概率被输出长度截断，注入提示让模型自愈
         // 2) 任务清单仍有未完成项（running/pending）→ LLM 提前收尾：注入提示引导其继续
@@ -421,10 +804,21 @@ export async function runReActLoop(
         // 首次温和提示，连续多次无工具调用则提示加强（明确二选一：继续调工具 / task_complete）。
         // 失控风险由 maxIterations 迭代上限兜底（超限走既有 paused + ask_user 路径）。
         const outputTruncated = response.finishReason === 'length'
-        const unfinishedCount = (task.planItems ?? []).filter(
-          (p) => p.status === 'running' || p.status === 'pending',
-        ).length
-        if (outputTruncated || unfinishedCount > 0) {
+        // v0.37.0：paused 也计入未完成 —— 中断保留态不是"已处理完"，
+        // 把它漏掉会让「暂停 → 续聊 → 直接收尾」这条路径静默丢工作。
+        // v0.38.1（D170）：对话级任务不把兜底占位项当「未完成工作」——
+        // 纯对话输入（你好/问好/闲聊）被 plan 兜底成单项清单后，模型每轮的正文答复
+        // 本身就是正确产出；此前它被守卫视为「unfinished work」→ 4 轮有界暂停 →
+        // ask_user「模型较弱」，实测 qwen3.5:9b 对「你好」也被迫走完全套守卫链。
+        // chatMode 时 unfinishedCount 恒为 0 → 自然落到下方「最终答复收尾」路径。
+        const unfinishedCount = chatMode
+          ? 0
+          : (task.planItems ?? []).filter(
+              (p) => p.status === 'running' || p.status === 'pending' || p.status === 'paused',
+            ).length
+        // v0.36.0 F1.5：greetingLoopTriggered 时绝不走「最终答复」收尾（问候语
+        // 被当成 task done 是问候循环最恶劣的出口），一律进提示自愈路径。
+        if (outputTruncated || unfinishedCount > 0 || greetingLoopTriggered) {
           consecutiveNoToolFinal += 1
           const truncatedHint =
             '你上一轮回复被输出长度截断（finish=length），工具调用可能被截掉。' +
@@ -436,14 +830,112 @@ export async function runReActLoop(
                 `否则从第一个未完成项开始继续调用工具执行。禁止只输出文字说明。`
               : `任务清单仍有 ${unfinishedCount} 项未完成（running/pending），而上一轮回复未调用任何工具。` +
                 `若这些项确已无需执行，请调用 task_complete 明确收尾；否则请继续调用工具完成剩余项，不要只输出文字。`
-          const hint = outputTruncated
-            ? truncatedHint + (unfinishedCount > 0 ? `\n${unfinishedHint}` : '')
-            : unfinishedHint
+          // v0.36.0 F1.5：问候循环专属提示（优先于截断/未完成通用提示，已含【引擎提示】标签）
+          const hint = greetingLoopTriggered && !outputTruncated
+            ? (pendingSystemHint ?? unfinishedHint)
+            : outputTruncated
+              ? truncatedHint + (unfinishedCount > 0 ? `\n${unfinishedHint}` : '')
+              : unfinishedHint
           logger.warn(
             'Agent',
             `no-tool turn with unfinished work (round ${consecutiveNoToolFinal}) — injected self-heal hint`,
             task.id,
           )
+          // v0.38.0（D160）：伪调用定向处置 —— 判据独立于「模型有没有说话」。
+          // 实机 qwen3.5:9b 把 `file-reader(path=".")` / `task_plan(items=[…])`
+          // 写成正文，引擎解析出 0 个动作；而 stall.ts 的零产出守卫因
+          // hasSayOutput=true（一直在说话）每轮把计数清零 → 空转 21 轮无人管。
+          // 处置两段式：① 首轮给定向提示（要求发起真实调用）；② 连满
+          // PSEUDO_CALL_STOP_ROUNDS 轮 → 转人工并讲清原因（纪律⑨）。
+          const pseudoTool = detectPseudoToolCallInTurn({
+            content: response.content ?? undefined,
+            thought: response.thought ?? undefined,
+            reasoningContent: response.reasoningContent ?? undefined,
+          })
+          if (pseudoTool) {
+            consecutivePseudoNoTool += 1
+            logger.warn(
+              'Agent',
+              `pseudo tool call in prose: ${pseudoTool}(…) (round ${consecutivePseudoNoTool}/${PSEUDO_CALL_STOP_ROUNDS}) — model is not emitting native tool_calls`,
+              task.id,
+            )
+            if (consecutivePseudoNoTool >= PSEUDO_CALL_STOP_ROUNDS) {
+              await pauseForPseudoToolCalls(task, iteration, pseudoTool)
+              return
+            }
+            pendingSystemHint = labelEngineHint(
+              `【重要】你上一轮把工具调用写成了正文文字（例如 \`${pseudoTool}(…)\`），` +
+                `这类文字引擎**无法执行**。请改为发起真实工具调用（用系统提供的工具 / 函数），` +
+                `不要用代码块演示调用，也不要复述你"将要"做什么。`,
+            )
+            continue
+          }
+          consecutivePseudoNoTool = 0
+          // v0.38.1（D168）②：无工具「纯答复」停滞守卫（对齐 D160 伪调用两段处置）。
+          // 实机 qwen3.5:0.8b：强提示对能力不足的模型无效 —— 连续多轮只输出正文
+          // 答复、从不调 task_plan / task_complete，而 say 非空使 stall 计数每轮
+          // 归零、伪调用守卫也不触发 → 原设计烧到 maxIterations（10 分钟假执行）。
+          // 连满 NO_TOOL_STOP_ROUNDS 轮 → 转人工并讲清原因（纪律⑨）。
+          if (consecutiveNoToolFinal >= NO_TOOL_STOP_ROUNDS) {
+            await pauseForNoToolAnswerStall(task, iteration, unfinishedCount, consecutiveNoToolFinal)
+            return
+          }
+          // ============================================================
+          // v0.39.0（D179 / D182）：文本解析回退**必须排在最后**。
+          //
+          // v0.38.1（D177）把它放在无工具分支的最前面，后果有两条：
+          //   ① 伪调用守卫被架空 —— 模型把 `task_plan(items=[…])` 写成 fenced JSON
+          //      时，这里先把它当"合法清单"登记并 `continue`，`consecutivePseudoNoTool`
+          //      永远不递增，D160 的第二段（连满 3 轮转人工）永远走不到；
+          //   ② D168 与 stall 计数被 `continue` 旁路 —— 措辞每次微变就能让
+          //      `changed > 0` 持续成立，一路烧到 maxIterations。
+          // 现在顺序固定为：伪调用 → 纯答复停滞 →（本处）文本解析。
+          //
+          // 另外两条硬条件（D182）：
+          //   · 对话级任务（chatMode）不解析 —— 模型解释性答复里的「1… 2…」不是清单；
+          //   · 每 run 最多代为落库 3 次 —— 防止「提交 → 再解析 → 再提交」的空转。
+          // ============================================================
+          if (shouldCommitRegexDraft({
+            chatMode,
+            // v0.39.0（D188）：此处**必须传真实推导值**，不能写字面量 `false`。
+            // 上面两条早退（伪调用 → continue/return；纯答复停滞 → return）只是**顺序**
+            // 上保证了这两个守卫此刻为假；把 `false` 写死，等于把「顺序」这个唯一防线
+            // 悄悄降级成「没人会动这段代码」的假设 —— 日后有人把本块挪到伪调用判定
+            // 之前，守卫不会自己失效，而是安安静静继续放行（D179 的原始病态）。
+            // 传推导值后，重排顺序会让这两个条件**自己**成立 → 解析回退自动关门。
+            pseudoHit: pseudoTool !== null,
+            noToolStallHit: consecutiveNoToolFinal >= NO_TOOL_STOP_ROUNDS,
+            regexCommits,
+          })) {
+            const parsedPlan = parsePlannerOutput(
+              [response.content, response.reasoningContent, response.thought].filter(Boolean).join('\n'),
+            )
+            if (parsedPlan) {
+              const committed = await commitPlanDraft({
+                task,
+                iteration,
+                draft: parsedPlan.draft,
+                reason: '模型未发起原生工具调用，引擎从答复正文解析出清单并代为登记（D177 正则回退）',
+                source: 'plan-regex',
+              })
+              if (committed.ok && committed.changed > 0) {
+                regexCommits += 1
+                logger.info(
+                  'Agent',
+                  `plan-regex: extracted ${parsedPlan.draft.length} item(s) via ${parsedPlan.via}, committed changed=${committed.changed}（本 run 第 ${regexCommits} 次）`,
+                  task.id,
+                )
+                pendingSystemHint = labelEngineHint(
+                  `已从你上一轮的答复正文里解析出任务清单（${parsedPlan.draft.length} 项，${committed.summary || '已登记'}）并登记生效，` +
+                    `后续清单更新请直接调用 task_plan 工具。现在请从第一个未完成项开始，调用工具实际执行（file-writer / shell 等）。`,
+                )
+                // D179：代为落库后**仍然**计入「无工具轮次」。此前 continue 跳过了
+                // consecutiveNoToolFinal 的递增，等于给这条路径开了无限通行证。
+                consecutiveNoToolFinal += 1
+                continue
+              }
+            }
+          }
           // v0.31.0 D22（用户实测缺陷）：此处原为 appendL1 + role=user +
           // kind=user_message（详见 l1-repair.ts 头注释）。该类别是**渲染层
           // 判定「这是用户说的话」的唯一依据**（derive-conversation.ts 把所有
@@ -475,11 +967,132 @@ export async function runReActLoop(
           continue
         }
         // 模型未调用工具，且清单无未完成项、输出未被截断 → 认为是最终回复
+        // ============================================================
+        // v0.38.0（D150/D151/D152/D153）：**答复型收尾过统一完成门禁**。
+        //
+        // 这里此前是两条独立分支（D128 的「续聊零写树」+ D134 的「清单未收口」），
+        // 两者计数源不同（run 局部 `completeRefusals` vs 账本 `resume.refusals`），
+        // 叠加后单 run 稳定产出 3 次拒绝且无人能解释（现场「连续三轮」即此）。
+        // 现在只剩**一条**判定：判据客观（本 run 实际工具调用），计数单一（账本）。
+        //
+        // 被拒时：recordRefusal（账本唯一计数）→ refuseViaGate（system 指令 + 用户通告
+        // 两条独立通道）→ emitTurnNote（把模型本轮**已经写好的正文**保底投给用户，
+        // 治 D152「拒绝即吞答复」）。
+        // ============================================================
+        const verdict = await guardFinish({
+          taskId: task.id,
+          iteration,
+          workClass: classifyRunWork(toolsThisRun),
+          touchedTree: treeTouchedThisRun,
+        })
+        if (!verdict.allow) {
+          // v0.39.0（D180）：`recordRefusal` 现在返回是否写成功。写失败时账本计数
+          // 不会增长 → `overLimit` 永不成立 → 任务在「拒绝 → continue」里烧到迭代
+          // 上限（fail-closed）。这里用「连续写失败」做有界放行兜底：不是绕过门禁，
+          // 而是在门禁自己失能时给一条出口，并且明确告警。
+          const wrote = await recordRefusal(task.id)
+          if (wrote) {
+            refusalWriteFailures = 0
+          } else {
+            refusalWriteFailures += 1
+            if (refusalWriteFailures >= MAX_REFUSAL_WRITE_FAILURES) {
+              logger.warn(
+                'Agent',
+                `完成门禁拒绝计数连续 ${refusalWriteFailures} 次写入失败 —— 门禁计数已不可信，按超限放行（清单不改写）`,
+                task.id,
+              )
+              await emitTurnNote({
+                taskId: task.id,
+                iteration,
+                text: '清单写入异常，引擎已按最小干预原则放行收尾（清单状态保持原样）。',
+                via: 'gate-refusal',
+              })
+              await sealLedger(task.id, 'completed', '任务完成（门禁计数异常，有界放行）')
+              await sealGraphForTaskOutcome(task, 'completed', '任务完成')
+              await updateTask(task.id, { status: 'done', completedAt: Date.now() })
+              broadcastTaskStatus({ ...task, status: 'done', completedAt: Date.now() })
+              return
+            }
+          }
+          await refuseViaGate({
+            taskId: task.id,
+            iteration,
+            code: verdict.code,
+            message: verdict.message,
+            refusals: verdict.refusals,
+          })
+          await emitTurnNote({
+            taskId: task.id,
+            iteration,
+            text: safeSlice(response.thought, 500),
+            via: 'gate-refusal',
+          })
+          continue
+        }
         await emitEvent(task.id, {
           type: 'task_complete',
           iteration,
-          summary: safeSlice(response.thought, 500),
+          // v0.39.0（D197）：此处是「未调工具且清单已收口」的答复型收尾，
+          // 没有 action.args.summary 可读，第一级必然落到 thought；
+          // 由 resolveCompleteSummary 保证第三级占位兜底（永不输出空串 ——
+          // 空串会在渲染层直出一条空白「答复」，即 D197 的用户可见形态）。
+          summary: resolveCompleteSummary(undefined, response.thought),
         })
+        // ============================================================
+        // v0.39.0（D178）：超限放行后的在途项收口。
+        //
+        // `guardFinish` 以 `over-limit` 放行时，账本里可能仍有在途项（模型坚持
+        // 清单无需变化）。而 `seal` 算子对 `completed` **显式跳过所有项**，于是
+        // 任务 done、清单仍 running —— 界面上是一眼可见的矛盾态，而
+        // `ledger-guard.ts` 的注释当时还承诺「在途项将在收尾时收口」。
+        //
+        // 只对 **UNFINISHED 型**超限收口（有实质动作、清单确实没收干净）；
+        // TREE_SYNC 型超限保持既有用户裁决「不逼模型做假动作、不改写清单」。
+        // ============================================================
+        if (verdict.reason === 'over-limit' && verdict.leftovers.length > 0 && treeTouchedThisRun) {
+          try {
+            await forceCloseOpenItems(task.id, `完成门禁已达拒绝上限，收尾时收口 ${verdict.leftovers.length} 项在途任务`)
+            logger.warn(
+              'Agent',
+              `over-limit 放行：已收口 ${verdict.leftovers.length} 项在途任务（避免「任务 done 清单仍在途」）`,
+              task.id,
+            )
+          } catch (err) {
+            logger.warn('Agent', `over-limit 在途项收口失败（不影响任务终局）：${(err as Error).message}`, task.id)
+          }
+        }
+        // v0.38.1（D170 + TC-WIRE-008 修正）：对话级任务的兜底占位项随任务完成收口。
+        // 正常任务到达此处时清单已全部终态（guardFinish 已拦在途项），等价无操作；
+        // 仅 chatMode 的引擎兜底单项（如「你好」）会在此被真实收口，避免任务 done
+        // 而清单仍挂 running。**必须走账本 mutate**（唯一写入口纪律 / D132 /
+        // TC-WIRE-008）—— 此前直写 task.planItems 是第二个写入者。
+        if (chatMode) {
+          try {
+            const led = await import('../ledger/engine.js')
+            const ledSnap = await led.loadLedger(task.id)
+            const openItems = (ledSnap?.items ?? []).filter(
+              (it) => it.status === 'pending' || it.status === 'running' || it.status === 'paused',
+            )
+            for (const it of openItems) {
+              await led.mutate(
+                task.id,
+                {
+                  kind: 'set-status',
+                  itemId: it.id,
+                  to: 'done',
+                  source: 'engine-decide',
+                  note: '对话级交互：模型已直接答复',
+                  force: true,
+                },
+                { actor: 'engine:chat-final' },
+              )
+            }
+          } catch (err) {
+            logger.warn('Agent', `chatMode 清单收口失败（不影响任务终局）：${(err as Error).message}`, task.id)
+          }
+        }
+        // v0.37.0：清单账本同步收口（graph 收口在下一行，两者是不同层）
+        await sealLedger(task.id, 'completed', '任务完成（最终答复）')
         // v0.32.1（缺陷 D35）：把**图级 status** 封成 completed。
         // 清单各节点在过程中已由 decidePlanAdvance / stage-gate 逐项推进到 completed，
         // 但 graph.status 在此之前从没有任何生产代码写过 —— 不封口就会出现
@@ -516,20 +1129,29 @@ export async function runReActLoop(
       if (action?.tool === 'task_complete') {
         // v0.27.0 R2/F7：完成收尾（配对 observation / 完成态 / 里程碑 / 记忆钩子）→ turn-end.ts
         // v0.30.0：返回 true 表示"完成被验证门禁拦截，本回合不结束"（需先跑验证命令）
-        // v0.32.1（D39）：清单仍有未收口项时也会被拦（上限 MAX_COMPLETE_REFUSALS 次），
-        // 计数器必须由本循环维护 —— 它是「本 run 内已经被拒几次」的唯一来源。
+        // v0.38.0（D150/D151）：判据改为**客观事实** —— workClass（本 run 实际工具调用）
+        // + touchedTree（本 run 是否写过清单）。
+        //
+        // v0.39.0（D183）：**计数唯一** —— 此前本循环另维护 `completeRefusals`
+        // （run 局部、上限 2）驱动 turn-end 里的 D39 第二套守卫，与账本
+        // `resume.refusals`（上限 2）串联出「单 run 最多 3 次拒绝且无人能解释」
+        // 的现场。第二套守卫已删除，本计数随之删除：拒绝只有账本一处落点。
         if (
           await finishViaTaskComplete(
-            { task, agent, modelId: opts.modelId },
+            {
+              task,
+              agent,
+              modelId: opts.modelId,
+              workClass: classifyRunWork(toolsThisRun),
+              touchedTree: treeTouchedThisRun,
+            },
             action,
             response,
             pendingActions,
             pendingActionIds,
             iteration,
-            completeRefusals,
           )
         ) {
-          completeRefusals += 1
           continue
         }
         return
@@ -549,6 +1171,13 @@ export async function runReActLoop(
       // v0.34.0（D52）：Act 前的清单签名 —— 用于判定「本轮是否产生实质进展」
       const planSigBefore = planSignature(task.planItems)
       const actions = collectActionsForIteration(response)
+      // v0.38.0（D160）：本轮确有真实工具调用 → 伪调用连续计数归零
+      // （只统计**连续**无工具轮，中间成功调过工具就重新计）。
+      if (actions.length > 0) consecutivePseudoNoTool = 0
+      // v0.38.0（D150）：记录本 run 实际请求过的工具 —— 完成门禁的唯一客观事实来源。
+      // 在此处（Act 之前）收集：即使个别 action 随后被预算/阶段守卫拦下，它仍属于
+      // 「模型尝试做过实质工作」，按事实计入（宁可保守拦截，不可静默放行）。
+      for (const a of actions) toolsThisRun.push(a.tool)
       const groupId = genId('group')
       // polish4 §A2 + §D1.1 + §D1.2：每个 action 独立 id，并入 toolCallBudget
       // actionIds 优先采用 response.toolCallIds（adapter 已收集的真实 id），
@@ -733,19 +1362,12 @@ export async function runReActLoop(
       // v0.16.x：阶段门禁信号 — 本轮迭代触发了文档驱动开发门禁（写完 PRD / 交互 / 原型 /
       // 系统设计等）。引擎强制暂停任务并自动 ask_user，避免 LLM 写完不询问直接跳下一阶段。
       let stageGateHit: import('../../skills/builtin/react-core-skills/stage-gates.js').StageGate | null = null
-      // v0.30.0 / P8：计划闸门信号 — Planner 调 submit_plan 成功，计划卡进入
-      // 对话流内联卡等待用户「批准 / 打回 / 编辑」。三层确认闸门第一层：不批准不执行。
-      let planGateHit = false
       for (let i = 0; i < actions.length; i++) {
         const a = actions[i]
         const step = actSteps[i]
         const r = actResults[i]
         broadcastStep(r.completedStep)
         broadcastToolProgress(toFinishedProgress(r.completedStep, groupId))
-        // P8：识别 submit_plan 成功 → 本轮结束后暂停任务（见下方 planGateHit 处理）
-        if (r.ok && a.tool === 'submit_plan' && (r.result as { submitted?: boolean } | undefined)?.submitted === true) {
-          planGateHit = true
-        }
         await emitEvent(task.id, {
           type: 'act_end',
           iteration,
@@ -777,6 +1399,24 @@ export async function runReActLoop(
           durationMs: r.durationMs,
         })
         // 每个 act 写一条 observation
+        // ============================================================
+        // v0.39.0（W2 · F7）：**失败摘要采集**。
+        //
+        // 不是把堆栈贴给模型，而是三件事都说清：哪一步（tool）、失败多少次
+        // （attempts，让模型知道"重试过了，别再来"）、下一步建议（digest.suggest）。
+        // 工具**成功**即清掉同 tool 的记录 —— 只有"连续失败"才值得换回合重想。
+        // ============================================================
+        if (!r.ok) {
+          failureDigest = pushFailureDigest(failureDigest, {
+            tool: String(a.tool ?? 'unknown'),
+            code: r.failureCode,
+            message: safeSlice(String(r.errorMessage ?? '工具执行失败'), 160),
+            // 首次记 1；同一 tool 再次失败由 pushFailureDigest 累加
+            attempts: 1,
+          })
+        } else {
+          failureDigest = failureDigest.filter((f) => f.tool !== a.tool)
+        }
         const observationSummary = buildObservationSummary(a.tool, r.result, r.resultSummary, r.ok)
         await appendL1({
           taskId: task.id,
@@ -815,6 +1455,91 @@ export async function runReActLoop(
           }
         }
       }
+      // ============================================================
+      // v0.39.0（W2 · F7）：**失败达阈值 → 规划通道重排**。
+      //
+      // 业界共识：失败后最忌「原样重试」。此前引擎把失败原样贴回 observation，
+      // 模型看到的是一串红字，最省力的回应就是再调一次同一个工具 —— 实测一路
+      // 烧到工具预算上限。现在连满 PLANNER_FAILURE_THRESHOLD 次就**换一个回合想**：
+      // 一次不带工具的独立调用，输入是「失败摘要 + 当前清单」，硬性要求
+      // 「不得原样重试同一失败动作，必须换路径或拆小」（prompt.failure）。
+      //
+      // 三条自限（缺一即变成"又多烧一次 token"）：
+      //   ① 触发后**清空** failureDigest —— 下一次机会留给新的连续失败；
+      //   ② 受每 run 预算（MAX_PLANNER_PASSES_PER_RUN=5）约束，failure 豁免冷却；
+      //   ③ planner 不可用 / 解析不出清单 / 落库失败 → 什么都不做，既有
+      //      observation 通道照常把失败交给模型（**不影响正常 LLM**）。
+      // ============================================================
+      if (failureDigest.some((f) => f.attempts >= PLANNER_FAILURE_THRESHOLD)) {
+        const digest = failureDigest
+        failureDigest = []
+        try {
+          const ledgerNow = await loadLedger(task.id)
+          const items: PlannerRequestItem[] = (ledgerNow?.items ?? []).map((it) => ({
+            id: it.id,
+            text: it.text,
+            status: String(it.status),
+            parentId: it.parentId ?? null,
+          }))
+          const gate = shouldRunPlanner({
+            state: plannerState,
+            trigger: 'failure',
+            now: Date.now(),
+            fingerprint: draftFingerprint(
+              items.map((i) => ({ text: i.text, status: i.status as 'todo' })),
+            ),
+          })
+          if (!gate.run) {
+            logger.info('Agent', `失败重排被策略跳过（${gate.reason}）—— 既有失败提示照常`, task.id)
+          } else {
+            plannerState = notePlannerRun(plannerState, 'failure', Date.now(), draftFingerprint(
+              items.map((i) => ({ text: i.text, status: i.status as 'todo' })),
+            ))
+            const res = await runPlannerPass({
+              req: {
+                taskId: task.id,
+                trigger: 'failure',
+                goal: safeSlice(task.input.text || '任务计划', 120),
+                items,
+                failures: digest,
+              },
+              modelId: await getPlannerModelId(opts.modelId),
+              signal,
+            })
+            if (res.ok && res.draft.length > 0) {
+              const committed = await commitPlanDraft({
+                task,
+                iteration,
+                draft: res.draft,
+                reason: `连续失败 ${digest.length} 项后由规划通道重排（via=${res.via}）`,
+                source: 'planner',
+              })
+              if (committed.ok && committed.changed > 0) {
+                logger.warn(
+                  'Agent',
+                  `失败重排生效：${res.summary} → changed=${committed.changed}`,
+                  task.id,
+                )
+                // 告知用户「换了个打法」—— 否则界面上清单突然变了没人知道为什么
+                await emitTurnNote({
+                  taskId: task.id,
+                  iteration,
+                  text:
+                    `连续失败后重新规划：${res.summary}。` +
+                    `已按新清单继续（原来的做法不再重试）。`,
+                  via: 'plan-revision',
+                })
+              }
+            } else {
+              logger.info('Agent', `失败重排未产出清单（${res.summary}）—— 既有失败提示照常`, task.id)
+            }
+          }
+        } catch (err) {
+          if ((err as Error)?.name === 'AbortError' || signal.aborted) throw err
+          logger.warn('Agent', `失败重排异常（忽略，回落既有提示）：${(err as Error).message}`, task.id)
+        }
+      }
+
       // 兼容原单 act 事件：最后一组（无并行/单 act 时）通过 observation 事件告知
       await emitEvent(task.id, {
         type: 'observation',
@@ -831,22 +1556,17 @@ export async function runReActLoop(
       // 现在改为：只有阶段门禁（产物文档真正写完）触发时才标 done，
       // 对齐 TraeWork「tasks.md 状态随产物落地自动更新」的做法。
 
-      // v0.30.0 / P8：计划闸门暂停 —— 「不批准不执行」。
-      // Planner 的 submit_plan 已把计划闸门登记为 pending 并广播（对话流内联卡渲染）。
-      // 引擎在此暂停任务即可：批准走 `graph:decide-plan`（冻结 AC + 注入 user 消息续跑），
-      // 打回走同一频道的 reject 分支（注入意见 user 消息触发重规划）。这里不注入 L1 ——
-      // 此刻还不知道用户会批准还是打回，注入任一方向的措辞都会误导下一轮 Reason。
-      if (planGateHit) {
-        logger.info('Agent', 'P8 计划闸门触发：计划已提交，暂停等待用户批准', task.id)
-        // v0.30.2 D12：计划闸门暂停属 ask_user 交互 → 打答复型续聊标记
-        // （批准/打回注入的 user 消息下一轮 run 识别为答复，不触发清单重评）
-        await updateTask(task.id, {
-          status: 'paused',
-          pendingAskUser: { question: '计划已提交，等待批准', askedAt: Date.now() },
-        })
-        broadcastTaskStatus({ ...task, status: 'paused' })
-        return
-      }
+      // v0.39.0（D188）：**已删除 P8 计划闸门暂停块**。
+      // 该块由 v0.30.0 `planGateHit`（`a.tool === 'submit_plan' && r.ok`）驱动，而
+      // `submit_plan` / `request_plan` 已随 v0.38.0（D154）下架 —— 模型根本拿不到这两个
+      // 工具名，即便硬编也先被 `act.ts` 的退役兜底拦掉（`r.ok === false`）
+      // ⇒ 判定恒为假，暂停**从未执行**，日志里却写着"闸门触发"。这是最坏的一类残留：
+      // 代码自称实现了「不批准不执行」，实际什么都没做，读代码的人被它骗过。
+      // 今天闸门仍会被登记（`run-setup.ts:370` 的计划三级降级全败 → 错误态卡片），
+      // 但**是否要让任务在此阻塞**是未决的产品语义（降级单步计划本身是可执行的兜底），
+      // 故本版只移除死代码、不擅自恢复暂停；缺口登记见 04-system-design §7 D188 与 §9 遗留。
+      // 恢复暂停的正确接法：读**活**的闸门状态 `getPlanApproval(task.id)?.state === 'pending'`，
+      // 而不是任何工具名 —— 工具名会被下架，闸门状态不会。
 
       // v0.16.x：阶段门禁 — 写完产物后立即推 task_progress + milestone，并
       // 自动 ask_user + 暂停任务（强制门禁）。修复「写完文档没询问直接开始」。
@@ -875,14 +1595,28 @@ export async function runReActLoop(
                 nextId,
               )
             } else {
-              task.planItems[doneIdx].status = 'done'
-              task.planItems[doneIdx].completedAt = Date.now()
-              task.planItems[doneIdx].updatedAt = Date.now()
-              if (nextId) {
-                task.planItems[doneIdx + 1].status = 'running'
-                task.planItems[doneIdx + 1].updatedAt = Date.now()
+              // v0.37.0（D132）：无图任务的阶段门禁推进也走账本 ——
+              // 此前直写 `updateTask({ planItems })`，与 todo_update 双通道并存。
+              try {
+                const ledS = await import('../ledger/engine.js')
+                const res = await ledS.mutate(
+                  task.id,
+                  { kind: 'advance', fromItemId: doneId, source: 'stage-gate', note: `阶段门禁：${gate.label}` },
+                  { actor: 'stage-gate' },
+                )
+                if (!res.ok && res.error?.code === 'NOT_FOUND') {
+                  await ledS.ensureLedger(task, { seedFromPlanItems: true })
+                  await ledS.mutate(
+                    task.id,
+                    { kind: 'advance', fromItemId: doneId, source: 'stage-gate', note: `阶段门禁：${gate.label}` },
+                    { actor: 'stage-gate' },
+                  )
+                }
+                const fresh = await ledS.loadLedger(task.id)
+                if (fresh) task.planItems = (await import('../ledger/project.js')).toPlanItems(fresh)
+              } catch (err) {
+                logger.warn('Agent', `阶段门禁清单推进失败（账本）：${(err as Error).message}`, task.id)
               }
-              await updateTask(task.id, { planItems: task.planItems })
             }
           }
         }
@@ -945,7 +1679,7 @@ export async function runReActLoop(
       )
       if (anyWrite) {
         consecutiveReadOnly = 0
-      } else if (actions.length > 0 && actions.every((a) => READONLY_TOOLS.has(a.tool))) {
+      } else if (actions.length > 0 && actions.every((a) => isReadonlyTool(a.tool))) {
         consecutiveReadOnly += 1
         if (consecutiveReadOnly >= 3) {
           logger.debug(
@@ -956,6 +1690,141 @@ export async function runReActLoop(
           pendingSystemHint = `你已经连续探索 ${consecutiveReadOnly} 轮仍未开始产出。若工作区为空或与任务无关，请立即用 shell mkdir 创建项目目录并开始实现；若已有足够信息，直接开始执行。`
           consecutiveReadOnly = 0  // 避免下一轮重复注入
         }
+      }
+
+      /* ---------- v0.36.5（D126）：段末任务树完成检查（ZCode todo_reminder 对应物） ----------
+       * 用户实测（java-coder agent 导出会话）：LLM 执行完一段任务后既不更新清单标记、
+       * 也不检查清单是否与现实脱节 —— 树与进度脱节只能靠中断/续聊暴露。
+       * 每轮 Act 结束后：① 本轮触碰过任务树（v0.38.0 起 = `task_plan`）→ 计数归零
+       *   并记录 treeTouchedThisRun（完成门禁的「零写树」客观事实来源）；
+       * ② 距上次触碰 ≥10 轮 → 经 pendingSystemHint 注入一次「检查任务树」提醒 + 内联树快照
+       *   （v0.36.6 D127：纯轮数判定，无「有未收口项」前置，对齐 ZCode runtime-reminders），
+       *   触发后归零（同 ZCode 双阈值防刷屏）。
+       * 追加而非覆盖：保留本轮 Act 期间已设置的技能/预算/只读停滞提示。 */
+      // v0.38.0（D156）：用「真正写账本」的守卫而不是「清单族」—— 一轮里调了已下架的
+      // 旧名（软失败、清单没变）不算"有输出"，否则用户会连看若干轮空白。
+      const calledPlanThisRound = actions.some((a) => isPlanWriteTool(a.tool))
+      // v0.40.0（O2 信号采集）：把本轮的**客观事实**留给下一轮轮首的 plan-ops tick。
+      // 只用「确实发起了哪些工具」+「模型说了什么」，不做任何成功/失败的推测 ——
+      // 推测一旦错了，tick 会把错误的进展写进清单（比不动更糟）。
+      planOpsJustSucceeded = actions.length > 0
+      planOpsLastEvent =
+        [
+          actions.length > 0 ? `本轮调用了工具：${actions.map((a) => a.tool).slice(0, 5).join('、')}` : '',
+          (response.content ?? '').trim().slice(0, 200),
+        ]
+          .filter(Boolean)
+          .join('；') || '（本轮无工具调用、无正文）'
+      itersSinceTreeTouch += 1
+      if (touchesPlanTree(actions.map((a) => a.tool))) {
+        itersSinceTreeTouch = 0
+        treeTouchedThisRun = true
+      } else if (shouldRemindTreeSync({ itersSinceTreeTouch, threshold: TREE_SYNC_REMIND_INTERVAL })) {
+        itersSinceTreeTouch = 0
+        // ============================================================
+        // v0.39.0（W3 · F3）：陈旧清单 → **先重排，再提醒**。
+        //
+        // D126 的现场是：模型闷头干了十几轮，清单停在原地。v0.36.5 的对策是
+        // 「段末注入提醒，请模型自己更新清单」—— 但**正在干活的模型最没空、也最
+        // 没视角**去重新推演整张清单，它只会就地打个勾。所以本版先给规划通道一次
+        // 机会（干净回合 + 失败摘要 + 当前清单），它产不出东西才回落到原提醒 ——
+        // 提醒路径**行为零变更**，这是"不影响正常 LLM"的边界。
+        // ============================================================
+        let replanHandled = false
+        try {
+          const staleItems = await loadLedger(task.id)
+          const items: PlannerRequestItem[] = (staleItems?.items ?? []).map((it) => ({
+            id: it.id,
+            text: it.text,
+            status: String(it.status),
+            parentId: it.parentId ?? null,
+          }))
+          const fp = draftFingerprint(items.map((i) => ({ text: i.text, status: i.status as 'todo' })))
+          const gate = shouldRunPlanner({ state: plannerState, trigger: 'stale', now: Date.now(), fingerprint: fp })
+          if (gate.run) {
+            plannerState = notePlannerRun(plannerState, 'stale', Date.now(), fp)
+            const res = await runPlannerPass({
+              req: {
+                taskId: task.id,
+                trigger: 'stale',
+                goal: safeSlice(task.input.text || '任务计划', 120),
+                items,
+                failures: [],
+              },
+              modelId: await getPlannerModelId(opts.modelId),
+              signal,
+            })
+            if (res.ok && res.draft.length > 0) {
+              const committed = await commitPlanDraft({
+                task,
+                iteration,
+                draft: res.draft,
+                reason: `清单已 ${TREE_SYNC_REMIND_INTERVAL} 轮未更新，规划通道重新推演`,
+                source: 'planner',
+              })
+              if (committed.ok && committed.changed > 0) {
+                replanHandled = true
+                logger.info(
+                  'Agent',
+                  `stale replan 生效：${res.summary} → changed=${committed.changed}`,
+                  task.id,
+                )
+                await emitTurnNote({
+                  taskId: task.id,
+                  iteration,
+                  text: `清单已 ${TREE_SYNC_REMIND_INTERVAL} 轮未更新，引擎重新推演后已更新：${res.summary}。`,
+                  via: 'plan-revision',
+                })
+                const replanHint = labelEngineHint(
+                  `引擎已根据当前进展重新推演任务清单（${res.summary}）。请按新清单继续执行；` +
+                    `若与你了解的事实不符，用 task_plan 提交你认可的完整清单覆盖它。\n` +
+                    `当前清单快照：\n${renderPlanTreeSnapshot(task.planItems ?? []) || '（空）'}`,
+                )
+                pendingSystemHint = pendingSystemHint ? `${pendingSystemHint}\n\n---\n${replanHint}` : replanHint
+              }
+            }
+          }
+        } catch (err) {
+          if ((err as Error)?.name === 'AbortError' || signal.aborted) throw err
+          logger.warn('Agent', `stale 重排异常（回落原提醒）：${(err as Error).message}`, task.id)
+        }
+        if (!replanHandled) {
+          // v0.38.0（D154）：工具名收敛为 task_plan 单入口 —— 提醒文案不得再指向已下架的旧工具。
+          const treeHint =
+            `[引擎提示] 任务清单已 ${TREE_SYNC_REMIND_INTERVAL} 轮未更新。请检查任务清单：` +
+            `① 已完成的段落用 task_plan 提交更新后的清单（status 置 done）；` +
+            `② 清单若已与现实不符，用 task_plan 提交你当前认为正确的完整清单（引擎自动算差异）；` +
+            `③ 全部完成后调用 task_complete 收尾。\n` +
+            `当前清单快照：\n${renderPlanTreeSnapshot(task.planItems ?? []) || '（空）'}`
+          pendingSystemHint = pendingSystemHint ? `${pendingSystemHint}\n\n---\n${treeHint}` : treeHint
+          logger.info(
+            'Agent',
+            `tree-sync reminder injected (${TREE_SYNC_REMIND_INTERVAL} iters since last tree touch)`,
+            task.id,
+          )
+        }
+      }
+
+      /* ---------- v0.38.0（D156）：阶段结论**兜底**节流 ----------
+       * 现场形态：模型连续推理 8 轮无任何输出，然后一次性给最终结果 —— 用户无法区分
+       * 「推进中」与「卡住」。`turn_note` 给了模型主动汇报的出口（自动结论由
+       * plan-commit 的 done 转移触发），但模型可能整段都不汇报；本兜底保证
+       * 连续 MAX_ROUNDS_WITHOUT_NOTE 轮无输出时，引擎主动要求一次进展说明。
+       * 计数归零同样只在"有输出"时（`plan` 或 `note`），防刷屏。 */
+      const calledNoteThisRound = actions.some((a) => a.tool === 'turn_note')
+      const notePolicyStep = advanceNotePolicy(notePolicy, {
+        plan: calledPlanThisRound,
+        note: calledNoteThisRound,
+      })
+      notePolicy = notePolicyStep.state
+      if (notePolicyStep.inject) {
+        const noteHint =
+          `[内部指令 · 请勿复述] 你已经连续 ${MAX_ROUNDS_WITHOUT_NOTE} 轮没有向用户汇报进展了。` +
+          `请用 turn_note 说明：① 现在进展到哪一步；② 下一步要做什么。内容要具体，不要写"正在处理中"。`
+        pendingSystemHint = pendingSystemHint
+          ? `${pendingSystemHint}\n\n---\n${noteHint}`
+          : noteHint
+        logger.info('Agent', `note-policy: injected progress request after ${MAX_ROUNDS_WITHOUT_NOTE} silent rounds`, task.id)
       }
 
       /* ---------- v0.34.0（D52）：零产出轮终局守卫 ----------
@@ -972,7 +1841,7 @@ export async function runReActLoop(
           actions.every((a) =>
             a.tool === 'shell'
               ? !WRITE_COMMAND_RE.test(String((a.args as Record<string, unknown>)?.command ?? ''))
-              : READONLY_TOOLS.has(a.tool),
+              : isReadonlyTool(a.tool),
           ),
         hasSayOutput: !!(response.say && response.say.trim()),
         hasNewThought: freshNarrative,
@@ -1034,7 +1903,7 @@ export async function runReActLoop(
       question: tFor(getUiLocale(), 'askUser.maxIterQuestion', { max: maxIter }),
       suggestions: [
         { label: tFor(getUiLocale(), 'suggest.resumeRun.label'), description: tFor(getUiLocale(), 'suggest.resumeRun.desc') },
-        { label: tFor(getUiLocale(), 'suggest.finishHere.label'), description: tFor(getUiLocale(), 'suggest.finishHere.desc') },
+        { label: tFor(getUiLocale(), 'suggest.finishHere.label'), description: tFor(getUiLocale(), 'suggest.finishHere.desc'), action: 'finish' },
       ],
     })
     // v0.30.2 D12：迭代上限暂停属 ask_user 交互（继续/结束选项卡）→ 打答复型续聊标记
@@ -1068,6 +1937,25 @@ export async function runReActLoop(
     // 注意此处**只补原因，不改状态语义**（AbortError 早已在上方分流，不会被写 failed）。
     await updateTask(task.id, { status: 'failed', errorMessage: message })
     broadcastTaskStatus({ ...task, status: 'failed', errorMessage: message })
+    // v0.39.0（D184）：**失败路径也要封账本**。
+    //
+    // 此前 `sealLedger` 只有两条成功路径在调（loop 最终答复 / turn-end 的
+    // task_complete），失败与取消分支一处都没有 —— 于是：
+    //   · 任务 `failed` ｜ 图 `failed` ｜ **账本仍 `open`** ❌
+    // 后果：清单在 UI 里一直显示"进行中"，`renderSnapshot` 每轮继续把在途项喂给模型，
+    // 且归档侧拿不到终态（`archiveLedger` 以 `outcome` 为判据）。
+    //
+    // 顺序：写在任务终态**之后**（与成功路径"先封、再写 done"相反 —— 失败路径不追求
+    // 那一帧的原子性，且 `markRunningPlanItemFailed` 已在上方收过图）。
+    // 封口失败只告警：不能让"记录失败"这件最重要的事再被失败打断。
+    try {
+      const sealRes = await sealLedger(task.id, 'failed', `运行失败：${message}`)
+      if (!sealRes.ok) {
+        logger.warn('Agent', `失败路径封账本未成功：${sealRes.error?.message ?? '未知'}`, task.id)
+      }
+    } catch (sealErr) {
+      logger.warn('Agent', `失败路径封账本抛错（忽略）：${(sealErr as Error).message}`, task.id)
+    }
     // v0.9.1 §Task 7：失败路径也尝试归档 L1，让失败的经验也能进入 L3b/L4a
     try {
       await runDoneMemoryHooks(task, agent, opts.modelId, '')

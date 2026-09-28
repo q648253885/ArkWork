@@ -40,6 +40,14 @@ export function subscribeAll(
         if (get().selectedTaskId === step.taskId) {
           get().appendStep(step)
         }
+        // v0.36.0（F4.1）：子任务步骤回流 → 并行组卡 stepSummary 回填。
+        // 为什么走 task:step 而不是每个中间步都发进度事件：子任务的步进频率与
+        // 父任务同量级，逐条发事件会把 IPC 和 session.jsonl 灌满（终态才值得落事件）。
+        // 该调用自身按 childTaskId 命中判定，未命中即空转，无需先判父子关系。
+        if (step.type === 'act' || step.type === 'observation') {
+          const summary = step.type === 'act' ? step.resultSummary : step.summary
+          if (summary) get().backfillSubagentStep(step.taskId, summary)
+        }
       }),
     )
 
@@ -144,6 +152,16 @@ export function subscribeAll(
             planItemInFlight: { ...s.planItemInFlight, [payload.taskId]: {} },
           }
         })
+      }),
+    )
+
+    // v0.37.0：任务清单账本变更（唯一真相源 → Renderer 单向投影）。
+    // 携带：任务模式（模型自选，UI 只读展示）、恢复点提示、未收口计数。
+    // 不在这里改写 task.planItems —— 那条通道仍由 plan-list-snapshot 负责，
+    // 两条通道各司其职，避免互相覆盖。
+    unsubs.push(
+      ark.task.onLedgerChanged((payload) => {
+        get().setLedgerSnapshot(payload.taskId, payload.snapshot)
       }),
     )
 
@@ -365,6 +383,47 @@ export function subscribeAll(
         } else if (event.type === 'task_milestone') {
           // Task 9：里程碑节点到达（含可选产物路径，可点击跳转）
           get().markTaskProgressMilestone(event.taskId, event.milestoneId, event.artifactPath)
+        } else if (event.type === 'task:subagent-progress') {
+          /* v0.36.0（F4.1）：并行子 agent 生命周期（queued/running/终态）。
+           * 数据落 store.subagentGroups（P5 卡唯一数据源）+ 函数日志留痕
+           * —— 委派过程此前在日志里是黑箱，出问题只能靠翻子任务。 */
+          get().applySubagentProgress(event)
+          get().appendLog({
+            ts: Date.now(),
+            level: event.status === 'failed' ? 'ERROR' : 'INFO',
+            source: 'Agent',
+            message:
+              `subagent [${event.agentName ?? event.agentId}] ${event.status}` +
+              (event.stepSummary ? `: ${event.stepSummary.slice(0, 80)}` : ''),
+          })
+        } else if (event.type === 'turn_note' || event.type === 'gate_blocked') {
+          /* v0.38.0（A4/A5/A9）：阶段结论 / 门禁通告。
+           *
+           * 为什么单开一条通道而不是复用日志/toast：
+           *   这两类必须成为交互区的**块**（NoteBlock / gate-blocked 通告），
+           *   而块只能由 `projectConversation(events)` 产出 —— 故必须把原始事件
+           *   交给 store.flowEvents，再喂进投影层（唯一块构造入口，不在渲染层
+           *   另起一条路径，否则导出/复制会漏掉它们，D69 的教训）。
+           *
+           * 按 `event.taskId` 分桶（事件自带，不靠"当前选中任务"猜）——
+           * 后台任务的结论不会被串进当前会话。 */
+          get().appendFlowEvent(event.taskId, event)
+          if (event.type === 'turn_note') {
+            get().appendLog({
+              ts: Date.now(),
+              level: 'INFO',
+              source: 'Agent',
+              message: `turn_note(${event.via}): ${event.text.slice(0, 100)}`,
+            })
+          } else {
+            // 门禁拦截是"本该做却没做"的信号，日志留 WARN 便于事后归因
+            get().appendLog({
+              ts: Date.now(),
+              level: 'WARN',
+              source: 'Agent',
+              message: `gate_blocked(${event.code}) ${event.refusals}/${event.max}: ${event.text.slice(0, 100)}`,
+            })
+          }
         }
       }),
     )

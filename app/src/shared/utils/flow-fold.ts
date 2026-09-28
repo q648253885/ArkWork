@@ -22,8 +22,13 @@ import type {
 } from '@shared/types/flow'
 import type { ToolCallKind } from '@shared/types/tool-present'
 
-/** 主展示块 = 用户消息 / 叙述 / 终答 / 计划 / 审批 / 提示 / 错误 */
-export const PRIMARY_KINDS = ['user', 'say', 'answer', 'plan', 'approval', 'notice', 'error'] as const
+/**
+ * 主展示块 = 用户消息 / 叙述 / 终答 / 计划 / 审批 / 提示 / 错误。
+ * v0.38.0：`note`（阶段结论）也是主展示块 —— 它**永不折叠**（03-interaction §二 V1）。
+ * 注意：本常量当前无消费方（`segmentFlow` 用 `scopeOf()` 判进程块，等价且更直接）。
+ * 保留它是为了让"哪些块不折叠"有一个可读的事实源；新增块时一并更新，别让它烂掉。
+ */
+export const PRIMARY_KINDS = ['user', 'say', 'answer', 'plan', 'approval', 'notice', 'error', 'note'] as const
 
 /** 进程块 = 思考 + 工具（技能 / MCP 调用在投影层已统一为 tool 块） */
 export function isProcessBlock(
@@ -100,8 +105,10 @@ export function buildFoldRun(scope: FoldScope, blocks: FlowBlock[]): FlowFoldRun
 /**
  * 把块序列切成渲染段（**保序**）。
  *
- * 规则（04 §1.3）：
- *  ① 相邻同类进程块合成一个 run；kind 变化即断组；
+ * 规则（v0.36.1 过程组修订，原 04 §1.3）：
+ *  ① 连续进程块合成一个 run —— **kind 变化（思考↔工具）不再断组**：
+ *    相关联的思考与工具调用作为整体收起（TraeWork 展示逻辑），
+ *    纯思考 run → scope 'reasoning'、纯工具 run → 'tool'、混排 run → 'process'；
  *  ② 主展示块永不折叠，且天然是 run 的分隔符；
  *  ③ `notice` / `error` 属主展示块 —— 异常必须可见，即使它夹在两次工具
  *     调用之间（此时得到「两个 run 夹一条提示」，**是期望行为**）。
@@ -109,25 +116,23 @@ export function buildFoldRun(scope: FoldScope, blocks: FlowBlock[]): FlowFoldRun
 export function segmentFlow(blocks: FlowBlock[]): FlowSegment[] {
   const out: FlowSegment[] = []
   let bucket: FlowBlock[] = []
-  let bucketScope: FoldScope | null = null
 
   const flush = () => {
-    if (bucket.length === 0 || bucketScope === null) return
-    const run = buildFoldRun(bucketScope, bucket)
+    if (bucket.length === 0) return
+    const hasReasoning = bucket.some((b) => b.kind === 'reasoning')
+    const hasTool = bucket.some((b) => b.kind === 'tool')
+    const scope: FoldScope = hasReasoning && hasTool ? 'process' : hasReasoning ? 'reasoning' : 'tool'
+    const run = buildFoldRun(scope, bucket)
     out.push({ type: 'fold', key: `fold:${run.id}`, run })
     bucket = []
-    bucketScope = null
   }
 
   for (const b of blocks) {
-    const scope = scopeOf(b)
-    if (scope === null) {
+    if (scopeOf(b) === null) {
       flush()
       out.push({ type: 'block', key: `b:${b.id}`, block: b })
       continue
     }
-    if (bucketScope !== null && scope !== bucketScope) flush()
-    bucketScope = scope
     bucket.push(b)
   }
   flush()
@@ -135,6 +140,18 @@ export function segmentFlow(blocks: FlowBlock[]): FlowSegment[] {
 }
 
 /* ---------- 工具 run 的分列计数（折叠行文案的唯一数据源） ---------- */
+
+/**
+ * run 内思考块计数（v0.36.1 过程组：混合 run 折叠行的「思考 N 次」数据源）。
+ * 仅统计 reasoning 块 —— 工具 / 主块忽略。
+ */
+export function thinkingCountOf(blocks: FlowBlock[]): number {
+  let n = 0
+  for (const b of blocks) {
+    if (b.kind === 'reasoning') n++
+  }
+  return n
+}
 
 /** 固定拼接顺序 —— 确定性便于测试，也让用户形成扫读习惯 */
 export const TOOL_COUNT_ORDER: ToolCallKind[] = [

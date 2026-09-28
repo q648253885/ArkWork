@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { listTaskFiles, readFileInTask, writeFileInTask } from '../memory/l2-file.js'
-import { readTextFile, writeTextFile, listTree } from '../fs/workspace.js'
+import { readTextFile, writeTextFile, listTree, listDir } from '../fs/workspace.js'
 import { getWorkspaceDir } from '../store/db.js'
 import { logger } from '../system/logger.js'
 import { getArtifactsDir, validateArtifactPath } from '../fs/artifacts.js'
@@ -16,7 +16,7 @@ import { getSettings, saveSettings } from './settings.js'
 // v0.29.0 F6：用户可见校验错误四语言化
 import { getUiLocale, tFor } from '../i18n/messages.js'
 // v0.31.0 B2：编辑器文件能力（路径边界已提升为共享实现，见 fs/guard.ts）
-import { assertInWorkspace, assertWritableTarget, isInsideRoot } from '../fs/guard.js'
+import { assertInWorkspace, assertWritableTarget, isInsideRoot, probeReadablePath, resolveUserPath } from '../fs/guard.js'
 import { probeText, readText } from '../fs/text.js'
 import { hashFile, writeText } from '../fs/write.js'
 // v0.31.0 B5：文件能力 P1（扁平清单 + chokidar 监听）
@@ -33,20 +33,39 @@ export function registerFsHandlers(): void {
       if (taskId) return await listTaskFiles(taskId)
       const ws = getWorkspaceDir()
       if (!existsSync(ws)) return []
-      return await listTree(ws, { maxDepth: 5, ignore: ['.git', '.arkwork'] })
+      // B11/P1：初始深度 5→3（首屏更快），ignore 恢复默认（含 node_modules ——
+      // 此前 override 掉默认值导致 node_modules 被全量扫 5 层）；更深层由
+      // `fs:list-dir` 懒加载补齐。
+      return await listTree(ws, { maxDepth: 3 })
     } catch (err) {
       logger.error('Tool', `fs:list-files failed: ${(err as Error).message}`, taskId)
       return []
     }
   })
 
+  /**
+   * B11/P1：单层目录懒加载（文件树深层展开）。
+   * v0.36.3 D115：走 `resolveUserPath`（相对路径以工作区根为基准），
+   * 保证交互区里出现的工作区相对路径也能展开；绝对路径越界由 `listDir` 自身容错返回 []。
+   */
+  ipcMain.handle('fs:list-dir', async (_e, dirPath: string) => {
+    try {
+      const dir = resolveUserPath(dirPath)
+      return await listDir(dir)
+    } catch (err) {
+      logger.error('Tool', `fs:list-dir failed: ${(err as Error).message}`)
+      return []
+    }
+  })
+
   ipcMain.handle('fs:read-file', async (_e, path: string) => {
-    return readTextFile(path)
+    // v0.36.3 D115：用户面读取 —— 相对路径以工作区根为基准
+    return readTextFile(resolveUserPath(path))
   })
 
   // v0.6.3：在系统文件管理器中显示文件所在位置（参考 WorkBuddy「打开文件夹」）
   ipcMain.handle('fs:reveal-in-folder', async (_e, path: string) => {
-    shell.showItemInFolder(path)
+    shell.showItemInFolder(resolveUserPath(path))
   })
 
   /**
@@ -146,11 +165,18 @@ export function registerFsHandlers(): void {
    *     不包装则 `code` / `ConflictInfo` 载荷全部丢失，渲染层无法分支。
    * ============================================================ */
 
-  /** 单路径 stat（= probe 的轻量子集；保留 TextProbe 形状避免第二套类型） */
+  /**
+   * v0.36.3 D115 — **用户面读取三频道**（stat / probe / read-text）：
+   *  ① 路径经 `probeReadablePath` 归一化（相对路径以工作区根为基准）**且不抛越界错**；
+   *  ② 工作区外不是拒绝，而是把 `insideWorkspace:false` 交给 `probeText` ⇒ 只读原因
+   *     `outside-workspace`（编辑器标只读、写盘被拒，预览照常）。
+   *  —— 边界只约束 LLM 工具面（file-editor / file-writer / grep / glob / permissions），
+   *     那几处仍走 `isInsideWorkspace`，本版一行未动。
+   */
   ipcMain.handle('fs:stat-path', async (_e, path: string): Promise<TextProbe> => {
     try {
-      await assertInWorkspace(path)
-      return await probeText(path)
+      const { absPath, insideWorkspace } = await probeReadablePath(path)
+      return await probeText(absPath, { insideWorkspace })
     } catch (err) {
       throwEncodedFsError(err)
     }
@@ -159,8 +185,8 @@ export function registerFsHandlers(): void {
   /** 编码 / EOL / BOM / 只读原因 / 快速哈希探测 */
   ipcMain.handle('fs:probe-text', async (_e, path: string): Promise<TextProbe> => {
     try {
-      await assertInWorkspace(path)
-      return await probeText(path)
+      const { absPath, insideWorkspace } = await probeReadablePath(path)
+      return await probeText(absPath, { insideWorkspace })
     } catch (err) {
       throwEncodedFsError(err)
     }
@@ -169,8 +195,8 @@ export function registerFsHandlers(): void {
   /** 读文本 + probe —— **编辑器打开的唯一入口**（§5.2） */
   ipcMain.handle('fs:read-text', async (_e, path: string) => {
     try {
-      await assertInWorkspace(path)
-      return await readText(path)
+      const { absPath, insideWorkspace } = await probeReadablePath(path)
+      return await readText(absPath, { insideWorkspace })
     } catch (err) {
       throwEncodedFsError(err)
     }

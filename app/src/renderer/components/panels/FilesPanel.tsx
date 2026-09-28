@@ -5,9 +5,10 @@
  * - 树视图：展开/折叠，点击文件 → 预览浮窗
  * - 右键菜单：重命名 / 删除 / 复制路径 / 插入为上下文
  * - 状态徽标：M / A / D
- * - 默认折叠 node_modules / .git
+ * - B11/P1：全部展开/收起 + 深层目录懒加载（fs:list-dir）；默认展开顶层、
+ *   收起 COLLAPSED_DIRS；node_modules/.git/.arkwork 主进程侧已 ignore 不下发
  * ============================================================ */
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Icon } from '../../icons'
 import { useStore } from '../../store'
 import { ark } from '../../ipc/client'
@@ -15,7 +16,7 @@ import { FILE_STATUS_COLOR } from '../../constants'
 import type { FsNode } from '../../types'
 import { Tooltip, EmptyState } from '../ui'
 import { useTranslation } from 'react-i18next'
-// 默认折叠的目录名
+// 默认收起的目录名（仅影响「默认是否展开」的判定）
 const COLLAPSED_DIRS = new Set(['node_modules', '.git', '.next', 'dist', 'build'])
 
 export function FilesPanel() {
@@ -25,30 +26,57 @@ export function FilesPanel() {
   const setSelectedFile = useStore((s) => s.setSelectedFile)
   const refreshFiles = useStore((s) => s.refreshFiles)
   const pushToast = useStore((s) => s.pushToast)
+  // v0.36.0 B11/P1：展开状态收进 fsSlice（双挂载不再分叉）+ 懒加载缓存
+  const treeExpanded = useStore((s) => s.treeExpanded)
+  const toggleTreeNode = useStore((s) => s.toggleTreeNode)
+  const expandAllTreeNodes = useStore((s) => s.expandAllTreeNodes)
+  const collapseAllTreeNodes = useStore((s) => s.collapseAllTreeNodes)
+  const dirChildren = useStore((s) => s.dirChildren)
+  const dirLoading = useStore((s) => s.dirLoading)
+  const loadTreeDir = useStore((s) => s.loadTreeDir)
+  const invalidateDirCache = useStore((s) => s.invalidateDirCache)
 
-  // 初始 expanded：显式折叠 node_modules / .git 等
-  const [expanded, setExpanded] = useState<Record<string, boolean>>(() =>
-    computeInitialExpanded(files)
-  )
   const [query, setQuery] = useState('')
 
-  const toggle = (path: string) => setExpanded((p) => ({ ...p, [path]: !p[path] }))
   const stats = useMemo(() => countFiles(files), [files])
   const filtering = query.trim() !== ''
   const visible = useMemo(() => filterTree(files, query), [files, query])
 
   return (
     <div className="flex flex-col h-full">
-      {/* 头部：标题 + 统计 + 刷新 */}
+      {/* 头部：标题 + 统计 + 全部展开/收起 + 刷新 */}
       <div className="flex items-center gap-2 px-3 h-9 flex-shrink-0 border-b border-border-subtle">
         <span className="text-sm text-text-primary font-medium">{t('panel.files.title')}</span>
         <span className="text-2xs text-text-tertiary tabular">
           {t('panel.files.stats', { files: stats.files, folders: stats.folders })}
         </span>
+        {/* v0.36.0 B11/P1：全部展开 = 已加载树 BFS；全部收起 = 清空展开表。
+            不做无限递归拉取全仓库（node_modules 类目录规模不可控）。 */}
+        <Tooltip label={t('panel.files.expandAll')} desc={t('panel.files.expandAllDesc')}>
+          <button
+            onClick={expandAllTreeNodes}
+            aria-label={t('panel.files.expandAll')}
+            className="ml-auto p-1 rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text-primary transition-colors"
+          >
+            <Icon.ChevronsDown width={16} height={16} />
+          </button>
+        </Tooltip>
+        <Tooltip label={t('panel.files.collapseAll')} desc={t('panel.files.collapseAllDesc')}>
+          <button
+            onClick={collapseAllTreeNodes}
+            aria-label={t('panel.files.collapseAll')}
+            className="p-1 rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text-primary transition-colors"
+          >
+            <Icon.ChevronsUp width={16} height={16} />
+          </button>
+        </Tooltip>
 <Tooltip label={t('panel.files.refreshTooltip')}>
         <button
-          onClick={() => void refreshFiles()}
-          className="ml-auto p-1 rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text-primary transition-colors"
+          onClick={() => {
+            invalidateDirCache()
+            void refreshFiles()
+          }}
+          className="p-1 rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text-primary transition-colors"
 
         >
           <Icon.Refresh width={16} height={16} />
@@ -93,8 +121,11 @@ export function FilesPanel() {
               key={node.path}
               node={node}
               depth={0}
-              expanded={expanded}
-              onToggle={toggle}
+              expanded={treeExpanded}
+              onToggle={toggleTreeNode}
+              dirChildren={dirChildren}
+              dirLoading={dirLoading}
+              onLoadDir={(path) => void loadTreeDir(path)}
               selectedPath={selectedFile}
               forceOpen={filtering}
               onSelect={(path) => void setSelectedFile(path)}
@@ -117,6 +148,9 @@ function FileTreeNode({
   depth,
   expanded,
   onToggle,
+  dirChildren,
+  dirLoading,
+  onLoadDir,
   selectedPath,
   onSelect,
   forceOpen,
@@ -125,20 +159,31 @@ function FileTreeNode({
   node: FsNode
   depth: number
   expanded: Record<string, boolean>
-  onToggle: (path: string) => void
+  onToggle: (path: string, defaultOpen: boolean) => void
+  /** B11/P1：懒加载目录缓存（path → 单层子项） */
+  dirChildren: Record<string, FsNode[]>
+  dirLoading: Record<string, boolean>
+  /** 展开一个 children 未加载（undefined）的目录时触发 */
+  onLoadDir: (path: string) => void
   selectedPath: string | null
   onSelect: (path: string) => void
   forceOpen: boolean
   onToast: (msg: string, type?: 'success' | 'warning' | 'danger') => void
 }) {
   const { t } = useTranslation()
-  const isOpen = forceOpen || (expanded[node.path] ?? depth < 1)
+  // 默认语义与旧版一致：顶层目录展开、COLLAPSED_DIRS（dist/build/.next 等）收起。
+  const defaultOpen = depth < 1 && !COLLAPSED_DIRS.has(node.name)
+  const isOpen = forceOpen || (expanded[node.path] ?? defaultOpen)
   const isSelected = selectedPath === node.path
   const [menuOpen, setMenuOpen] = useState(false)
   // v0.9.1：行内重命名状态
   const [renaming, setRenaming] = useState(false)
   const [renameDraft, setRenameDraft] = useState(node.name)
+  // v0.36.2（D113）：双击的第二击不再取反 —— 双击 = 两次 click = 取反两次 = 净零，
+  // 观感即「点了没反应，要再点一次才生效」。
+  const lastToggleAt = useRef(0)
   const refreshFiles = useStore((s) => s.refreshFiles)
+  const invalidateDirCache = useStore((s) => s.invalidateDirCache)
   const confirm = useStore((s) => s.confirm)
 
   // v0.9.1：提交重命名（Enter 提交 / Esc 取消 / 失焦提交）
@@ -152,6 +197,7 @@ function FileTreeNode({
     try {
       await ark.fs.rename(node.path, newName)
       onToast(t('panel.files.renamed', { name: newName }))
+      invalidateDirCache()
       await refreshFiles()
     } catch (err) {
       onToast(t('panel.files.renameFailed', { message: (err as Error).message }), 'danger')
@@ -171,6 +217,7 @@ function FileTreeNode({
     try {
       await ark.fs.delete(node.path)
       onToast(t('panel.files.movedToTrash', { name: node.name }))
+      invalidateDirCache()
       await refreshFiles()
     } catch (err) {
       onToast(t('panel.files.deleteFailed', { message: (err as Error).message }), 'danger')
@@ -178,10 +225,25 @@ function FileTreeNode({
   }
 
   if (node.type === 'folder') {
+    // B11/P1：子项优先取节点自带 children；未加载（undefined）时回落懒加载缓存。
+    // children === [] 表示「已加载且确认为空目录」——不再触发懒加载。
+    const kids = node.children ?? dirChildren[node.path]
+    const needsLoad = kids === undefined
+    const isLoading = Boolean(dirLoading[node.path])
+    const handleToggle = () => {
+      if (forceOpen) return // 搜索过滤态下 toggle 无效果，显式 no-op（B11/P1）
+      const now = Date.now()
+      if (now - lastToggleAt.current < 300) return
+      lastToggleAt.current = now
+      onToggle(node.path, defaultOpen)
+      // 展开一个未加载目录 → 触发单层懒加载
+      if (!isOpen && needsLoad) onLoadDir(node.path)
+    }
     return (
       <div>
         <button
-          onClick={() => onToggle(node.path)}
+          onClick={handleToggle}
+          aria-expanded={isOpen}
           className="w-full flex items-center gap-1.5 pl-2 pr-2 py-1 text-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
           style={{ paddingLeft: 8 + depth * 14 }}
         >
@@ -198,18 +260,30 @@ function FileTreeNode({
           <span className="flex-1 text-left truncate">{node.name}</span>
         </button>
         {isOpen &&
-          node.children?.map((child) => (
-            <FileTreeNode
-              key={child.path}
-              node={child}
-              depth={depth + 1}
-              expanded={expanded}
-              onToggle={onToggle}
-              selectedPath={selectedPath}
-              onSelect={onSelect}
-              forceOpen={forceOpen}
-              onToast={onToast}
-            />
+          (isLoading ? (
+            <div
+              className="py-1 text-2xs text-text-tertiary"
+              style={{ paddingLeft: 8 + (depth + 1) * 14 + 22 }}
+            >
+              {t('panel.files.loading')}
+            </div>
+          ) : (
+            (kids ?? []).map((child) => (
+              <FileTreeNode
+                key={child.path}
+                node={child}
+                depth={depth + 1}
+                expanded={expanded}
+                onToggle={onToggle}
+                dirChildren={dirChildren}
+                dirLoading={dirLoading}
+                onLoadDir={onLoadDir}
+                selectedPath={selectedPath}
+                onSelect={onSelect}
+                forceOpen={forceOpen}
+                onToast={onToast}
+              />
+            ))
           ))}
       </div>
     )
@@ -418,21 +492,6 @@ function MenuItem({
 /* ============================================================
  * 辅助函数
  * ============================================================ */
-
-/** 初始 expanded：node_modules / .git 等显式折叠 */
-function computeInitialExpanded(nodes: FsNode[]): Record<string, boolean> {
-  const out: Record<string, boolean> = {}
-  const walk = (list: FsNode[]) => {
-    for (const n of list) {
-      if (n.type === 'folder') {
-        if (COLLAPSED_DIRS.has(n.name)) out[n.path] = false
-        if (n.children) walk(n.children)
-      }
-    }
-  }
-  walk(nodes)
-  return out
-}
 
 /** 按文件名模糊过滤树 */
 function filterTree(nodes: FsNode[], query: string): FsNode[] {

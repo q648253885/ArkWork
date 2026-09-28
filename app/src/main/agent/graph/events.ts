@@ -24,6 +24,9 @@
  */
 import type { NodeStatus, ReplanEventType, TaskGraph } from '@shared/types/graph'
 import type { DriftResult } from './drift.js'
+// v0.39.0（D189）：模型可见的清单指引只许引唯一事实源 —— 本文件此前写死 `replan`，
+// 而该工具已随 v0.38.0（D154）下架，模型照做必吃软失败。
+import { PLAN_TOOL_HINT } from '../ledger/hint.js'
 
 /** 事件判定输出 */
 export interface EventDecision {
@@ -228,7 +231,7 @@ function detectNewDependency(graph: TaskGraph, files?: string[]): EventDecision 
     reason:
       `本轮写入了当前任务未声明的模块：${outsiders.slice(0, 3).join(', ')}` +
       `${outsiders.length > 3 ? ` 等 ${outsiders.length} 处` : ''}。` +
-      `若这些改动是完成 ${focus.key ?? focus.id} 的前置条件，请用 replan 追加节点并建立依赖；否则请确认是否已偏离任务范围。`,
+      `若这些改动是完成 ${focus.key ?? focus.id} 的前置条件，${PLAN_TOOL_HINT.order}；否则请确认是否已偏离任务范围。`,
   }
 }
 

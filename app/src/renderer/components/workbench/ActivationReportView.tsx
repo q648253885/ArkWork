@@ -7,10 +7,12 @@
  * 必须无处藏身。因此报告要同时回答三个问题：
  *   ① **过没过**（校验问题，error 阻断 / warning 不阻断）
  *   ② **哪几项没生效**（降级四要素：layer / ref / reason / blocking 逐条可见）
- *   ③ **实际装了什么**（快照五层：agents / tools / ui / data / auto）
+ *   ③ **实际装了什么**（快照三层：agents / tools / ui）
  *
  * 复用纪律：本组件是**纯展示**（入参即数据），因此 ProfileSwitcher 的下拉、
- * ProfilesView 的抽屉、DiagnosticsView 的快照区三处都能直接复用同一实现。
+ * ProfilesView 的抽屉两处都能直接复用同一实现。
+ *
+ * ★ v0.36.0（D5）：快照由五层收缩为三层 —— `data` / `auto` 两层随插槽契约删除。
  * ============================================================ */
 import { useTranslation } from 'react-i18next'
 import { Icon } from '../../icons'
@@ -21,15 +23,13 @@ import type {
   ValidationIssue,
 } from '@shared/types/profile'
 
-const SNAPSHOT_LAYERS = ['agents', 'tools', 'ui', 'data', 'auto'] as const
+const SNAPSHOT_LAYERS = ['agents', 'tools', 'ui'] as const
 
 function layerKey(layer: string): string {
   switch (layer) {
     case 'agents':
     case 'tools':
     case 'ui':
-    case 'data':
-    case 'auto':
       return layer
     default:
       return 'unknown'
@@ -126,7 +126,7 @@ export function DegradedView({ degraded }: { degraded: Degradation[] }) {
 }
 
 /* ============================================================
- * 快照五层
+ * 快照三层
  * ============================================================ */
 export function SnapshotView({ snapshot }: { snapshot: CompositionSnapshot | null }) {
   const { t } = useTranslation()
@@ -135,7 +135,7 @@ export function SnapshotView({ snapshot }: { snapshot: CompositionSnapshot | nul
   }
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-5 gap-1.5">
+      <div className="grid grid-cols-3 gap-1.5">
         {SNAPSHOT_LAYERS.map((layer) => (
           <div key={layer} className="rounded-md border border-border-subtle bg-bg-surface px-2 py-1.5 text-center">
             <div className="text-2xs text-text-tertiary truncate">{t(`profile.report.layer.${layer}`)}</div>

@@ -64,6 +64,8 @@ export interface HostRuntimeState {
   effects: number
   registeredTools: string[]
   registeredViews: string[]
+  /** v0.36.0：已登记的视图桥方法（ctx.views.onCall） */
+  registeredViewCalls: string[]
   registeredPanels: string[]
   /** 私有 KV 已用字节 */
   storageBytes: number
@@ -153,11 +155,20 @@ export function pickApply(mod: unknown): ((ctx: unknown) => unknown) | null {
 
 const isFn = (v: unknown): v is (...a: unknown[]) => unknown => typeof v === 'function'
 
+/** ctx.ark.log 的已知级别（首参命中 → 按位置参数解；否则首参即日志内容） */
+const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const
+
 export function createHostRuntime(deps: HostRuntimeDeps): HostRuntime {
   const { endpoint } = deps
   const loadModule = deps.loadModule ?? ((abs: string, rel: string) => defaultLoadModule(abs, rel))
   const storageQuota = deps.storageQuotaBytes ?? 256 * 1024
   const invokeTimeoutMs = deps.invokeTimeoutMs ?? 0
+  // v0.36.0（D83）：计时器必须有全局默认。host-entry 生产入口只传 `{ endpoint }`，
+  // 而 setTimer/clearTimer 原先「可选注入且无默认」—— 心跳 tick 从未被调度，
+  // 所有健康插件都在激活 ~9s 后被主进程看门狗误判「心跳缺失」回收（实机冒烟
+  // 暴露；单测因注入假计时器而全绿 —— 「离线全绿、真跑不过」第四例）。
+  const setTimer = deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms))
+  const clearTimer = deps.clearTimer ?? ((h: unknown) => clearTimeout(h as NodeJS.Timeout))
 
   /* ---------- 状态 ---------- */
   let prepared = false
@@ -217,6 +228,8 @@ export function createHostRuntime(deps: HostRuntimeDeps): HostRuntime {
 
   /* ---------- 注册表（宿主侧真源在主进程；这里的表只用于「本进程内可路由」） ---------- */
   const toolHandlers = new Map<string, (input: unknown) => unknown>()
+  /** v0.36.0：视图桥方法注册表（Client 半经 host.call 调；宿主只搬运不经手业务） */
+  const viewCallHandlers = new Map<string, (params: unknown) => unknown>()
   const viewRegIds = new Map<string, number>()
   const panelRegIds = new Map<string, number>()
   const eventHandlers = new Map<string, Set<(payload: unknown) => unknown>>()
@@ -235,7 +248,7 @@ export function createHostRuntime(deps: HostRuntimeDeps): HostRuntime {
     return new Promise((resolve, reject) => {
       const timer =
         invokeTimeoutMs > 0
-          ? deps.setTimer?.(() => {
+          ? setTimer(() => {
               pendingInvokes.delete(id)
               reject(new RpcError(RPC_ERROR.E_TIMEOUT, `能力调用 ${cap} 超时（${invokeTimeoutMs}ms）`, { cap }))
             }, invokeTimeoutMs)
@@ -267,9 +280,24 @@ export function createHostRuntime(deps: HostRuntimeDeps): HostRuntime {
       // 事件名闭集：未登记即报错。为什么不在主进程兜：作者写错事件名时
       // 「静默不触发」是最难查的一类 bug（纪律⑦）。
       if (!KNOWN_EVENTS.has(event)) {
-        throw new RpcError(RPC_ERROR.E_EVENT_UNKNOWN, `未知宿主事件「${event}」`, {
-          fix: `可选：${Array.from(KNOWN_EVENTS).join(' / ')}`,
-        })
+        // ★ v0.36.0（F3.3）：命令事件 `command:<id>` 是第二类合法事件名，
+        //   但必须**先在清单 provides.commands 里声明**（闭集纪律的延伸 ——
+        //   声明过的命令才有 QuickAction 入口，监听未声明的命令是作者笔误）。
+        if (event.startsWith('command:')) {
+          const cmdId = event.slice('command:'.length)
+          const declared = ((manifest as { provides?: { commands?: Array<{ id: string }> } }).provides?.commands ?? []).some(
+            (c) => c.id === cmdId,
+          )
+          if (!declared) {
+            throw new RpcError(RPC_ERROR.E_EVENT_UNKNOWN, `命令事件「${event}」未在清单 provides.commands 中声明`, {
+              fix: '在 plugin.json 的 provides.commands 里补 { "id": "<cmdId>", "title": "…" }，或改用已声明的命令 id',
+            })
+          }
+        } else {
+          throw new RpcError(RPC_ERROR.E_EVENT_UNKNOWN, `未知宿主事件「${event}」`, {
+            fix: `可选：${Array.from(KNOWN_EVENTS).join(' / ')}，或 command:<已声明的命令 id>`,
+          })
+        }
       }
       let set = eventHandlers.get(event)
       if (!set) {
@@ -285,9 +313,21 @@ export function createHostRuntime(deps: HostRuntimeDeps): HostRuntime {
       return off
     },
     ark: {
-      /** 日志是单向通知（无应答）—— 不该让一条日志把调用链卡住 */
-      log(level: unknown, msg: unknown, data?: unknown): void {
-        endpoint.send(notify('host/log', { level: String(level ?? 'info'), msg: String(msg ?? ''), data }))
+      /**
+       * 日志是单向通知（无应答）—— 不该让一条日志把调用链卡住。
+       *
+       * 兼容两种调用形态：`log('info', '内容'[, data])`（仓内约定）与
+       * `log('内容'[, data])`（最自然的单参写法）。单参若按位置硬解会把
+       * 消息静默丢进 level 位（B2 实机冒烟发现：插件日志到达主进程只剩空前缀），
+       * 故首参不是已知级别（或只传了一个参数）时按「内容」处理。
+       */
+      log(levelOrMsg: unknown, msg?: unknown, data?: unknown): void {
+        const first = typeof levelOrMsg === 'string' && (LOG_LEVELS as readonly string[]).includes(levelOrMsg)
+        if (first && msg !== undefined) {
+          endpoint.send(notify('host/log', { level: levelOrMsg, msg: String(msg), data }))
+        } else {
+          endpoint.send(notify('host/log', { level: 'info', msg: String(levelOrMsg ?? ''), data: msg }))
+        }
       },
       workspace: {
         root: (): Promise<unknown> => cap('workspace.root'),
@@ -309,6 +349,24 @@ export function createHostRuntime(deps: HostRuntimeDeps): HostRuntime {
       },
       views: {
         register: (def: unknown): Promise<unknown> => registerView(def),
+        /**
+         * v0.36.0：登记一个视图桥方法 —— 插件 Client 半（iframe）经桥
+         * `host.call {method, params}` 调到这里。宿主只做搬运与超时，
+         * 业务逻辑全在插件自己注册的 handler 里（不构成额外攻击面）。
+         * effect-tracked：dispose / 激活失效时随插件侧账一起撤。
+         */
+        onCall: (method: unknown, handler: unknown): (() => void) => {
+          if (typeof method !== 'string' || !method || !isFn(handler)) {
+            throw new RpcError(RPC_ERROR.E_INTERNAL, 'views.onCall 需要 (string, function)')
+          }
+          if (viewCallHandlers.has(method)) {
+            throw new RpcError(RPC_ERROR.E_CONFLICT, `视图方法「${method}」已被本插件注册`)
+          }
+          viewCallHandlers.set(method, handler as (p: unknown) => unknown)
+          return recordEffect('view-call', method, () => {
+            viewCallHandlers.delete(method)
+          })
+        },
       },
       panels: {
         register: (def: unknown): Promise<unknown> => registerPanel(def),
@@ -358,6 +416,20 @@ export function createHostRuntime(deps: HostRuntimeDeps): HostRuntime {
           void cap('renderer.post', { payload }).catch(() => {})
         },
       },
+      /**
+       * v0.36.0：git 封闭白名单（git/service.ts 的 20 个 op）。
+       * 用 Proxy 让 `ctx.ark.git.status({...})` 直观可用；op 是否合法由
+       * 主进程的 git 服务终审（未知 op = E_GIT_UNKNOWN_OP），Host 半不做镜像
+       * 白名单（两份表迟早漂移）。
+       */
+      git: new Proxy({}, {
+        get: (_t, prop): unknown => {
+          // `then` 必须是 undefined：await 会先探测 thenable，返回函数会让
+          // Promise 把代理本身当 thenable 永远挂起。
+          if (typeof prop !== 'string' || prop === 'then') return undefined
+          return (args?: unknown) => cap('git', { op: prop, ...(args === undefined ? {} : { args }) })
+        },
+      }) as Record<string, (args?: unknown) => Promise<unknown>>,
     },
   }
 
@@ -552,7 +624,7 @@ export function createHostRuntime(deps: HostRuntimeDeps): HostRuntime {
       const p = pendingInvokes.get(msg.id)
       if (!p) return
       pendingInvokes.delete(msg.id)
-      if (p.timer !== undefined) deps.clearTimer?.(p.timer)
+      if (p.timer !== undefined) clearTimer(p.timer)
       if (msg.ok) p.resolve(msg.result)
       else p.reject(new RpcError(msg.error?.code ?? RPC_ERROR.E_INTERNAL, msg.error?.message ?? '未知错误', msg.error?.data))
       return
@@ -596,6 +668,20 @@ export function createHostRuntime(deps: HostRuntimeDeps): HostRuntime {
           endpoint.send(replyOk(id, { delivered: set?.size ?? 0 }))
           return
         }
+        case 'host/view-call': {
+          // v0.36.0：Client 半的 host.call 落到插件的 ctx.views.onCall 注册表。
+          // 未注册 = E_NOT_FOUND（让 Client 半拿到明确报错，而不是静默无响应）。
+          const p = (params ?? {}) as { method?: string; params?: unknown }
+          const method = String(p.method ?? '')
+          const h = viewCallHandlers.get(method)
+          if (!h) {
+            throw new RpcError(RPC_ERROR.E_NOT_FOUND, `插件未注册视图方法「${method}」`, {
+              fix: '在 apply(ctx) 里 ctx.views.onCall("<method>", handler)',
+            })
+          }
+          endpoint.send(replyOk(id, await h(p.params)))
+          return
+        }
         default:
           throw new RpcError(RPC_ERROR.E_NOT_FOUND, `未知方法「${method}」`)
       }
@@ -622,7 +708,7 @@ export function createHostRuntime(deps: HostRuntimeDeps): HostRuntime {
   let beatTimer: unknown
   function stopHeartbeat(): void {
     if (beatTimer !== undefined) {
-      deps.clearTimer?.(beatTimer)
+      clearTimer(beatTimer)
       beatTimer = undefined
     }
   }
@@ -633,9 +719,9 @@ export function createHostRuntime(deps: HostRuntimeDeps): HostRuntime {
     stopHeartbeat()
     const tick = (): void => {
       endpoint.send(notify('host/heartbeat', { at: Date.now() }))
-      beatTimer = deps.setTimer?.(tick, every)
+      beatTimer = setTimer(tick, every)
     }
-    beatTimer = deps.setTimer?.(tick, every)
+    beatTimer = setTimer(tick, every)
   }
 
   /* ★ 端点自挂：工厂**自己**订阅，而不是让调用方记得去挂。
@@ -655,6 +741,7 @@ export function createHostRuntime(deps: HostRuntimeDeps): HostRuntime {
       effects: effects.length,
       registeredTools: Array.from(toolHandlers.keys()),
       registeredViews: Array.from(viewRegIds.keys()),
+      registeredViewCalls: Array.from(viewCallHandlers.keys()),
       registeredPanels: Array.from(panelRegIds.keys()),
       storageBytes,
     }),

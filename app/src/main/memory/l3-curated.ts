@@ -1,16 +1,18 @@
 /* ============================================================
  * ArkWork — L3a 策展记忆（v0.8.0 F802）
  * frozen snapshot 机制：run 启动读一次，写入进 pending 区，下次 run 合并生效。
- * 文件：
- *   {workspace}/.arkwork/memory.md           — 工作区策展快照（≤2,200 字符）
- *   {workspace}/.arkwork/user.md              — 用户画像笔记快照（≤1,375 字符）
- *   {workspace}/.arkwork/memory.pending.jsonl — 待生效条目（暂存区）
+ * 文件（★ v0.36.3 修订）：
+ *   {workspace}/.arkwork/memory.md            — 工作区策展快照（项目偏好/规则，≤2,200 字符）
+ *   {agentSpace}/user.md                      — 用户偏好笔记快照（跨工作区，≤1,375 字符）
+ *   {agentSpace}/memory.pending.jsonl         — 待生效条目（暂存区）
  * 预算：画像 + 策展合计注入 ≤2,000 tokens（engine 装配时硬顶）。
- * 设计文档：versions/v0.8.0/01-memory.md §4
+ * 设计文档：versions/v0.8.0/01-memory.md §4 ·
+ *          versions/v0.36.0/15-v0363-memory-motion-path-design.md §4.1（归属修订）
  * ============================================================ */
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
+import { agentSpaceDir } from './agent-space.js'
 import { getWorkspaceDir } from '../store/db.js'
 import { genId } from '@shared/utils/id'
 import { getAdapter } from '../llm/registry.js'
@@ -28,8 +30,20 @@ export const BUDGET = {
   user: 1375,
 }
 
-function curatedPath(file: string): string {
-  return join(getWorkspaceDir(), '.arkwork', file)
+/**
+ * 快照文件位置 —— 唯一的归属真源。
+ *
+ * ★ v0.36.3（设计文档 §4.1 归属修订，覆盖 v0.36.0 决策 D1 的一半）：
+ *   · `memory.md` **回迁工作区** —— 它记的是「项目偏好 / 项目规则 / 关键事实」，
+ *     天然属于某个项目：换项目就该换一套（在 A 项目记的约定不该约束 B 项目）；
+ *   · `user.md` **留在 Agent 空间** —— 它记的是「这个人怎么干活」，与项目无关，
+ *     跨工作区通用（v0.36.0 D1 的初衷对这份文件依旧成立）；
+ *   · 暂存区 `memory.pending.jsonl` 留在 Agent 空间：它只是「待生效队列」，
+ *     同时服务两份文件，放在公共空间可避免工作区切换时丢队列。
+ */
+export function curatedPath(file: typeof MEMORY_FILE | typeof USER_FILE | typeof PENDING_FILE): string {
+  if (file === MEMORY_FILE) return join(getWorkspaceDir(), '.arkwork', MEMORY_FILE)
+  return join(agentSpaceDir(), file)
 }
 
 async function readText(path: string): Promise<string> {

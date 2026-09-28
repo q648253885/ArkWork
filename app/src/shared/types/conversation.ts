@@ -34,6 +34,13 @@ export interface Suggestion {
   description?: string
   /** 是否为推荐项（渲染高亮 + "推荐"标签） */
   recommended?: boolean
+  /**
+   * v0.38.1（D171）：建议项的结构化动作。`'finish'` = 就此结束 —— 点击后走
+   * 停止任务通道（cancelTask），**不再把 label 文本当答复发给模型**。
+   * 此前「就此结束」被当成普通答复 appendMessage 续跑，弱模型不调 task_complete
+   * 就永远收不了尾（实测 qwen3.5:9b 点击后继续空转 4 轮再次暂停）。
+   */
+  action?: 'finish'
 }
 
 export interface ConversationItem {

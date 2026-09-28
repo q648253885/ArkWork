@@ -152,7 +152,17 @@ test('TC-PLG4-021 HTML 响应必须带 CSP，且 connect-src 为 none（网络�
     assert.ok(csp, 'HTML 必须带 CSP')
     assert.equal(csp, PLUGIN_VIEW_CSP)
     assert.match(csp!, /connect-src 'none'/, 'Client 半不得直连网络 —— 要联网必须回 Host 半走带闸门的网关')
-    assert.match(csp!, /frame-ancestors 'self'/)
+    /* ★ v0.36.0（D90）反向断言：**不得**有 frame-ancestors。
+     * 这条用例原先断言的是 `frame-ancestors 'self'` **存在** —— 等于把缺陷写进了
+     * 期望值：宿主页的源是 `file://`（生产）/ `http://localhost:*`（开发），
+     * 与插件的 `arkwork-plugin://<id>` 永不相等，于是宿主自己嵌不动自己，
+     * iframe 退化成 ERR_BLOCKED_BY_RESPONSE（实机表现：面板整块纯白）。
+     * 改成「不得存在」后，谁再顺手加回来就会立刻报红。 */
+    assert.doesNotMatch(
+      csp!,
+      /frame-ancestors/,
+      '不得设 frame-ancestors —— 「谁能嵌我」的闸门在宿主页 frame-src，不在这里（D90）',
+    )
   } finally {
     sb.cleanup()
   }

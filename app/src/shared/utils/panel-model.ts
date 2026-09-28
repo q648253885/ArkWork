@@ -222,6 +222,19 @@ export function isPanelTabRef(ref: string): boolean {
   return !(INSPECTOR_TAB_REFS as readonly string[]).includes(ref)
 }
 
+/**
+ * v0.36.0（B11/P3-b）：按工作台插件白名单过滤面板 / 视图 Tab。
+ *
+ * `pluginRefs === null` = manifest 未声明 → 原样返回（不过滤，存量行为不变）；
+ * 数组（含空）→ 只保留内置 Tab 与 pluginId 在白名单内的插件 Tab。
+ * 判定依据是 Tab 自带的 `pluginId`（面板与代码视图都有），与 ref 形状解耦。
+ */
+export function filterTabsByPluginRefs(tabs: PanelTab[], pluginRefs: string[] | null): PanelTab[] {
+  if (pluginRefs === null) return tabs
+  const allow = new Set(pluginRefs)
+  return tabs.filter((t) => t.builtin || (t.pluginId !== undefined && allow.has(t.pluginId)))
+}
+
 /* ============================================================
  * ★ v0.35.0：插件**代码视图** → Tab（M13 的建 Tab 半边）
  * ============================================================ */

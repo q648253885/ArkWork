@@ -39,6 +39,10 @@ export interface MarkdownLabels {
   approval: string
   answer: string
   error: string
+  /** v0.36.0（F4.1）：并行子 agent 组卡标题 */
+  subagent: string
+  /** v0.38.0（A5/D156）：阶段结论块标题 */
+  note: string
   args: string
   result: string
   errorMsg: string
@@ -60,6 +64,8 @@ export const DEFAULT_LABELS: MarkdownLabels = {
   approval: '待确认',
   answer: '答复',
   error: '错误',
+  subagent: '并行子 agent',
+  note: '阶段结论',
   args: '参数',
   result: '结果',
   errorMsg: '错误',
@@ -282,6 +288,32 @@ function renderBlock(block: FlowBlock, L: MarkdownLabels, out: string[]): void {
       out.push(`#### ${L.error}`, '')
       pushBlocked(out, block.text)
       if (block.detail) pushBlocked(out, block.detail)
+      break
+
+    // v0.36.0（F4.1）：并行子 agent 组卡（逐行：agent / 状态 / 耗时 / 摘要）
+    case 'subagent-group': {
+      out.push(`#### ${L.subagent} · ${block.children.length} 个${block.settled ? '' : '（进行中）'}`, '')
+      out.push(
+        block.children
+          .map((c) => {
+            const dur = fmtDuration(c.durationMs)
+            const head = `- **@${c.agentName}** · ${c.status}${dur ? ` · ${L.duration} ${dur}` : ''}`
+            const obj = text(c.objective)
+            const sum = text(c.stepSummary)
+            const detail = sum || obj
+            return detail ? `${head}\n  ${detail}` : head
+          })
+          .join('\n'),
+        '',
+      )
+      break
+    }
+
+    // v0.38.0（A5/D156）：阶段结论 —— 屏幕上是"不折叠的正文级块"，
+    // 导出侧必须同等对待（D69 纪律：屏幕加一种块，导出同步可获得）
+    case 'note':
+      out.push(`#### ${L.note} · ${block.via}`, '')
+      pushBlocked(out, block.text)
       break
   }
 }

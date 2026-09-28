@@ -49,7 +49,7 @@ import { patchNode, updateNodeFields } from '../agent/graph/write.js'
 import { applyPatch, buildPatch } from '../agent/graph/replan.js'
 import { renderGraphErrorForModel } from '../agent/graph/invariants.js'
 import { getMetricsSnapshot, recordMetric } from '../agent/graph/metrics.js'
-import { getPendingPatch, listPendingPatches, markPatchDecided, decidePlanApproval, getPlanApproval, updatePlanApproval } from '../agent/graph/pending.js'
+import { getPendingPatch, listPendingPatches, markPatchDecided, decidePlanApproval, getPlanApproval, updatePlanApproval, dropTaskPlanApproval } from '../agent/graph/pending.js'
 import { getTask, appendUserMessage } from '../store/tasks.js'
 import { broadcastReActEvent } from '../agent/events.js'
 import { logger } from '../system/logger.js'
@@ -835,6 +835,24 @@ export function registerGraphHandlers(): void {
     return graph ? { ...plan, uncovered: uncoveredAcs(graph) } : plan
   })
 
+  // v0.38.1（D173）：降级错误卡的唯一出口 —— 用户手动关闭。
+  // 缺陷：降级闸门登记于建图前（startIter===0，task.graphId 尚为 undefined），
+  // 而 updateTask 的终态清理带 graphId 守卫 → 该闸门永不清理，卡片伴随进程
+  // 生命周期常驻（用户实测「无法点击无法关闭」）。此通道提供显式关闭出口；
+  // 正常待批准闸门**不可**走此通道（必须经 approve/reject 决策留痕）。
+  ipcMain.handle('graph:dismiss-plan-degraded', async (_e, taskId: string): Promise<GraphResult<null>> => {
+    const plan = getPlanApproval(taskId)
+    if (!plan) return ok(null) // 幂等：闸门已不存在视为已关闭
+    if (!plan.degraded) {
+      return fail(err('CONFLICT', '该计划闸门不是降级错误态，请走批准/打回出口', '仅「计划生成失败」卡片支持直接关闭。'))
+    }
+    dropTaskPlanApproval(taskId)
+    // 携带旧闸门广播 → 内联卡重读 pendingPlan（已为 null）→ 卸载
+    broadcastPlanGate(taskId, plan)
+    logger.info('Agent', `plan degraded gate dismissed by user: ${taskId}`)
+    return ok(null)
+  })
+
   ipcMain.handle(
     'graph:decide-plan',
     async (_e, p: GraphPlanDecisionPayload): Promise<GraphResult<GraphSnapshot | null>> => {
@@ -930,8 +948,90 @@ export function registerGraphHandlers(): void {
       const loaded = await load(p.taskId)
       if (isErr(loaded)) return fail(loaded)
       const { graph } = loaded
-      // 覆盖率服务端兜底校验（前端已禁用按钮，但并发/竞态下仍需拒 —— I7）
-      const uncovered = uncoveredAcs(graph)
+
+      /* -- F6.2（v0.36.0）：勾选子集校验 —— 缺省 = 全选（旧行为）；空数组拒绝；未知 id 拒绝 -- */
+      const nodeIds = Object.keys(graph.nodes)
+      const approvedIds = p.approvedItemIds ?? nodeIds
+      if (approvedIds.length === 0) {
+        return fail(
+          err('SCHEMA_INVALID', '至少勾选一项计划项再批准', '取消全部勾选等于不执行；如确需如此，请直接结束任务。'),
+        )
+      }
+      const unknownIds = approvedIds.filter((id) => !graph.nodes[id])
+      if (unknownIds.length > 0) {
+        return fail(
+          err(
+            'SCHEMA_INVALID',
+            `勾选的计划项不存在于图中：${unknownIds.join(', ')}`,
+            '计划项可能已被 Planner 调整，请刷新卡片后重新勾选。',
+          ),
+        )
+      }
+
+      /* -- F6.2：行内改题合并（空标题/未变跳过；只动 title 与 updatedAt，纯拷贝不污染缓存） -- */
+      const editedIds: string[] = []
+      let nodes: TaskGraph['nodes'] = graph.nodes
+      for (const e of p.nodeEdits ?? []) {
+        const n = graph.nodes[e.id]
+        const title = (e.title ?? '').trim()
+        if (!n || !title || title === n.title) continue
+        nodes = { ...nodes, [e.id]: { ...n, title, updatedAt: Date.now() } }
+        editedIds.push(e.id)
+      }
+
+      /* -- F6.2：未勾选节点（含后代）按 cancelled 收口 —— 计划里明确不执行的项 -- */
+      // 勾选父项 = 勾选整棵子树：UI 只传结构行 id（有里程碑时快照行不含任务层），
+      // 后代不在勾选集合里也随父执行，否则「只勾里程碑」会把其子任务全部误杀。
+      const approvedSet = new Set(approvedIds)
+      {
+        const stack = [...approvedSet]
+        while (stack.length > 0) {
+          const id = stack.pop()!
+          for (const c of graph.nodes[id]?.children ?? []) {
+            if (!approvedSet.has(c)) {
+              approvedSet.add(c)
+              stack.push(c)
+            }
+          }
+        }
+      }
+      // 已批准节点的全部祖先受保护（如 goal 根、已勾选里程碑的上层）：
+      // UI 只传结构行 id（快照行不含 goal 层），若不保护祖先会从根级联误杀全图。
+      const protectedFromCancel = new Set<string>()
+      for (const id of approvedSet) {
+        let cur = graph.nodes[id]?.parentId
+        while (cur) {
+          protectedFromCancel.add(cur)
+          cur = graph.nodes[cur]?.parentId
+        }
+      }
+      const cancelledIds = new Set<string>()
+      if (approvedSet.size < nodeIds.length) {
+        const stack = nodeIds.filter((id) => !approvedSet.has(id) && !protectedFromCancel.has(id))
+        while (stack.length > 0) {
+          const id = stack.pop()!
+          if (cancelledIds.has(id)) continue
+          const n = nodes[id]
+          if (!n) continue
+          cancelledIds.add(id)
+          for (const c of n.children) stack.push(c)
+        }
+        const nextNodes: TaskGraph['nodes'] = { ...nodes }
+        for (const id of cancelledIds) {
+          const n = nextNodes[id]!
+          // completed 是终态证据在案的既成事实，不因勾选倒退；其余非取消态一律收口
+          if (n.status !== 'cancelled' && n.status !== 'completed') {
+            nextNodes[id] = { ...n, status: 'cancelled', updatedAt: Date.now() }
+          }
+        }
+        nodes = nextNodes
+      }
+
+      // 覆盖率服务端兜底校验（前端已禁用按钮，但并发/竞态下仍需拒 —— I7）。
+      // F6.2：被取消节点覆盖的 AC 等同无覆盖，一并拒绝 —— 防「冻结了永远不跑的验收」的静默洞。
+      const uncovered = graph.spec.acceptance
+        .filter((ac) => !ac.coveredBy.some((id) => graph.nodes[id] && !cancelledIds.has(id)))
+        .map((ac) => ac.id)
       if (uncovered.length > 0) {
         return fail(
           err(
@@ -953,6 +1053,7 @@ export function registerGraphHandlers(): void {
       ]
       const next: TaskGraph = {
         ...graph,
+        nodes,
         spec: { ...graph.spec, state: 'approved' },
         frozenTests,
         updatedAt: Date.now(),
@@ -965,23 +1066,41 @@ export function registerGraphHandlers(): void {
             op: 'update',
             targetId: graph.id,
             before: { specState: graph.spec.state },
-            after: { specState: 'approved', frozenTests },
+            after: {
+              specState: 'approved',
+              frozenTests,
+              approvedItems: approvedSet.size,
+              editedItems: editedIds.length,
+              cancelledItems: cancelledIds.size,
+            },
             reason: 'plan-approved',
           },
         ],
       }
       const out = await commit(p.taskId, next, {
-        reason: '用户批准计划：验收条件冻结，切换身份为 builder 开始执行',
+        reason: `用户批准计划：勾选 ${approvedIds.length} 项（含后代共 ${approvedSet.size} 个节点），验收条件冻结，切换身份为 builder 开始执行`,
         source: 'ipc-approve-plan',
         skipRevision: true,
       })
       if (!out.ok) return out
-      decidePlanApproval(p.taskId, 'approved')
+      decidePlanApproval(p.taskId, 'approved', undefined, {
+        approvedItemIds: approvedIds,
+        ...(editedIds.length > 0 ? { editedItemIds: editedIds } : {}),
+      })
       broadcastPlanGate(p.taskId, getPlanApproval(p.taskId)!)
       recordMetric('sync_action', { op: 'plan-approved' })
-      logger.info('Agent', `P8: 用户批准计划，AC 已冻结（${frozenTests.length} 条测试标识）`, p.taskId)
-      // 放行执行：注入合成 user 消息续跑（引擎续跑时按 spec.state='approved' 以 builder 身份执行）
-      await appendUserMessage(p.taskId, '我已批准计划，验收条件已冻结，请开始执行。')
+      logger.info(
+        'Agent',
+        `P8: 用户批准计划（勾选 ${approvedIds.length} 项 · 含后代 ${approvedSet.size} 节点 · 改题 ${editedIds.length} · 取消 ${cancelledIds.size}），AC 已冻结（${frozenTests.length} 条测试标识）`,
+        p.taskId,
+      )
+      // 放行执行：注入合成 user 消息续跑（引擎续跑时按 spec.state='approved' 以 builder 身份执行）。
+      // F6.2：startExecution === false = 「仅保留计划不执行」—— 冻结与勾选照常生效，但不注入续跑消息。
+      if (p.startExecution !== false) {
+        await appendUserMessage(p.taskId, '我已批准计划，验收条件已冻结，请开始执行。')
+      } else {
+        logger.info('Agent', 'P8: 用户选择「仅保留计划不执行」，任务保持待命', p.taskId)
+      }
       return out
     },
   )

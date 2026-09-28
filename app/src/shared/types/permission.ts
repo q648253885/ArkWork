@@ -76,3 +76,40 @@ export interface PermissionContext {
   /** 四级配置合并后的 allow/deny/ask 规则 */
   rules: ResolvedRules
 }
+
+/* ============================================================
+ * ★ v0.36.0（F6.1 / P9）：规则**条目**（带来源与生效态）
+ *
+ * 为什么不能继续只给 `allow/ask/deny: string[]`：
+ *   P9 的面板要逐行显示「工具 / 路径 glob / 行为 / **来源**」并支持**逐行开关**。
+ *   合并后的三个数组把「这条是谁写的」「这条现在生效吗」两个关键信息丢掉了 ——
+ *   用户看到 `Bash(git diff:*)` 出现在 allow 里，却不知道它是项目配置带来的
+ *   （改了会被覆盖）还是自己上次点「记住此选择」写的（可以删）。
+ *   ⇒ 面板必须消费**条目**，而不是合并结果。
+ * ============================================================ */
+
+/** 规则来源（四级配置，优先级 managed > local > project > user） */
+export type PermissionRuleScope = 'managed' | 'local' | 'project' | 'user'
+
+/** 规则行为 */
+export type PermissionRuleBehavior = 'allow' | 'ask' | 'deny'
+
+/**
+ * 一条规则的完整可视化形态。
+ * `editable` 由主进程判定（只有 `local` 可写）—— 渲染层**不得自行推断**，
+ * 否则一旦四级策略变化，两边就会不一致。
+ */
+export interface PermissionRuleEntry {
+  /** 原文，如 `Bash(git diff:*)`；也是删除/开关的定位键 */
+  raw: string
+  /** 工具名（`Bash` / `Read` / `WebFetch` …） */
+  tool: string
+  /** 路径 / 命令 glob；无参规则为 `*` */
+  pattern: string
+  behavior: PermissionRuleBehavior
+  scope: PermissionRuleScope
+  /** 是否生效（被 `disabled` 列表关掉的为 false） */
+  enabled: boolean
+  /** 是否可由用户编辑（只有 local 来源为 true） */
+  editable: boolean
+}

@@ -50,6 +50,8 @@ import {
   type TaskGraph,
   type TaskNode,
 } from '@shared/types/graph'
+// v0.37.0（纪律⑲）：注释剥离的唯一真源 —— 本套件断言前先剥注释，防 D89 式注释误报
+import { stripComments } from '@shared/utils/source-guard'
 
 /* ---------------- 工作区构造 --------------- */
 
@@ -359,21 +361,56 @@ test('TC-D9-SRC-002 store.saveGraph 在图写镜像后显式调用 mirrorWritten
   assert.match(src, /export function registerMirrorWrittenHook\(/, 'store 暴露注册口（依赖倒置）')
 })
 
-test('TC-D9-SRC-003 8 个绕过点已全部改调桥（有图任务写图，无图任务保持 v0.29 直写）', () => {
-  // ① IPC 用户手动切状态
-  assert.match(read(`${MAIN}ipc/plan-items.ts`), /applyPlanItemStatus\(/, 'ipc/plan-items 应调桥')
-  // ② stage-gate 推进
-  assert.match(read(`${AGENT}engine/loop.ts`), /applyStageGateAdvance\(/, 'engine/loop 应调桥')
-  // ③ todo_update 回写
-  assert.match(read(`${AGENT}engine/act.ts`), /applyPlanItemStatuses\(/, 'engine/act 应调桥')
-  // ④ 推理阶段推进首项
-  assert.match(read(`${AGENT}engine/reason-phase.ts`), /markPlanItemInProgress\(/, 'engine/reason-phase 应调桥')
-  // ⑤/#6 失败与丢弃
-  const gates = read(`${AGENT}engine/gates.ts`)
+/*
+ * v0.37.0（缺陷 D132）**语义变更**：写入点盘点。
+ *
+ * 旧契约（v0.30.0 D9）：「8 个绕过点全部改调桥 = 有图写图 / 无图直写 planItems」。
+ * 本版把**账本**立为清单唯一真相源，图降级为**派生镜像层**，于是这份盘点变成：
+ *   · 有图任务 → 仍然写图（图是镜像载体，镜像由 saveGraph 统一补发）；
+ *   · 无图任务 → **不再直写 planItems**，改走 `ledger.mutate`（第二真相源已消除）。
+ * 因此断言必须同时钉住「有图走桥」**与**「无图走账本」两条腿 —— 只断言前半，
+ * 回退到直写仍会通过（那正是 D132 的复现路径）。
+ */
+test('TC-D9-SRC-003 写入点盘点：有图走桥、无图走账本（v0.37.0 起无第二真相源）', () => {
+  // ① IPC 用户手动切状态 —— v0.37.0（D132）起用户点击也是账本唯一写入口
+  const ipcPlanItems = stripComments(read(`${MAIN}ipc/plan-items.ts`))
+  assert.match(ipcPlanItems, /await mutate\(/, 'ipc/plan-items 应经账本 mutate')
+  assert.doesNotMatch(
+    ipcPlanItems,
+    /applyPlanItemStatus\(/,
+    'ipc/plan-items 不得再直调桥（第二写入者）',
+  )
+  // ② stage-gate 推进：有图写图，无图走账本 advance
+  const loopSrc = stripComments(read(`${AGENT}engine/loop.ts`))
+  assert.match(loopSrc, /applyStageGateAdvance\(/, 'engine/loop 有图分支应调桥')
+  assert.match(loopSrc, /kind: 'advance'/, 'engine/loop 无图分支应走账本 advance')
+  // ③ task_plan 图镜像下推 —— v0.36.4（D123）起走两级定位原语；v0.38.1（D174）
+  //    升级为结构对账 reconcilePlanItemsToGraph（账本为准：缺节点补建 /
+  //    多余节点 cancelled / 状态文本 key 全量对齐），内部仍走本桥。
+  //    v0.38.1（D177）：管线收敛到 plan-commit-pipeline.ts（task_plan 与
+  //    正则清单回退两条入口共享），act.ts 只经管线间接调用。
+  assert.match(
+    stripComments(read(`${AGENT}engine/plan-commit-pipeline.ts`)),
+    /reconcilePlanItemsToGraph\(/,
+    'engine/plan-commit-pipeline 应调桥（结构对账原语，两条清单入口共享管线）',
+  )
+  assert.match(
+    stripComments(read(`${AGENT}engine/act.ts`)),
+    /commitPlanDraft\(/,
+    'engine/act task_plan 分支应经共享管线落库（不得绕过）',
+  )
+  // ④ 推理阶段推进首项：有图写图，无图走账本 set-status
+  const reasonSrc = stripComments(read(`${AGENT}engine/reason-phase.ts`))
+  assert.match(reasonSrc, /markPlanItemInProgress\(/, 'engine/reason-phase 有图分支应调桥')
+  assert.match(reasonSrc, /kind: 'set-status'/, 'engine/reason-phase 无图分支应走账本')
+  // ⑤/#6 失败与丢弃（桥内部按 task.graphId 分流，见 TC-D9-SRC-004）
+  const gates = stripComments(read(`${AGENT}engine/gates.ts`))
   assert.match(gates, /markRunningFailed\(/, 'engine/gates 失败应调桥')
   assert.match(gates, /cancelIncomplete\(/, 'engine/gates 丢弃应调桥')
-  // ⑦ pause/manager 恢复
-  assert.match(read(`${MAIN}pause/manager.ts`), /applyPlanItemStatuses\(/, 'pause/manager 应调桥')
+  // ⑦ pause/manager 恢复：有图写图，无图以账本为准（checkpoint 只作建账种子）
+  const pauseMgr = stripComments(read(`${MAIN}pause/manager.ts`))
+  assert.match(pauseMgr, /applyPlanItemStatuses\(/, 'pause/manager 有图分支应调桥')
+  assert.match(pauseMgr, /mutate\(/, 'pause/manager 无图分支应经账本')
   // ⑧ 启动链安装
   assert.match(read(`${MAIN}ipc/index.ts`), /installPlanSync\(\)/, '启动链应安装桥的镜像广播 hook')
 })

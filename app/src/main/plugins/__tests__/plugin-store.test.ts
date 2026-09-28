@@ -34,7 +34,8 @@ import {
 import { setWorkspaceDir } from '../../store/db.js'
 import { SAMPLE_PLUGIN_IDS } from '../sample-plugins.js'
 
-const STOCK = 'ark.plugin.stock'
+// v0.36.0：随包示例改为 Git Manager（股票插件已退役，不可再用它的 id 当「活示例」）
+const BUNDLED_ID = 'ark.plugin.git-manager'
 
 function doc(enabled: Record<string, boolean>, order: Record<string, number> = {}): PluginsDoc {
   return { schemaVersion: '1.1', enabled, order, updatedAt: 0 }
@@ -77,24 +78,24 @@ test('TC-PST-002 pluginsDir：两级目录互不相同，且都落在 `.arkwork`
  * ============================================================ */
 
 test('TC-PST-003 ★ resolveEnabled 优先级：工作区覆盖全局，全局覆盖清单默认值', async () => {
-  __setDocForTest('workspace', doc({ [STOCK]: false }))
-  __setDocForTest('global', doc({ [STOCK]: true }))
-  assert.deepEqual(await resolveEnabled(STOCK, true), { enabled: false, decidedBy: 'workspace' })
+  __setDocForTest('workspace', doc({ [BUNDLED_ID]: false }))
+  __setDocForTest('global', doc({ [BUNDLED_ID]: true }))
+  assert.deepEqual(await resolveEnabled(BUNDLED_ID, true), { enabled: false, decidedBy: 'workspace' })
 
   // 工作区那份没有该项 → 回落到全局
   __setDocForTest('workspace', doc({}))
-  assert.deepEqual(await resolveEnabled(STOCK, false), { enabled: true, decidedBy: 'global' })
+  assert.deepEqual(await resolveEnabled(BUNDLED_ID, false), { enabled: true, decidedBy: 'global' })
 
   // 两级都没有 → 用清单自己的 enabledByDefault
   __setDocForTest('global', doc({}))
-  assert.deepEqual(await resolveEnabled(STOCK, true), { enabled: true, decidedBy: 'manifest' })
+  assert.deepEqual(await resolveEnabled(BUNDLED_ID, true), { enabled: true, decidedBy: 'manifest' })
   assert.deepEqual(await resolveEnabled('never.seen', false), { enabled: false, decidedBy: 'manifest' })
 })
 
 test('TC-PST-004 resolveEnabled 只认布尔值（脏数据不得被当成「用户显式改过」）', async () => {
-  __setDocForTest('workspace', doc({ [STOCK]: 'yes' as unknown as boolean }))
-  __setDocForTest('global', doc({ [STOCK]: true }))
-  assert.deepEqual(await resolveEnabled(STOCK, false), { enabled: true, decidedBy: 'global' })
+  __setDocForTest('workspace', doc({ [BUNDLED_ID]: 'yes' as unknown as boolean }))
+  __setDocForTest('global', doc({ [BUNDLED_ID]: true }))
+  assert.deepEqual(await resolveEnabled(BUNDLED_ID, false), { enabled: true, decidedBy: 'global' })
 })
 
 /* ============================================================
@@ -104,12 +105,12 @@ test('TC-PST-004 resolveEnabled 只认布尔值（脏数据不得被当成「用
 test('TC-PST-005 ★ D76：只清「不在磁盘上且也不是随包示例」的条目（保守语义）', async () => {
   __setDocForTest(
     'global',
-    doc({ 'dead.plugin': false, 'alive.plugin': true, [STOCK]: false }),
+    doc({ 'dead.plugin': false, 'alive.plugin': true, [BUNDLED_ID]: false }),
   )
   const res = await reconcileKnownIds(new Set(['alive.plugin']))
   assert.deepEqual(res.cleaned, ['dead.plugin'], '死条目必须被清，且只清它')
   const after = await getEnabledMap('global')
-  assert.deepEqual(Object.keys(after).sort(), ['alive.plugin', STOCK].sort())
+  assert.deepEqual(Object.keys(after).sort(), ['alive.plugin', BUNDLED_ID].sort())
 })
 
 test('TC-PST-006 ★ D76：随包示例的开关**永远保留**（用户禁用示例是合法选择，示例也可能被重新落盘）', async () => {

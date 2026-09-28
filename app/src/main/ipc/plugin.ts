@@ -19,12 +19,13 @@
  *  ⑤ ★ **每个入参都要校验**（preload 与 main 双处）—— v0.35.0 的 view-call
  *     直接带着「会话 id + 方法名」进来，是攻击面最宽的一个，必须先卡形状。
  * ============================================================ */
-import { BrowserWindow, ipcMain, shell } from 'electron'
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   PluginChannel,
   PLUGIN_VIEW_METHODS,
+  type PluginCommandEntry,
   type PluginRuntimeReport,
   type PluginViewCallRequest,
   type PluginViewCallResult,
@@ -34,14 +35,16 @@ import {
 import type { PluginKind, PluginSummary } from '@shared/types/plugin'
 import {
   builtinManifestForExport,
+  declaredPluginCommands,
   invalidatePlugins,
+  listPluginSummaries,
   listPlugins,
-  pluginSummaries,
   pluginViews,
   refreshPluginSlots,
   setPluginEnabled,
   uninstallPlugin,
 } from '../plugins/registry.js'
+import { installPluginFromZip, setPluginInstallBroadcaster } from '../plugins/install.js'
 import { ensurePluginsDir, pluginsDir, type PluginScope } from '../plugins/store.js'
 import { scaffoldPlugin } from '../plugins/scaffold.js'
 import { getPluginHostService } from '../plugins/runtime/host-service.js'
@@ -66,6 +69,9 @@ const asScope = (v: unknown, dflt: PluginScope = 'global'): PluginScope =>
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 export function registerPluginHandlers(): void {
+  // ★ v0.36.0（F3.2）：安装器完成落盘后的「重建插槽 + 广播」出口
+  setPluginInstallBroadcaster(broadcast)
+
   /* ============================================================
    * A. 插拔
    * ============================================================ */
@@ -73,7 +79,9 @@ export function registerPluginHandlers(): void {
   ipcMain.handle(
     PluginChannel.List,
     async (_e, args?: { scope?: 'workspace' | 'global' | 'all' }): Promise<PluginSummary[]> => {
-      const all = pluginSummaries(await listPlugins())
+      // ★ D95：必须走 listPluginSummaries（含 enabled 三级解析）——
+      // 直接 pluginSummaries(await listPlugins()) 会拿到占位 false，UI 永远显示「0 个启用」
+      const all = await listPluginSummaries()
       const scope = args?.scope
       if (!scope || scope === 'all') return all
       return all.filter((p) => p.source === scope || (scope === 'global' && p.source === 'bundled'))
@@ -94,10 +102,11 @@ export function registerPluginHandlers(): void {
     },
   )
 
-  ipcMain.handle(PluginChannel.Uninstall, async (_e, args: { id: string }) => {
+  ipcMain.handle(PluginChannel.Uninstall, async (_e, args: { id: string; purgeData?: boolean }) => {
     const id = str(args?.id)
     if (!id) return { ok: false, reason: 'bad-args' }
-    const res = await uninstallPlugin(id)
+    // v0.36.0（F3.2）：purgeData —— 卸载时连插件私有 KV 一起清（UI 确认弹窗勾选）
+    const res = await uninstallPlugin(id, { purgeData: args?.purgeData === true })
     if (res.ok) {
       await getPluginHostService()?.refreshIndex()
       broadcastPluginChanged(id)
@@ -109,7 +118,7 @@ export function registerPluginHandlers(): void {
     invalidatePlugins()
     await refreshPluginSlots()
     await getPluginHostService()?.refreshIndex()
-    const out = pluginSummaries(await listPlugins())
+    const out = await listPluginSummaries()
     broadcastPluginChanged('*')
     return out
   })
@@ -302,6 +311,73 @@ export function registerPluginHandlers(): void {
       migrated: [],
       // 顺带把「被覆盖的插件」告诉调用方（诊断页要用）
       shadowed: before.filter((p) => p.shadowedBy).map((p) => `${p.manifest.id} ← ${p.shadowedBy}`),
+    }
+  })
+
+  /* ============================================================
+   * E. 安装 / 命令（★ v0.36.0 · B2 / F3.2 / F3.3）
+   * ============================================================ */
+
+  ipcMain.handle(
+    PluginChannel.InstallZip,
+    async (_e, args?: { zipPath?: string; confirmed?: boolean; overwrite?: boolean }) => {
+      // 无 zipPath → 弹文件选择框（对话框归 main 侧所有，渲染层不给文件路径能力）
+      let zipPath = typeof args?.zipPath === 'string' ? args.zipPath.trim() : ''
+      if (!zipPath) {
+        const res = await dialog.showOpenDialog({
+          title: '安装插件包',
+          filters: [{ name: '插件包', extensions: ['zip'] }],
+          properties: ['openFile'],
+        })
+        if (res.canceled || res.filePaths.length === 0) {
+          return { ok: false, error: 'CANCELLED', message: '已取消安装' }
+        }
+        zipPath = res.filePaths[0]!
+      }
+      const out = await installPluginFromZip({
+        zipPath,
+        confirmed: args?.confirmed === true,
+        overwrite: args?.overwrite === true,
+      })
+      if (out.ok) await getPluginHostService()?.refreshIndex()
+      return out
+    },
+  )
+
+  ipcMain.handle(
+    PluginChannel.ListCommands,
+    async (_e, args?: { pluginId?: string }): Promise<PluginCommandEntry[]> => {
+      const all = await declaredPluginCommands()
+      const pid = typeof args?.pluginId === 'string' ? args.pluginId : ''
+      return all
+        .filter((x) => !pid || x.pluginId === pid)
+        .map((x) => ({
+          pluginId: x.pluginId,
+          pluginName: x.pluginName,
+          id: x.command.id,
+          title: x.command.title,
+          ...(x.command.icon ? { icon: x.command.icon } : {}),
+          // 只有带 Host 半代码的插件才真正处理得了命令；
+          // runCommand 侧还有二次校验（未激活即懒激活，激活失败如实报错）
+          runnable: true,
+        }))
+    },
+  )
+
+  ipcMain.handle(PluginChannel.RunCommand, async (_e, args?: { pluginId?: string; commandId?: string }) => {
+    const pluginId = typeof args?.pluginId === 'string' ? args.pluginId.trim() : ''
+    const commandId = typeof args?.commandId === 'string' ? args.commandId.trim() : ''
+    if (!pluginId || !commandId) return { ok: false, message: '参数缺失（pluginId / commandId）' }
+    const svc = getPluginHostService()
+    if (!svc) return { ok: false, message: '插件运行时未就绪' }
+    try {
+      await svc.runCommand(pluginId, commandId)
+      logger.info('System', `[plugin] 命令已触发：${pluginId} / ${commandId}`)
+      return { ok: true }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      logger.warn('System', `[plugin] 命令触发失败：${pluginId} / ${commandId} — ${msg}`)
+      return { ok: false, message: msg }
     }
   })
 }

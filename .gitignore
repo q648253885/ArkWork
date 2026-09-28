@@ -16,6 +16,12 @@ app/release/
 app/.dev-data/
 .dev-data/
 app/.arkwork/
+# v0.37.0：仓库根也可能成为「工作区」—— 账本落盘在 <workspace>/.arkwork/，
+# 冒烟脚本会在根目录留 .arkwork/{b2,b3}-smoke/ 残留。此前只忽略了 app/ 下的那份。
+/.arkwork/
+# v0.40.0：Agent Harness 架构设计技能（墨衡专家）的外部进化知识库 ——
+# 属工具产物，不是 ArkWork 项目内容。
+/.agent-harness-knowledge/
 **/.DS_Store
 **/Cache/
 **/Code Cache/

@@ -12,32 +12,10 @@
 import type { FaultError, RetryAttemptRecord, RetryOptions, RetryResult } from './types.js'
 import { classifyError, isFaultError, RETRIES_EXHAUSTED_CODE } from './classify.js'
 import { getUiLocale, tFor } from '../i18n/messages.js'
+// v0.36.0 F1.4：默认退避与 sleep 收敛至 retry-core（统一 [500,2000,4000]×3）
+import { DEFAULT_BACKOFF_MS, DEFAULT_MAX_ATTEMPTS, sleep } from './retry-core.js'
 
-export const DEFAULT_BACKOFF_MS = [1000, 2000, 4000] as const
-export const DEFAULT_MAX_ATTEMPTS = 3
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  if (ms <= 0) return Promise.resolve()
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort)
-      resolve()
-    }, ms)
-    const onAbort = (): void => {
-      clearTimeout(t)
-      const e = new Error('aborted')
-      ;(e as Error & { code: string }).code = 'ABORT_ERR'
-      reject(e)
-    }
-    if (signal) {
-      if (signal.aborted) {
-        onAbort()
-        return
-      }
-      signal.addEventListener('abort', onAbort, { once: true })
-    }
-  })
-}
+export { DEFAULT_BACKOFF_MS, DEFAULT_MAX_ATTEMPTS }
 
 /**
  * 工具调用包装器（与编排器配合使用）：

@@ -25,6 +25,12 @@ export interface ProjectedProfileView {
    */
   homeModule: string | null
   composerChips: string[]
+  /**
+   * v0.36.0（B11/P3-b）：工作台级插件白名单。
+   * `null` = manifest 未声明（不过滤，全部插件面板照旧显示）；
+   * 数组（含空）= 白名单生效。
+   */
+  pluginRefs: string[] | null
 }
 
 /** 合法的 CenterStage 内置首页模块白名单（与 store ModulePage 同源，值级校验） */
@@ -49,10 +55,11 @@ export function isHomeModuleValue(v: string): boolean {
  *     「有覆盖」，否则首页会白屏（v0.33.0 放宽为开放引用后的必要守卫）。
  */
 export function projectUiLayer(snapshot: CompositionSnapshot | null): ProjectedProfileView {
-  if (!snapshot) return { dockTabs: null, homeModule: null, composerChips: [] }
+  if (!snapshot) return { dockTabs: null, homeModule: null, composerChips: [], pluginRefs: null }
   let dockTabs: DockTabId[] | null = null
   let homeModule: string | null = null
   let composerChips: string[] = []
+  let pluginRefs: string[] | null = null
   for (const item of snapshot.layers.ui) {
     if (!item.applied) continue
     if (item.slot === 'ui.dockTabs' && item.value) {
@@ -62,45 +69,32 @@ export function projectUiLayer(snapshot: CompositionSnapshot | null): ProjectedP
       if (isHomeModuleValue(item.value)) homeModule = item.value
     } else if (item.slot === 'ui.composerChips' && item.value) {
       composerChips = item.value.split(',').filter(Boolean).slice(0, 8)
+    } else if (item.slot === 'ui.pluginRefs') {
+      // applied=true 的行无论 value 是否为空串都生效：空数组 = 全部隐藏
+      pluginRefs = item.value.split(',').filter(Boolean)
     }
   }
-  return { dockTabs, homeModule, composerChips }
+  return { dockTabs, homeModule, composerChips, pluginRefs }
 }
 
 /* ============================================================
- * v0.33.0：插槽明细 → 三份派生量
+ * v0.33.0：插槽明细 → 派生量（★ v0.36.0 D5 收缩：去掉 rendererOverrides）
  *
  * 与 `projectUiLayer`（读**快照**）的分工：
  *   · 快照 = 人话级的「这一层生效了吗」（用于激活报告）
- *   · 插槽 = 真正可渲染的数据体（用于 Inspector 面板 / 渲染器覆盖 / 主题）
+ *   · 插槽 = 真正可渲染的数据体（用于 Inspector 面板 / 主题）
  * 两者不可互相替代 —— 快照的 ui.theme 只登记**键名**，token 值只在插槽里。
  * ============================================================ */
 
 export interface SlotDerivations {
   /** 可渲染面板 Tab（顺序真源 = manifest position） */
   panels: PanelTab[]
-  /** 扩展名 → 渲染器名（profile 的 previewRenderers ∪ 插件 renderer 贡献） */
-  rendererOverrides: Record<string, string>
   /** token 覆盖（已过值白名单；键的存在性由应用层用 DOM 兜底） */
   theme: ThemeTokens
 }
 
 /** 空派生量（无插槽时的返回值，避免各处重复造对象） */
-export const EMPTY_DERIVATIONS: SlotDerivations = { panels: [], rendererOverrides: {}, theme: { light: {}, dark: {} } }
-
-/** `ui.renderer` 条目的载荷形状守卫（插槽来自磁盘，必须值级校验） */
-function rendererOverrideOf(e: SlotEntry): Array<[string, string]> | null {
-  if (e.kind !== 'ui.renderer') return null
-  const p = e.payload
-  if (typeof p !== 'object' || p === null) return null
-  const rec = p as unknown as Record<string, unknown>
-  const kind = rec.rendererKind
-  if (typeof kind !== 'string' || kind.length === 0) return null
-  const exts = rec.extensions
-  const list = Array.isArray(exts) ? exts.filter((x): x is string => typeof x === 'string') : []
-  if (list.length === 0) return null
-  return list.map((x) => [x.toLowerCase(), kind] as [string, string])
-}
+export const EMPTY_DERIVATIONS: SlotDerivations = { panels: [], theme: { light: {}, dark: {} } }
 
 /** `ui.theme` 条目的载荷形状守卫（**再净化一次**：插槽可能来自插件或手改磁盘） */
 function themeTokensOf(e: SlotEntry): Partial<ThemeTokens> | null {
@@ -116,23 +110,21 @@ function themeTokensOf(e: SlotEntry): Partial<ThemeTokens> | null {
 /**
  * 插槽明细 → 派生量。
  *
- * 纪律：**坏条目跳过，绝不抛错**（插槽可能来自用户手改的磁盘文件）；
- * 同一扩展名被多条声明覆盖时，**后者胜**（与 `resolveSlots` 的注册序一致）。
+ * 纪律：**坏条目跳过，绝不抛错**（插槽可能来自用户手改的磁盘文件）。
+ *
+ * ★ v0.36.0（D5）：`ui.renderer` 分支已删除 —— 该插槽随契约收缩消失。
+ * 扩展名 → 渲染器的判定不走这里：`detectRendererKind()` 直读
+ * `shared/utils/renderer-ext.ts` 的内置表（唯一真源）；
+ * 预览窗的「切换格式」是**本地 UI 状态**（`PreviewWindow` 的 `rendererOverrides`），
+ * 与插槽无关 —— 两者同名不同物，别再被名字误导（这是 D101 的教训）。
  */
 export function deriveFromSlots(slots: Partial<Record<SlotKind, SlotEntry[]>> | null | undefined): SlotDerivations {
   if (!slots) return EMPTY_DERIVATIONS
   const panels = panelTabsOf(slots['ui.panel'])
 
-  const rendererOverrides: Record<string, string> = {}
-  for (const e of slots['ui.renderer'] ?? []) {
-    const pairs = rendererOverrideOf(e)
-    if (!pairs) continue
-    for (const [ext, kind] of pairs) rendererOverrides[ext] = kind
-  }
-
   const sets = (slots['ui.theme'] ?? []).map(themeTokensOf).filter((t): t is Partial<ThemeTokens> => t !== null)
   const merged = mergeThemeTokens(...sets)
-  return { panels, rendererOverrides, theme: merged }
+  return { panels, theme: merged }
 }
 
 /** 主题覆盖是否为空（空集不触发样式重算，也不写 documentElement） */

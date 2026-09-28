@@ -85,6 +85,8 @@ export interface LlmCompleteResponse {
   finishReason: 'stop' | 'tool_calls' | 'length' | 'content_filter' | 'interrupted'
   /** DeepSeek/o1 等思考模型的 reasoning_content，需原样传回 API */
   reasoningContent?: string
+  /** v0.36.0 F1.5：malformed tool call 数（arguments 非法 JSON，args 已降级 {_raw}；缺省=无） */
+  malformedToolCallCount?: number
 }
 
 /** v0.27.0 R1：流式增量回调集合（渲染加速用；聚合结果仍以返回值为准） */

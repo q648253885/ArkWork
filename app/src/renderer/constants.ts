@@ -106,6 +106,19 @@ function todoArgSummary(args: Record<string, unknown>): string {
   return Number.isInteger(idx) && idx >= 0 ? i18next.t('const.todo.itemProgress', { index: idx + 1, status: label }) : label
 }
 
+/**
+ * v0.39.0（D190）task_plan 工具参数摘要：秒读「这次清单变成什么样」。
+ *
+ * 只显示第一项 + 剩余项数 —— 详细清单在详情面板里，动作行摘要位置越短越好。
+ * `… (+N)` 是纯符号，不引入需要翻译的词（不新增 i18n key）。
+ */
+function planArgSummary(args: Record<string, unknown>): string {
+  const items = Array.isArray(args.items) ? (args.items as Array<Record<string, unknown>>) : []
+  if (items.length === 0) return ''
+  const first = truncate(String(items[0]?.text ?? ''), 24)
+  return items.length > 1 ? `${first} … (+${items.length - 1})` : first
+}
+
 export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   'file-reader': {
     icon: 'File',
@@ -167,7 +180,22 @@ export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
     get verb() { return i18next.t('const.tool.askUser') },
     argSummary: (a) => truncate(String(a.question ?? ''), 32),
   },
-  // v0.21.0：清单更新工具人性化（此前走 fallback 显示机械名 todo_update）
+  // v0.39.0（D190）：`task_plan` / `turn_note` 是 v0.38.0（D154）收敛后**唯一**的
+  // 两个清单控制入口，此前表里没有它们 —— 反而只剩历史名 `todo-update` / `todo_update`。
+  // 后果：用户看动作行时，当前入口显示机械英文名，早就下架的工具却有中文动词。
+  // 旧代码留着、新入口缺条目，是"代码与文档不一致"最难自查的一类。
+  task_plan: {
+    icon: 'ListChecks',
+    get verb() { return i18next.t('const.tool.taskPlan') },
+    argSummary: planArgSummary,
+  },
+  turn_note: {
+    icon: 'Note',
+    get verb() { return i18next.t('const.tool.turnNote') },
+    argSummary: (a) => truncate(String(a.text ?? ''), 32),
+  },
+  // 历史名（v0.38.0 D154 已下架）：**只为渲染旧会话**保留 —— 删掉它们，
+  // 老对话里的动作行会退化成机械英文名。当前工具判定一律走 work-class 的守卫。
   'todo-update': {
     icon: 'Check',
     get verb() { return i18next.t('const.tool.todoUpdate') },

@@ -18,13 +18,31 @@ function snap(ui: CompositionSnapshot['layers']['ui'], degraded: Degradation[] =
     profileId: 'wb.x',
     profileVersion: '1.0.0',
     resolvedAt: 1700000000000,
-    layers: { agents: [], tools: [], ui, data: [], auto: [] },
+    layers: { agents: [], tools: [], ui },
     degraded,
   }
 }
 
-test('TC-PVIEW-001 无快照 → 三字段全为「不覆盖」空态（不得凭空生成 UI）', () => {
-  assert.deepEqual(projectUiLayer(null), { dockTabs: null, homeModule: null, composerChips: [] })
+test('TC-PVIEW-001 无快照 → 视图字段全为「不覆盖」空态（不得凭空生成 UI）', () => {
+  // v0.36.0（B11/P3-b）：新增 pluginRefs 投影字段（null = 未声明不过滤）
+  assert.deepEqual(projectUiLayer(null), {
+    dockTabs: null,
+    homeModule: null,
+    composerChips: [],
+    pluginRefs: null,
+  })
+})
+
+test('TC-PVIEW-007 ★ v0.36.0（B11/P3-b）：ui.pluginRefs 快照行 → 白名单投影', () => {
+  // applied=true 且非空 → 白名单生效
+  const v = projectUiLayer(snap([{ slot: 'ui.pluginRefs', value: 'ark.plugin.git-manager', applied: true }]))
+  assert.deepEqual(v.pluginRefs, ['ark.plugin.git-manager'])
+  // applied=true 且 value 空串 → 显式空数组（全部隐藏），与未声明可区分
+  const empty = projectUiLayer(snap([{ slot: 'ui.pluginRefs', value: '', applied: true }]))
+  assert.deepEqual(empty.pluginRefs, [])
+  // applied=false → 未声明（不过滤）
+  const off = projectUiLayer(snap([{ slot: 'ui.pluginRefs', value: 'x', applied: false }]))
+  assert.equal(off.pluginRefs, null)
 })
 
 test('TC-PVIEW-002 applied=false 的 ui 项必须被跳过（没生效就不能给 UI 用）', () => {
@@ -65,7 +83,7 @@ test('TC-PVIEW-006 blocking 拆分：红点=阻断（会导致激活失败），
   const degraded: Degradation[] = [
     { layer: 'tools', ref: 'S-core.ghost', reason: '必需技能未安装', blocking: true },
     { layer: 'tools', ref: 'S-core.other', reason: '技能未安装', blocking: false },
-    { layer: 'auto', ref: '0 9 * * 1-5', reason: 'v1 不注册', blocking: false },
+    { layer: 'ui', ref: '0 9 * * 1-5', reason: '示例非阻断项', blocking: false },
   ]
   const s = snap([], degraded)
   assert.equal(blockingDegradations(s).length, 1)

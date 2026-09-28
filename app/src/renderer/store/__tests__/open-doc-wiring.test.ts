@@ -21,7 +21,10 @@
  * ============================================================ */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { stripComments } from '@shared/utils/source-guard'
 
 const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf-8')
 
@@ -120,12 +123,50 @@ test('TC-WIRE-005 activeRenderer 一律尊重 rendererOverrides（editor 不再�
 
 /* ============================================================
  * TC-WIRE-006 · 产物跳转复用共享谓词（消除硬编码字面量）
+ * ------------------------------------------------------------
+ * ★ v0.36.0（B9）改锚说明：
+ *   原用例锚在 `components/dock/ProgressPanel.tsx`，但该组件**从不被渲染**
+ *   （`dockTabId: 'progress'` 不在 `INSPECTOR_TAB_REFS` 内，`getEnabledWidgets()`
+ *   零调用方），B9 已随死代码清理删除 —— 继续锚它等于「断言一个死组件」，
+ *   正是纪律⑥点名的失效形态（TC-PUI-009 曾断言死组件）。
+ *   改为**全局口径**：凡是活的渲染层组件，都不得硬编码 `.arkwork/` 字面量。
+ *   这条比原断言**更强**（覆盖全部组件而非一个），且不依赖任何单个文件存活。
  * ============================================================ */
-test('TC-WIRE-006 ProgressPanel 用共享谓词判 .arkwork，不再硬编码字面量', () => {
-  const src = read('../../components/dock/ProgressPanel.tsx')
-  assert.match(src, /isArkworkInternal\(path\)/, '必须用共享纯函数判定')
-  assert.ok(
-    !/path\.includes\('\.arkwork\/'\)/.test(src),
-    "不得再硬编码 `.arkwork/` 字面量 —— 它漏判「无尾斜杠」的 `.arkwork` 路径",
+test('TC-WIRE-006 渲染层组件不得硬编码 `.arkwork/` —— 一律走共享谓词 isArkworkInternal', () => {
+  // ① 死组件确实已删（防止「删了又加回来」）
+  assert.equal(
+    existsSync(fileURLToPath(new URL('../../components/dock/ProgressPanel.tsx', import.meta.url))),
+    false,
+    'ProgressPanel 是死组件（无挂点），不得复活；若确要恢复请连同挂点一起加',
+  )
+
+  // ② 共享谓词仍是唯一真源（符号链路锚定，不锚路径字面）
+  const paths = readFileSync(fileURLToPath(new URL('../../../shared/utils/paths.ts', import.meta.url)), 'utf-8')
+  assert.match(paths, /export function isArkworkInternal\(/, '共享谓词必须存在')
+  assert.match(paths, /export const ARKWORK_DIRNAME = '\.arkwork'/, '目录名必须只有一处定义')
+
+  // ③ 全局扫描：活的渲染层组件里不得出现 `.includes('.arkwork/')` 这类硬编码
+  const COMPONENTS = fileURLToPath(new URL('../../components/', import.meta.url))
+  const offenders: string[] = []
+  const walk = (dir: string): void => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, ent.name)
+      if (ent.isDirectory()) {
+        if (ent.name === '__tests__') continue
+        walk(full)
+        continue
+      }
+      if (!ent.name.endsWith('.tsx') && !ent.name.endsWith('.ts')) continue
+      const src = readFileSync(full, 'utf-8')
+      // 只为源码守卫服务：剥掉注释再判，避免「注释里提到坏写法」误报（纪律⑫）
+      const code = stripComments(src)
+      if (/['"`]\.arkwork\//.test(code)) offenders.push(full.slice(COMPONENTS.length))
+    }
+  }
+  walk(COMPONENTS)
+  assert.deepEqual(
+    offenders,
+    [],
+    `不得硬编码 \`.arkwork/\` 字面量 —— 它漏判「无尾斜杠」的 \`.arkwork\` 路径，请改用 isArkworkInternal：${offenders.join(', ')}`,
   )
 })

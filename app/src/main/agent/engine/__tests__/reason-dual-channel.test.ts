@@ -29,6 +29,8 @@ import {
   reasoningText,
   firstSentence,
 } from '@shared/utils/reasoning'
+/** 注释剥离器唯一真源（v0.36.0 · D101 收敛；本文件原有朴素正则副本已退役） */
+import { stripComments } from '@shared/utils/source-guard'
 
 const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf-8')
 
@@ -41,11 +43,6 @@ const PRELOAD = read('../../../../preload/index.ts')
 // components/flow/blocks/ReasoningBlock.tsx + 投影层 flow/project.ts（§4.1 登记表）
 const REASONING_BLOCK = read('../../../../renderer/components/flow/blocks/ReasoningBlock.tsx')
 const FLOW_PROJECT = read('../../../../renderer/flow/project.ts')
-
-/** 去掉注释后的源码：避免「注释里提到过」被误判为「实现里有」。 */
-function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
 
 const REASON_PHASE_CODE = stripComments(REASON_PHASE)
 const LLM_STREAM_CODE = stripComments(LLM_STREAM)

@@ -224,8 +224,12 @@ export async function updateTask(
   await writeCollection(() => getCollection().upsert(updated))
   // v0.30.1 问题②·修复点 C：任务进入终态（done/failed/cancelled）时清理该图的
   // 待决补丁（纯内存表，防泄漏）。paused 可恢复，**不**清理。
-  if (patch.status && TERMINAL_TASK_STATUSES.has(patch.status) && updated.graphId) {
-    dropGraphPending(updated.graphId)
+  if (patch.status && TERMINAL_TASK_STATUSES.has(patch.status)) {
+    if (updated.graphId) dropGraphPending(updated.graphId)
+    // v0.38.1（D173）：降级计划闸门登记于建图前（startIter===0，graphId 尚为
+    // undefined），上方 graphId 守卫对其失效 → 用户实测「计划生成失败」卡片在
+    // 任务终态后仍常驻。按 taskId 直接清理（paused 保持不清理，可恢复语义不变）。
+    dropTaskPlanApproval(id)
   }
   return updated
 }

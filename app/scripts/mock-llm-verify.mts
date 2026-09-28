@@ -54,6 +54,35 @@ function roundsSoFar(messages: ChatMessage[]): number {
   return messages.filter((m) => m.role === 'assistant' && (m.tool_calls?.length ?? 0) > 0).length
 }
 
+/**
+ * 从引擎注入的「当前清单快照」里取**真实**清单文本。
+ *
+ * 为什么不能写死：LLM 可见的工具名由 skill id 派生（`S-core.task-plan` → `task-plan`），
+ * 清单文本也要与引擎账本**逐字一致** —— 否则 `task_plan` 的差异算法会把提交项当成
+ * "新增项"，S1/S4 的收口断言全部失真。引擎每轮把快照放进 system：
+ *   `当前清单快照：\n1. [ ] 读取工作区结构\n2. [▶] 检索入口文件\n…`
+ */
+function snapshotTexts(messages: ChatMessage[]): string[] {
+  const sys = messages.find(
+    (m) => m.role === 'system' && typeof m.content === 'string' && (m.content as string).includes('当前清单快照：'),
+  )
+  if (!sys) return []
+  const seg = (sys.content as string).split('当前清单快照：')[1] ?? ''
+  const out: string[] = []
+  for (const line of seg.split('\n')) {
+    const m = /^\s*\d+\.\s*\[[^\]]*\]\s*(.+?)\s*$/.exec(line)
+    if (!m) {
+      if (out.length > 0) break
+      continue
+    }
+    out.push(m[1]!)
+  }
+  return out.filter((x) => !/^…（其余/.test(x))
+}
+
+/** 第 n 项及之前为 done、第 n 项为 doing、其后 todo（task_plan 的"完整清单"形态） */
+const progressTo = (n: number) => (idx: number): string => (idx < n ? 'done' : idx === n ? 'doing' : 'todo')
+
 /** 从可用工具里按关键字挑一个名字（不硬编码 —— 工具集换版本也不失效） */
 function pickTool(req: ChatRequest, keywords: string[]): string | null {
   const names = (req.tools ?? []).map((t) => t.function?.name).filter((n): n is string => !!n)
@@ -101,10 +130,25 @@ function scriptFor(model: string, req: ChatRequest): MockReply {
   const readTool = pickTool(req, ['file-reader'])
   const globTool = pickTool(req, ['glob-search'])
   const writeTool = pickTool(req, ['file-writer'])
-  const todoTool = pickTool(req, ['todo-update'])
-  /** 第 n 项标为 status（todo_update 的真实入参形态：item_index + status + comment） */
-  const todo = (i: number, status: string, comment: string): Array<[string, Record<string, unknown>]> =>
-    todoTool ? [[todoTool, { item_index: i, status, comment }]] : []
+  // v0.38.0（D154）：清单写入口收敛为 **`task-plan`**（提交**完整清单**，引擎算差异）。
+  // 旧形态 `todo-update({ item_index, status })` 已下架 —— 继续用旧名会让 pickTool 挑不到
+  // 工具 → mock 退化成"零工具调用" → 清单永不推进 → S1/S4 收口断言全红（契约未同步，
+  // 不是引擎缺陷）。清单文本取引擎快照，保证与账本逐字一致。
+  const todoTool = pickTool(req, ['task-plan'])
+  /** 按 mark 函数提交**完整**清单（task_plan 的真实入参形态：items[{text,status,note}]） */
+  const todo = (
+    mark: (idx: number, total: number) => string,
+    reason: string,
+  ): Array<[string, Record<string, unknown>]> => {
+    const texts = snapshotTexts(req.messages)
+    if (!todoTool || texts.length === 0) return []
+    return [
+      [
+        todoTool,
+        { items: texts.map((t, i) => ({ text: t, status: mark(i, texts.length), note: reason })), reason },
+      ],
+    ]
+  }
 
   /* ---------- 高性能模型：规范 ReAct，叙述在 content，探索→产出→收口 ---------- */
   if (model.startsWith('mock-strong')) {
@@ -140,7 +184,7 @@ function scriptFor(model: string, req: ChatRequest): MockReply {
       return {
         reasoning: `第 ${i + 1} 项已完成，更新清单。`,
         content: `清单第 ${i + 1} 项完成。`,
-        calls: todo(i, 'done', `第 ${i + 1} 项已完成并验证`),
+        calls: todo(progressTo(i + 1), `第 ${i + 1} 项已完成并验证`),
         finish: 'stop',
       }
     }
@@ -171,7 +215,7 @@ function scriptFor(model: string, req: ChatRequest): MockReply {
       return {
         reasoning: '九轮探索已经覆盖主要目录，清单可以收口了。',
         content: '',
-        calls: todo(0, 'done', '已探索主要目录与文件，结论已就绪'),
+        calls: todo(progressTo(1), '已探索主要目录与文件，结论已就绪'),
         finish: 'stop',
       }
     }

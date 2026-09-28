@@ -3,6 +3,9 @@
     "title": "页面渲染出现异常",
     "retry": "重试"
   },
+  "notice": {
+    "gateBlocked": "〈系统提示〉"
+  },
   "flow": {
     "showResult": "查看结果",
     "hideResult": "收起",
@@ -16,6 +19,7 @@
     "openFile": "点击打开文件",
     "fold": {
       "thinking": "思考过程",
+      "thinkingCount": "思考 {{n}} 次",
       "tools": "工具调用",
       "running": "进行中",
       "sep": "，",
@@ -141,6 +145,39 @@
     },
     "permission": {
       "title": "权限",
+      "rules": {
+        "title": "权限规则",
+        "listTitle": "生效中的规则",
+        "count": "{{count}} 条",
+        "loading": "正在读取规则…",
+        "loadFailed": "规则读取失败，可能没有该文件的读取权限",
+        "retry": "重试",
+        "emptyTitle": "还没有自定义规则",
+        "emptyHint": "运行中若被权限拦下，在弹窗里勾选「记住此选择」就会在这里多出一条；也可以直接在下面添加。",
+        "addTitle": "添加规则",
+        "toolLabel": "工具",
+        "patternLabel": "路径或命令（glob）",
+        "patternPlaceholder": "如 git diff:* 或 src/**/*.ts",
+        "behaviorLabel": "行为",
+        "add": "添加",
+        "preview": "将写入",
+        "toolScopeHint": "当前只有 {{tools}} 走规则匹配；文件类工具由受保护路径独立把守，不在这张表里。",
+        "enabled": "生效",
+        "disabled": "已停用",
+        "readonly": "只读",
+        "readonlyHint": "这条来自配置文件，在这里改会被下次读取覆盖；要改请直接编辑对应文件。",
+        "remove": "删除",
+        "scope": {
+          "managed": "管理员",
+          "local": "本工作区",
+          "project": "项目配置",
+          "user": "个人配置",
+          "managedHint": "由管理员下发，不可修改",
+          "localHint": "你在本工作区添加的规则，可开关、可删除",
+          "projectHint": "来自 <workspace>/.arkwork/settings.json，请直接编辑该文件",
+          "userHint": "来自 ~/.arkwork/settings.json，请直接编辑该文件"
+        }
+      },
       "fastSwitchHint": "Shift+Tab 快捷切换",
       "sessionMode": "会话模式",
       "ruleMerged": "合并规则",
@@ -273,6 +310,19 @@
       "previewSuccess": "成功",
       "previewWarning": "警告",
       "previewError": "错误"
+    },
+    "performance": {
+      "title": "性能与本地部署",
+      "modeTitle": "性能模式",
+      "modeAuto": "自动",
+      "modeAutoDesc": "按显卡状态自动判定；软件渲染/虚拟机时自动抑制动画并放缓流式刷新",
+      "modeOn": "开启",
+      "modeOnDesc": "强制性能降级：抑制全部连续动画，流式输出放缓刷新 —— 低配虚拟机建议开启",
+      "modeOff": "关闭",
+      "modeOffDesc": "强制关闭降级（自动判定误判时的逃生门）",
+      "lightModelTitle": "轻量模型（旁路任务）",
+      "lightModelNone": "不使用（跟随任务模型）",
+      "lightModelDesc": "用于任务标题等轻量旁路调用；本地部署大思考模型时，选一个小参数模型可秒级返回且不占用主模型"
     }
   },
   "toast": {
@@ -515,7 +565,12 @@
     "ctxUsage": "已用 {{used}} / {{total}} tokens（{{pct}}%，上限 {{window}}）{{cache}}",
     "cachePrefixHit": "缓存命中 {{pct}}% · {{hit}} / {{total}}",
     "compressHintInline": "上下文超过上限，建议压缩",
-    "compressHint": "/压缩"
+    "compressHint": "/压缩",
+    "agentFilterPlaceholder": "过滤 agent…",
+    "agentFilterEmpty": "没有匹配的 agent",
+    "agentSectionGlobal": "内置 / 全局",
+    "agentSectionWorkspace": "工作区内置",
+    "manageAgents": "管理 agent…"
   },
   "editors": {
     "close": "关闭",
@@ -867,6 +922,11 @@
       "title": "文件",
       "stats": "{{files}} 个文件 · {{folders}} 个文件夹",
       "refreshTooltip": "刷新",
+      "expandAll": "全部展开",
+      "expandAllDesc": "展开当前已加载的所有目录（更深层随展开逐层加载）",
+      "collapseAll": "全部收起",
+      "collapseAllDesc": "收起所有已展开的目录",
+      "loading": "加载中…",
       "searchPlaceholder": "搜索文件…",
       "empty": {
         "title": "暂无文件",
@@ -1610,6 +1670,7 @@
       "toggleRight": "折叠或展开右栏",
       "openSettings": "打开设置",
       "export": "导出当前对话",
+      "copyConversation": "复制当前对话",
       "returnTask": "返回任务"
     },
     "placeholder": {
@@ -1676,6 +1737,12 @@
       "subtitle": "工作台 · 插件 · 诊断 —— 配置能力与插件插拔"
     }
   },
+  "taskAnchor": {
+    "title": "任务锚点",
+    "goal": "核心任务",
+    "doing": "正在做",
+    "intent": "用户意图"
+  },
   "conversationflow": {
     "loadingAgent": "正在加载 Agent…",
     "executing": "执行中…",
@@ -1686,7 +1753,26 @@
     "planStepAria": "计划步骤 {{index}}：{{text}}（状态：{{status}}）",
     "steps": "步骤流",
     "foldedTurns": "… 已折叠 {{count}} 轮（点击展开）",
-    "collapseTurns": "收起前 {{count}} 轮"
+    "collapseTurns": "收起前 {{count}} 轮",
+    "subagent": {
+      "title": "并行执行 {{count}} 个子 agent",
+      "progress": "{{finished}}/{{total}} 已完成",
+      "settledAll": "全部完成",
+      "settledWithFailures": "{{total}} 个中 {{failed}} 个失败",
+      "concurrencyCap": "并发上限 4",
+      "cancel": "取消",
+      "retry": "重试该子任务",
+      "waiting": "等待模型槽位…",
+      "expand": "展开",
+      "collapse": "收起",
+      "status": {
+        "queued": "排队中",
+        "running": "运行中",
+        "done": "已完成",
+        "failed": "失败",
+        "cancelled": "已取消"
+      }
+    }
   },
   "browserchrome": {
     "nav": {
@@ -1898,7 +1984,11 @@
     "noAskSession": "本次会话内不再询问",
     "deny": "拒绝",
     "allow": "允许",
-    "closeHint": "Esc 关闭"
+    "closeHint": "Esc 关闭",
+    "remember": "记住此选择",
+    "rememberBehavior": "记住时的行为",
+    "rememberPreview": "将写入规则",
+    "ruleRemembered": "已记住规则 {{rule}}"
   },
   "markdown": {
     "copied": "已复制",
@@ -2053,10 +2143,20 @@
   "plantatus": {
     "waiting": "等待",
     "running": "执行中",
+    "paused": "中断待续",
     "done": "已完成",
     "failed": "失败",
     "cancelled": "已取消",
     "skipped": "已跳过"
+  },
+  "ledger": {
+    "modeLabel": "任务模式",
+    "modeChat": "对话式",
+    "modePlan": "计划式",
+    "modeSpec": "规格式",
+    "modeTooltip": "由模型根据任务复杂度自选，不提供手动切换",
+    "resumeBar": "恢复点",
+    "openCount": "{{n}} 项未收口"
   },
   "help": {
     "title": "ArkWork 帮助中心",
@@ -2140,11 +2240,12 @@
       },
       "parallel": {
         "title": "并行执行",
-        "summary": "无依赖的多次工具调用会被自动并行发起，进度按工具维度独立展示，不会互相覆盖。",
+        "summary": "同一轮里互不依赖的工作会被并发发起：工具调用并行、子 agent 并行，进度按各自的维度独立展示。",
         "bullets": {
-          "0": "同一 Agent 一次推理中可触发多个工具调用，引擎并发执行。",
-          "1": "前后依赖（写入后再读取）仍按串行语料执行，避免竞态。",
-          "2": "计划卡 / 右侧清单共享同一份 planItems 数据源，杜绝\"提前勾完\"。"
+          "0": "同一 Agent 一次推理中可触发多个工具调用，引擎并发执行，进度按工具维度独立展示、互不覆盖。",
+          "1": "遇到可拆分的子任务会委派给子 agent 并行处理，每个子 agent 有独立的步骤流与产出，互不阻塞。",
+          "2": "前后依赖（写入后再读取）仍按串行执行，避免竞态。",
+          "3": "计划卡 / 右侧清单共享同一份 planItems 数据源，杜绝\"提前勾完\"。"
         },
         "actions": {
           "0": "打开 Inspector · 清单",
@@ -2153,15 +2254,30 @@
       },
       "conversation": {
         "title": "对话流",
-        "summary": "对话流承载用户消息、计划、工具调用结果与 Agent 回复；可滚动、可锁定焦点。",
+        "summary": "对话流按三层信息架构组织：正文（你的消息与 Agent 回复）、过程（思考 / 工具调用 / 观察），以及可折叠的过程组。",
         "bullets": {
-          "0": "用户消息与 Agent 回复的文本块默认按时间倒序堆叠；工具调用以\"折叠卡片\"展示。",
-          "1": "当 Agent 正在执行时，对话顶部出现\"正在运行命令…\"等人类可读描述（按工具类型映射）。",
-          "2": "Composer 支持多行输入；长任务可暂停 / 继续 / 取消。"
+          "0": "正文层只保留人与 Agent 的可读内容；过程层承载思考、工具调用与观察结果，默认收起以便通读。",
+          "1": "连续的过程会自动聚成\"过程组\"并给出摘要（轮次区间、步数、耗时），点开即展开，收起不丢内容。",
+          "2": "工具调用以卡片展示，运行中显示人类可读描述（如\"正在读取文件…\"）；失败卡片可就地重试。",
+          "3": "Composer 支持多行输入；长任务可暂停 / 继续 / 取消，本轮上下文占用在输入区右侧实时显示。"
         },
         "actions": {
           "0": "聚焦 Composer",
           "1": "新建任务开始一段对话"
+        }
+      },
+      "files": {
+        "title": "文件工作台",
+        "summary": "工作区文件在应用内直接打开、编辑与保存：编辑器提供语法高亮与查找替换，保存走原子写入，磁盘改动冲突就地提示。",
+        "bullets": {
+          "0": "按名字跳转用 QuickOpen；在右侧坞\"文件\"标签里可浏览整棵工作区目录树，点击即在编辑器打开。",
+          "1": "编辑器支持语法高亮、多光标、查找替换与行操作；保存为原子写入（先写临时文件再替换），不会留下半截文件。",
+          "2": "磁盘文件被外部改动时弹出冲突横幅：可对比差异，选择保留我的改动或采用磁盘版本，不会静默覆盖。",
+          "3": "工作区内的文件可读可写；工作区外的文件（例如以绝对路径引用）以只读方式打开并标出原因，写入会被拒绝。"
+        },
+        "actions": {
+          "0": "打开 QuickOpen（按名字跳转）",
+          "1": "打开 Inspector · 文件"
         }
       },
       "agents": {
@@ -2189,6 +2305,34 @@
           "0": "打开能力中心"
         }
       },
+      "plugins": {
+        "title": "插件",
+        "summary": "插件扩展 ArkWork 的能力：可贡献命令、面板与代码视图；安装前会先列出它申请的权限与能力，卸载时可一并清除私有数据。",
+        "bullets": {
+          "0": "在能力页的\"插件\"标签里新建、安装（选择 zip 包）与卸载；安装前先预览权限与能力清单，确认后才落盘。",
+          "1": "插件贡献的命令会进入 QuickAction，可直接触发；贡献的面板与视图出现在右侧坞的标签里。",
+          "2": "代码插件在独立的宿主进程中运行，并受能力白名单约束；校验失败或崩溃只影响它自己，其他插件不受牵连。",
+          "3": "卸载时可选\"删除插件数据\"，连同该插件的私有键值一起清理；装载状态与失败原因逐条可见。",
+          "4": "插件页内置\"使用指南 / 开发指南\"两套内嵌教程，含一个能直接通过校验的最小示例。"
+        },
+        "actions": {
+          "0": "打开能力中心 · 插件",
+          "1": "打开 QuickAction 查看插件命令"
+        }
+      },
+      "workbench": {
+        "title": "工作台",
+        "summary": "工作台是配置能力的宿主：把一套工作方式声明成工作台 Profile，切换即改变界面布局与启用能力。",
+        "bullets": {
+          "0": "每个 Profile 声明布局、启用的插件与技能、右侧坞标签与主题等；可从内置方案复制一份再按需改造。",
+          "1": "向导化配置：新建与编辑 Profile 按步骤选择布局与能力，不需要手写 JSON。",
+          "2": "激活后会应用其声明；\"声明了什么\"与\"实际生效了什么\"在同一页对照呈现，降级与校验问题就地以横幅说明。",
+          "3": "Profile 与激活报告都可导出、导入，便于在多台机器之间同步同一套工作方式。"
+        },
+        "actions": {
+          "0": "打开工作台中心"
+        }
+      },
       "kb": {
         "title": "知识库",
         "summary": "把 PDF / TXT / Markdown / DOCX 解析为可检索文本（SQLite FTS5），kb_query 工具调用命中片段。",
@@ -2205,13 +2349,14 @@
       },
       "memory": {
         "title": "记忆 L1 – L4",
-        "summary": "ArkWork 维护四层记忆，自动蒸馏晋升，原始层会自动清理。",
+        "summary": "记忆按\"任务内 → 工作区 → 跨工作区\"逐层沉淀：一手证据留在下层，长期内容只由收尾巩固推导写入策展层。",
         "bullets": {
-          "0": "L1 工作记忆：当轮对话上下文内的临时条目。",
-          "1": "L2 文件记忆：会话内抽取的事实、引用、命令记录。",
-          "2": "L3 策展记忆：跨会话的主题 / 复用片段，可被搜索并注入。",
-          "3": "L4 画像记忆：长期用户偏好与角色画像，慢变量更新。",
-          "4": "满足门槛（主题计数 / 复用次数 / L2 体积）会自动蒸馏；UI 中\"手动转知识库\"已下线。"
+          "0": "L1 工作记忆：当前任务的逐轮条目（消息 / 思考 / 工具观察），是唯一的一手证据，蒸馏不会删除它。",
+          "1": "L2 文件记忆：溢出的大结果与步骤产物落成文件，按需读回，不常驻上下文。",
+          "2": "L3a 策展记忆：项目记忆落工作区（随项目走），用户偏好留在全局 Agent 空间（跨工作区共享）。",
+          "3": "L3b 档案：任务收尾时把 L1 归档成可检索的历史条目，原始条目同时保留，可回查可检索。",
+          "4": "L4 用户画像：跨工作区的长期偏好，按周期（首次 / 24 小时 / 5 个任务）批量合成，不做每次重写。",
+          "5": "收尾巩固：任务结束时由模型从 L1 / L2 提炼长期内容，先进暂存区、下次运行才生效；失败时一个字都不写。"
         },
         "actions": {
           "0": "打开记忆页面"
@@ -2231,14 +2376,14 @@
       },
       "inspector": {
         "title": "Inspector",
-        "summary": "右侧五固定 Tab：清单 / 上下文 / 文件 / 日志 / 浏览器。",
+        "summary": "右侧坞按需滑出：内置六个标签（清单 / 上下文 / 文件 / 日志 / 浏览器 / 终端），插件还可贡献自己的面板与视图。",
         "bullets": {
-          "0": "当前激活标签再点击可折叠；折叠后任意标签再次点击能重新展开（不再\"卡住\"）。",
+          "0": "折叠 / 展开右侧坞有快捷键；点当前激活标签也可折叠，折叠后再点任意标签能重新展开（不会\"卡住\"）。",
           "1": "清单：实时同步 planItems，状态源唯一。",
-          "2": "上下文：只读展示当前任务注入的 KB / 记忆片段与 token 预算；L2 起可在记忆中心编辑。",
-          "3": "文件：工作区文件浏览（不再保留假\"收藏\"按钮）。",
-          "4": "日志：工具调用 / 权限 / 错误流水；可一键复制。",
-          "5": "浏览器：内嵌 BrowserPanel 与 PreviewWindow 联动。"
+          "2": "上下文：只读展示本任务注入的知识库 / 记忆片段与上下文占用；记忆条目可在记忆中心编辑。",
+          "3": "文件：工作区目录树，点击即在编辑器中打开；Agent 生成的产物文件也在其中。",
+          "4": "日志：工具调用 / 权限 / 错误流水；可一键复制，用于排查。",
+          "5": "浏览器与终端：内嵌浏览面板与终端；插件声明贡献的面板与视图会以额外标签出现。"
         },
         "actions": {
           "0": "打开清单",
@@ -2248,30 +2393,30 @@
           "4": "打开浏览器"
         }
       },
-      "models": {
-        "title": "模型 / 设置",
-        "summary": "设置页五分区：模型 / 工作区 / 外观 / 快捷键 / 高级。",
+      "settings": {
+        "title": "设置与权限",
+        "summary": "设置页按标签组织：模型 / 工作区 / 知识 / 外观 / 高级（权限规则与诊断都在高级里）。",
         "bullets": {
-          "0": "模型：选择默认 / 备用模型，配置 API Key；支持 OpenAI、Anthropic、本地 Ollama。",
-          "1": "工作区：选择工作区根目录、默认 KB、文件忽略规则。",
-          "2": "外观：主题（浅 / 深 / 跟随系统）+ 字体密度。",
-          "3": "快捷键：当前所有快捷键只读总表（与 HelpCenter 同步）。",
-          "4": "高级：实验性开关、日志级别、自动更新通道。",
-          "5": "当前模型仅在 Composer 唯一展示，其他位置（TopBar / StatusBar / 任务头）已收敛。"
+          "0": "模型：选择默认与备用模型、配置 API Key；支持 OpenAI、Anthropic 与本地 Ollama / vLLM 等兼容端点。",
+          "1": "工作区：切换当前工作区（一个文件夹即一个工作区）、默认知识库与文件忽略规则。",
+          "2": "外观：浅色 / 深色 / 跟随系统与字号密度；切换立即生效，无需重启。",
+          "3": "权限规则：按来源四级展示（管理员 / 本工作区 / 项目配置 / 个人配置），可逐条启用与停用，命中情况在日志里可查。",
+          "4": "拦截浮层上的\"记住此选择\"会把这次决定写成一条规则（默认记到本工作区），下次同类调用不再打断你。",
+          "5": "高级：日志 / 图谱诊断、压缩策略只读展示与实验性开关；当前模型只在输入框展示，其他位置已收敛。"
         },
         "actions": {
           "0": "打开设置"
         }
       },
-      "privacy": {
-        "title": "隐私 / 本地存储",
-        "summary": "ArkWork 默认本地优先：任务 / 对话 / 记忆落本地 JSON，知识库索引落本地 SQLite（FTS5）与文件系统。",
+      "performance": {
+        "title": "性能与本地存储",
+        "summary": "ArkWork 面向没有独立显卡的机器做了性能取舍，同时保持本地优先：动效只留纯色与透明度呼吸，数据默认不出本机。",
         "bullets": {
-          "0": "数据目录：开发态 userData 重定向到 app/.dev-data；打包态在系统 userData（macOS：~/Library/Application Support/ArkWork）。",
-          "1": "应用数据根目录为 <userData>/arkwork-data：任务 / 智能体 / 技能 / 模型 / 记忆均以 JSON 持久化于此。",
-          "2": "当前工作区：<userData>/arkwork-data/workspace/default（可在设置 · 工作区切换）；任务记忆位于 <workspaceDir>/.arkwork/memory/<taskId>。",
-          "3": "模型调用由用户显式配置的 API Key 发起；ArkWork 不上传你的对话内容。",
-          "4": "一键导出 / 清空工作区数据；所有变更可在设置 → 高级找到入口。"
+          "0": "动效纪律：只保留透明度变化与纯色呼吸这类廉价效果，不用模糊、位移与持续重绘的动画。",
+          "1": "毛玻璃（背景模糊）已全面移除，遮罩改为纯色分层，避免无 GPU 环境下的逐帧合成开销。",
+          "2": "系统开启\"减少动态效果\"时会自动降级；检测到软件渲染时也会进入性能降级模式，界面立即静止。",
+          "3": "数据目录：开发态重定向到 app/.dev-data；打包态在系统用户数据目录，应用数据根为其中的 arkwork-data。",
+          "4": "对话、记忆与知识库索引都落本地；模型调用只由你配置的 API Key 发起，不上传你的对话内容。"
         },
         "actions": {
           "0": "打开设置 · 高级"
@@ -2304,7 +2449,9 @@
       "sessionSearch": "检索历史",
       "taskComplete": "完成任务",
       "askUser": "询问用户",
-      "todoUpdate": "更新清单"
+      "todoUpdate": "更新清单",
+      "taskPlan": "更新任务清单",
+      "turnNote": "补充说明"
     },
     "argKey": {
       "path": "路径",
@@ -2582,11 +2729,20 @@
       "editMarkdownSoon": "即将支持",
       "reject": "打回并说明",
       "approve": "批准执行",
+      "approveSelected": "批准所选并开始",
+      "keepOnly": "仅保留计划不执行",
+      "keepOnlyHint": "保留计划与已冻结的验收条件，暂不注入执行；之后可在任务面板手动启动",
+      "approveNoneHint": "至少勾选一项计划项再批准",
+      "itemCheckbox": "勾选该计划项",
+      "editItemHint": "点击标题可行内编辑：Enter 提交，Esc 取消",
+      "editedBadge": "已调整",
+      "itemsEmpty": "计划尚未包含可勾选的结构项（里程碑 / 任务）—— 可直接批准执行，或先打回请 Planner 细化。",
       "rejectReason": "打回理由（会作为说明注入给 Planner）",
       "rejectPlaceholder": "说明要改什么…",
       "confirmReject": "确认打回",
       "cancel": "取消",
       "approvedFold": "计划已批准（{{tasks}} 项任务 · {{acs}} 条验收）· AC 已冻结",
+      "approvedSelectedFold": "计划已批准（已批准 {{approved}}/{{total}} 项 · {{acs}} 条验收）· AC 已冻结",
       "rejectedFold": "计划已打回，等待 Planner 重新规划",
       "rejectedNote": "我的意见：{{note}}",
       "errorBanner": "计划生成失败（已用三级降级重试仍失败）—— 已降级为直接执行，不阻断任务",
@@ -2602,7 +2758,7 @@
       "acceptDegraded": "接受降级，直接执行",
       "acceptDegradedHint": "暂不支持手动确认降级，将在 v0.30.1 提供",
       "degradedEntryNote": "以上入口将在 v0.30.1 提供；任务已按扁平清单继续执行",
-      "nodeFocusHint": "已在任务面板中定位该节点",
+      "dismissDegraded": "关闭此卡片",
       "failed": "操作失败，请重试"
     }
   },
@@ -2699,13 +2855,11 @@
       "ok": "已激活 {{name}}（{{id}} v{{version}}）· {{ms}}ms",
       "failed": "激活失败",
       "stillActive": "当前仍生效：{{name}}",
-      "layers": "五层装配",
+      "layers": "三层装配",
       "layer": {
         "agents": "智能体",
         "tools": "工具与技能",
-        "ui": "界面",
-        "data": "数据",
-        "auto": "自动化"
+        "ui": "界面"
       },
       "degraded": "降级与警告",
       "issues": "校验问题",
@@ -2750,10 +2904,12 @@
         "agents": "智能体",
         "tools": "工具",
         "ui": "界面",
-        "data": "数据",
-        "auto": "定时任务",
         "unknown": "未知"
       }
+    },
+    "banner": {
+      "partial": "{{name}} · {{count}} 项能力未生效",
+      "blocking": "{{name}} · {{count}} 项必需能力缺失"
     }
   },
   "keybind": {
@@ -2822,6 +2978,30 @@
       "deleteActiveHint": "生效中的工作台不可删除（先切换到其他台）",
       "deleteAria": "删除 {{name}}"
     },
+    "wizard": {
+      "title": "新建工作台",
+      "step": {
+        "template": "模板",
+        "agent": "智能体",
+        "capabilities": "插件与技能",
+        "name": "命名"
+      },
+      "templateHint": "从一个模板开始 —— 它会带上一套现成的技能与面板，之后也能再改",
+      "agentHint": "选一个默认智能体；也可以不绑定，之后在编辑器里再加",
+      "noAgent": "不绑定智能体",
+      "noAgentHint": "建台后仍可运行，稍后可补配",
+      "capHint": "勾选要启用的插件面板与技能（可留空，稍后再开）",
+      "nameLabel": "名称",
+      "idLabel": "标识",
+      "idHint": "全小写字母数字与连字符，形如 组名.名称（如 my.notes）",
+      "back": "上一步",
+      "next": "下一步",
+      "finish": "完成并激活",
+      "creating": "创建中…",
+      "created": "已创建并激活「{{name}}」",
+      "createFailed": "创建失败，请检查名称与标识",
+      "loadFailed": "无法读取模板工作台"
+    },
     "editor": {
       "title": "编辑工作台",
       "close": "关闭",
@@ -2829,6 +3009,22 @@
       "loading": "正在读取工作台清单…",
       "loadFailed": "读取工作台清单失败",
       "notFound": "工作台不存在，可能已被删除",
+      "agentTitle": "智能体",
+      "agentHint": "选一个默认智能体，并勾选本台要启用的其他智能体",
+      "agentDefaultAria": "设为默认智能体：{{id}}",
+      "agentInclude": "启用",
+      "noAgents": "本台未声明任何智能体 —— 请到高级里补上，或从其他台克隆",
+      "capTitle": "插件与技能",
+      "capHint": "你的勾选决定：模型能用哪些技能、界面能挂哪些插件面板",
+      "skillsTitle": "技能（模型可用）",
+      "noSkills": "未声明任何技能",
+      "skillAdd": "添加",
+      "skillAddPlaceholder": "技能名，如 S-core.plan",
+      "pluginsTitle": "插件面板（界面可挂）",
+      "pluginFilterHint": "勾选 = 本工作台显示该插件面板（改动即时生效）；全部勾选等同于默认状态",
+      "pluginFilterFailed": "插件配置保存失败",
+      "noPlugins": "没有已启用的插件贡献 —— 到「能力 → 插件」启用后这里才有可选项",
+      "dockTitle": "界面布局",
       "cloneFail.not-found": "源工作台不存在",
       "cloneFail.id-exists": "克隆目标 id 已存在",
       "cloneFail.invalid": "克隆结果未通过校验",
@@ -2838,13 +3034,19 @@
         "dockPanels": "Dock 插件面板",
         "ui": "界面",
         "data": "记忆域",
-        "theme": "主题 token 覆盖"
+        "theme": "主题 token 覆盖",
+        "identity": "身份",
+        "advanced": "高级",
+        "advancedHint": "继承、界面偏好、主题与记忆归属（一般不需要改）"
       },
       "name": "名称",
       "version": "版本",
       "icon": "图标（宿主白名单）",
       "iconNone": "跟随默认",
       "description": "描述",
+      "extends": "继承自（高级）",
+      "extendsHint": "单继承、深度不超过 2 层：本台会先合并父台的字段，再应用自己的改动。留空即独立。",
+      "extendsPlaceholder": "父工作台 id，如 wb.base",
       "dockBuiltinHint": "勾选并排序内置面板（顺序即 ui.dockTabs；至少保留 1 个）",
       "moveUp": "上移",
       "remove": "移除",
@@ -2857,7 +3059,9 @@
       "composerChips": "Composer 快捷 chips",
       "composerChipsHint": "逗号分隔，最多 5 个",
       "memoryNamespace": "记忆命名空间",
+      "memoryNamespaceHint": "本台的记忆写在独立命名空间里，和其他台互不串台；留空则用默认命名空间。",
       "shareCoreProfile": "共享核心记忆画像",
+      "shareCoreProfileHint": "勾选后可与本台共享你沉淀的核心画像（偏好、习惯）；取消则完全隔离。",
       "themeHint": "只允许覆盖已存在的 token（键形如 --x-y；值只允许颜色或 px/rem/em/%）",
       "addToken": "添加 token",
       "saveIssues": "保存未通过校验 —— 请修正下列问题后重试",
@@ -2937,7 +3141,87 @@
       "scaffoldKind": "类型",
       "scaffoldCreate": "生成并打开",
       "scaffoldCancel": "取消",
-      "scaffoldIdRequired": "请先填写插件 id 与显示名"
+      "scaffoldIdRequired": "请先填写插件 id 与显示名",
+      "backToList": "返回列表",
+      "guideBtn": "插件指南",
+      "guideUsage": "使用指南",
+      "guideDev": "开发指南",
+      "install": "安装",
+      "installZip": "安装插件包（.zip）",
+      "installConfirmTitle": "安装插件",
+      "installCapabilities": "能力贡献",
+      "installPermissions": "申请权限",
+      "installPermissionHint": "权限默认拒绝：插件只能在声明过的能力范围内工作。启用前请确认你信任它的来源。",
+      "installNoPermissions": "此插件不申请任何权限",
+      "installOverwrite": "覆盖已有的同 id 插件",
+      "installDisabledHint": "安装后默认禁用：请在列表中确认权限后再启用。",
+      "installCancel": "取消",
+      "installConfirm": "确认安装",
+      "uninstallConfirmTitle": "卸载插件",
+      "uninstallConfirmBody": "确定卸载「{{id}}」？插件目录将被删除。",
+      "uninstallConfirm": "确认卸载",
+      "uninstallPurge": "同时删除插件数据（私有存储）",
+      "commandsHint": "可在 {{kbd}} 快捷面板用 / 前缀触发",
+      "errNoFile": "未选择文件",
+      "errCancelled": "已取消",
+      "errExtractFailed": "解压失败，插件包可能已损坏",
+      "errManifestInvalid": "清单校验未通过",
+      "errEnginesMismatch": "宿主版本不满足插件要求",
+      "errEntryMissing": "插件包缺少必需文件",
+      "errAlreadyExists": "同 id 插件已存在",
+      "errIoError": "文件读写失败",
+      "errIpcError": "与主进程通讯失败",
+      "errUnknown": "安装失败",
+      "guide": {
+        "usage": {
+          "title": "如何使用插件",
+          "intro": "从安装 zip 包到卸载的完整流程。插件包是一个含 plugin.json 的 .zip 文件。",
+          "install": {
+            "title": "安装插件包",
+            "body": "点顶部「安装」选择 .zip 文件 → 预览插件信息、能力与权限 → 确认安装。新装的插件默认禁用。"
+          },
+          "enable": {
+            "title": "启用插件",
+            "body": "在列表中打开开关。注意作用域：「本工作区」只在当前工作区生效，「全局」对所有工作区生效。"
+          },
+          "command": {
+            "title": "触发命令与打开视图",
+            "body": "按 {{kbd}} 打开快捷面板，输入 / 按命令过滤，回车触发。插件贡献的代码视图出现在右侧检查器（Inspector）的 Tab 里。"
+          },
+          "uninstall": {
+            "title": "卸载插件",
+            "body": "展开插件详情 → 点「卸载」→ 确认。勾选「同时删除插件数据」会连同它的私有存储一起清除。"
+          },
+          "notes": {
+            "title": "安全须知",
+            "body": "权限默认拒绝（插件只能用声明过的能力）；安装包上限 64MB / 2000 个文件；重复安装同 id 插件需勾选「覆盖已有」。"
+          }
+        },
+        "dev": {
+          "title": "如何开发插件",
+          "intro": "一个插件 = 一个文件夹：plugin.json 必需，main.js（Host 半）与 index.html（Client 半）可选。下面从零做一个带命令的最小插件。",
+          "scaffold": {
+            "title": "从脚手架开始（推荐）",
+            "body": "能力页点「新建插件」→ 填 id 与名称 → 生成可运行骨架（plugin.json + main.js + index.html + renderer.js + README）。模板自带通过校验的清单，直接改业务逻辑即可。"
+          },
+          "manifest": {
+            "title": "写清单（plugin.json）",
+            "body": "命令写在 provides.commands（id + title）。声明命令就必须有 Host 半入口（main），否则校验直接拒绝："
+          },
+          "host": {
+            "title": "监听命令（main.js）",
+            "body": "Host 半导出一个 apply(ctx)。命令事件名 = command:<命令 id>，监听未声明的命令会当场报错（不静默）："
+          },
+          "package": {
+            "title": "打包成 zip",
+            "body": "把插件目录压缩为 .zip（plugin.json 必须在包内，建议套一层顶层目录）。随后在能力页点「安装」选择它。"
+          },
+          "verify": {
+            "title": "验证与调试",
+            "body": "安装后默认禁用 → 启用 → {{kbd}} 输入 / 触发命令。详情里的「运行期诊断」能看到装载耗时与最近错误；改了 main.js 后点「重新扫描」生效。"
+          }
+        }
+      }
     },
     "diag": {
       "slotsTitle": "插槽实况（九类）",
@@ -2967,5 +3251,18 @@
       "themeCount": "light {{light}} 项 · dark {{dark}} 项",
       "themeHint": "只覆盖已存在 token；宿主已删除的 token 会被自动丢弃（见激活报告）。"
     }
+  },
+  "answerLayer": {
+    "conclusion": "结论先行",
+    "changes": "变更清单",
+    "verification": "验证结果",
+    "next": "下一步",
+    "expand": "展开",
+    "collapse": "收起",
+    "missingConclusion": "未给出结论（模型遗漏了这一段，可直接追问）",
+    "missingChanges": "未列出变更（可直接追问改了哪些文件）",
+    "missingVerification": "未提供验证结果 —— 这不等于已验证，请谨慎采纳",
+    "missingNext": "未说明下一步",
+    "layerHint": "交付摘要（按「结论 / 变更 / 验证 / 下一步」分层；验证细节默认折叠）"
   }
 }

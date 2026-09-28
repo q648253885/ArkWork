@@ -15,19 +15,20 @@
  *    appendUserMessage 首条消息回填（见 store/tasks.ts）。
  *  - 清洗/占位判定纯函数在 task-title-clean.ts（零依赖，可直连单测）。
  * ============================================================ */
-import { getAdapter } from '../llm/registry.js'
+import { getAdapter, getModel } from '../llm/registry.js'
 import { getTask, updateTask } from '../store/tasks.js'
 import { broadcastTaskStatus } from './events.js'
 import { logger } from '../system/logger.js'
 import { MESSAGES } from '../i18n/messages.js'
 import { cleanTitle, isPlaceholderTitleIn } from './task-title-clean.js'
 
-export { cleanTitle, isPlaceholderTitleIn }
-
 /** 生成超时（毫秒）：标题生成是低优先级旁路，超时即放弃。
  * v0.34.x 实测：45s。20s 会被小模型冷启动（首次加载 1GB 进显存）直接吃掉，
- * 真机 qwen3.5:0.8b 首任务标题必然 'Request was aborted'。 */
-const TITLE_TIMEOUT_MS = 45_000
+ * 真机 qwen3.5:0.8b 首任务标题必然 'Request was aborted'。
+ * v0.36.4（D120）：本地大思考模型（如 27B @ 2 vCPU）标题调用可达分钟级，
+ * 45s 必超时 → 放宽到 120s；配了轻量模型（lightweightModelId）时通常秒级返回，
+ * 该上限只是兜底。思考保留（用户裁决：Ollama 需要 think）。 */
+const TITLE_TIMEOUT_MS = 120_000
 /**
  * 送给模型的素材上限（字符）
  * v0.34.x 修正：32 → 512。思考模型（qwen3.5 等）会先输出 `<think>` 思考再给
@@ -70,6 +71,28 @@ export function isPlaceholderTitle(title: string): boolean {
 }
 
 /**
+ * v0.36.4（D120）：标题生成的 adapter 选择。
+ * 设置里配了轻量模型（lightweightModelId）且存在/启用 → 用它；
+ * 否则回落任务模型。任何异常（设置读取失败/模型缺失）都静默回落，不阻断标题链路。
+ */
+async function getTitleAdapter(taskModelId: string) {
+  try {
+    const { getSettings } = await import('../ipc/settings.js')
+    const lightId = (await getSettings()).lightweightModelId?.trim()
+    if (lightId) {
+      const m = await getModel(lightId)
+      if (m?.enabled) {
+        return getAdapter(lightId)
+      }
+      logger.debug('Agent', `task title: lightweight model unavailable (${lightId}), falling back to task model`)
+    }
+  } catch (err) {
+    logger.debug('Agent', `task title: lightweight model lookup failed, falling back: ${(err as Error).message}`)
+  }
+  return getAdapter(taskModelId)
+}
+
+/**
  * 尝试为任务生成 LLM 标题（fire-and-forget，调用方用 void 调用）。
  *
  * 跳过条件：titleSource 已置位（user 锁定 / llm 已生成）或素材为空。
@@ -89,7 +112,10 @@ export async function maybeGenerateTaskTitle(taskId: string): Promise<void> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), TITLE_TIMEOUT_MS)
     try {
-      const adapter = await getAdapter(task.modelId)
+      // v0.36.4（D120）：旁路轻量模型优先（OpenCode small_model 同款）——
+      // 标题是高频低价值调用，不该消耗主思考模型的预算/时延；未配置或模型
+      // 不可用时回落任务自身模型（行为与 v0.36.3 一致）。
+      const adapter = await getTitleAdapter(task.modelId)
       // v0.34.x：空输出补试一次（思考模型偶发把预算吃满/端点毛刺 → content 空）
       let resp = await adapter.complete({
         system: TITLE_SYSTEM_PROMPT,

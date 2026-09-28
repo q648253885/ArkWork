@@ -3,38 +3,43 @@
  * 由 engine.ts 纯移动而来（行区间 1688-1857）。
  */
 
-import type { Task, PlanItem } from '@shared/types/task'
-import type {
-  ReActEvent,
-  ReActAction,
-  ReActStep,
-  PlanContent,
-} from '@shared/types/react'
-import type { Agent } from '@shared/types/agent'
-import { getAdapter, getModel } from '../../llm/registry.js'
-import type { LlmMessage, LlmTool, LlmCompleteResponse } from '../../llm/adapter.js'
-// agent-context-compaction-robustness：LLM 调用健壮性（120s 超时 / 中止短路 / 重试分级）
-import { callLlmWithRetry, withLlmTimeout, isContextOverflowError } from '../llm-call.js'
-import { invokeSkill, skillToLlmTool, skillToolName, listSkills, getSkill, type SkillContext } from '../registry.js'
-// v0.19.0 M1：系统提示词组装器（收敛 parts.push 硬拼逻辑）
-import { buildSystemSections, renderSystemPrompt, buildPersonalitySegment } from '../prompt-assembly.js'
-// v0.25.0 F1：提示词契约层（契约注册 + always-on 技能段 + 契约装配 + 门禁状态机）
-import { collectAlwaysOnSections, assembleSystemPrompt } from '../prompt/sections.js'
 import {
+  type Task,
+  type PlanItem,
+  type ReActEvent,
+  type ReActAction,
+  type ReActStep,
+  type PlanContent,
+  type Agent,
+  getAdapter,
+  getModel,
+  type LlmMessage,
+  type LlmTool,
+  type LlmCompleteResponse,
+  callLlmWithRetry,
+  withLlmTimeout,
+  isContextOverflowError,
+  invokeSkill,
+  skillToLlmTool,
+  skillToolName,
+  listSkills,
+  getSkill,
+  type SkillContext,
+  buildSystemSections,
+  renderSystemPrompt,
+  buildPersonalitySegment,
+  collectAlwaysOnSections,
+  assembleSystemPrompt,
   collectGateSpecs,
   initGateStates,
   checkGateBeforeAdvance,
   confirmGate,
   findGateForStageDoc,
   isDocDrivenAgent,
-} from '../prompt/gates.js'
-import type { GateSpec } from '@shared/types/agent'
-// v0.19.0 M2：唯一真源会话事件日志（Reason/Act/tool 事件落盘 session.jsonl）
-import { appendSessionEvent } from '../session-log.js'
-// v0.19.0 M3：轮次/步骤收件箱 + 停止候选钩子（turn/step 语义）
-import { drainContinuations } from '../inbox.js'
-import { emitTurnStopping } from '../turn-stopping.js'
-import {
+  type GateSpec,
+  appendSessionEvent,
+  drainContinuations,
+  emitTurnStopping,
   matchStageGate,
   isCoreSkillsEnabled,
   buildGateBlockObservation,
@@ -43,17 +48,19 @@ import {
   matchForbiddenWritePath,
   matchForbiddenShellCommand,
   type StageGate,
-} from '../../skills/builtin/react-core-skills/stage-gates.js'
-import { appendL1, listEnabledL1, listL1, totalTokens } from '../../memory/l1-working.js'
-import { persistRawL2 } from '../../memory/l2-file.js'
-import { logger } from '../../system/logger.js'
-import { genId } from '@shared/utils/id'
-import { isNoisePlanItem } from '@shared/utils/plan-noise'
-import { describeAction } from '@shared/utils/action-description'
-import { createHash } from 'node:crypto'
-import { updateTask, getTask } from '../../store/tasks.js'
-import { getAgent } from '../../store/agents.js'
-import {
+  appendL1,
+  listEnabledL1,
+  listL1,
+  totalTokens,
+  persistRawL2,
+  logger,
+  genId,
+  isNoisePlanItem,
+  describeAction,
+  createHash,
+  updateTask,
+  getTask,
+  getAgent,
   broadcastStep,
   broadcastTaskStatus,
   broadcastToolProgress,
@@ -62,24 +69,26 @@ import {
   broadcastPlanListSnapshot,
   broadcastTextDelta,
   type ToolProgress,
-} from '../events.js'
-// v0.27.0 R1：流式管道（completeWithStream 静默降级 + text-delta 增量泵）
-import { completeWithStream, createTextDeltaPump, type TextDeltaPump } from '../llm-stream.js'
-import { getWorkspaceDir } from '../../store/db.js'
-import { saveCheckpoint, checkpointId } from '../../checkpoint/store.js'
-// v0.8.0 记忆系统钩子
-import { applyPending, getCuratedSnapshot } from '../../memory/l3-curated.js'
-import { archiveTaskL1, initArchiveIndex } from '../../memory/l3-archive.js'
-import { getProfile, synthesizeFromTaskL1 } from '../../memory/l4-profile.js'
-import { evaluateDistillTrigger, autoPromoteDistill, getDistillMetrics } from '../../memory/distill.js'
-import { runForSkillForge } from '../../memory/skill-forge.js'
-import { compressMemory } from '../../ipc/memory.js'
-// v0.15.0：统一压缩路径——自动压缩与 Turn Phase-0 均走两阶段 compact()（联动 L3b + 压缩后蒸馏）
-import { compactTask } from '../../memory/compaction.js'
-import { createMemoryPhase0 } from '../../memory/compaction-hook.js'
-import type { CompressPolicy } from '@shared/types/memory'
-// agent-context-compaction-robustness：上下文预算与分层压缩纯工具模块
-import {
+  completeWithStream,
+  createTextDeltaPump,
+  type TextDeltaPump,
+  getWorkspaceDir,
+  saveCheckpoint,
+  checkpointId,
+  applyPending,
+  getCuratedSnapshot,
+  archiveTaskL1,
+  initArchiveIndex,
+  getProfile,
+  synthesizeFromTaskL1,
+  evaluateDistillTrigger,
+  autoPromoteDistill,
+  getDistillMetrics,
+  runForSkillForge,
+  compressMemory,
+  compactTask,
+  createMemoryPhase0,
+  type CompressPolicy,
   estimatePayloadTokens,
   estimatePayloadTokensDetailed,
   estimateTextTokens,
@@ -90,20 +99,19 @@ import {
   MAX_OBSERVATION_CONTENT,
   MICRO_COMPACT_PLACEHOLDER,
   OBSERVATION_TRUNCATED_MARK,
-} from '../context.js'
-import { getMemoryConfig, getSettings } from '../../ipc/settings.js'
-// v0.8.0 知识库钩子
-import { listKb, listEnabledKb } from '../../kb/store.js'
-import { searchKb, initKbIndex } from '../../kb/index.js'
-import { readFile } from 'node:fs/promises'
-// Task 6：上下文占比可视化与下钻
-import {
+  getMemoryConfig,
+  getSettings,
+  listKb,
+  listEnabledKb,
+  searchKb,
+  initKbIndex,
+  readFile,
   computeContextBreakdown,
   type ContextBreakdownInput,
   type ContextBreakdownResult,
   type ContextToolEntry,
   type ContextSkillInstruction,
-} from '../context-breakdown.js'
+} from './engine-context.js'
 import { emitEvent } from './broadcast.js'
 import { buildMemoryInjection } from './memory-hooks.js'
 import { assembleMessages, assembleTools } from './messages.js'

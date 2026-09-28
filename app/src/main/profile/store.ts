@@ -26,6 +26,12 @@ export interface ProfilesDoc {
   schemaVersion: string
   activeProfileId: string
   userProfiles: WorkbenchProfile[]
+  /**
+   * v0.36.0（B11/P3-b）：内置台字段覆盖（目前仅 pluginRefs）。
+   * 内置台整体只读，但「插件白名单」走这个窄通道持久化 —— 不整份克隆，
+   * 升级时内置台其余字段照常随代码更新，只有用户显式改过的键被覆盖。
+   */
+  builtinOverrides?: Record<string, Record<string, unknown>>
   lastSnapshot?: CompositionSnapshot
   updatedAt: number
 }
@@ -34,6 +40,7 @@ const FALLBACK: ProfilesDoc = {
   schemaVersion: PROFILE_SCHEMA_VERSION,
   activeProfileId: DEFAULT_PROFILE_ID,
   userProfiles: [],
+  builtinOverrides: {},
   updatedAt: 0,
 }
 
@@ -70,6 +77,10 @@ export async function readProfilesDoc(): Promise<ProfilesDoc> {
         ? raw.activeProfileId
         : DEFAULT_PROFILE_ID,
     userProfiles,
+    builtinOverrides:
+      raw.builtinOverrides && typeof raw.builtinOverrides === 'object'
+        ? (raw.builtinOverrides as ProfilesDoc['builtinOverrides'])
+        : {},
     lastSnapshot: raw.lastSnapshot,
     updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : 0,
   }
@@ -85,7 +96,13 @@ async function persist(next: ProfilesDoc): Promise<void> {
 export async function listProfiles(): Promise<WorkbenchProfile[]> {
   const d = await readProfilesDoc()
   const userIds = new Set(d.userProfiles.map((p) => p.id))
-  return [...BUILTIN_PROFILES.filter((b) => !userIds.has(b.id)), ...d.userProfiles]
+  // B11/P3-b：内置台先套用户覆盖（目前只有 pluginRefs），再与用户档案合并
+  const overrides = d.builtinOverrides ?? {}
+  const builtins = BUILTIN_PROFILES.filter((b) => !userIds.has(b.id)).map((b) => {
+    const ov = overrides[b.id]
+    return ov ? ({ ...b, ...ov } as WorkbenchProfile) : b
+  })
+  return [...builtins, ...d.userProfiles]
 }
 
 /** 单查（用户优先） */
@@ -125,6 +142,24 @@ export async function upsertUserProfile(profile: WorkbenchProfile): Promise<void
   const d = await readProfilesDoc()
   const rest = d.userProfiles.filter((p) => p.id !== profile.id)
   await persist({ ...d, userProfiles: [...rest, { ...profile, source: 'user' }] })
+}
+
+/**
+ * v0.36.0（B11/P3-b）：内置台字段覆盖（窄通道）。
+ * 只允许 BUILTIN_PROFILES 里存在的 id；patch 与既有覆盖浅合并后整体落盘。
+ * 调用方（ipc/profile.ts Update）负责限定可覆盖的键。
+ */
+export async function saveBuiltinOverride(
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  if (!BUILTIN_PROFILES.some((b) => b.id === id)) {
+    throw new Error(`[profile] saveBuiltinOverride: ${id} 不是内置工作台`)
+  }
+  const d = await readProfilesDoc()
+  const overrides = { ...(d.builtinOverrides ?? {}) }
+  overrides[id] = { ...overrides[id], ...patch }
+  await persist({ ...d, builtinOverrides: overrides })
 }
 
 /** 删除用户 profile（内置不可删、生效中不可删） */

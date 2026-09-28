@@ -25,7 +25,8 @@ import {
   type ComposePanels,
 } from '../activator.js'
 import { registerSlot, resetProfileSlots, slotStats, resolveSlots } from '../slots.js'
-import { BUILTIN_PROFILES, builtinRendererSlotEntries, DEFAULT_PROFILE_ID } from '../builtins.js'
+import { BUILTIN_PROFILES, DEFAULT_PROFILE_ID } from '../builtins.js'
+import { BUILTIN_EXT_RENDERER, detectRendererKind } from '@shared/utils/renderer-ext'
 import { SAMPLE_PLUGIN_MANIFESTS } from '../../plugins/sample-plugins.js'
 import { BUILTIN_PANEL_REFS } from '../../plugins/registry.js'
 import { parseManifest, validateReferences } from '@shared/utils/profile-manifest'
@@ -90,6 +91,19 @@ const PANEL_CTX: ComposePanels = (() => {
     'files', 'context', 'terminal', 'browser', 'todos', 'progress',
     ...payloads.keys(),
   ])
+  /* ★ v0.36.0：随包示例已从「声明式面板插件」（股票）换成「代码视图插件」（Git 管理），
+   * 不再有任何 `provides.panel` 生产者。但本组用例测的是**装配契约**
+   * （「库存命中 → 产出 ui.panel 条目」），不是「某插件是否还在随包集里」——
+   * 契约用例跟着随包内容漂移，等于每次换范例就要改一遍测试。
+   * 故补一个合成面板，把契约钉在库存语义上。 */
+  payloads.set('panel:demo', {
+    panelRef: 'panel:demo',
+    title: '示例面板',
+    component: 'DataTable',
+    pluginId: 'ark.plugin.demo',
+    data: { kind: 'inline', rows: [] },
+  } as unknown as PanelSlotPayload)
+  available.add('panel:demo')
   return { payloads, available }
 })()
 
@@ -237,7 +251,7 @@ test('TC-PACT-007 技能缺失 → tools 层降级；required 决定 blocking', 
       ],
     }),
   )
-  const { degraded, snapshot } = composeProfile(p, INV, true)
+  const { degraded, snapshot } = composeProfile(p, INV)
   const blocking = degraded.find((d) => d.ref === 'S-core.ghost')
   assert.ok(blocking && blocking.blocking === true, 'required 缺失必须阻断')
   assert.equal(blocking.layer, 'tools')
@@ -255,7 +269,7 @@ test('TC-PACT-008 MCP 未连接 → 降级；panel 能力未安装 → 降级（
       ],
     }),
   )
-  const { degraded } = composeProfile(p, INV, true)
+  const { degraded } = composeProfile(p, INV)
   assert.ok(degraded.some((d) => d.ref === 'mcp-beta' && d.layer === 'tools'))
   // v0.32.0 此处恒报「面板在 v1 只登记不挂载」（缺陷 D43）；v0.33.0 起按插件注册表判定
   const panel = degraded.find((d) => d.ref === 'quote')
@@ -263,19 +277,30 @@ test('TC-PACT-008 MCP 未连接 → 降级；panel 能力未安装 → 降级（
   assert.ok(panel!.reason.includes('未安装') || panel!.reason.includes('未启用'), panel!.reason)
 })
 
-test('TC-PACT-009 命名空间未就绪 → data 层降级，且快照里 applied=false', () => {
+test('TC-PACT-009 ★ v0.36.0（D5）：快照恰为三层，data/auto 不再产层也不再产降级', () => {
+  // 原用例（v0.32.0）守「命名空间未就绪 → data 层降级 + applied=false」。
+  // D5 删掉 data/auto 两层之后，这条**语义迁移**为：
+  //   · 快照形状硬收缩为 agents / tools / ui（多一层就是契约漏改）；
+  //   · `composeProfile` 不再产出 layer ∈ {data, auto} 的降级项
+  //     （命名空间目录失败仍在 `activateProfile` 里 `ensureMemoryNamespace` +
+  //      `logger.warn`，走诊断通道 —— 纪律⑨，不是消失）。
   const p = must(mkRaw())
-  const { snapshot, degraded } = composeProfile(p, INV, false)
-  assert.ok(degraded.some((d) => d.layer === 'data'))
-  assert.ok(snapshot.layers.data.every((d) => d.applied === false), '未就绪就不能标 applied')
+  const { snapshot, degraded } = composeProfile(p, INV)
+  assert.deepEqual(Object.keys(snapshot.layers).sort(), ['agents', 'tools', 'ui'], '快照必须恰为三层')
+  const layerNames: string[] = degraded.map((d) => d.layer)
+  assert.deepEqual(layerNames.filter((l) => l === 'data' || l === 'auto'), [], `不得再有 data/auto 降级：${JSON.stringify(degraded)}`)
 })
 
-test('TC-PACT-010 automation v1 只登记不注册（registered=false + 逐条降级）', () => {
+test('TC-PACT-010 ★ v0.36.0（D5）：automation 仍声明、仍过 V4 校验，但不再产 auto 层/插槽/降级', () => {
+  // 原用例守「auto 层只登记不注册（registered=false）」。契约删除后
+  // **manifest 字段本身保留**（改它要动 schemaVersion，不是本版的事），
+  // 变的是「不再复制一份只给诊断页看的层」。
   const p = must(mkRaw({ automation: [{ cron: '0 9 * * 1-5', taskTemplate: '晨报', agent: '@x' }] }))
-  const { snapshot, degraded } = composeProfile(p, INV, true)
-  assert.equal(snapshot.layers.auto.length, 1)
-  assert.equal(snapshot.layers.auto[0]!.registered, false, 'v1 绝不偷偷注册定时任务（遗留 L5）')
-  assert.ok(degraded.some((d) => d.layer === 'auto'))
+  assert.equal(p.automation.length, 1, 'manifest 字段必须保留（V4 闭合校验仍在其上）')
+  const { slots, degraded } = composeProfile(p, INV)
+  assert.deepEqual(slots.filter((s) => s.id.startsWith('auto:')), [], '不得再产 auto 插槽条目')
+  const layerNames: string[] = degraded.map((d) => d.layer)
+  assert.equal(layerNames.includes('auto'), false, '不得再产 auto 层降级')
 })
 
 /* ============================================================
@@ -283,41 +308,51 @@ test('TC-PACT-010 automation v1 只登记不注册（registered=false + 逐条�
  * ============================================================ */
 
 test('TC-PACT-011 persona 哈希稳定：同一 persona 跨会话同值，不同 persona 不同值', () => {
-  const a = composeProfile(must(mkRaw({ agents: [{ id: '@x', name: 'X', personaText: '同一段人格' }] })), INV, true)
-  const b = composeProfile(must(mkRaw({ agents: [{ id: '@x', name: 'X', personaText: '同一段人格' }] })), INV, true)
-  const c = composeProfile(must(mkRaw({ agents: [{ id: '@x', name: 'X', personaText: '另一段人格' }] })), INV, true)
+  const a = composeProfile(must(mkRaw({ agents: [{ id: '@x', name: 'X', personaText: '同一段人格' }] })), INV)
+  const b = composeProfile(must(mkRaw({ agents: [{ id: '@x', name: 'X', personaText: '同一段人格' }] })), INV)
+  const c = composeProfile(must(mkRaw({ agents: [{ id: '@x', name: 'X', personaText: '另一段人格' }] })), INV)
   assert.equal(a.snapshot.layers.agents[0]!.personaHash, b.snapshot.layers.agents[0]!.personaHash)
   assert.notEqual(a.snapshot.layers.agents[0]!.personaHash, c.snapshot.layers.agents[0]!.personaHash)
 })
 
 test('TC-PACT-012 ui 层：声明才有 applied=true，未声明的一律 false（不骗 UI）', () => {
   const p = must(mkRaw({ ui: { dockTabs: ['files', 'terminal'], homeModule: 'kb', composerChips: ['继续'] } }))
-  const { snapshot } = composeProfile(p, INV, true)
+  const { snapshot } = composeProfile(p, INV)
   const dock = snapshot.layers.ui.find((u) => u.slot === 'ui.dockTabs')
   assert.ok(dock && dock.value === 'files,terminal' && dock.applied === true)
   const home = snapshot.layers.ui.find((u) => u.slot === 'ui.homeModule')
   assert.ok(home && home.value === 'kb' && home.applied === true)
-  const bare = composeProfile(must(mkRaw()), INV, true).snapshot
+  const bare = composeProfile(must(mkRaw()), INV).snapshot
   assert.ok(bare.layers.ui.every((u) => u.applied === false))
 })
 
-test('TC-PACT-013 插槽产出覆盖五层且 id 唯一（同一次装配可重复注册而不冲突）', () => {
+test('TC-PACT-013 ★ v0.36.0：插槽产出覆盖契约五类且 id 唯一（同一次装配可重复注册而不冲突）', () => {
   const p = must(
     mkRaw({
       agents: [{ id: '@x', name: 'X', personaText: 'p' }],
       capabilities: [{ type: 'skill', ref: 'skill:S-core.plan' }],
-      ui: { dockTabs: ['files', 'context'], homeModule: 'kb' },
+      ui: {
+        dockTabs: ['files', 'context'],
+        homeModule: 'kb',
+        composerChips: ['继续'],
+        theme: { light: { '--r-lg': '4px' } },
+      },
       automation: [{ cron: '0 9 * * 1-5', taskTemplate: 't' }],
     }),
   )
-  const { slots } = composeProfile(p, INV, true)
+  const { slots } = composeProfile(p, INV)
   const ids = slots.map((s) => s.id)
   assert.equal(new Set(ids).size, ids.length, '同一次装配的插槽 id 必须唯一')
   const kinds = new Set(slots.map((s) => s.kind))
-  const required: SlotKind[] = ['agent', 'tool', 'ui.panel', 'ui.homeModule', 'data', 'auto']
+  // D5 收缩后的契约全集：五类，一个不多一个不少
+  const required: SlotKind[] = ['agent', 'tool', 'ui.panel', 'ui.action', 'ui.theme']
   for (const k of required) {
-    assert.ok(kinds.has(k), `插槽缺少 ${k}`)
+    assert.ok(kinds.has(k), `插槽缺少 ${k}（实际：${[...kinds].join(',')}）`)
   }
+  assert.equal(kinds.size, required.length, `插槽类型必须恰为契约五类，实际：${[...kinds].join(',')}`)
+  // homeModule 不再是插槽（快照行仍在，见 TC-PACT-027）
+  assert.deepEqual(slots.filter((s) => s.id.startsWith('homeModule:')), [])
+  assert.deepEqual(slots.filter((s) => s.id.startsWith('data:') || s.id.startsWith('auto:')), [])
 })
 
 /* ============================================================
@@ -341,7 +376,7 @@ test('TC-PACT-014 三个内置台都能 compose 成功；底座能力齐备时�
     baseVersion: '0.32.0',
   }
   for (const p of BUILTIN_PROFILES) {
-    const { snapshot, degraded, slots } = composeProfile(p, rich, true, PANEL_CTX)
+    const { snapshot, degraded, slots } = composeProfile(p, rich, PANEL_CTX)
     assert.equal(snapshot.profileId, p.id)
     assert.ok(slots.length > 0, `${p.id} 至少要注册出插槽`)
     // 三台全覆盖：内置台一律内联 personaText + 只用真实存在的 S-core.* 技能
@@ -359,7 +394,7 @@ test('TC-PACT-015 底座缺能力时，内置台降级但绝不阻断（required
   // 空库存 = 刚装完客户端、技能包还没落地的最坏情况
   const empty: BaseInventory = { skills: [], mcpServers: [], baseVersion: '0.32.0' }
   for (const p of BUILTIN_PROFILES) {
-    const { snapshot, degraded } = composeProfile(p, empty, true, PANEL_CTX)
+    const { snapshot, degraded } = composeProfile(p, empty, PANEL_CTX)
     // 通用台本来就是零依赖 → 空库存下也必须零降级
     if (p.id === DEFAULT_PROFILE_ID) {
       assert.deepEqual(degraded, [], '通用台不依赖任何能力，空库存下仍须零降级')
@@ -384,22 +419,24 @@ test('TC-PACT-015 底座缺能力时，内置台降级但绝不阻断（required
  * ============================================================ */
 
 test('TC-PACT-016 ui.dockPanels → 产出 ui.panel 条目（id = panelRef，来源 profile）', () => {
-  // v0.34.1：原引用 `panel:runtime-metrics`（假数据示例，已下线）→ 改用真实股票插件的面板
-  const p = must(mkRaw({ ui: { dockPanels: [{ slot: 'inspector', panelRef: 'panel:stock-quotes', position: 1 }] } }))
-  const { slots } = composeProfile(p, INV, true, PANEL_CTX)
-  const e = slots.find((s) => s.id === 'panel:stock-quotes')
+  // v0.34.1：原引用 `panel:runtime-metrics`（假数据示例，已下线）
+  // v0.36.0：原引用 `panel:stock-quotes`（股票插件退役）→ 改用 PANEL_CTX 的合成面板
+  //          （契约用例不跟随随包范例漂移，理由见 PANEL_CTX 注释）
+  const p = must(mkRaw({ ui: { dockPanels: [{ slot: 'inspector', panelRef: 'panel:demo', position: 1 }] } }))
+  const { slots } = composeProfile(p, INV, PANEL_CTX)
+  const e = slots.find((s) => s.id === 'panel:demo')
   assert.ok(e, `必须产出面板条目，实际：${slots.map((s) => s.id).join(',')}`)
   assert.equal(e!.kind, 'ui.panel')
   assert.equal(e!.source, 'profile')
   assert.equal(e!.position, 1)
   const payload = e!.payload as PanelSlotPayload
   assert.equal(payload.component, 'DataTable')
-  assert.equal(payload.pluginId, 'ark.plugin.stock', '贡献者必须可追溯')
+  assert.equal(payload.pluginId, 'ark.plugin.demo', '贡献者必须可追溯')
 })
 
 test('TC-PACT-017 panelRef 未命中 → ui 层降级（非阻断）且不产条目', () => {
   const p = must(mkRaw({ ui: { dockPanels: [{ slot: 'inspector', panelRef: 'panel:ghost' }] } }))
-  const { slots, degraded } = composeProfile(p, INV, true, PANEL_CTX)
+  const { slots, degraded } = composeProfile(p, INV, PANEL_CTX)
   assert.ok(!slots.some((s) => s.id === 'panel:ghost'), '未命中不得产出条目')
   const d = degraded.find((d) => d.ref === 'ghost')
   assert.ok(d && d.layer === 'ui' && d.blocking === false, JSON.stringify(degraded))
@@ -412,7 +449,7 @@ test('TC-PACT-018 声明 required 的面板缺失 → 阻断（D43：不再恒�
       ui: { dockPanels: [{ slot: 'inspector', panelRef: 'panel:ghost' }] },
     }),
   )
-  const { degraded } = composeProfile(p, INV, true, PANEL_CTX)
+  const { degraded } = composeProfile(p, INV, PANEL_CTX)
   assert.ok(degraded.some((d) => d.blocking === true && d.layer === 'ui'), JSON.stringify(degraded))
 })
 
@@ -420,14 +457,14 @@ test('TC-PACT-019 dockPanels 与 dockTabs 指向同一面板 → 只产一条（
   const p = must(
     mkRaw({ ui: { dockTabs: ['files', 'context'], dockPanels: [{ slot: 'inspector', panelRef: 'panel:files', position: 0 }] } }),
   )
-  const { slots } = composeProfile(p, INV, true, PANEL_CTX)
+  const { slots } = composeProfile(p, INV, PANEL_CTX)
   assert.equal(slots.filter((s) => s.id === 'panel:files').length, 1)
   assert.equal(slots.filter((s) => s.id === 'panel:context').length, 1)
 })
 
 test('TC-PACT-020 ui.theme → 产出 ui.theme 条目 + 快照有应用项', () => {
   const p = must(mkRaw({ ui: { theme: { light: { '--r-lg': '4px' }, dark: { '--r-lg': '4px' } } } }))
-  const { slots, snapshot } = composeProfile(p, INV, true)
+  const { slots, snapshot } = composeProfile(p, INV)
   const e = slots.find((s) => s.kind === 'ui.theme')
   assert.ok(e, '必须产出 ui.theme 插槽条目')
   const payload = e!.payload as { light: Record<string, string>; dark: Record<string, string> }
@@ -436,18 +473,21 @@ test('TC-PACT-020 ui.theme → 产出 ui.theme 条目 + 快照有应用项', () 
   assert.ok(uiItem && uiItem.applied === true && uiItem.value.includes('--r-lg'))
 })
 
-test('TC-PACT-021 ui.previewRenderers → 每个扩展名一条 ui.renderer 条目', () => {
-  const p = must(mkRaw({ ui: { previewRenderers: { kchart: 'table', zchart: 'code' } } }))
-  const { slots } = composeProfile(p, INV, true)
-  const rs = slots.filter((s) => s.kind === 'ui.renderer')
-  assert.equal(rs.length, 2)
-  assert.ok(rs.every((r) => r.source === 'profile'))
-  assert.ok(rs.some((r) => r.id === 'renderer:kchart'))
+test('TC-PACT-021 ★ v0.36.0（D5）：ui.previewRenderers 已删 → warning 忽略且零 ui.renderer 插槽', () => {
+  // 兼容纪律（04-system-design §4）：旧 manifest 含被删插槽 → warn 并忽略，**不阻断**。
+  const raw = mkRaw({ ui: { previewRenderers: { kchart: 'table', zchart: 'code' } } })
+  const { profile, issues } = parseManifest(raw, 'user')
+  assert.ok(profile, `夹具非法：${JSON.stringify(issues)}`)
+  const warn = issues.find((i) => i.path === '$.ui.previewRenderers')
+  assert.ok(warn && warn.level === 'warning', `必须给「已删除」的 warning，实际：${JSON.stringify(issues)}`)
+  assert.equal(issues.some((i) => i.level === 'error'), false, '旧 manifest 不得被阻断（破坏性却无收益）')
+  const { slots } = composeProfile(profile, INV)
+  assert.deepEqual(slots.filter((s) => s.id.startsWith('renderer:')), [], '不得再产 ui.renderer 条目')
 })
 
 test('TC-PACT-022 ui.actionExtensions 与 composerChips 的 id 不冲突', () => {
   const p = must(mkRaw({ ui: { composerChips: ['继续'], actionExtensions: ['annotate-trend'] } }))
-  const { slots } = composeProfile(p, INV, true)
+  const { slots } = composeProfile(p, INV)
   const acts = slots.filter((s) => s.kind === 'ui.action')
   assert.equal(acts.length, 2)
   const ids = acts.map((a) => a.id)
@@ -465,32 +505,42 @@ test('TC-PACT-023 装配产出的所有条目 source === profile', () => {
       ui: {
         dockTabs: ['files'],
         dockPanels: [{ slot: 'inspector', panelRef: 'panel:runtime-metrics' }],
-        previewRenderers: { kchart: 'table' },
         actionExtensions: ['x'],
         theme: { light: { '--r-lg': '4px' } },
       },
       automation: [{ cron: '0 9 * * 1-5', taskTemplate: 't' }],
     }),
   )
-  const { slots } = composeProfile(p, INV, true, PANEL_CTX)
+  const { slots } = composeProfile(p, INV, PANEL_CTX)
   const bad = slots.filter((s) => s.source !== 'profile')
   assert.deepEqual(bad.map((b) => `${b.kind}:${b.id}`), [], '来源必须统一标为 profile（D42）')
 })
 
-test('TC-PACT-024 内置渲染器登记：8 条 ui.renderer，来源 builtin', () => {
-  const entries = builtinRendererSlotEntries()
-  assert.equal(entries.length, 8, '7 渲染器 + editor')
-  assert.ok(entries.every((e) => e.kind === 'ui.renderer' && e.source === 'builtin'))
-  const md = entries.find((e) => e.id === 'renderer:markdown')
-  assert.ok(md && (md.payload as { extensions: string[] }).extensions.includes('md'))
-  const fb = entries.find((e) => e.id === 'renderer:fallback')
-  assert.ok(fb && (fb.payload as { extensions: string[] }).extensions.length === 0, 'fallback 不占扩展名')
+test('TC-PACT-024 ★ v0.36.0（D5）：内置渲染器不再入槽，扩展名映射的唯一真源是内置表', () => {
+  // 原用例守「builtinRendererSlotEntries() → 8 条 ui.renderer」。该函数已随契约删除，
+  // 于是把守点前移到**真正的行为锚点**：`detectRendererKind` 必须仍按内置表判定
+  // （「删插槽不影响渲染器判定」不是修辞，是本条要证明的事实）。
+  assert.equal(BUILTIN_EXT_RENDERER['md'], 'markdown')
+  assert.equal(detectRendererKind('a.md'), 'markdown')
+  assert.equal(detectRendererKind('a.csv'), 'table')
+  assert.equal(detectRendererKind('a.kchart'), 'fallback', '无内置映射的扩展名回落 fallback')
+  assert.throws(
+    () =>
+      registerSlot('renderer:md' as SlotKind, {
+        id: 'renderer:md',
+        kind: 'renderer:md' as SlotKind,
+        label: 'md',
+        payload: { actionId: 'x', label: 'x', origin: 'test' },
+      }),
+    /未知插槽类型/,
+    'ui.renderer 已不在契约里 → 注册必须直接 throw（而不是静默接受）',
+  )
 })
 
 test('TC-PACT-025 连续两次 applyProfileSlots → 面板条目数不翻倍（按来源清理生效）', () => {
   resetProfileSlots()
   const p = must(mkRaw({ ui: { dockTabs: ['files', 'context'] } }))
-  const first = composeProfile(p, INV, true).slots
+  const first = composeProfile(p, INV).slots
   applyProfileSlots(first)
   applyProfileSlots(first)
   assert.equal(slotStats()['ui.panel'], 2, `实际：${JSON.stringify(slotStats())}`)
@@ -499,8 +549,8 @@ test('TC-PACT-025 连续两次 applyProfileSlots → 面板条目数不翻倍（
 
 test('TC-PACT-026 换台后只保留新集合（旧 profile 的条目无残留）', () => {
   resetProfileSlots()
-  const a = composeProfile(must(mkRaw({ ui: { dockTabs: ['files'] } })), INV, true).slots
-  const b = composeProfile(must(mkRaw({ ui: { dockTabs: ['context', 'browser'] } })), INV, true).slots
+  const a = composeProfile(must(mkRaw({ ui: { dockTabs: ['files'] } })), INV).slots
+  const b = composeProfile(must(mkRaw({ ui: { dockTabs: ['context', 'browser'] } })), INV).slots
   applyProfileSlots(a)
   applyProfileSlots(b)
   const ids = resolveSlots('ui.panel').map((s) => s.id).sort()
@@ -508,13 +558,16 @@ test('TC-PACT-026 换台后只保留新集合（旧 profile 的条目无残留�
   resetProfileSlots()
 })
 
-test('TC-PACT-027 ui.homeModule 支持 module:<id> 开放引用（不被闭集拒绝）', () => {
+test('TC-PACT-027 ★ v0.36.0（D5）：ui.homeModule 不再是插槽，但快照行仍在（首页模块功能不受影响）', () => {
+  // 「删插槽不影响首页模块功能」必须被证明，而不是被声称：
+  // 消费端 `projectUiLayer()` 读的是**快照行** `layers.ui[slot='ui.homeModule']`。
   const p = must(mkRaw({ ui: { homeModule: 'module:market-overview' } }))
-  const { slots, snapshot } = composeProfile(p, INV, true)
-  const e = slots.find((s) => s.kind === 'ui.homeModule')
-  assert.ok(e, '必须产出 ui.homeModule 条目')
-  assert.equal((e!.payload as { module: string }).module, 'module:market-overview')
-  assert.equal(snapshot.layers.ui.find((u) => u.slot === 'ui.homeModule')?.applied, true)
+  const { slots, snapshot } = composeProfile(p, INV)
+  assert.deepEqual(slots.filter((s) => s.id.startsWith('homeModule:')), [], '不得再产 ui.homeModule 插槽条目')
+  const row = snapshot.layers.ui.find((u) => u.slot === 'ui.homeModule')
+  assert.ok(row, '快照行必须保留（它是首页模块的唯一消费入口）')
+  assert.equal(row.value, 'module:market-overview')
+  assert.equal(row.applied, true)
 })
 
 /* ============================================================
@@ -599,7 +652,7 @@ test('TC-PACT-030 语义闭环：非恒可用面板未命中 → 非阻断降级
   // 两层语义必须同向 —— 否则又是「校验说能过、装配说不给挂」或反之。
   const p = must(mkRaw({ ui: { dockPanels: [{ slot: 'inspector', panelRef: 'panel:runtime-metrics', position: 1 }] } }))
   const starvedPanels: ComposePanels = { payloads: new Map(), available: new Set<string>([...BUILTIN_PANEL_REFS]) }
-  const { slots, degraded } = composeProfile(p, INV, true, starvedPanels)
+  const { slots, degraded } = composeProfile(p, INV, starvedPanels)
   assert.ok(!slots.some((s) => s.id === 'panel:runtime-metrics'), '未命中不得产出条目')
   const d = degraded.find((x) => x.ref === 'runtime-metrics')
   assert.ok(d, `必须进 degraded（不静默半死）：${JSON.stringify(degraded)}`)

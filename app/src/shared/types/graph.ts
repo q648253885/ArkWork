@@ -209,21 +209,6 @@ export type Assignee =
   | { kind: 'external'; system: string; ref: string }
   | { kind: 'system' }
 
-/** Assignee 的短标签（日志与 UI 徽标共用） */
-export function assigneeLabel(a: Assignee | undefined): string {
-  if (!a) return '—'
-  switch (a.kind) {
-    case 'agent':
-      return a.id
-    case 'human':
-      return 'human'
-    case 'external':
-      return `${a.system}:${a.ref}`
-    case 'system':
-      return 'system'
-  }
-}
-
 /**
  * 上下文引用 —— **只存指针，不内联内容**（设计稿 §3.1）。
  * 内联内容会让 graph.json 膨胀并把上下文预算吃光。
@@ -783,6 +768,13 @@ export interface PlanApproval {
   uncovered: string[]
   /** 规划失败降级（原型的 error 态）；`[重试规划]` 可重新触发 */
   degraded?: boolean
+  /**
+   * F6.2（v0.36.0）：批准时用户实际勾选的计划项 id（结构行节点 id）。
+   * 缺省 = 全选（旧行为）；未勾选的节点在批准时按 `cancelled` 收口（不执行）。
+   */
+  approvedItemIds?: string[]
+  /** F6.2：批准前被用户行内编辑过标题的计划项 id（UI「已调整」徽标与 N/M 折叠条的数据源） */
+  editedItemIds?: string[]
 }
 
 /* ============================================================

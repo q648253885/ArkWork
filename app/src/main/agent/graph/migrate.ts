@@ -65,7 +65,11 @@ export function mapSourceToRevisionFields(source: PlanItemSource | undefined): {
     case 'engine-fail':
       return { by: { kind: 'system' }, reason: '引擎推断：执行失败' }
     case 'todo-update':
+      // v0.17–v0.37 的历史标记（工具已下架，旧数据仍会带着它）
       return { by: { kind: 'agent', id: 'agent' }, reason: '模型显式写回' }
+    case 'task-plan':
+      // v0.38.0（D154）：清单控制面收敛为 task_plan 后的新标记
+      return { by: { kind: 'agent', id: 'agent' }, reason: '模型提交完整清单（task_plan）' }
     case 'user-cancel':
       return { by: { kind: 'human', id: 'user' }, reason: '用户手动取消' }
     case 'user-retry':
@@ -78,6 +82,20 @@ export function mapSourceToRevisionFields(source: PlanItemSource | undefined): {
       return { by: { kind: 'system' }, reason: '计划生成失败，降级为精简清单' }
     case 'continuation':
       return { by: { kind: 'agent', id: 'agent' }, reason: '续聊时引擎追加的承接项' }
+    // v0.38.0：补齐 v0.37.0 新增的 5 个来源。
+    //   此前它们落到 default（"未标记来源"）—— 与 tasks.migrate.ts 的同类缺口同型：
+    //   覆盖范围没跟上本体组成，失败是**静默**的（UI 只说得出"未标记"，说不出
+    //   "是巡检把它标成 paused 的"）。这里补上，让每条状态变更都有人话溯源。
+    case 'park':
+      return { by: { kind: 'system' }, reason: '中断保留：可恢复的暂停' }
+    case 'resume':
+      return { by: { kind: 'system' }, reason: '续聊恢复' }
+    case 'sweep-stale':
+      return { by: { kind: 'system' }, reason: '过期巡检：长时间无进展' }
+    case 'seal':
+      return { by: { kind: 'system' }, reason: '任务收尾封存' }
+    case 'ledger-sync':
+      return { by: { kind: 'system' }, reason: '任务清单账本同步' }
     default:
       return { by: { kind: 'system' }, reason: '未标记来源（v0.29 缺省）' }
   }

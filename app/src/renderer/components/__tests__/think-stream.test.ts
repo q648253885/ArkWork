@@ -133,10 +133,17 @@ test('TC-THINK-004 TurnList：reasoning 通道缓冲直入投影层（流式默�
     /:turn:reasoning/,
     'TurnList 应订阅 `${taskId}:turn:reasoning` 通道',
   )
+  // v0.36.0（B11/P4-a）：缓冲注入从单通道三元改为双通道展开 —— text 通道
+  // 此前无消费点，导致「正文最后才一次性出现」；投影层据此产 streaming Answer。
   assert.match(
     FLOW,
-    /streamBuffers:\s*streamBuffer\s*\?\s*\{/,
-    '流式缓冲应注入投影层（不再有独立 StreamingThinkBlock 裸渲形态）',
+    /streamBuffers:\s*\{/,
+    '流式缓冲应注入投影层（双通道展开形态）',
+  )
+  assert.match(
+    FLOW,
+    /:turn:text/,
+    'TurnList 必须同时订阅正文 text 通道（B11/P4-a：正文流式渲染）',
   )
   assert.match(FLOW, /projectConversation\(/, '交互区唯一真相 = 投影层')
   // 裸流式文本直渲形态不得回归（旧「被吞」观感来源）

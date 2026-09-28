@@ -1,18 +1,24 @@
 /* ============================================================
- * ArkWork — ToolBlock（v0.31.0 B4）
+ * ArkWork — ToolBlock（v0.31.0 B4 · v0.36.2 D112 一行化）
  * 工具块。契约：
  *  - 六态状态机（05 §二 T1）：pending/running/success/failed/guarded/cancelled，
  *    guarded（琥珀，Agent 拦截·非错误）与 failed（红）**视觉与语义可区分**（C-16）；
  *  - 视觉层级三重编码（C-13）：形状（卡边框）+ 图标（KindIcon 按呈现类别）+ 色（状态点）；
- *  - 结果摘要默认可见（C-11 零点击），完整结果默认折叠（resultOpen 初始 false，
- *    v018 契约转写）；截断显示上限提示（C-18）；
+ *  - v0.36.2（D112）一行化：动作文本 + 可点击文件 + 结果摘要合并进头行，
+ *    路径只出现一次（stripPaths 去重）；完整结果默认折叠（resultOpen 初始
+ *    false），截断显示上限提示（C-18）；
  *  - 零原生 title（C-20，guarded 说明走 HoverCard）；
  *  - 字号与思考块同级 = text-xs/13px（C-14）。
  * ============================================================ */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { FlowBlock, ToolCallKind, ToolStatus } from '@shared/types/flow'
-import { ToolCallBody, ToolResultBody, ResultSummaryLine } from '../tools'
+import type { ToolCallView, ToolResultView } from '@shared/types/tool-present'
+import { shortPathOf } from '@shared/utils/path-display'
+import { ToolCallBody, ToolResultBody } from '../tools'
+import { ChangeSummary } from '../ChangeSummary'
+import { FileLink } from '../FileLink'
+import { useOpenPath } from '../useOpenPath'
 import { HoverCard } from '../HoverCard'
 
 type ToolBlockT = Extract<FlowBlock, { kind: 'tool' }>
@@ -109,12 +115,56 @@ function KindIcon({ kind }: { kind?: ToolCallKind }) {
   }
 }
 
+/** 「像路径」的串才参与剥除（含分隔符），防误伤搜索 pattern 等普通词（TC-BLOCK-023） */
+function looksPath(v: string): boolean {
+  return v.length >= 2 && (v.includes('/') || v.includes('\\'))
+}
+
+/**
+ * D112：把文本里与路径重复的片段剥掉（全路径与展示短路径两种变体），
+ * 再清理残留分隔符 —— 「读取文件：src/app.ts」→「读取文件」、
+ * 「src/app.ts · 120 行」→「120 行」。路径的**唯一**展示位交给行内 FileLink。
+ */
+export function stripPaths(text: string, paths: string[]): string {
+  let out = text
+  for (const p of paths) {
+    if (!p) continue
+    for (const variant of new Set([p, shortPathOf(p)])) {
+      if (looksPath(variant)) out = out.split(variant).join(' ')
+    }
+  }
+  return out.replace(/[\s：:·，,]+/g, ' ').trim()
+}
+
+/** 本次调用的全部路径：generic 卡取 locations，write 卡取 changes（D112 去重源） */
+function pathsOfCall(call: ToolCallView): string[] {
+  if (call.card === 'generic') return (call.locations ?? []).map((l) => l.path)
+  if (call.card === 'write') return call.changes.map((c) => c.path)
+  return []
+}
+
+/** 行内摘要（折叠态）：strip 后为空则不渲染（避免孤零零的分隔符） */
+function inlineStats(result: ToolResultView, paths: string[]): string {
+  return stripPaths(result.summary, paths)
+}
+
 export function ToolBlock({ block }: { block: ToolBlockT }) {
   const { t } = useTranslation()
   const [resultOpen, setResultOpen] = useState(false)
+  const open = useOpenPath()
   const failed = block.status === 'failed'
   const guarded = block.status === 'guarded'
   const running = block.status === 'running'
+
+  const call = block.call
+  // D112：一行化的两个前提 —— 去重路径集 + 是否抑制独立调用体行
+  const paths = useMemo(() => pathsOfCall(call), [call])
+  const inlineSubject =
+    (call.card === 'generic' && (call.locations?.length ?? 0) > 0) || call.card === 'write'
+  const text = useMemo(() => stripPaths(block.intent || call.title, paths), [block.intent, call, paths])
+  // 折叠态行内结果摘要（write 卡由 ChangeSummary 携带 +/− 信号，不再显示文本摘要）
+  const stats = block.result && !resultOpen && call.card !== 'write' ? inlineStats(block.result, paths) : ''
+  const truncated = block.result && 'truncated' in block.result && block.result.truncated === true
 
   return (
     <div
@@ -122,8 +172,8 @@ export function ToolBlock({ block }: { block: ToolBlockT }) {
       className="rounded-lg border border-border-default bg-bg-surface px-3 py-2 select-text"
       style={{ borderLeftWidth: 2, borderLeftColor: railColor(block.status) }}
     >
-      {/* 头行：状态点 + 类别图标 + 意图 + 时长 + 结果开关（控件 select-none，F1-4） */}
-      <div className="flex items-center gap-2 select-none">
+      {/* 头行（D112 一行化）：状态点 + 类别图标 + 动作文 + 行内文件 + 行内摘要 + 时长 + 结果开关 */}
+      <div className="flex items-center gap-2 select-none min-w-0">
         {guarded ? (
           <HoverCard tip={<span>{t('thought.guardedTitle')}</span>}>
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-warning shrink-0" />
@@ -134,8 +184,33 @@ export function ToolBlock({ block }: { block: ToolBlockT }) {
             style={{ background: dotColor(block.status) }}
           />
         )}
-        <KindIcon kind={block.call.kind} />
-        <span className="text-xs text-text-secondary truncate">{block.intent || block.call.title}</span>
+        <KindIcon kind={call.kind} />
+        {text && (
+          <span className="text-xs text-text-secondary truncate shrink-0 max-w-[45%]">{text}</span>
+        )}
+        {/* 行内文件（可点击，全路径传参 —— openDoc 唯一门面，展示即全路径） */}
+        {call.card === 'generic' && (call.locations?.length ?? 0) > 0 && (
+          <span className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+            {call.locations!.map((loc, i) => (
+              <FileLink key={`${loc.path}:${i}`} path={loc.path} line={loc.line} className="text-xs" />
+            ))}
+          </span>
+        )}
+        {/* write 卡：ChangeSummary 上移进头行（路径本就可点击，+/− 是核心信号） */}
+        {call.card === 'write' && (
+          <span className="min-w-0 overflow-hidden">
+            <ChangeSummary changes={call.changes} variant="inline" onOpenFile={open} />
+          </span>
+        )}
+        {/* 行内结果摘要（信号层 text-primary，B11/P4-b 口径） */}
+        {stats && (
+          <span className="text-xs text-text-primary truncate min-w-0">
+            {stats}
+            {truncated && (
+              <span className="ml-1.5 text-2xs text-text-faint select-none">{t('flow.truncatedResult')}</span>
+            )}
+          </span>
+        )}
         <span className="flex-1" />
         {block.durationMs > 0 && (
           <span className="text-2xs text-text-faint shrink-0 select-none">
@@ -153,8 +228,9 @@ export function ToolBlock({ block }: { block: ToolBlockT }) {
         )}
       </div>
 
-      {/* 调用卡（按 card 字段分发，无 toolName 特判） */}
-      <ToolCallBody call={block.call} />
+      {/* 调用卡（按 card 字段分发，无 toolName 特判）。
+          D112：generic+locations / write 的调用体已上移头行，不再重复渲染。 */}
+      {!inlineSubject && <ToolCallBody call={call} />}
 
       {/* guarded / failed 的说明文本：琥珀 vs 红（C-16 可区分） */}
       {guarded && block.errorMessage && (
@@ -164,8 +240,7 @@ export function ToolBlock({ block }: { block: ToolBlockT }) {
         <div className="mt-1 text-xs text-danger whitespace-pre-wrap select-text">{block.errorMessage}</div>
       )}
 
-      {/* 结果：摘要默认可见（C-11），完整结果默认折叠（resultOpen 初始 false） */}
-      {block.result && !resultOpen && <ResultSummaryLine result={block.result} />}
+      {/* 结果：完整内容默认折叠（resultOpen 初始 false），展开后整块渲染 */}
       {block.result && resultOpen && (
         <div className="mt-1">
           <ToolResultBody result={block.result} />

@@ -60,7 +60,7 @@ export function BugfixIsland() {
   return (
     <div className="px-3 pt-2 flex-shrink-0">
       <div
-        className={`mx-auto max-w-[620px] rounded-xl border bg-bg-overlay backdrop-blur px-3.5 py-2.5 transition-colors ${
+        className={`mx-auto max-w-[620px] rounded-xl border bg-bg-overlay px-3.5 py-2.5 transition-colors ${
           terminal
             ? achieved
               ? 'border-success shadow-panel'

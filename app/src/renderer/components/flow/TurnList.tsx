@@ -21,6 +21,8 @@ import { SuggestionCards } from '../SuggestionCards'
 import { PlanApprovalCard } from '../graph/PlanApprovalCard'
 // v0.34.0（D52）：轮次折叠（空转时交互区不再无限增高）
 import { foldTurnRange } from '../../utils/turn-fold'
+// v0.36.4（D121）：任务锚点卡（核心任务/正在做/用户意图 —— LLM 规划产物渲染）
+import { TaskAnchor } from './TaskAnchor'
 
 export function TurnList() {
   const { t } = useTranslation()
@@ -40,10 +42,23 @@ export function TurnList() {
   const askUserQuestion = useStore((s) => s.askUserQuestion)
   const task = useStore((s) => s.tasks.find((tl) => tl.id === s.selectedTaskId))
   const flow = useStore((s) => s.flow)
+  // v0.36.0（F4.1）：并行子 agent 组（live-only，事件流落到 store 后进投影）
+  const subagentGroups = useStore((s) =>
+    s.selectedTaskId ? s.subagentGroups[s.selectedTaskId] : undefined,
+  )
+  // v0.38.0（A4/A5/A9）：阶段结论（note）/ 门禁通告（gate-blocked）—— 同为 live-only，
+  // 但**不给投影层就永远不会显示**（块只能由 projectConversation 产出）。
+  const flowEvents = useStore((s) =>
+    s.selectedTaskId ? s.flowEvents[s.selectedTaskId] : undefined,
+  )
 
   // B1 reasoning 通道缓冲（投影层在最后一轮追加 streaming ReasoningBlock）
   const streamBuffer = useStore((s) =>
     s.selectedTaskId ? s.streamBuffers[`${s.selectedTaskId}:turn:reasoning`] : undefined,
+  )
+  // v0.36.0（B11/P4-a）：正文 text 通道缓冲（此前无消费点 → 正文最后才出现）
+  const textStreamBuffer = useStore((s) =>
+    s.selectedTaskId ? s.streamBuffers[`${s.selectedTaskId}:turn:text`] : undefined,
   )
 
   const taskId = task?.id ?? selectedTaskId ?? ''
@@ -55,16 +70,20 @@ export function TurnList() {
       taskId,
       items,
       steps,
-      events: [], // 渲染层暂无 session 事件通道（§11 登记，B5/B6 接入）
-      streamBuffers: streamBuffer ? { [`${taskId}:turn:reasoning`]: streamBuffer } : {},
+      events: flowEvents ?? [], // v0.38.0：阶段结论 / 门禁通告（此前恒为空数组，故两块从不显示）
+      streamBuffers: {
+        ...(streamBuffer ? { [`${taskId}:turn:reasoning`]: streamBuffer } : {}),
+        ...(textStreamBuffer ? { [`${taskId}:turn:text`]: textStreamBuffer } : {}),
+      },
       planItems: task?.planItems ?? [],
       viewMode: flow.viewMode,
       showThinking: flow.showThinking,
       ui: flow,
       now: Date.now(),
+      subagentGroups,
     })
     // now 刻意不入依赖：运行中轮的时长随 steps/buffer 更新自然刷新
-  }, [taskId, items, steps, streamBuffer, task?.planItems, flow])
+  }, [taskId, items, steps, streamBuffer, textStreamBuffer, task?.planItems, flow, subagentGroups, flowEvents])
 
   /* ---------- 内容签名：贴底跟随依赖（迁移 ConversationFlow :105-130） ---------- */
   const contentSignature = useMemo(
@@ -90,7 +109,7 @@ export function TurnList() {
     if (atBottom) {
       el.scrollTop = el.scrollHeight
     }
-  }, [contentSignature, atBottom, streamBuffer?.text])
+  }, [contentSignature, atBottom, streamBuffer?.text, textStreamBuffer?.text])
 
   // v0.13.0：未读计数（不在底部 + 有新增 → 累加；贴底归零）
   useEffect(() => {
@@ -174,6 +193,10 @@ export function TurnList() {
     <div className="flex-1 overflow-y-auto min-h-0 relative" ref={scrollRef} onScroll={onScroll}>
       <div className="max-w-[760px] mx-auto px-6 py-6 space-y-4">
         {items.length === 0 && ctxChips.length === 0 && turns.length === 0 && <div className="py-10" />}
+
+        {/* v0.36.4（D121）：任务锚点卡 —— 恒在锚点（goal / 焦点节点 / 用户意图），
+            全部为 LLM 规划产物结构化渲染，不进过程组 */}
+        {taskId && <TaskAnchor taskId={taskId} />}
 
         {/* v0.5.0（B4）：上下文变更 chip 渲染 */}
         {ctxChips.length > 0 && (

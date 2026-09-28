@@ -1,20 +1,23 @@
 /* ============================================================
- * ArkWork — ProcessFold（v0.32.0 进程折叠条）
- * 设计文档：docs/versions/v0.32.0/03-interaction.md §二 / §三
- *           docs/versions/v0.32.0/04-system-design.md §1.3–1.6
+ * ArkWork — ProcessFold（v0.32.0 进程折叠条 · v0.36.1 过程组）
+ * 设计文档：docs/versions/v0.36.0/13-process-group-design.md
+ *           docs/versions/v0.32.0/03-interaction.md §二 / §三
  *
- * 职责：把一段连续的思考 / 工具块收成**一行可判断的摘要**。主展示区只留
- * 「要做的事」（计划 / 叙述）与「结论」（答复 / 审批 / 错误），过程收进折叠条。
+ * 职责：把一段连续的进程块（思考 + 工具，允许混排 —— v0.36.1 起不再按
+ * kind 断组）收成**一行可判断的摘要**。主展示区只留「要做的事」（计划 /
+ * 叙述）与「结论」（答复 / 审批 / 错误），过程收进折叠条。
  *
  * 四条硬约束：
  *  ① **摘要必须有信息量**（TraeWork 官方论坛投诉的正向修复）——
- *     工具条按类别分列计数（已读取 3 个文件，搜索 2 次），思考条带来源与时长；
- *     禁止「已调用 N 次」式空壳。
+ *     工具条按类别分列计数（已读取 3 个文件，搜索 2 次），思考条带次数与
+ *     时长（思考 5 次）；禁止「已调用 N 次」式空壳。
  *  ② **展开态存 store**（`flow.blockUiState[run.id].userOpen`）而非组件
  *     useState —— 虚拟化（P2）后组件会频繁挂载/卸载，组件态会丢。
  *  ③ **异常不静默**：含 failed / guarded 时改语义色，且 standard 及以上自动展开。
  *  ④ **展开体复用既有渲染**：工具块走 BlockRenderer → ToolBlock；
  *     思考块走 ReasoningBlock 且 `forceOpen` 去掉内层头行（避免双重头）。
+ *  ⑤ **showThinking 关闭**：纯思考 run 不渲染（而非折叠占位）；混合 run
+ *     展开体过滤思考块、摘要同步隐藏思考计数（工具过程仍可见）。
  * ============================================================ */
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../../store'
@@ -23,6 +26,7 @@ import {
   TOOL_FOLD_I18N_KEY,
   countToolRun,
   resolveFoldOpen,
+  thinkingCountOf,
   toolCountTotal,
   toolRunParts,
 } from '@shared/utils/flow-fold'
@@ -40,7 +44,8 @@ export function ProcessFold({ run }: { run: FlowFoldRun }) {
   const uiState = useStore((s) => s.flow.blockUiState[run.id])
   const setBlockOpen = useStore((s) => s.setBlockOpen)
 
-  // showThinking 关闭时思考 run **不渲染**（而非折叠占位）—— 03 §2.2
+  // showThinking 关闭时纯思考 run **不渲染**（而非折叠占位）—— 03 §2.2；
+  // 混合 / 纯工具 run 仍渲染（工具过程不受思考开关影响），展开体再过滤。
   if (run.scope === 'reasoning' && !showThinking) return null
 
   const reasoningBlocks = run.blocks.filter(
@@ -49,16 +54,31 @@ export function ProcessFold({ run }: { run: FlowFoldRun }) {
   const emptyReason =
     run.scope === 'reasoning' && reasoningBlocks.every((b) => !b.text.trim())
 
+  // ---- 展开体与摘要的可见块集（showThinking 关闭 → 过滤思考块） ----
+  const visibleBlocks =
+    run.scope === 'tool' || showThinking
+      ? run.blocks
+      : run.blocks.filter((b) => b.kind !== 'reasoning')
+
   // ---- 摘要文案（唯一数据源 = flow-fold 的纯函数）----
-  const counts = countToolRun(run.blocks)
+  const counts = countToolRun(visibleBlocks)
   const parts = toolRunParts(counts)
   const total = toolCountTotal(counts)
+  const thinkCount = thinkingCountOf(visibleBlocks)
+  const labelParts: string[] = []
+  // 思考部分：混合 run 带次数（纯思考 run 维持「思考过程」原口径 + 来源徽标）
+  if (run.scope === 'process' && thinkCount > 0) {
+    labelParts.push(t('flow.fold.thinkingCount', { n: thinkCount }))
+  }
+  if (parts.length > 0) {
+    labelParts.push(...parts.map((p) => t(TOOL_FOLD_I18N_KEY[p.kind], { n: p.count })))
+  }
   const label =
-    run.scope === 'tool'
-      ? parts.length > 0
-        ? parts.map((p) => t(TOOL_FOLD_I18N_KEY[p.kind], { n: p.count })).join(t('flow.fold.sep'))
-        : `${t('flow.fold.tools')} × ${total}`
-      : t('flow.fold.thinking')
+    run.scope === 'reasoning'
+      ? t('flow.fold.thinking')
+      : labelParts.length > 0
+        ? labelParts.join(t('flow.fold.sep'))
+        : `${t('flow.fold.tools')} × ${total || run.blocks.length}`
 
   const failedReason = reasoningBlocks.some((b) => b.status === 'failed')
   const placeholder = emptyReason
@@ -130,7 +150,7 @@ export function ProcessFold({ run }: { run: FlowFoldRun }) {
       </button>
       {open && (
         <div className="flow-fold__body">
-          {run.blocks.map((b) =>
+          {visibleBlocks.map((b) =>
             b.kind === 'reasoning' ? (
               <ReasoningBlock key={b.id} block={b} forceOpen />
             ) : (

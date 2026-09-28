@@ -3,7 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' https: http://127.0.0.1:* http://localhost:*; frame-src 'self' https: http: data: file:; img-src 'self' data: https: http:" />
+    <!--
+      ★ v0.36.0（D90）frame-src 必须放行 `arkwork-plugin:`
+        —— 插件代码视图（v0.35.0）用 `<iframe src="arkwork-plugin://<id>/xxx.html">`
+           装载客户端半；本页这条 CSP 若不列该 scheme，Chromium 在建框阶段就拒绝
+           （`net::ERR_BLOCKED_BY_CSP`，子框架退化成 `chrome-error://chromewebdata/`
+           即**一片纯白**，且宿主侧没有任何报错提示）—— 用户实测「git 侧边栏点进去
+           全是白色」的第一层根因。
+        约束：本行与 `main/plugins/protocol.ts` 的 `PLUGIN_SCHEME` 是**同一事实的
+        两个副本**，由 `src/main/plugins/__tests__/plugin-frame-src-contract.test.ts`
+        （TC-PFS-001/002）逐字校验，改一处必须改两处。
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' https: http://127.0.0.1:* http://localhost:*; frame-src 'self' https: http: data: file: arkwork-plugin:; img-src 'self' data: https: http:" />
     <title>ArkWork — AI Agent Workbench</title>
     <!--
       v0.21.0 — 参考 deepseek-harness-desktop（DSH），改用系统字体栈：

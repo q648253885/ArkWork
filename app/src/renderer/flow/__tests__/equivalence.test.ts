@@ -103,7 +103,10 @@ function canonicalFromItems(items: ConversationItem[]): Canonical {
 }
 
 /* ---------- 新路径规范序列（FlowTurn[] → canonical） ---------- */
-const NEW_KINDS = new Set(['notice', 'error']) // §11 登记的新增可见类型（本版能力，非回归）
+// §11 登记的新增可见类型（本版能力，非回归）：notice / error 为旧版新增；
+// subagent-group 为 v0.36.0 F4.1 并行子 agent 组卡（仅有 live 事件源，历史回放不重建）；
+// note 为 v0.38.0 A5 阶段结论（数据源是 turn_note 事件，旧 deriveConversation 路径无此概念）。
+const NEW_KINDS = new Set(['notice', 'error', 'subagent-group', 'note'])
 
 function visibleOf(b: FlowBlock): string {
   switch (b.kind) {
@@ -116,6 +119,9 @@ function visibleOf(b: FlowBlock): string {
     case 'notice': return b.text
     case 'error': return b.text
     case 'approval': return b.cardKind
+    case 'subagent-group': return `并行执行 ${b.children.length} 个子 agent`
+    // v0.38.0（A5/D156）：阶段结论 —— 同样是"旧路径没有"的新可见块
+    case 'note': return b.text
   }
 }
 

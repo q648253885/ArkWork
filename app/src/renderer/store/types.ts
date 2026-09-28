@@ -19,7 +19,12 @@ import type {
   Degradation,
   ProfileSummary,
 } from '@shared/types/profile'
-import type { ReActStep } from '@shared/types/react'
+import type { ReActStep, ReActEvent } from '@shared/types/react'
+// v0.36.0（F4.1）：并行子 agent 组卡视图与进度事件载荷
+import type { SubagentProgressPayload } from '@shared/types/react'
+// v0.38.0（A4/A5/A9）：交互区投影事件（turn_note / gate_blocked）
+import type { SessionEvent } from '@shared/types/conversation'
+import type { SubagentChildView } from '@shared/types/flow'
 import type {
   TaskProgress,
   TaskProgressMilestone,
@@ -47,7 +52,7 @@ import type {
   ConfirmRespondReason,
   Locale,
 } from '@shared/types/ipc'
-import type { PermissionMode, ResolvedRules } from '@shared/types/permission'
+import type { PermissionMode, ResolvedRules, PermissionRuleEntry, PermissionRuleBehavior } from '@shared/types/permission'
 // v0.31.0 B2：编辑器文件能力的类型真源
 import type { ConflictInfo, EditorDocMeta } from '@shared/types/fs'
 // v0.31.0 B3：交互区展示模型（层级骨架）
@@ -57,6 +62,7 @@ import type { SaveOutcome } from '../services/editorDoc'
 import type { PanelTab } from '@shared/utils/panel-model'
 import type { SlotEntry, SlotKind } from '@shared/types/profile'
 import type { PluginRuntimeStatus, PluginSource, PluginSummary } from '@shared/types/plugin'
+import type { PluginInstallZipResult } from '@shared/types/ipc'
 import type { ThemeTokens } from '@shared/utils/theme-tokens'
 import type { RendererKindName } from '@shared/types/vlib'
 import type {
@@ -386,6 +392,14 @@ export interface AppState {
   optimisticOverlay: Record<string, Record<string, { targetStatus: import('@shared/types/task').PlanItemStatus; submittedTs: number; clientVersion?: number }>>
   /** v0.18.0：每 task 的 planListVersion（Main 端 patch/snapshot 同步推进） */
   planListVersion: Record<string, number>
+  /**
+   * v0.37.0：任务清单账本快照（**唯一真相源的只读投影**）。
+   * 携带任务模式（模型自选，UI 只读）、恢复点提示、未收口计数。
+   * 由 `task:ledger-changed` 单向推送 + `fetchLedgerSnapshot` 主动拉取。
+   */
+  ledgerSnapshots: Record<string, import('@shared/types/ipc').LedgerSnapshotView>
+  /** v0.37.0：写入/覆盖某任务的账本快照 */
+  setLedgerSnapshot: (taskId: string, snapshot: import('@shared/types/ipc').LedgerSnapshotView | null) => void
   /** v0.18.0：用户在 TodoPanel 触发的动作（行级 inFlight 角标显示） */
   planItemInFlight: Record<string, Record<string, 'submitted' | 'rejected'>>
   /** v0.18.0：写入 Optimistic + 立即本地生效；返回 clientVersion 预测值（后续 reconcile 用） */
@@ -546,10 +560,19 @@ export interface AppState {
   // ---- v0.15.0 权限模型 ----
   permissionMode: PermissionMode
   permissionRules: ResolvedRules | null
+  /** ★ v0.36.0（F6.1 / P9）：带来源与生效态的规则条目（面板消费） */
+  permissionRuleEntries: PermissionRuleEntry[]
+  /** ★ v0.36.0：规则拉取中（P9 五态之「加载」） */
+  permissionRulesLoading: boolean
   getPermissionMode: () => Promise<void>
   setPermissionMode: (mode: PermissionMode) => Promise<void>
   refreshPermissionRules: () => Promise<void>
-  addPermissionRule: (rule: string) => Promise<void>
+  /** ★ v0.36.0：`behavior` 缺省为 `allow`（保持既有调用点不变） */
+  addPermissionRule: (rule: string, behavior?: PermissionRuleBehavior) => Promise<void>
+  /** ★ v0.36.0：删除一条 **local** 规则（其余作用域只读，主进程会拒绝） */
+  removePermissionRule: (entry: PermissionRuleEntry) => Promise<void>
+  /** ★ v0.36.0：开关一条 **local** 规则的生效态 */
+  setPermissionRuleEnabled: (entry: PermissionRuleEntry, enabled: boolean) => Promise<void>
 
   // ---- Pickers（Composer 中选择） ----
   selectedAgentId: string
@@ -628,6 +651,50 @@ export interface AppState {
   /** UI 上某 task 当前的活跃进度（用于面板/列表展示） */
   activeProgressByTask: Record<string, ToolProgressEvent[]>
 
+  /* ============================================================
+   * v0.36.0（F4.1）— 并行子 agent 执行组（tasksSlice 认领）
+   *
+   * 数据源：task:subagent-progress 事件（父任务 → 渲染层）。
+   * live-only：不落盘、不随 session.jsonl 回放重建（与压缩通告同口径，§11 登记）。
+   * 步骤摘要走两条路：终态事件自带 stepSummary；运行中由 task:step 回流回填
+   * （子任务的 step 也经 task:step 广播，按 childTaskId 反向定位）。
+   * ============================================================ */
+  /** parentTaskId → 子 agent 行（保持事件到达顺序） */
+  subagentGroups: Record<string, SubagentChildView[]>
+  /** 收到 task:subagent-progress 时 upsert 一行 */
+  applySubagentProgress: (payload: SubagentProgressPayload) => void
+  /** 子任务 step 回流 → 回填该行的 stepSummary */
+  backfillSubagentStep: (childTaskId: string, summary: string) => void
+  /** P5 卡「取消」：只中断该子任务 */
+  cancelSubagent: (childTaskId: string) => Promise<void>
+  /** P5 卡「重试该子任务」：复用 delegate 通道单发（产生新 childTaskId） */
+  retrySubagent: (payload: { parentTaskId: string; agentId: string; objective: string }) => Promise<void>
+
+  /* ============================================================
+   * v0.38.0（A4/A5/A9）— 交互区投影事件（tasksSlice 认领）
+   *
+   * 数据源：`task:event` 中的 `turn_note`（阶段结论）/ `gate_blocked`（门禁通告），
+   * 由 main 侧 `agent/engine/gate-channel.ts` 投递。
+   *
+   * 为什么单独存这两类事件：
+   *   · 它们**不是** ConversationItem / ReActStep 的产物 —— 没有对应的落盘步骤
+   *     结构，渲染层其余事件也各有专门通道（压缩走 ctxChip、失败走 toast、
+   *     子 agent 走 subagentGroups），唯独这两类必须进
+   *     `projectConversation(events)` 才能成为可渲染的块（NoteBlock / gate-blocked
+   *     通告）。收口在投影层的唯一入口，避免渲染层再开第二条块构造路径。
+   *   · live-only：与 subagentGroups 同口径（不落盘、不随 session.jsonl 回放重建）。
+   *     区别是**按 taskId 分桶且切换任务不清空** —— 同一进程内切回去仍可见，
+   *     只有重启才丢（switching 丢内容对"阶段结论"是致命的，故不做清空）。
+   * ============================================================ */
+  /** taskId → 待投影事件（仅 turn_note / gate_blocked，保持到达顺序） */
+  flowEvents: Record<string, SessionEvent[]>
+  /**
+   * `task:event` 命中上述两类时追加（**唯一写入口**）。
+   * 入参是裸 `ReActEvent`（IPC 不带落盘元数据）；id / seq / ts 由本函数补齐，
+   * 保证投影层块 id 稳定（同一事件重投影恒得同一 id）。
+   */
+  appendFlowEvent: (taskId: string, event: ReActEvent) => void
+
   // ---- Task 9：任务侧边栏进度摘要（按 taskId 索引，独立持久化） ----
   taskProgress: Record<string, TaskProgress>
   /** 整体覆盖式写入（不触发派生计算；由 Main 推事件回流时直接调用） */
@@ -662,6 +729,23 @@ export interface AppState {
   activeDocPath: string | null
   /** 刷新文件树（B2 委托既有 refreshFiles；B5 接管为 tree） */
   refreshTree: () => Promise<void>
+  /* ---- v0.36.0 B11/P1：文件树展开状态与懒加载 ---- */
+  /** 节点展开覆盖表（undefined = 默认：顶层目录展开、COLLAPSED_DIRS 收起） */
+  treeExpanded: Record<string, boolean>
+  /** 懒加载目录缓存：path → 单层 FsNode[]（未加载的目录不在此表） */
+  dirChildren: Record<string, FsNode[]>
+  /** 正在懒加载的目录集合 */
+  dirLoading: Record<string, boolean>
+  /** 切换节点展开态；defaultOpen 与渲染层默认语义一致（B11/P1：一次点击即收起） */
+  toggleTreeNode: (path: string, defaultOpen: boolean) => void
+  /** 全部展开：对当前已加载树 BFS，展开所有目录节点 */
+  expandAllTreeNodes: () => void
+  /** 全部收起：清空展开覆盖表 */
+  collapseAllTreeNodes: () => void
+  /** 懒加载目录单层子项并入缓存；已加载或加载中则跳过 */
+  loadTreeDir: (path: string) => Promise<void>
+  /** 失效懒加载缓存（刷新/重命名/删除后调用） */
+  invalidateDirCache: () => void
   /** 打开文档并据 `editable` 决定 Tab 是否进编辑态 */
   openDoc: (path: string, mode?: 'preview' | 'pinned' | 'edit') => Promise<void>
   /** 关闭文档；dirty / 保存中 → 返回 false（禁止静默丢弃，A5/A6） */
@@ -747,13 +831,13 @@ export interface AppState {
   profileHomeModule: string | null
   /** profile 声明的 Composer chips（点击后填入草稿） */
   profileComposerChips: string[]
+  /** v0.36.0（B11/P3-b）：工作台级插件白名单；null = 未声明（不过滤） */
+  profilePluginRefs: string[] | null
   /**
    * v0.33.0：可渲染的面板 Tab（来自 `profile:slots` 的 `ui.panel` 条目）。
    * 消费者是 `Inspector.tsx`；顺序真源是 manifest 的 `position`。
    */
   profilePanels: PanelTab[]
-  /** v0.33.0：扩展名 → 渲染器（profile 的 `previewRenderers` ∪ 插件 renderer 贡献） */
-  rendererOverrides: Record<string, string>
   /** v0.33.0：token 覆盖（只覆盖已存在 token，见 theme-tokens.ts 的白名单） */
   themeOverrides: ThemeTokens
   loadProfiles: () => Promise<void>
@@ -779,7 +863,12 @@ export interface AppState {
   loadPlugins: () => Promise<void>
   setPluginScope: (scope: 'workspace' | 'global') => Promise<void>
   setPluginEnabled: (id: string, enabled: boolean, scope?: 'workspace' | 'global') => Promise<boolean>
-  uninstallPlugin: (id: string) => Promise<boolean>
+  uninstallPlugin: (id: string, opts?: { purgeData?: boolean }) => Promise<boolean>
+  installPlugin: (opts?: {
+    zipPath?: string
+    confirmed?: boolean
+    overwrite?: boolean
+  }) => Promise<PluginInstallZipResult>
   rescanPlugins: () => Promise<void>
   openPluginsDir: (scope?: 'workspace' | 'global') => Promise<void>
   exportPluginSample: (id: string) => Promise<void>

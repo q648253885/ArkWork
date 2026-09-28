@@ -46,6 +46,10 @@ const ark: ArkApi = {
     cancel: (id) => ipcRenderer.invoke('task:cancel', id),
     appendMessage: (taskId, text) => ipcRenderer.invoke('task:append-message', { taskId, text }),
     listSteps: (taskId) => ipcRenderer.invoke('task:steps', taskId),
+    /** ★ v0.36.0（F4.2）：单卡取消并行子 agent（只中断该子任务） */
+    cancelSubagent: (childTaskId) => ipcRenderer.invoke('task:cancel-subagent', childTaskId),
+    /** ★ v0.36.0（F4.2）：重试失败的子 agent（复用 delegate 通道单发，产生新 childTaskId） */
+    retrySubagent: (payload) => ipcRenderer.invoke('task:retry-subagent', payload),
     onStep: (cb) => {
       const handler = (_e: IpcRendererEvent, step: Parameters<typeof cb>[0]) => cb(step)
       ipcRenderer.on('task:step', handler)
@@ -96,6 +100,15 @@ const ark: ArkApi = {
     markDonePlanItem: (payload) => ipcRenderer.invoke('task:plan-item-mark-done', payload),
     /** v0.18.0：Renderer 主动拉取 planItems（patch 落后兜底） */
     fetchPlanItemList: (taskId) => ipcRenderer.invoke('task:plan-list-snapshot', taskId),
+    /** v0.37.0：拉取任务清单账本快照（唯一真相源，只读） */
+    fetchLedgerSnapshot: (taskId) => ipcRenderer.invoke('task:ledger-snapshot', taskId),
+    fetchLedgerHistory: (taskId, limit) => ipcRenderer.invoke('task:ledger-history', taskId, limit),
+    /** v0.37.0：订阅账本变更（Main → Renderer 单向） */
+    onLedgerChanged: (cb) => {
+      const handler = (_e: IpcRendererEvent, payload: Parameters<typeof cb>[0]) => cb(payload)
+      ipcRenderer.on('task:ledger-changed', handler)
+      return () => ipcRenderer.removeListener('task:ledger-changed', handler)
+    },
     // Task 9：进度摘要持久化（覆盖式写入 / 启动时一次性加载）
     progressSave: (payload) => ipcRenderer.invoke('task:progress-save', payload),
     progressLoad: () => ipcRenderer.invoke('task:progress-load'),
@@ -163,7 +176,11 @@ const ark: ArkApi = {
     getMode: () => ipcRenderer.invoke('permission:getMode'),
     setMode: (mode) => ipcRenderer.invoke('permission:setMode', mode),
     resolveRules: () => ipcRenderer.invoke('permission:resolveRules'),
-    addRule: (rule, scope) => ipcRenderer.invoke('permission:addRule', { rule, scope }),
+    addRule: (rule, behavior) => ipcRenderer.invoke('permission:addRule', { rule, behavior }),
+    // ★ v0.36.0（F6.1 / P9）：规则面板的「逐行来源 / 开关 / 删除」
+    listRules: () => ipcRenderer.invoke('permission:listRules'),
+    removeRule: (req) => ipcRenderer.invoke('permission:removeRule', req),
+    setRuleEnabled: (req) => ipcRenderer.invoke('permission:setRuleEnabled', req),
     onModeChanged: (cb) => {
       const handler = (_e: IpcRendererEvent, payload: PermissionModeEvent) => cb(payload)
       ipcRenderer.on('permission:mode-changed', handler)
@@ -252,6 +269,8 @@ const ark: ArkApi = {
   },
   fs: {
     listFiles: (taskId) => ipcRenderer.invoke('fs:list-files', taskId),
+    // v0.36.0 B11/P1：单层目录懒加载
+    listDir: (dirPath) => ipcRenderer.invoke('fs:list-dir', dirPath),
     readFile: (path) => ipcRenderer.invoke('fs:read-file', path),
     writeFile: (path, content) => ipcRenderer.invoke('fs:write-file', { path, content }),
     revealInFolder: (path) => ipcRenderer.invoke('fs:reveal-in-folder', path),
@@ -324,6 +343,8 @@ const ark: ArkApi = {
     // v0.30.0 P8：计划闸门（Plan 审批卡）—— pendingPlan 读、decidePlan 决
     pendingPlan: (taskId) => ipcRenderer.invoke('graph:pending-plan', taskId),
     decidePlan: (payload) => ipcRenderer.invoke('graph:decide-plan', payload),
+    // v0.38.1（D173）：降级错误卡手动关闭（唯一出口；正常闸门不可走此通道）
+    dismissPlanDegraded: (taskId) => ipcRenderer.invoke('graph:dismiss-plan-degraded', taskId),
     onUpdate: (cb) => {
       const handler = (_e: IpcRendererEvent, payload: Parameters<typeof cb>[0]) => cb(payload)
       ipcRenderer.on('graph:update', handler)
@@ -399,6 +420,12 @@ const ark: ArkApi = {
     rescan: () => ipcRenderer.invoke('plugin:rescan'),
     openDir: (args) => ipcRenderer.invoke('plugin:open-dir', args),
     exportSample: (args) => ipcRenderer.invoke('plugin:export-sample', args),
+    /** ★ v0.36.0（F3.2）：安装插件包（无 zipPath 时 main 弹文件选择框；两段式 confirmed/overwrite） */
+    installZip: (args) => ipcRenderer.invoke('plugin:install-zip', args),
+    /** ★ v0.36.0（F3.3）：列出启用插件贡献的命令（QuickAction 与插件详情共用） */
+    listCommands: (args) => ipcRenderer.invoke('plugin:list-commands', args),
+    /** ★ v0.36.0（F3.3）：触发一条插件命令 */
+    runCommand: (args) => ipcRenderer.invoke('plugin:run-command', args),
     onChanged: (cb) => {
       const handler = (_e: IpcRendererEvent, payload: Parameters<typeof cb>[0]) => cb(payload)
       ipcRenderer.on('plugin:changed', handler)

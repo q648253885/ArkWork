@@ -39,7 +39,7 @@ export interface ScaffoldResult {
   message?: string
 }
 
-/** 目录名取 id 末段（`ark.plugin.demo` → `demo`；与扫描约定一致，见 store.ts） */
+/** 目录名取 id 末段（`ark.plugin.demo` → `demo`）——仅用于 viewRef / 工具名等短名场景 */
 export function scaffoldDirName(id: string): string {
   return id.split('.').pop() || id
 }
@@ -67,6 +67,10 @@ export function scaffoldManifest(input: ScaffoldInput): Record<string, unknown> 
     // 能力声明：**默认拒绝**，模板给最小一组并在注释里标明每一项的用途
     permissions: ['tools.register', 'views.register'],
     provides: {
+      // ★ v0.36.0 修复（B1 实机登记）：VP2 要求 kind='tool' 时 provides.tool（单数）
+      //   键存在（仅存在性校验；真实工具载荷走下面的 provides.tools 数组）。
+      //   缺了它脚手架产物自己都过不了校验 —— 「模板先过校验」的自举被打破。
+      ...(input.kind === 'tool' ? { tool: {} } : {}),
       views: [
         {
           viewRef: `view:${short}`,
@@ -233,7 +237,10 @@ export function scaffoldPlugin(input: ScaffoldInput): ScaffoldResult {
   }
 
   const root = ensurePluginsDir(input.scope)
-  const dir = join(root, scaffoldDirName(id))
+  // ★ v0.36.0（B2 实测修复）：目录名必须是**完整 id** —— registry 扫描约定
+  //   `dirName === manifest.id`（不一致会被打上 invalidReason，插件直接判废）。
+  //   旧版取末段（demo）与 zip 安装器（完整 id）互相打架，脚手架产物一扫就是坏的。
+  const dir = join(root, input.id)
   if (existsSync(dir)) {
     return { ok: false, reason: 'exists', dir, message: `目录已存在，脚手架不会覆盖：${dir}` }
   }

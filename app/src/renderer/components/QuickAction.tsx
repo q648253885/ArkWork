@@ -1,15 +1,20 @@
 /* ============================================================
  * ArkWork — Quick Action (v0.13.0)
  * Quick Action（Mod+K）：四源搜索 Commands / Files / Skills / Agents
+ * ★ v0.36.0（F3.3）：命令源并入插件命令（provides.commands）——
+ *   用户可见的用户动作与内置命令走同一入口（/ 前缀），模型可见的
+ *   工具才走工具表（provides.tools）—— 两条管线不混。
  * ============================================================ */
 import { useEffect, useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
+import { ark } from '../ipc/client'
 import { Icon, type IconName } from '../icons'
 import { Kbd } from './ui'
 // v0.31.1：shortcut 不再硬编码 mac 符号 —— 一律经 keymap 按平台渲染（Windows 显示 Ctrl+…）
 import { chordText } from '../keymap'
 import type { FsNode } from '../types'
+import type { PluginCommandEntry } from '@shared/types/ipc'
 
 interface QuickItem {
   id: string
@@ -88,16 +93,36 @@ export function QuickAction() {
   const openModulePage = useStore((s) => s.openModulePage)
   const closeModulePage = useStore((s) => s.closeModulePage)
   const exportConversation = useStore((s) => s.exportConversation)
+  const copyConversation = useStore((s) => s.copyConversation)
+  const pushToast = useStore((s) => s.pushToast)
 
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const listboxId = useId()
+  /** ★ v0.36.0（F3.3）：插件命令源 —— 打开面板时现拉（廉价 IPC），不做常驻订阅 */
+  const [pluginCommands, setPluginCommands] = useState<PluginCommandEntry[]>([])
 
   // 必须所有 hooks 都在条件 return 前（React Hooks 规则）
   useEffect(() => {
     if (!open) {
       setQuery('')
       setActiveIndex(0)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    ark.plugin
+      .listCommands()
+      .then((list) => {
+        if (alive) setPluginCommands(Array.isArray(list) ? list : [])
+      })
+      .catch(() => {
+        if (alive) setPluginCommands([])
+      })
+    return () => {
+      alive = false
     }
   }, [open])
 
@@ -156,6 +181,17 @@ export function QuickAction() {
         action: exportConversation,
       },
       {
+        // ★ v0.36.0（B9）：随 CommandPalette 死代码清理迁入 —— 它是「复制对话」
+        //   在 v0.34.1 契约里四个挂点之一（类型 / store / 头部菜单 / 命令面板），
+        //   而 CommandPalette 自 v0.13.0 起就不再挂载。仅删文件会让该功能
+        //   只剩头部菜单一条路（键盘不可达），故把命令迁到**活的** ⌘K 面板。
+        id: 'cmd-copy',
+        label: t('quickaction.commands.copyConversation'),
+        icon: 'Copy',
+        source: 'command',
+        action: () => void copyConversation(),
+      },
+      {
         id: 'cmd-return-task',
         label: t('quickaction.commands.returnTask'),
         icon: 'ChevronLeft',
@@ -163,6 +199,32 @@ export function QuickAction() {
         action: closeModulePage,
       },
     ]
+
+    // ★ v0.36.0（F3.3）：插件贡献的命令 —— 与内置命令同源渲染（/ 前缀过滤）。
+    //   runnable=false（未启用/未声明）的项由主进程过滤，这里再兜一道。
+    for (const c of pluginCommands) {
+      if (!c.runnable) continue
+      result.push({
+        id: `plugin-cmd-${c.pluginId}:${c.id}`,
+        label: c.title,
+        hint: c.pluginName,
+        icon: 'Command',
+        source: 'command',
+        action: () => {
+          void ark.plugin
+            .runCommand({ pluginId: c.pluginId, commandId: c.id })
+            .then((res) => {
+              // 成功保持静默（效果由插件自己呈现）；失败必须人话报出来
+              if (res && res.ok === false && res.message) {
+                pushToast({ type: 'danger', message: res.message, duration: 6000 })
+              }
+            })
+            .catch((err) => {
+              pushToast({ type: 'danger', message: String(err?.message ?? err), duration: 6000 })
+            })
+        },
+      })
+    }
 
     for (const agent of agents) {
       result.push({
@@ -203,6 +265,8 @@ export function QuickAction() {
     agents,
     skills,
     files,
+    pluginCommands,
+    pushToast,
     createTask,
     setSelectedAgent,
     openDoc,
@@ -212,6 +276,7 @@ export function QuickAction() {
     openModulePage,
     closeModulePage,
     exportConversation,
+    copyConversation,
   ])
 
   const filtered = useMemo(() => {
@@ -297,7 +362,7 @@ export function QuickAction() {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center pt-[12vh] bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-start justify-center pt-[12vh] bg-black/50"
       // v0.31.1（用户裁决）：点击遮罩空白处关闭 —— 覆盖 v0.13 的「防误触仅 Esc」
       // 旧决策。只有直接点到遮罩本身（target === currentTarget）才关，
       // 面板内部的点击不受影响，无需再 stopPropagation。

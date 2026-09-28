@@ -343,26 +343,20 @@ export function parseManifest(raw: unknown, source: ProfileSource): ParseResult 
       }
     }
 
-    /* ---- ★ v0.33.0：ui.previewRenderers ---- */
+    /* ---- ★ v0.36.0（D5）：ui.previewRenderers 插槽已从契约删除 ---- */
+    // 兼容性纪律（04-system-design §4）：「旧 manifest 含被删插槽 → warn 并忽略，不阻断」。
+    // 这里**刻意不做结构校验**：字段已经不被消费，为一堆即将被丢弃的值报 error
+    // 只会让老用户的台激活不了 —— 那是最糟的兼容形态（破坏性却无收益）。
     if (raw.ui.previewRenderers !== undefined) {
-      if (!isObj(raw.ui.previewRenderers)) {
-        issues.push(issue('V1', 'warning', '$.ui.previewRenderers', 'previewRenderers 应为对象（{ "<ext>": "<RendererKind>" }），已忽略'))
-      } else {
-        const out: Record<string, string> = {}
-        for (const [k, v] of Object.entries(raw.ui.previewRenderers)) {
-          const p = `$.ui.previewRenderers.${k}`
-          if (!/^[a-z0-9]+$/.test(k)) {
-            issues.push(issue('V1', 'error', p, `扩展名键 "${k}" 必须全小写字母数字且不含点`, '例如 "kchart"'))
-            continue
-          }
-          if (!isStr(v)) {
-            issues.push(issue('V1', 'error', p, '渲染器类型必须是非空字符串', '例如 "table"'))
-            continue
-          }
-          out[k] = v
-        }
-        if (Object.keys(out).length > 0) ui.previewRenderers = out
-      }
+      issues.push(
+        issue(
+          'V1',
+          'warning',
+          '$.ui.previewRenderers',
+          'ui.previewRenderers 已从 v0.36.0 插槽契约删除，该字段被忽略（不阻断激活）',
+          '扩展名 → 渲染器的唯一真源是宿主内置表；如需新渲染器请提插件视图或改宿主',
+        ),
+      )
     }
 
     /* ---- ★ v0.33.0：ui.actionExtensions（只登记） ---- */
@@ -431,6 +425,16 @@ export function parseManifest(raw: unknown, source: ProfileSource): ParseResult 
     if (isStr(raw.requirements.minBaseVersion)) requirements.minBaseVersion = raw.requirements.minBaseVersion
   }
 
+  /* ---- v0.36.0（B11/P3-b）：pluginRefs 工作台级插件白名单（可选字符串数组） ---- */
+  let pluginRefs: string[] | undefined
+  if (raw.pluginRefs !== undefined) {
+    if (!Array.isArray(raw.pluginRefs) || !raw.pluginRefs.every(isStr)) {
+      issues.push(issue('V1', 'warning', '$.pluginRefs', 'pluginRefs 应为字符串数组（插件 manifest id），已忽略'))
+    } else {
+      pluginRefs = (raw.pluginRefs as string[]).filter(isStr)
+    }
+  }
+
   const hasError = issues.some((i) => i.level === 'error')
   const profile: WorkbenchProfile | null = hasError
     ? null
@@ -445,6 +449,7 @@ export function parseManifest(raw: unknown, source: ProfileSource): ParseResult 
         extends: isStr(raw.extends) ? raw.extends : undefined,
         agents,
         capabilities,
+        pluginRefs,
         ui,
         data,
         automation,
@@ -540,6 +545,8 @@ export function mergeProfile(
     extends: child.extends,
     agents,
     capabilities: caps,
+    // B11/P3-b：插件白名单 —— 子台未声明时沿用父台（与 icon/description 同口径）
+    pluginRefs: child.pluginRefs ?? parent.pluginRefs,
     ui,
     data,
     automation: autos,
@@ -635,14 +642,9 @@ export function validateReferences(
     })
   }
 
-  // ---- V2 · ui.previewRenderers 的值必须是合法 RendererKind ----
-  for (const [ext, kind] of Object.entries(profile.ui.previewRenderers ?? {})) {
-    if (!isRendererKind(kind)) {
-      issues.push(
-        issue('V2', 'error', `$.ui.previewRenderers.${ext}`, `未知渲染器类型「${kind}」`, '取值见宿主渲染器白名单（markdown / code / table / …）'),
-      )
-    }
-  }
+  /* ★ v0.36.0（D5）：原「V2 · ui.previewRenderers 的值必须是合法 RendererKind」
+   * 已删除 —— 该字段本身随 `ui.renderer` 插槽契约消失，V1 阶段已给 warning
+   * （见 parseManifest 的 ui 段）。 */
 
   // ---- V2 · ui.theme token 合法性（只覆盖不新增） ----
   if (profile.ui.theme) {
@@ -812,8 +814,7 @@ export function diffSnapshots(a: CompositionSnapshot | null, b: CompositionSnaps
   cmp('agents', a.layers.agents.map((x) => x.id), b.layers.agents.map((x) => x.id))
   cmp('tools', a.layers.tools.map((x) => x.ref), b.layers.tools.map((x) => x.ref))
   cmp('ui', a.layers.ui.map((x) => `${x.slot}=${x.value}`), b.layers.ui.map((x) => `${x.slot}=${x.value}`))
-  cmp('data', a.layers.data.map((x) => `${x.key}=${x.value}`), b.layers.data.map((x) => `${x.key}=${x.value}`))
-  cmp('auto', a.layers.auto.map((x) => x.cron), b.layers.auto.map((x) => x.cron))
+  // ★ v0.36.0（D5）：`data` / `auto` 两层已从快照删除 → 不再参与 diff
   if (a.degraded.length !== b.degraded.length) {
     lines.push(`degraded: ${a.degraded.length} → ${b.degraded.length}`)
   }

@@ -8,9 +8,11 @@ import type { PlanItemStatus } from '@shared/types/task'
 
 type PlanBlockT = Extract<FlowBlock, { kind: 'plan' }>
 
+/** v0.37.0：七态（新增 paused = 中断保留，用 ❙❙ 与 cancelled 的 ✕ 明确区分） */
 const STATE_MARK: Record<PlanItemStatus, { text: string; cls: string }> = {
   done: { text: '✓', cls: 'text-success' },
   running: { text: '●', cls: 'text-business-primary animate-pulse' },
+  paused: { text: '❙❙', cls: 'text-warning' },
   failed: { text: '✗', cls: 'text-danger' },
   pending: { text: '○', cls: 'text-text-faint' },
   cancelled: { text: '✕', cls: 'text-text-faint' },

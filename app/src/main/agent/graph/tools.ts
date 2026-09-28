@@ -936,21 +936,24 @@ function pickRunningId(graph: TaskGraph): string | undefined {
   return Object.values(graph.nodes).find((n) => n.status === 'in_progress')?.id
 }
 
-/**
- * 工具名 → 是否需要 graph 上下文（供 registry 判定"轻量模式下应隐藏这些工具"）。
+/* ============================================================
+ * v0.38.0（D154）：控制面收敛 —— 图工具对模型**可见**的那一个子集
  *
- * `policy.builtinTaskListEnabled === false` 时（接入外部任务系统），
- * 引擎会把这些工具从工具集移除（设计稿 §8.2 / A4 准则）。
- */
-export const GRAPH_TOOL_NAMES: readonly string[] = GRAPH_TOOL_SPECS.map((s) => s.name!)
+ * 收敛前模型可见 11 个清单工具、两套定位语义（图工具按 node_id、账本工具按
+ * item_index），语义还重叠 → 模型没有唯一正确答案可选（现场：用 todo_update
+ * 冒充 task_create）。现在清单控制面只剩 `task_plan` 一个入口。
+ *
+ * 下架的 8 个图工具（能力仍由引擎/handler 保留，只是不再出现在模型工具表里）：
+ *   task_create / task_update / replan  → 并入 task_plan 的 create / status / note diff
+ *   submit_plan / request_plan          → 由 task_plan + 模式声明覆盖
+ *   task_block                          → 由 task_plan 的 status:'blocked' + note 覆盖
+ *   task_get / task_list                → 由每轮注入的清单快照覆盖
+ * 保留：task_evidence（验证证据属 V 层，不是清单操作）
+ * ============================================================ */
+/** v0.39.0（W15）：降为模块私有 —— 外部无引用，唯一消费者是本文件的 filter */
+const VISIBLE_GRAPH_TOOLS: readonly string[] = ['task_evidence']
 
-/** 允许关闭的图工具（task_* 系列；request_plan/submit_plan 属身份协议，不可关闭） */
-export const DISABLEABLE_GRAPH_TOOLS: readonly string[] = [
-  'task_create',
-  'task_update',
-  'task_get',
-  'task_list',
-  'task_evidence',
-  'task_block',
-  'replan',
-]
+/** 模型可见的图工具规格（`seed.ts` 只 spread 这一份） */
+export const VISIBLE_GRAPH_TOOL_SPECS: Skill[] = GRAPH_TOOL_SPECS.filter((s) =>
+  VISIBLE_GRAPH_TOOLS.includes(s.name ?? ''),
+)

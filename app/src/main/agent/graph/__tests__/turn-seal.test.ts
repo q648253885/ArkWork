@@ -47,6 +47,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { stripComments } from '@shared/utils/source-guard'
 
 /* ---------------- 模块引入（先于 setWorkspaceDir，纯加载无副作用） --------------- */
 
@@ -521,6 +522,13 @@ test('TC-SEAL-019 失败路径不重复封口（markRunningPlanItemFailed 内已
 /** app/ 根目录（本文件位于 app/src/main/agent/graph/__tests__/） */
 const APP = fileURLToPath(new URL('../../../../..', import.meta.url))
 const read = (rel: string): string => readFileSync(join(APP, rel), 'utf8')
+/**
+ * v0.39.0（D183）：**剥注释后再断言**。
+ * turn-end.ts 里留着一段解释「为什么删掉 D39 第二套守卫」的注释，逐字写着
+ * `MAX_COMPLETE_REFUSALS` / `refuseCompletionForLeftovers` / `discardIncompletePlanItems`
+ * —— 那是删除说明，不是代码；不剥注释就会把说明当违规（纪律⑫）。
+ */
+const readCode = (rel: string): string => stripComments(read(rel))
 
 test('TC-SEAL-021 四个终态/起始分支必须各有收口挂点（防回潮）', () => {
   const loop = read('src/main/agent/engine/loop.ts')
@@ -743,54 +751,40 @@ test('TC-SEAL-029 unfinishedTaskNodes：列出未收口的 task 层节点（goal
   )
 })
 
-test('TC-SEAL-030 task_complete 必须先让清单收口（D39：不得留下「已完成 + 待执行」）', () => {
-  const turnEnd = read('src/main/agent/engine/turn-end.ts')
-  const loop = read('src/main/agent/engine/loop.ts')
+test('TC-SEAL-030 完成收尾唯一路径（v0.39.0 · D183）：一条判据、一个计数、放行即收口', () => {
+  const turnEnd = readCode('src/main/agent/engine/turn-end.ts')
+  const loop = readCode('src/main/agent/engine/loop.ts')
 
-  // ① 守卫存在：用未收口项列表做判据
+  // ① 唯一判据：task_complete 分支的第一道门必须是 guardFinish（读账本）
+  const iGuard = turnEnd.indexOf('const verdict = await guardFinish(')
+  assert.ok(iGuard > 0, '★ task_complete 分支必须先过统一账本门禁')
+
+  // ② 第二套守卫（D39）不得复活 —— 它与账本门禁串联出「单 run 最多 3 次拒绝」，
+  //    且第二套不写账本（D151 同型），超限兜底还与门禁结论相反（作废 vs 收口）。
+  assert.doesNotMatch(turnEnd, /MAX_COMPLETE_REFUSALS/, 'D183：run 局部拒绝上限已删除')
+  assert.doesNotMatch(turnEnd, /refuseCompletionForLeftovers/, 'D183：第二套未收口守卫已删除')
+  assert.doesNotMatch(turnEnd, /discardIncompletePlanItems/, 'D183：超限作废兜底已删除（与门禁"放行+收口"相反）')
+  assert.doesNotMatch(loop, /completeRefusals/, 'D183：loop 不得再维护第二套计数')
+
+  // ③ 放行后在途项必须收口 —— 不得把「任务 done + 清单在途」留在界面上
+  const iClose = turnEnd.indexOf('await forceCloseOpenItems(')
+  assert.ok(iClose > iGuard, '★ 收口必须在门禁判定之后（不得先收口再判）')
   assert.match(
     turnEnd,
-    /const leftovers = claim\.graph \? unfinishedTaskNodes\(claim\.graph\) : \[\]/,
-    '★ 有图任务的完成前守卫必须基于图（唯一真相）取未收口项',
-  )
-  // ② 拒绝路径：补配对 observation + 指令性消息，且**不结束回合**
-  assert.match(
-    turnEnd,
-    /(?:export )?async function refuseCompletionForLeftovers\([\s\S]{0,3000}appendPairedControlObservations/,
-    '★ 拒绝完成时必须补配对 observation（否则 tool_calls 悬空 → 服务端 400）',
-  )
-  assert.match(
-    turnEnd,
-    /refuseCompletionForLeftovers\(\{[\s\S]{0,400}return true \/\/ 不结束任务/,
-    '★ 拒绝后必须 return true（回到循环让模型自处），不得继续收尾',
-  )
-  // ③ 上限兜底：模型坚持时接受完成，但**剩余项必须收成 cancelled**（清单与终态自洽）
-  assert.match(
-    turnEnd,
-    /priorRefusals < MAX_COMPLETE_REFUSALS[\s\S]{0,2500}discardIncompletePlanItems\(task, '任务完成：模型坚持收尾/,
-    '★ 超过拒绝上限后必须先把剩余项收口再完成 —— 不能把「已完成 + 4 条待执行」留在界面上',
-  )
-  // ④ 无图任务（tier 0/1）同守卫：判据取**最新的** planItems，不是内存里的旧对象
-  assert.match(
-    turnEnd,
-    /const fresh = await getTask\(task\.id\)[\s\S]{0,200}status === 'running' \|\| p\.status === 'pending'/,
-    '★ 无图分支必须重读 planItems（内存里的 task 可能已过期）',
-  )
-  // ⑤ 计数器由 loop 维护并透传（本 run 内被拒几次）
-  assert.match(
-    loop,
-    /iteration,\s*completeRefusals,\s*\)\s*\)\s*\{\s*completeRefusals \+= 1/,
-    '★ loop 必须把「已拒绝次数」透传给收尾并在被拒时自增（否则上限形同虚设）',
+    /if \(verdict\.leftovers\.length > 0\)/,
+    '★ 仅在途项非空才收口（空清单不得产生写操作 —— 与 P2「不逼模型做假动作」同向）',
   )
 })
 
-test('TC-SEAL-031 有图任务的完成前守卫顺序正确：先收口剩余项、再封图（避免一帧矛盾）', () => {
-  const turnEnd = read('src/main/agent/engine/turn-end.ts')
-  const iDiscard = turnEnd.indexOf("discardIncompletePlanItems(task, '任务完成：模型坚持收尾")
-  const iSeal = turnEnd.indexOf("sealGraphForTaskOutcome(task, 'completed'")
-  assert.ok(iDiscard > 0 && iSeal > 0, '两处调用都必须存在')
+test('TC-SEAL-031 收口顺序正确：先收口在途项、再封图 / 封账本（避免一帧矛盾）', () => {
+  const turnEnd = readCode('src/main/agent/engine/turn-end.ts')
+  const iClose = turnEnd.indexOf('await forceCloseOpenItems(')
+  const iSealGraph = turnEnd.indexOf("sealGraphForTaskOutcome(task, 'completed'")
+  const iSealLedger = turnEnd.indexOf("sealLedger(task.id, 'completed'")
+  const iDone = turnEnd.indexOf("updateTask(task.id, { status: 'done'")
+  assert.ok(iClose > 0 && iSealGraph > 0 && iSealLedger > 0 && iDone > 0, '四处调用都必须存在')
   assert.ok(
-    iDiscard < iSeal,
-    '★ 必须先收口剩余节点（cancelled）再封图 completed —— 反了会短暂出现「图已完成、节点待执行」',
+    iClose < iSealGraph && iSealGraph < iSealLedger && iSealLedger < iDone,
+    '★ 顺序必须是 收口 → 封图 → 封账本 → 写 done —— 反了会短暂出现「任务已完成、清单还在跑」',
   )
 })

@@ -23,14 +23,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
 
-// 用独立的临时 userData 目录，避开 electron 桩的固定 /tmp/arkwork-test-userData
-// 让多测试间互不污染：每次 run 前手动 mkdir 一个新的临时目录，
-// 然后把 process.env 注入 db.ts。
-//
-// 简单做法：直接走 db.ts 的 getArkworkDir() 路径（electron 桩固定返回
-// /tmp/arkwork-test-userData），所有测试都共享它。beforeEach 删除并重建
-// skills/ 目录即可。arkwork-data 目录会自动创建。
-const TEST_ARKWORK_DIR = '/tmp/arkwork-test-userData/arkwork-data'
+// userData 根**问生产代码**，不写死路径（D98）。
+// 写死 `/tmp/arkwork-test-userData` 有两个致命处：① electron 桩已改为「每进程独占根」，
+// 写死的路径根本不再是被测代码真正使用的路径；② 固定共享路径会被并行运行的
+// 另一个套件 `rm -rf` 抽走夹具（单跑全绿、全量偶红）。
+const { getArkworkDir } = await import('../db.js')
+const TEST_ARKWORK_DIR = getArkworkDir()
 
 test.before(async () => {
   mkdirSync(TEST_ARKWORK_DIR, { recursive: true })
@@ -44,9 +42,8 @@ test.beforeEach(async () => {
   await mkdir(skillsDir, { recursive: true })
 })
 
-test.after(async () => {
-  await rm('/tmp/arkwork-test-userData', { recursive: true, force: true }).catch(() => {})
-})
+// 不再 `rm -rf` userData 根：那是 D98 的作案工具（会抽走并行套件的夹具）。
+// 本进程的根由 electron 桩在进程退出时自清。
 
 const { importSkillFromZip, exportSkillToDir, listSkills, removeSkill } =
   await import('../skills.js')

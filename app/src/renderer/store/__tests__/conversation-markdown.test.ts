@@ -39,9 +39,11 @@ import type {
   FlowStep,
   FlowTurn,
   NoticeBlock,
+  NoteBlock,
   PlanBlock,
   ReasoningBlock,
   SayBlock,
+  SubagentGroupBlock,
   ToolBlock,
   TurnMetrics,
   UserBlock,
@@ -197,6 +199,17 @@ const bAnswer = (over: Partial<AnswerBlock> = {}): AnswerBlock => ({
   ...over,
 })
 
+const bNote = (over: Partial<NoteBlock> = {}): NoteBlock => ({
+  kind: 'note',
+  id: 'b-note',
+  turn: 1,
+  step: 1,
+  text: '阶段结论：配置已定位，开始改代码。',
+  via: 'model',
+  ts: T0,
+  ...over,
+})
+
 const bError = (over: Partial<ErrorBlock> = {}): ErrorBlock => ({
   kind: 'error',
   id: 'b-error',
@@ -209,7 +222,40 @@ const bError = (over: Partial<ErrorBlock> = {}): ErrorBlock => ({
   ...over,
 })
 
-/** 一个「满轮」：九种块各一（user/answer/approval/error 走 outer，其余走 step） */
+/** v0.36.0（F4.1）：并行子 agent 组卡（第十种块） */
+const bSubagentGroup = (over: Partial<SubagentGroupBlock> = {}): SubagentGroupBlock => ({
+  kind: 'subagent-group',
+  id: 'b-subagent',
+  turn: 1,
+  step: 0,
+  parentTaskId: 'task-parent',
+  children: [
+    {
+      childTaskId: 'child-1',
+      agentId: '@researcher',
+      agentName: '研究员',
+      objective: '对比三个状态库',
+      modelId: 'claude-sonnet-4.5',
+      status: 'done',
+      stepSummary: '生成对比矩阵',
+      durationMs: 42000,
+    },
+    {
+      childTaskId: 'child-2',
+      agentId: '@coder',
+      agentName: '代码专家',
+      objective: '补齐单元用例',
+      status: 'failed',
+      stepSummary: '用例编译失败',
+      durationMs: 18000,
+    },
+  ],
+  settled: true,
+  ts: T0,
+  ...over,
+})
+
+/** 一个「满轮」：十种块各一（user/answer/approval/error/subagent-group 走 outer，其余走 step） */
 const fullTurn = (): FlowTurn =>
   turn({
     header: {
@@ -229,12 +275,13 @@ const fullTurn = (): FlowTurn =>
       bApproval(),
       bError(),
       bAnswer(),
+      bSubagentGroup(),
     ],
     steps: [
       step({
         summary: '读取配置',
         durationMs: 130,
-        blocks: [bPlan(), bReasoning(), bTool(), bNotice(), bSay()],
+        blocks: [bPlan(), bReasoning(), bTool(), bNote(), bNotice(), bSay()],
       }),
     ],
     summary: { thinkingMs: 2000, toolCounts: { read: 1 }, toolTotal: 1, metrics: metrics() },
@@ -368,6 +415,22 @@ test('TC-CMD-009 error 块：错误标题 + 正文 + 详情', () => {
   assert.ok(md.includes('120s 无响应'), '错误详情必须导出（诊断空转全靠它）')
 })
 
+test('TC-CMD-030 子 agent 组卡：数量 + 逐行 agent/状态/耗时/摘要（v0.36.0 F4.1）', () => {
+  const md = render([turn({ outerBlocks: [bSubagentGroup()] })])
+  assert.match(md, /#### 并行子 agent · 2 个/, '组卡标题应含子 agent 数量')
+  assert.ok(md.includes('@研究员'), '每个子 agent 必须逐行导出（不能只给一个"N 个"就完了）')
+  assert.ok(md.includes('@代码专家'), '失败的那个子 agent 同样要导出')
+  assert.ok(md.includes('done'), '状态必须导出（否则看不出哪个失败了）')
+  assert.ok(md.includes('failed'), '失败状态必须导出')
+  assert.ok(md.includes('42.0s'), '耗时必须导出')
+  assert.ok(md.includes('生成对比矩阵'), '单步/终态摘要必须导出')
+  // 未终结时标题标注「进行中」—— 导出件是静态快照，读者必须能分辨它是中途态
+  const running = render([
+    turn({ outerBlocks: [bSubagentGroup({ settled: false })] }),
+  ])
+  assert.match(running, /#### 并行子 agent · 2 个（进行中）/, '未终结组卡应标注「进行中」')
+})
+
 test('TC-CMD-010 ★ 结构对等：渲染器的 case 集合 ≡ FlowBlock 判别联合的 kind 集合', () => {
   // 这条用例是纪律⑪的机器化：**屏幕加一种块，导出不加渲染 → 立即报红**。
   // 断言的是「判别取值域」（解析 `kind: '...'` 字面量），不是「源码里出现过某词」，
@@ -382,8 +445,8 @@ test('TC-CMD-010 ★ 结构对等：渲染器的 case 集合 ≡ FlowBlock 判�
     [...rendererSrc.matchAll(/\bcase\s*'([a-z-]+)'\s*:/g)].map((m) => m[1]),
   )
 
-  // 先自证：判别联合确实有 9 种（若 flow.ts 改了形态本用例要显式失败而非静默空集）
-  assert.equal(unionKinds.size, 9, `FlowBlock 判别联合应有 9 种 kind，实得 ${unionKinds.size}：${[...unionKinds].join(',')}`)
+  // 先自证：判别联合确实有 11 种（若 flow.ts 改了形态本用例要显式失败而非静默空集）
+  assert.equal(unionKinds.size, 11, `FlowBlock 判别联合应有 11 种 kind，实得 ${unionKinds.size}：${[...unionKinds].join(',')}`)
 
   const missing = [...unionKinds].filter((k) => !renderedKinds.has(k)).sort()
   assert.deepEqual(
@@ -400,7 +463,7 @@ test('TC-CMD-010 ★ 结构对等：渲染器的 case 集合 ≡ FlowBlock 判�
   )
 })
 
-test('TC-CMD-010b 满轮导出：九种块同时在场且彼此不串味', () => {
+test('TC-CMD-010b 满轮导出：十一种块同时在场且彼此不串味', () => {
   const md = render([fullTurn()])
   for (const frag of [
     '### 你 · 14:05',
@@ -410,7 +473,9 @@ test('TC-CMD-010b 满轮导出：九种块同时在场且彼此不串味', () =>
     '#### 计划清单 · 分析工作区结构',
     '#### 思考过程 · 原生思考',
     '#### 工具 · file-reader',
+    '#### 阶段结论 · model',
     '#### 通知 · compaction',
+    '#### 并行子 agent · 2 个',
     '先看目录结构，再定位入口。',
   ]) {
     assert.ok(md.includes(frag), `满轮导出应含：${frag}`)

@@ -12,7 +12,7 @@ import { countTokens, countL1Tokens } from './token-counter.js'
 import { estimateTokens } from '@shared/utils/id'
 import { logger } from '../system/logger.js'
 import { broadcast } from '../window.js'
-import { getAdapter } from '../llm/registry.js'
+import { getAdapter, getModel } from '../llm/registry.js'
 import {
   COMPACTION_SYSTEM_PROMPT,
   COMPACTION_SUMMARY_TEMPLATE,
@@ -70,6 +70,34 @@ export function getBlockingThreshold(modelMaxTokens: number): number {
 }
 
 export type CompactionLevel = 'normal' | 'warning' | 'autoCompact' | 'blocking'
+
+/** v0.36.0 F1.3：modelId 解析失败 / 无模型配置时的窗口回落值（与 compactTask 口径一致） */
+export const DEFAULT_MODEL_MAX_TOKENS = 180_000
+
+/**
+ * v0.36.0 F1.3：自动压缩阈值的**单一解析入口**。
+ * 阈值 = getAutoCompactThreshold(模型窗口)；用户显式设置的 compressThreshold
+ * 仅作为**覆盖上限**（cap，取 min）—— 绝不再作为绝对阈值直接触发。
+ */
+export function resolveAutoCompactThreshold(modelMaxTokens: number, userOverrideCap?: number): number {
+  const base = getAutoCompactThreshold(modelMaxTokens)
+  return userOverrideCap !== undefined && userOverrideCap > 0 ? Math.min(base, userOverrideCap) : base
+}
+
+/**
+ * v0.36.0 F1.3：modelId → 模型上下文窗口；解析失败 / 无配置 / 非法值回落
+ * DEFAULT_MODEL_MAX_TOKENS（180_000，同 compactTask 无模型口径）。
+ */
+export async function resolveModelMaxTokens(modelId?: string): Promise<number> {
+  if (!modelId) return DEFAULT_MODEL_MAX_TOKENS
+  try {
+    const model = await getModel(modelId)
+    return model?.contextWindow && model.contextWindow > 0 ? model.contextWindow : DEFAULT_MODEL_MAX_TOKENS
+  } catch {
+    return DEFAULT_MODEL_MAX_TOKENS
+  }
+}
+
 
 /** v0.15.0：依据当前 token 数与模型上限判定阈值级别 */
 export function classifyTokenUsage(

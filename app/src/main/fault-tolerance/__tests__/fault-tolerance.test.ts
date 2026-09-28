@@ -224,9 +224,9 @@ test('retry: LLM 致命异常直接抛（不消耗重试）', async () => {
   assert.equal(calls, 1)
 })
 
-test('retry: 默认 maxAttempts / backoffMs 正确', () => {
+test('retry: 默认 maxAttempts / backoffMs 正确（v0.36.0 与 llm-call 统一为 [500,2000,4000]×3）', () => {
   assert.equal(DEFAULT_MAX_ATTEMPTS, 3)
-  assert.deepEqual([...DEFAULT_BACKOFF_MS], [1000, 2000, 4000])
+  assert.deepEqual([...DEFAULT_BACKOFF_MS], [500, 2000, 4000])
 })
 
 test('retry: AbortSignal 触发后立即终止', async () => {

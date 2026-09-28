@@ -10,7 +10,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { getWorkspaceDir } from '../store/db.js'
+import { agentSpaceDir } from './agent-space.js'
 import { genId } from '@shared/utils/id'
 import { getAdapter } from '../llm/registry.js'
 import { logger } from '../system/logger.js'
@@ -22,7 +22,9 @@ import type {
 } from '@shared/types/memory'
 
 function profilePath(): string {
-  return join(getWorkspaceDir(), '.arkwork', 'profile.json')
+  // ★ v0.36.0（决策 D1）：L4a 用户画像是「这个人的画像」，不随工作区走 ——
+  // 换项目不该让 Agent 忘了用户是谁。旧位置由 agent-space.ts 首启迁移。
+  return join(agentSpaceDir(), 'profile.json')
 }
 
 const DEFAULT_PROFILE: UserProfile = {
@@ -37,6 +39,73 @@ const DEFAULT_PROFILE: UserProfile = {
 const SYNTHESIS_BUDGET = 1800
 /** 历史版本保留上限 */
 const HISTORY_KEEP = 10
+
+/* ============================================================
+ * ★ v0.36.3：周期合成口径（设计文档 §4.2「L4 定期写入口径」）
+ *
+ * 为什么画像不能每次 task-done 都重写：画像是一次**辩证合成**（LLM 读旧画像 +
+ * 全部观察 → 新画像），每次收尾都跑一遍会带来三个真问题：
+ *  ① 同一批观察反复参与合成，画像被反复"推着走"，稳定性差（用户会觉得它变了）；
+ *  ② 每个任务多一次长上下文 LLM 调用，纯为「几乎不变的内容」付费；
+ *  ③ history 保留 10 版 → 一天跑十个任务就把真正的历史版本挤没了。
+ *
+ * 口径（任一满足即合成，否则跳过并在 detail 记明「未到周期」）：
+ *  ① 从未合成过；② 距上次合成 ≥24h；③ 上次合成后累计完成 ≥5 个任务。
+ * ============================================================ */
+
+/** 周期阈值 */
+export const L4_CYCLE = {
+  /** 时间周期：24 小时 */
+  ms: 24 * 60 * 60 * 1000,
+  /** 任务数周期：5 个任务 */
+  tasks: 5,
+} as const
+
+export interface ProfileCycleDecision {
+  /** 本次是否该合成 */
+  run: boolean
+  /** 人话说明（无论跑不跑都要能说清为什么） */
+  detail: string
+  /** 记账后的状态（已落盘） */
+  lastSynthesizedAt: number | null
+  tasksSinceSynthesis: number
+}
+
+/**
+ * 周期判定 + 记账：每次 task-done 调一次。
+ * **会计入一个任务**（连「跳过」也计数），命中周期则 run:true（由调用方去合成）。
+ * 未命中时立即落盘计数 —— 否则进程中断会让计数丢失，画像永远等不到第 5 个任务；
+ * 命中时由合成流程重置（`synthesizeFromTaskL1` 成功则 lastSynthesizedAt=now、计数归零）。
+ * @param now - 当前时间（测试注入）
+ */
+export async function evaluateProfileCycle(now: number = Date.now()): Promise<ProfileCycleDecision> {
+  const p = await getProfile()
+  const last = p.lastSynthesizedAt ?? null
+  const tasks = (p.tasksSinceSynthesis ?? 0) + 1
+
+  const firstTime = last === null && p.version === 0
+  const byTime = last !== null && now - last >= L4_CYCLE.ms
+  const byTasks = tasks >= L4_CYCLE.tasks
+
+  if (firstTime || byTime || byTasks) {
+    const why = firstTime
+      ? '首次合成'
+      : byTime
+        ? `距上次 ${Math.round((now - (last as number)) / 3600000)}h ≥ 24h`
+        : `累计 ${tasks} 个任务 ≥ ${L4_CYCLE.tasks}`
+    return { run: true, detail: `命中周期（${why}）`, lastSynthesizedAt: last, tasksSinceSynthesis: tasks }
+  }
+
+  const hours = last === null ? '从未' : `${Math.round((now - last) / 3600000)}h`
+  const next: UserProfile = { ...p, tasksSinceSynthesis: tasks }
+  await writeProfile(next)
+  return {
+    run: false,
+    detail: `未到周期（已 ${hours} / 已 ${tasks} 任务）`,
+    lastSynthesizedAt: last,
+    tasksSinceSynthesis: tasks,
+  }
+}
 
 /**
  * 读取用户画像——run 启动注入与面板展示共用。
@@ -153,6 +222,9 @@ export async function synthesizeFromTaskL1(
       traits: profile.traits,
       observations: [...profile.observations, ...newObs],
       history: [historyEntry, ...profile.history].slice(0, HISTORY_KEEP),
+      // ★ v0.36.3：合成成功即重置周期记账（下次合成要等 24h 或再攒 5 个任务）
+      lastSynthesizedAt: Date.now(),
+      tasksSinceSynthesis: 0,
     }
     await writeProfile(next)
     logger.info('Memory', `L4a synthesized v${next.version} (+${newObs.length} obs)`, taskId)

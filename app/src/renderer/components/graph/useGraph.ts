@@ -61,7 +61,8 @@ export interface UseGraphResult {
   answerBlock: (p: { nodeId: string; action: 'submit' | 'skip' | 'cancel-all'; answer?: string; note?: string }) => Promise<boolean>
   decideReplan: (p: Omit<GraphReplanDecisionPayload, 'taskId'>) => Promise<boolean>
   resolveConverge: (p: Omit<GraphConvergePayload, 'taskId'>) => Promise<boolean>
-  setTier: (tier: Tier) => Promise<boolean>
+  // v0.37.0（D137）：**钩子不再暴露 setTier** —— 档位判定权归模型与引擎，
+  // UI 不提供任何选择入口。IPC 通道 `graph:set-tier` 保留给引擎/模型侧使用。
   exportMd: () => Promise<string | null>
   runConverge: () => Promise<boolean>
   restoreSnapshot: (stamp: string) => Promise<boolean>
@@ -187,8 +188,6 @@ export function useGraph(taskId: string | null | undefined): UseGraphResult {
         taskId ? runAction(() => window.ark.graph.decideReplan({ taskId, ...p })) : Promise.resolve(false),
       resolveConverge: (p: Omit<GraphConvergePayload, 'taskId'>) =>
         taskId ? runAction(() => window.ark.graph.resolveConverge({ taskId, ...p })) : Promise.resolve(false),
-      setTier: (tier: Tier) =>
-        taskId ? runAction(() => window.ark.graph.setTier({ taskId, tier })) : Promise.resolve(false),
       exportMd: async () => {
         if (!taskId) return null
         const res = await window.ark.graph.exportMd(taskId)

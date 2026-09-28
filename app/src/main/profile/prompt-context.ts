@@ -12,7 +12,7 @@
  * ============================================================ */
 import { BASE_NAMESPACE } from './builtins.js'
 import { CORE_NAMESPACE, resolveCoreMemoryDir, resolveMemoryNamespaceDir } from './namespace.js'
-import { getLastSnapshot } from './store.js'
+import { getLastSnapshot, getProfile } from './store.js'
 
 /** 段渲染用的极简形态（拒绝把整份快照塞进提示词） */
 interface SegmentView {
@@ -64,13 +64,17 @@ export async function buildProfileContextSegment(): Promise<string | null> {
     if (!snap) return null
     // 默认命名空间 = 通用形态 → 不渲染（保持 v0.31 的提示词体积）
     if (snap.profileId === 'wb.base') return null
-    const nsEntry = snap.layers.data.find((d) => d.key === 'memoryNamespace')
-    const shareEntry = snap.layers.data.find((d) => d.key === 'sharedCoreNamespace')
-    const namespace = nsEntry?.value || BASE_NAMESPACE
+    /* ★ v0.36.0（D5）：命名空间改从 **profile 本体**读取，不再读快照的 `data` 层。
+     * 原实现是 `snap.layers.data.find(d => d.key === 'memoryNamespace')` —— 那是
+     * 「manifest 字段 → 快照镜像 → 提示词」的两跳，中间那一跳随插槽契约删除。
+     * 直读本体更短也更不易漂移（快照的 data 层本来就是同一个字段的有损副本）。 */
+    const profile = await getProfile(snap.profileId)
+    const namespace = profile?.data.memoryNamespace || BASE_NAMESPACE
+    const shareCore = profile ? profile.data.shareCoreProfile !== false : true
     const view = pickSegmentView({
       profileId: snap.profileId,
       namespace,
-      shareCore: shareEntry?.applied !== false,
+      shareCore,
     })
     return renderSegment(view)
   } catch {

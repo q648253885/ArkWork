@@ -3,38 +3,43 @@
  * 由 engine.ts 纯移动而来（行区间 3325-3569）。
  */
 
-import type { Task, PlanItem } from '@shared/types/task'
-import type {
-  ReActEvent,
-  ReActAction,
-  ReActStep,
-  PlanContent,
-} from '@shared/types/react'
-import type { Agent } from '@shared/types/agent'
-import { getAdapter, getModel } from '../../llm/registry.js'
-import type { LlmMessage, LlmTool, LlmCompleteResponse } from '../../llm/adapter.js'
-// agent-context-compaction-robustness：LLM 调用健壮性（120s 超时 / 中止短路 / 重试分级）
-import { callLlmWithRetry, withLlmTimeout, isContextOverflowError } from '../llm-call.js'
-import { invokeSkill, skillToLlmTool, skillToolName, listSkills, getSkill, type SkillContext } from '../registry.js'
-// v0.19.0 M1：系统提示词组装器（收敛 parts.push 硬拼逻辑）
-import { buildSystemSections, renderSystemPrompt, buildPersonalitySegment } from '../prompt-assembly.js'
-// v0.25.0 F1：提示词契约层（契约注册 + always-on 技能段 + 契约装配 + 门禁状态机）
-import { collectAlwaysOnSections, assembleSystemPrompt } from '../prompt/sections.js'
 import {
+  type Task,
+  type PlanItem,
+  type ReActEvent,
+  type ReActAction,
+  type ReActStep,
+  type PlanContent,
+  type Agent,
+  getAdapter,
+  getModel,
+  type LlmMessage,
+  type LlmTool,
+  type LlmCompleteResponse,
+  callLlmWithRetry,
+  withLlmTimeout,
+  isContextOverflowError,
+  invokeSkill,
+  skillToLlmTool,
+  skillToolName,
+  listSkills,
+  getSkill,
+  type SkillContext,
+  buildSystemSections,
+  renderSystemPrompt,
+  buildPersonalitySegment,
+  collectAlwaysOnSections,
+  assembleSystemPrompt,
   collectGateSpecs,
   initGateStates,
   checkGateBeforeAdvance,
   confirmGate,
   findGateForStageDoc,
   isDocDrivenAgent,
-} from '../prompt/gates.js'
-import type { GateSpec } from '@shared/types/agent'
-// v0.19.0 M2：唯一真源会话事件日志（Reason/Act/tool 事件落盘 session.jsonl）
-import { appendSessionEvent } from '../session-log.js'
-// v0.19.0 M3：轮次/步骤收件箱 + 停止候选钩子（turn/step 语义）
-import { drainContinuations } from '../inbox.js'
-import { emitTurnStopping } from '../turn-stopping.js'
-import {
+  type GateSpec,
+  appendSessionEvent,
+  drainContinuations,
+  emitTurnStopping,
   matchStageGate,
   isCoreSkillsEnabled,
   buildGateBlockObservation,
@@ -43,17 +48,19 @@ import {
   matchForbiddenWritePath,
   matchForbiddenShellCommand,
   type StageGate,
-} from '../../skills/builtin/react-core-skills/stage-gates.js'
-import { appendL1, listEnabledL1, listL1, totalTokens } from '../../memory/l1-working.js'
-import { persistRawL2 } from '../../memory/l2-file.js'
-import { logger } from '../../system/logger.js'
-import { genId } from '@shared/utils/id'
-import { isNoisePlanItem } from '@shared/utils/plan-noise'
-import { describeAction } from '@shared/utils/action-description'
-import { createHash } from 'node:crypto'
-import { updateTask, getTask } from '../../store/tasks.js'
-import { getAgent } from '../../store/agents.js'
-import {
+  appendL1,
+  listEnabledL1,
+  listL1,
+  totalTokens,
+  persistRawL2,
+  logger,
+  genId,
+  isNoisePlanItem,
+  describeAction,
+  createHash,
+  updateTask,
+  getTask,
+  getAgent,
   broadcastStep,
   broadcastTaskStatus,
   broadcastToolProgress,
@@ -62,24 +69,22 @@ import {
   broadcastPlanListSnapshot,
   broadcastTextDelta,
   type ToolProgress,
-} from '../events.js'
-// v0.27.0 R1：流式管道（completeWithStream 静默降级 + text-delta 增量泵）
-import { completeWithStream, createTextDeltaPump, type TextDeltaPump } from '../llm-stream.js'
-import { getWorkspaceDir } from '../../store/db.js'
-import { saveCheckpoint, checkpointId } from '../../checkpoint/store.js'
-// v0.8.0 记忆系统钩子
-import { applyPending, getCuratedSnapshot } from '../../memory/l3-curated.js'
-import { archiveTaskL1, initArchiveIndex } from '../../memory/l3-archive.js'
-import { getProfile, synthesizeFromTaskL1 } from '../../memory/l4-profile.js'
-import { evaluateDistillTrigger, autoPromoteDistill, getDistillMetrics } from '../../memory/distill.js'
-import { runForSkillForge } from '../../memory/skill-forge.js'
-import { compressMemory } from '../../ipc/memory.js'
-// v0.15.0：统一压缩路径——自动压缩与 Turn Phase-0 均走两阶段 compact()（联动 L3b + 压缩后蒸馏）
-import { compactTask } from '../../memory/compaction.js'
-import { createMemoryPhase0 } from '../../memory/compaction-hook.js'
-import type { CompressPolicy } from '@shared/types/memory'
-// agent-context-compaction-robustness：上下文预算与分层压缩纯工具模块
-import {
+  completeWithStream,
+  createTextDeltaPump,
+  type TextDeltaPump,
+  getWorkspaceDir,
+  saveCheckpoint,
+  checkpointId,
+  applyPending,
+  getCuratedSnapshot,
+  initArchiveIndex,
+  getProfile,
+  compressMemory,
+  compactTask,
+  resolveAutoCompactThreshold,
+  resolveModelMaxTokens,
+  createMemoryPhase0,
+  type CompressPolicy,
   estimatePayloadTokens,
   estimatePayloadTokensDetailed,
   estimateTextTokens,
@@ -90,21 +95,24 @@ import {
   MAX_OBSERVATION_CONTENT,
   MICRO_COMPACT_PLACEHOLDER,
   OBSERVATION_TRUNCATED_MARK,
-} from '../context.js'
-import { getMemoryConfig, getSettings } from '../../ipc/settings.js'
-// v0.8.0 知识库钩子
-import { listKb, listEnabledKb } from '../../kb/store.js'
-import { searchKb, initKbIndex } from '../../kb/index.js'
-import { readFile } from 'node:fs/promises'
-// Task 6：上下文占比可视化与下钻
-import {
+  getMemoryConfig,
+  getSettings,
+  listKb,
+  listEnabledKb,
+  searchKb,
+  initKbIndex,
+  readFile,
   computeContextBreakdown,
   type ContextBreakdownInput,
   type ContextBreakdownResult,
   type ContextToolEntry,
   type ContextSkillInstruction,
-} from '../context-breakdown.js'
-
+} from './engine-context.js'
+// v0.36.0（F1.2）：任务级四步转化（L3b 归档 / L4a 合成 / 蒸馏 / 技能炼制）
+// 统一由记忆转化管线编排 —— 钩子退化为「触发点」，不再自己串流程。
+// buildDistillContext 也搬到管线（它属于转化链而非引擎）。
+import { buildDistillContext, runMemoryPipeline } from '../../memory/pipeline.js'
+export { buildDistillContext } from '../../memory/pipeline.js'
 import { safeSlice, emitEvent, emitProgress } from './broadcast.js'
 
 /* ============================================================
@@ -222,7 +230,9 @@ export async function autoRecallKb(task: Task): Promise<void> {
  * F801 token 阈值自动压缩——每轮完成后检查 enabled L1 的 token 量，
  * 超过阈值时自动执行压缩（v0.15.0 统一走两阶段 compact()，联动 L3b 归档
  * 与压缩后蒸馏；沿用 CompressPolicy 语义，不打断运行）。
- * 压缩完成后发射 memory_compressed 事件供 UI 展示 chip。
+ * v0.36.0 F1.3：阈值改为**模型窗口驱动**（resolveAutoCompactThreshold）；
+ * 用户显式设置的 compressThreshold 仅作覆盖上限。压缩完成后发射
+ * memory_compressed 事件供 UI 展示 chip。
  */
 export async function maybeAutoCompress(
   taskId: string,
@@ -231,13 +241,20 @@ export async function maybeAutoCompress(
   const config = await getMemoryConfig()
   if (!config.autoCompress) return
 
+  const task = await getTask(taskId)
+  // 模型窗口驱动：无模型/解析失败回落 180_000（与 compactTask 口径一致）
+  const modelMaxTokens = await resolveModelMaxTokens(task?.modelId)
+  const threshold = resolveAutoCompactThreshold(
+    modelMaxTokens,
+    config.compressThresholdSet ? config.compressThreshold : undefined,
+  )
+
   const enabled = await listEnabledL1(taskId)
   const used = totalTokens(enabled)
-  if (used < config.compressThreshold) return
+  if (used < threshold) return
 
-  logger.info('Memory', `auto-compress triggered: ${used} >= ${config.compressThreshold} tokens`, taskId)
+  logger.info('Memory', `auto-compress triggered: ${used} >= ${threshold} tokens (window ${modelMaxTokens})`, taskId)
   try {
-    const task = await getTask(taskId)
     const result = await compactTask(taskId, { modelId: task?.modelId ?? undefined })
     // 无实质压缩（无丢弃条目）不发射事件，避免 UI 展示无效压缩 chip
     if (result.stats.droppedMessageCount === 0 && result.tokenAfter >= result.tokenBefore) return
@@ -256,12 +273,18 @@ export async function maybeAutoCompress(
 }
 
 /**
- * F803/F804/F805 run done 记忆钩子——任务完成后：
- * 1. 归档：该任务全部 L1 条目异步入库 L3b 档案（ADD-only，跳过 system_prompt）；
- * 2. 画像合成：L4a 辩证合成（提取观察 → LLM 合成 → 版本+1），更新后发射 profile_updated；
- * 3. 蒸馏评估：按规模门槛评估触发，命中则自动蒸馏（晋升 L3/L4 并清理 L1/L2），
- *    完成后发射 distill_completed 轻量提示（不再弹"是否需要蒸馏"建议卡）。
- * 全程失败静默降级（不影响任务完成）。
+ * F803/F804/F805 run done 记忆钩子 —— **任务级转化的触发点**。
+ *
+ * v0.36.0（F1.2）起本函数只做一件事：把「任务终态」这个事实交给记忆转化管线
+ * （`runMemoryPipeline(taskId, 'task-done')`），由管线按固定顺序执行
+ * L3b 归档 → L4a 画像合成 → 蒸馏评估 → 技能炼制，并逐步上报 `memory_pipeline` 事件。
+ *
+ * 为什么改成委派而不是继续在这里串流程：
+ *  ① 顺序与跳过语义只有一处真源（管线里的 PIPELINE_STAGES 表）；
+ *  ② 「哪一步没跑到」从一条 warn 变成交互区可见的事件（记忆丢步最难查）；
+ *  ③ 管线可注入可测，等价流程的测试不必再拉起整个引擎。
+ *
+ * 失败语义不变：**全程失败静默降级**，绝不影响任务完成态。
  */
 export async function runDoneMemoryHooks(
   task: Task,
@@ -269,86 +292,14 @@ export async function runDoneMemoryHooks(
   modelId: string,
   _finalThought: string,
 ): Promise<void> {
-  const l1Items = await listL1(task.id)
-
-  // 1. F803 归档到 L3b
   try {
-    const taskTitle = safeSlice(task.input?.text ?? '', 80) || task.id
-    await archiveTaskL1(task.id, taskTitle, l1Items)
-  } catch (err) {
-    logger.warn('Memory', `L3b archive failed (silent): ${(err as Error).message}`, task.id)
-  }
-
-  // 2. F804 L4a 画像合成
-  try {
-    const synthResult = await synthesizeFromTaskL1(task.id, l1Items, modelId)
-    if (synthResult.synthesisUpdated) {
-      await emitEvent(task.id, {
-        type: 'profile_updated',
-        iteration: 0,
-        version: synthResult.profile.version,
-        newObservations: synthResult.newObservations,
-      })
+    const run = await runMemoryPipeline(task.id, 'task-done', { task, agent, modelId })
+    if (!run.ok) {
+      const bad = run.steps.filter((s) => !s.ok).map((s) => `${s.stage}(${s.detail})`)
+      logger.warn('Memory', `转化管线有步骤失败：${bad.join('；')}`, task.id)
     }
   } catch (err) {
-    logger.warn('Memory', `L4a synthesis failed (silent): ${(err as Error).message}`, task.id)
+    // 管线自身已逐步隔离；这里兜的是「取任务/取 L1」这类管线外异常
+    logger.warn('Memory', `run done memory hooks failed (silent): ${(err as Error).message}`, task.id)
   }
-
-  // 3. F805 蒸馏评估（Task 10：仅规模门槛命中才自动执行，完成后发轻量完成提示）
-  try {
-    const ctx = buildDistillContext(task.id, l1Items)
-    const metrics = await getDistillMetrics(task.id, l1Items)
-    const evalResult = await evaluateDistillTrigger({ ...ctx, ...metrics })
-    if (evalResult.trigger && evalResult.category) {
-      const message = await autoPromoteDistill({ ...ctx, ...metrics }, evalResult.category, modelId)
-      await emitEvent(task.id, {
-        type: 'distill_completed',
-        iteration: 0,
-        taskId: task.id,
-        category: evalResult.category,
-        message,
-      })
-    }
-  } catch (err) {
-    logger.warn('Memory', `distill evaluation failed (silent): ${(err as Error).message}`, task.id)
-  }
-
-  // 4. v0.25.0 F3：技能创建严格管线（skill-forge 五阶段）—— L2 步骤产物为唯一合法候选
-  try {
-    const forgeResult = await runForSkillForge(task.id, modelId)
-    if (forgeResult.skill) {
-      await emitEvent(task.id, {
-        type: 'distill_completed',
-        iteration: 0,
-        taskId: task.id,
-        category: 'skill',
-        message: forgeResult.reason,
-      })
-    } else if (forgeResult.stage === 'value-judge' || forgeResult.stage === 'integrity') {
-      // 评估未通过 / 校验未过：发轻量事件给 UI（任务完成提示中说明）
-      logger.info('Memory', `skill-forge ${forgeResult.stage} not passed: ${forgeResult.reason}`, task.id)
-    }
-  } catch (err) {
-    logger.warn('Memory', `skill-forge failed (silent): ${(err as Error).message}`, task.id)
-  }
-}
-
-/** 从 L1 条目构建蒸馏触发上下文（启发式提取信号） */
-export function buildDistillContext(
-  taskId: string,
-  l1Items: import('@shared/types/memory').MemoryItem[],
-): import('../../memory/distill.js').DistillTriggerContext {
-  const observations = l1Items.filter((m) => m.kind === 'observation' && !m.archivedAt)
-  const toolCallCount = observations.length
-  const hadErrorRecovery = observations.some(
-    (m, i) => /\]\s*failed:/.test(m.content) && observations.slice(i + 1).some((n) => !/\]\s*failed:/.test(n.content)),
-  )
-  const userMessages = l1Items.filter((m) => m.kind === 'user_message')
-  const hadUserCorrection = userMessages.some((m) =>
-    /不对|错了|不是|纠正|应该|重新|重做/.test(m.content),
-  )
-  const hadPreferenceExpression = userMessages.some((m) =>
-    /我喜欢|我习惯|请用|不要|偏好|希望|最好/.test(m.content),
-  )
-  return { taskId, l1Items, toolCallCount, hadErrorRecovery, hadUserCorrection, hadPreferenceExpression }
 }

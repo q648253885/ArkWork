@@ -57,7 +57,7 @@ export function PanelHost({ tab }: { tab: PanelTab }) {
   if (state.status === 'loading') {
     return shell(
       <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-tertiary">
-        <Icon.Refresh width={18} height={18} className="animate-spin" />
+        <Icon.Refresh width={18} height={18} className="breathe" />
         <span className="text-xs">{t('panel.loading')}</span>
       </div>,
     )

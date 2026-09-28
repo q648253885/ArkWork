@@ -78,7 +78,11 @@ function normalizePlanItem(raw: unknown, taskId: string, index: number): PlanIte
   const updatedAt = typeof obj['updatedAt'] === 'number' ? (obj['updatedAt'] as number) : createdAt
   const completedAt =
     typeof obj['completedAt'] === 'number' ? (obj['completedAt'] as number) : undefined
-  // v0.18.0：source 是新增可选字段，旧数据缺失合法；有值且非 PlanItemSource 字符串则丢弃
+  // v0.18.0：source 是新增可选字段，旧数据缺失合法；有值且非 PlanItemSource 字符串则丢弃。
+  // v0.38.0（D154）：白名单补齐 —— 此前只列了 v0.18 的 7 个值，v0.37.0 新增的
+  //   plan-fallback / park / resume / sweep-stale / seal / ledger-sync / continuation
+  //   一直被静默丢弃（读一次旧任务 → 来源标记消失，UI 徽标失灵）。
+  //   新增 task-plan（本版清单控制面唯一入口）。
   const rawSource = obj['source']
   const source =
     typeof rawSource === 'string' &&
@@ -90,6 +94,14 @@ function normalizePlanItem(raw: unknown, taskId: string, index: number): PlanIte
       'user-retry',
       'user-mark-done',
       'plan-regen',
+      'plan-fallback',
+      'park',
+      'resume',
+      'sweep-stale',
+      'seal',
+      'ledger-sync',
+      'continuation',
+      'task-plan',
     ].includes(rawSource)
       ? (rawSource as PlanItem['source'])
       : undefined

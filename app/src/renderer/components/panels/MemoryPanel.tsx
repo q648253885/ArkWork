@@ -278,7 +278,7 @@ function ContextBudget() {
               <Icon.Refresh
                 width={11}
                 height={11}
-                className={compressing ? 'animate-spin' : ''}
+                className={compressing ? 'breathe' : ''}
               />
               {t('panel.memory.compress')}
             </button>

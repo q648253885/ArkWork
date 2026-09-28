@@ -20,7 +20,6 @@
  * "什么叫做完"，直接对冲 **F2 上下文焦虑导致的过早完成**。
  */
 import {
-  assigneeLabel,
   type NodeStatus,
   type TaskGraph,
   type TaskNode,
@@ -321,6 +320,3 @@ function fmtDuration(ms: number): string {
 export function formatWaiting(ms: number): string {
   return fmtDuration(ms)
 }
-
-/** 供 UI 复用：assignee 短标签 */
-export { assigneeLabel }

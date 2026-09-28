@@ -54,6 +54,9 @@ import { bugfix, type BugfixArgs, type BugfixResult } from '../skills/builtin/bu
 import { reactCoreSkills, type ReactCoreSkillsArgs, type ReactCoreSkillsResult } from '../skills/builtin/react-core-skills/index.js'
 import { parseSkillFrontmatter } from './prompt/gates.js'
 import { logger } from '../system/logger.js'
+// v0.36.0 F2.1：技能缓存失效 → 统一能力注册表失效（capability 是低层模块，
+// 不静态依赖本文件，无循环）
+import { markCapabilityDirty } from '../capability/registry.js'
 
 /**
  * Skill 执行上下文 — 由 engine 在每次 Act 阶段创建并传入 invokeSkill。
@@ -139,6 +142,13 @@ export interface ToolRisk {
   impacts: string[]
 }
 
+/**
+ * ⚠️ 与 `engine/work-class.ts` 的 `READONLY_TOOLS` 是**两个不同概念**，不要合并：
+ *   · 这里回答「调用它要不要弹确认框」（交互风险档）；
+ *   · `work-class` 回答「这次 run 算不算发生了实质工作」（完成门禁判据）。
+ * 两者可以不同：例如 `kb-enable` 在本表是 readonly（不弹确认），但在 work-class
+ * 不在白名单里 → 算 mutating（进门禁）。这是**有意**的保守取舍：门禁宁可多拦一次。
+ */
 const READONLY_BUILTINS: Record<string, ToolRiskLevel> = {
   'file-reader': 'workspace-readonly',
   'glob-search': 'workspace-readonly',
@@ -163,6 +173,11 @@ const READONLY_BUILTINS: Record<string, ToolRiskLevel> = {
   'request_plan': 'workspace-readonly',
   'submit_plan': 'workspace-readonly',
   'replan': 'workspace-readonly',
+  // v0.38.0（D154）：清单控制面收敛后的唯一入口 —— 改的是"计划"不是"用户的代码"，
+  // 每次写入都过账本不变量 + 落 revision 审计，故不弹确认（与 task_* 同档）。
+  // `turn_note` 只是把一段文字投给用户（无副作用）。
+  'task_plan': 'workspace-readonly',
+  'turn_note': 'workspace-readonly',
 }
 
 const LIGHT_WRITE_BUILTINS: Record<string, ToolRiskLevel> = {
@@ -217,6 +232,21 @@ const handlers: Record<string, BuiltinHandler> = {
   'plan': async (args, ctx) => plan(args as PlanArgs, ctx) as Promise<PlanResult | { status: 'failed'; error: string }>,
   'bugfix': async (args, ctx) => bugfix(args as BugfixArgs, ctx) as Promise<BugfixResult | { status: 'failed'; error: string }>,
   'react-core-skills': async (args, ctx) => reactCoreSkills(args as ReactCoreSkillsArgs, ctx) as Promise<ReactCoreSkillsResult | { status: 'failed'; error: string }>,
+  // v0.38.0（D154）：清单控制面 / 输出面的两个新入口。
+  // **它们正常不会走到这里** —— `engine/act.ts` 在 `invokeSkill` 之前就拦截了
+  // （控制类工具，与 todo_update / set-task-mode 同族）。这里放一个显式失败的
+  // stub 只是防"拦截点被误删"：一旦有人删掉 act.ts 的分支，模型会拿到一条
+  // 人话错误，而不是静默的 `No handler for builtin skill`（纪律⑨）。
+  'task_plan': async () => {
+    throw new Error(
+      'task_plan 必须由引擎的 Act 拦截分支处理（engine/act.ts）。请检查该分支是否被误删。',
+    )
+  },
+  'turn_note': async () => {
+    throw new Error(
+      'turn_note 必须由引擎的 Act 拦截分支处理（engine/act.ts）。请检查该分支是否被误删。',
+    )
+  },
 }
 
 /* ============================================================
@@ -519,6 +549,10 @@ export async function readSkillInstruction(skillId: string): Promise<string | nu
 /** 失效 skill 内存缓存（CRUD 后调用） */
 export function invalidateSkillCache(): void {
   skillCacheByWorkspace.clear()
+  // v0.36.0 F2.1：同步失效统一能力注册表的 skill provider（惰性重扫标记 +
+  // 订阅者通知）。单点接线 —— 本函数的全部既有调用点（技能 CRUD / MCP 连接
+  // 状态变化 / 市场安装 / skill-forge 落盘）自动继承，无需逐点改动。
+  markCapabilityDirty('skill')
 }
 
 /**
@@ -687,8 +721,14 @@ function summarizeResult(handler: string, result: unknown): string {
     return `ask_user acknowledged`
   }
   if (handler === 'delegate-agent') {
+    // v0.36.0 F4.1：targets 数组化 —— 摘要按结果逐项列出
     const r = result as DelegateResult
-    return `delegated to ${r.agentId} · ${r.summary.slice(0, 100)}`
+    const items = r.results ?? []
+    if (items.length === 1) {
+      const it = items[0]!
+      return `delegated to ${it.agentId} · ${it.summary.slice(0, 100)}`
+    }
+    return `delegated ${items.length} targets · ` + items.map((it) => `@${it.agentId}=${it.status}`).join(', ')
   }
   if (handler === 'session-search') {
     const r = result as SessionSearchResult
@@ -963,7 +1003,7 @@ export function respondToolConfirm(
 }
 
 /** 构造经 renderer 美观浮层确认的 confirm 函数；无窗口时回退原生 dialog */
-function makeRendererConfirm(): (req: ToolConfirmRequest) => Promise<ConfirmOutcome> {
+export function makeRendererConfirm(): (req: ToolConfirmRequest) => Promise<ConfirmOutcome> {
   return async (req) => {
     // 会话内同命令已批准 → 直接放行，不再打扰用户
     if (req.command) {

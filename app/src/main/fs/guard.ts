@@ -14,7 +14,7 @@
  *    `assertInWorkspace` 是 **async**（旧实现是 sync，调用点是 async handler，无损）。
  * ============================================================ */
 import { realpath } from 'node:fs/promises'
-import { join, resolve, sep } from 'node:path'
+import { isAbsolute, join, resolve, sep } from 'node:path'
 import { getWorkspaceDir } from '../store/db.js'
 import { getUiLocale, tFor } from '../i18n/messages.js'
 import { FsError } from '@shared/utils/fs-error'
@@ -105,10 +105,44 @@ async function realpathOfNearestExisting(absPath: string): Promise<string> {
 }
 
 /**
+ * 用户面路径归一化（**唯一实现**）。
+ *
+ * 为什么需要（v0.36.3 · D115）：交互区里的文件路径来自工具卡 / 搜索结果，是
+ * **工作区相对路径**（如 `src/main/java/...`）。而 `resolve(p)` 对相对路径按
+ * **主进程 `process.cwd()`** 解析 ⇒ 明明在工作区内也被判越界，用户点谁都打不开。
+ * 归一化后：相对路径以**工作区根**为基准，绝对路径原样 —— 与用户心智一致。
+ *
+ * @param absOrRel 绝对或工作区相对路径
+ * @param root 工作区根（缺省取当前工作区）
+ * @returns 归一化后的绝对路径（**不判越界**，越界判定见 `assertInWorkspace`）
+ */
+export function resolveUserPath(absOrRel: string, root: string = getWorkspaceDir()): string {
+  return isAbsolute(absOrRel) ? resolve(absOrRel) : resolve(root, absOrRel)
+}
+
+/**
+ * 用户面只读判定：realpath 归一化后给出「是否在工作区内」，**不抛越界错**。
+ *
+ * 口径（用户裁决）：交互区点击的文件「存在即可读」，越界只约束 LLM 工具面。
+ * 工作区外**不是拒绝**，而是「只读原因 = outside-workspace」（编辑器标只读、写盘被拒）。
+ */
+export async function probeReadablePath(
+  absOrRel: string,
+  root: string = getWorkspaceDir(),
+): Promise<{ absPath: string; insideWorkspace: boolean }> {
+  const ws = resolve(root)
+  const target = resolveUserPath(absOrRel, ws)
+  const realWs = await realpathOfNearestExisting(ws)
+  const realTarget = await realpathOfNearestExisting(target)
+  return { absPath: target, insideWorkspace: isInsideRoot(realWs, realTarget) }
+}
+
+/**
  * 路径边界断言：仅允许工作区内的路径。
  *
  * 两道检查：
- *  ① 字面归一化（`resolve` 后 startsWith）—— 挡住 `../` 逃逸；
+ *  ① 字面归一化（`resolveUserPath` 后 startsWith）—— 挡住 `../` 逃逸，
+ *     且**相对路径以工作区根为基准**（D115，否则交互区相对路径恒判越界）；
  *  ② `realpath` 后比对 —— 挡住 **symlink 逃逸**（TC-GUARD-003）。
  *     写新文件时目标尚不存在，故对「最近存在的祖先」做 realpath 再拼回。
  *
@@ -119,7 +153,7 @@ export async function assertInWorkspace(
   root: string = getWorkspaceDir(),
 ): Promise<string> {
   const ws = resolve(root)
-  const target = resolve(absPath)
+  const target = resolveUserPath(absPath, ws)
   if (!isInsideRoot(ws, target)) {
     throw new FsError(
       'E_PATH_OUTSIDE_WORKSPACE',

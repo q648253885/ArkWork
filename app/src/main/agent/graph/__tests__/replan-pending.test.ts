@@ -436,6 +436,22 @@ test('TC-REPLAN-PEND-008 任务终态 → dropGraphPending；paused 不清；待
   dropGraphCache(g.id)
 })
 
+test('TC-REPLAN-PEND-009 ★ [D173] 降级闸门（无 graphId）终态必须清理；paused 保留', async () => {
+  // 用户实测：降级闸门登记于建图前（startIter===0，task.graphId=undefined），
+  // 终态清理的 graphId 守卫对其失效 →「计划生成失败」卡片伴随进程生命周期常驻。
+  const taskId = await taskWithGraph(baseGraph()) // 任务本身有图，但闸门登记时 graphId 缺省（降级路径的真实形态）
+  registerPlanApproval({ taskId, graphId: undefined, state: 'pending', proposedAt: Date.now(), uncovered: [], degraded: true })
+  assert.ok(getPlanApproval(taskId), '降级闸门已登记（graphId=undefined）')
+
+  // paused 可恢复 → 不清理（与待决补丁同语义）
+  await updateTask(taskId, { status: 'paused' })
+  assert.ok(getPlanApproval(taskId), 'paused 不清降级闸门')
+
+  // 终态 → 按 taskId 清理（不再依赖 graphId 守卫）
+  await updateTask(taskId, { status: 'done' })
+  assert.equal(getPlanApproval(taskId), undefined, '终态（done）必须清理无 graphId 的降级闸门')
+})
+
 /* ---------------- 清理 --------------- */
 
 test('清理临时工作区', () => {

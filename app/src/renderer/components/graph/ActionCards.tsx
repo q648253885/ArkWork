@@ -119,7 +119,8 @@ export function CardButton({
       onClick={onClick}
       className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${cls[variant]}`}
     >
-      {loading && <span className="inline-block h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />}
+      {/* v0.36.3 D116：旋转圈 → 实心点纯色呼吸 */}
+      {loading && <span className="inline-block h-3 w-3 rounded-full bg-current breathe" />}
       {children}
     </button>
   )

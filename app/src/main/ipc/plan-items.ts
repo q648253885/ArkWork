@@ -25,8 +25,13 @@ import {
   broadcastPlanItemStatus,
   getPlanListVersion,
 } from '../agent/events.js'
-import { applyPlanItemStatus } from '../agent/graph/plan-sync.js'
-import type { PlanItemActionResult } from '@shared/types/ipc'
+// v0.37.0（缺陷 D132）：不再 import 桥的 `applyPlanItemStatus` —— 用户手动操作改走账本，
+// 图只在账本落定后做派生镜像；保留旧 import 会让「还有第二个写入者」的假象留在代码里。
+// v0.37.0：清单唯一真相源（TaskLedger）—— 用户手动操作也必须经 mutate
+import { loadLedger, mutate, getSnapshotView, ensureLedger } from '../agent/ledger/engine.js'
+import { toPlanItems } from '../agent/ledger/project.js'
+import type { PlanItemActionResult, LedgerSnapshotView, LedgerHistoryView } from '@shared/types/ipc'
+import { readAuditLog, readLedgerArchive } from '../agent/ledger/audit.js'
 import type { PlanItem, PlanItemStatus, PlanItemSource } from '@shared/types/task'
 import { logger } from '../system/logger.js'
 
@@ -53,8 +58,49 @@ export function registerPlanItemHandlers(): void {
   ipcMain.handle(
     'task:plan-list-snapshot',
     async (_e, taskId: string): Promise<PlanItem[]> => {
+      // v0.37.0：优先读账本（唯一真相源）；无账本回退 tasks.json（旧任务兼容）
+      try {
+        const ledger = await loadLedger(taskId)
+        if (ledger && ledger.items.length > 0) return toPlanItems(ledger)
+      } catch {
+        /* 账本不可用 → 回退 */
+      }
       const task = await getTask(taskId)
       return task?.planItems ?? []
+    },
+  )
+
+  // v0.39.0（D187）：清单变更历史 —— 永久审计日志 + 终态归档状态
+  ipcMain.handle(
+    'task:ledger-history',
+    async (_e, taskId: string, limit?: number): Promise<LedgerHistoryView | null> => {
+      try {
+        const entries = readAuditLog(taskId, typeof limit === 'number' ? limit : 50)
+        const arch = readLedgerArchive(taskId)
+        return {
+          taskId,
+          entries,
+          archived: Boolean(arch),
+          ...(arch
+            ? { archivedAt: arch.archivedAt, outcome: arch.outcome, reason: arch.reason }
+            : {}),
+        }
+      } catch (err) {
+        logger.warn('Agent', `task:ledger-history 读取失败：${(err as Error).message}`)
+        return null
+      }
+    },
+  )
+
+  // v0.37.0：账本快照（UI 显示任务模式徽标 / 恢复点提示条 / 未收口计数）
+  ipcMain.handle(
+    'task:ledger-snapshot',
+    async (_e, taskId: string): Promise<LedgerSnapshotView | null> => {
+      try {
+        return await getSnapshotView(taskId)
+      } catch {
+        return null
+      }
     },
   )
 }
@@ -113,50 +159,59 @@ async function setPlanItemStatus(
     }
   }
 
-  // v0.30.0 D9：有图任务 → 写图（唯一真相），镜像与广播由 graph/store.saveGraph 统一补发。
-  // 无图任务（tier 0/1）→ 保持 v0.29 直写 planItems。
-  if (task.graphId) {
-    const res = await applyPlanItemStatus(
-      { taskId, graphId: task.graphId },
-      planItemId,
-      targetStatus,
-      source,
-      source === 'user-cancel' ? '用户在 TodoPanel 取消' : undefined,
-    )
-    if (!res.ok) {
-      return {
-        ok: false,
-        error: {
-          code: res.error?.code === 'NOT_FOUND' ? 'E_NOT_FOUND' : 'E_INVALID_STATE',
-          message: res.error?.message ?? `图写入失败：${planItemId}`,
-        },
-      }
+  // ============================================================
+  // v0.37.0（缺陷 D132）：**用户点击也走账本**（唯一写入口）。
+  // 此前用户手动操作在无图任务上直写 `planItems`，与图/账本三条通道并存 ——
+  // 这正是"真相源不唯一"的表现。现在统一经 ledger.mutate（force=true：
+  // 用户显式指令优先，与 graph:set-status 的强制分支同语义）。
+  // ============================================================
+  try {
+    let ledger = await loadLedger(taskId)
+    if (!ledger) {
+      // 首次操作时尚未建账 → 先建账再写，绝不退化成直写 planItems
+      ledger = await ensureLedger(task, { seedFromPlanItems: true })
     }
-    const version = getPlanListVersion(taskId)
-    logger.info(
-      'Agent',
-      `[plan-item-action] task=${taskId} id=${planItemId} ${item.status}->${targetStatus} source=${source}（图侧写入）`,
-      taskId,
-    )
-    return { ok: true, version, effectiveStatus: res.effectiveStatus ?? targetStatus }
+    if (ledger) {
+      const res = await mutate(
+        taskId,
+        {
+          kind: 'set-status',
+          itemId: planItemId,
+          to: targetStatus as 'pending' | 'running' | 'done' | 'failed' | 'cancelled' | 'skipped',
+          source,
+          note: source === 'user-cancel' ? '用户在清单里取消' : undefined,
+          force: true,
+        },
+        { actor: `ui:${source}` },
+      )
+      if (!res.ok) {
+        return {
+          ok: false,
+          error: { code: 'E_INVALID_STATE', message: res.error?.message ?? '账本写入失败' },
+        }
+      }
+      const rawEffective = res.effective?.find((e) => e.itemId === planItemId)?.status ?? targetStatus
+      // 账本 9 态 → planItem 7 态：verifying/blocked 折叠到最接近的可展示态
+      const effective: PlanItemStatus =
+        rawEffective === 'verifying' ? 'running' : rawEffective === 'blocked' ? 'failed' : rawEffective
+      logger.info(
+        'Agent',
+        `[plan-item-action] task=${taskId} id=${planItemId} ${item.status}->${effective} source=${source}（账本通道）`,
+        taskId,
+      )
+      return { ok: true, version: getPlanListVersion(taskId), effectiveStatus: effective }
+    }
+  } catch (err) {
+    logger.warn('Agent', `[plan-item-action] 账本通道失败：${(err as Error).message}`, taskId)
+    return {
+      ok: false,
+      error: { code: 'E_INVALID_STATE', message: `任务清单引擎不可写：${(err as Error).message}` },
+    }
   }
-
-  const fromStatus = item.status
-  item.status = targetStatus
-  item.source = source
-  item.updatedAt = Date.now()
-  if (TERMINAL_STATES.has(targetStatus)) item.completedAt = Date.now()
-  await updateTask(taskId, { planItems })
-  const version = broadcastPlanItemStatus(taskId, [
-    {
-      planItemId: item.id,
-      index: idx,
-      fromStatus,
-      status: targetStatus,
-      source,
-      reason: source === 'user-cancel' ? '用户在 TodoPanel 取消' : undefined,
-    },
-  ])
-  logger.info('Agent', `[plan-item-action] task=${taskId} idx=${idx} ${fromStatus}->${targetStatus} source=${source}`, taskId)
-  return { ok: true, version, effectiveStatus: targetStatus }
+  // 账本不可用（建账失败）→ 明确报错，不静默回退成直写 planItems。
+  // 理由：直写会制造第二个真相源，UI 与模型随后会读到不一致的清单（诊断 §2 L2）。
+  return {
+    ok: false,
+    error: { code: 'E_INVALID_STATE', message: '任务清单账本不可用，无法修改清单项' },
+  }
 }

@@ -7,7 +7,10 @@
 import type { PlanItemStatus } from '@shared/types/task'
 import type { ReActStep } from '@shared/types/react'
 
-/** 六态元信息 */
+/**
+ * v0.37.0：七态元信息（新增 `paused` = 中断保留）。
+ * `paused` 与 `cancelled` 的区别对用户必须可见：前者"可以接着做"，后者"已作废"。
+ */
 export interface PlanStatusMeta {
   /** 面向用户的中文状态文案 */
   label: string
@@ -21,10 +24,11 @@ export interface PlanStatusMeta {
   terminal: boolean
 }
 
-/** 六态 → 元信息映射表（SubTask 8.5 测试断言对象） */
+/** 七态 → 元信息映射表（SubTask 8.5 测试断言对象） */
 export const PLAN_STATUS_META: Record<PlanItemStatus, PlanStatusMeta> = {
   pending:   { label: 'plantatus.waiting',   color: 'var(--text-tertiary)', strikethrough: false, animated: false, terminal: false },
   running:   { label: 'plantatus.running',   color: 'var(--accent)',        strikethrough: false, animated: true,  terminal: false },
+  paused:    { label: 'plantatus.paused',    color: 'var(--warning)',       strikethrough: false, animated: false, terminal: false },
   done:      { label: 'plantatus.done',      color: 'var(--success)',       strikethrough: true,  animated: false, terminal: true },
   failed:    { label: 'plantatus.failed',    color: 'var(--danger)',        strikethrough: false, animated: false, terminal: true },
   cancelled: { label: 'plantatus.cancelled', color: 'var(--text-tertiary)', strikethrough: true,  animated: false, terminal: true },
@@ -36,6 +40,8 @@ export function planStatusTextClass(status: PlanItemStatus): string {
   switch (status) {
     case 'running':
       return 'text-accent'
+    case 'paused':
+      return 'text-warning'
     case 'done':
       return 'text-text-tertiary line-through decoration-success'
     case 'failed':
@@ -62,6 +68,8 @@ export function aggregatePlanStatus(
   if (statuses.every((s) => s === 'done')) return 'done'
   if (statuses.includes('failed')) return 'failed'
   if (statuses.includes('running')) return 'running'
+  // v0.37.0：paused 优先于 cancelled/skipped —— 「中断待续」比「已作废」更值得用户看见
+  if (statuses.includes('paused')) return 'paused'
   if (statuses.includes('cancelled')) return 'cancelled'
   if (statuses.includes('skipped')) return 'skipped'
   return 'pending'

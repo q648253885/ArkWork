@@ -4,7 +4,6 @@
  * 内容仍可读）；内容类参数（content/oldStr/newStr）按 60 字符摘要显示
  * （v018 契约，转写自 ThoughtStream ToolCard）。
  * ============================================================ */
-import { useTranslation } from 'react-i18next'
 import type { ToolCallView, ToolResultView } from '@shared/types/tool-present'
 import { FileLink } from '../FileLink'
 
@@ -52,7 +51,8 @@ type GenericResult = Extract<ToolResultView, { card: 'generic' }>
 export function GenericResultView({ result }: { result: GenericResult }) {
   return (
     <div className="mt-1 select-text">
-      <div className={`text-xs whitespace-pre-wrap break-words ${result.isError ? 'text-danger' : 'text-text-tertiary'}`}>
+      {/* B11/P4-b：结果摘要 = 工具输出结果（信号），与过程日志拉开层级 */}
+      <div className={`text-xs whitespace-pre-wrap break-words ${result.isError ? 'text-danger' : 'text-text-primary'}`}>
         {result.summary}
       </div>
       {result.content && (
@@ -64,16 +64,3 @@ export function GenericResultView({ result }: { result: GenericResult }) {
   )
 }
 
-/** 结果摘要行（折叠态默认可见 —— C-11 结果摘要默认可见零点击） */
-export function ResultSummaryLine({ result }: { result: ToolResultView }) {
-  const { t } = useTranslation()
-  const isError = 'isError' in result && result.isError === true
-  return (
-    <div className={`mt-1 text-xs truncate select-text ${isError ? 'text-danger' : 'text-text-tertiary'}`}>
-      {result.summary}
-      {'truncated' in result && result.truncated === true && (
-        <span className="ml-1.5 text-2xs text-text-faint select-none">{t('flow.truncatedResult')}</span>
-      )}
-    </div>
-  )
-}

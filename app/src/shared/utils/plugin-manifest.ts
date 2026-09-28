@@ -9,7 +9,7 @@
  *   VP5  theme 载荷 · VP6 homeModule/action 载荷
  *   ★ VP7  代码入口：形状（相对路径、不得 `..`）+ 目标是否为空视图
  *   ★ VP8  代码视图与模型工具载荷（placement 只能是 dock/float、tool 名合法）
- *   ★ VP9  权限名必须在白名单内（**未知权限名即 error，不静默忽略**）
+ *   ★ VP9  权限名必须在白名单内（**未知权限名即 error，不静默忽略**）；v0.36.0 起命令贡献载荷（provides.commands）同归 VP9
  *   ★ VP10 入口路径的**形状**校验（`..` / 绝对路径 / 空段）
  *
  * ⚠️ **VP7 的「文件真的存在吗」不在这里做**：本文件是**零依赖纯函数**
@@ -32,6 +32,7 @@ import {
   PLUGIN_PERMISSIONS,
   PLUGIN_SCHEMA_VERSION,
   SUPPORTED_PLUGIN_SCHEMA_VERSIONS,
+  type PluginCommandContribution,
   type PluginIssue,
   type PluginKind,
   type PluginManifest,
@@ -550,6 +551,46 @@ export function parsePluginManifest(raw: unknown): PluginParseResult {
         if (list.length > 0) provides.tools = list
       }
     }
+
+    /* ---- ★ v0.36.0 VP9 命令贡献（provides.commands）---- */
+    if (raw.provides.commands !== undefined) {
+      if (!Array.isArray(raw.provides.commands)) {
+        issues.push(issue('VP9', 'error', '$.provides.commands', 'provides.commands 必须是数组', '形如 [{ "id": "my.status", "title": "查询状态" }]'))
+      } else if (raw.provides.commands.length === 0) {
+        issues.push(issue('VP9', 'warning', '$.provides.commands', 'provides.commands 是空数组（不贡献任何命令）', '去掉该字段，或至少给一个命令'))
+      } else if (raw.provides.commands.length > 32) {
+        issues.push(issue('VP9', 'error', '$.provides.commands', 'provides.commands 超过上限 32 条', '精简命令数量，或合并为带参数的单条命令'))
+      } else {
+        const list: PluginCommandContribution[] = []
+        const seen = new Set<string>()
+        raw.provides.commands.forEach((rawCmd, i) => {
+          const path = `$.provides.commands[${i}]`
+          if (!isObj(rawCmd)) {
+            issues.push(issue('VP9', 'error', path, '命令条目必须是对象'))
+            return
+          }
+          if (typeof rawCmd.id !== 'string' || !/^[\w][\w.-]*$/.test(rawCmd.id)) {
+            issues.push(issue('VP9', 'error', `${path}.id`, 'id 必填且仅含小写字母/数字/点/连字符/下划线', '例如 "my.status"'))
+            return
+          }
+          if (seen.has(rawCmd.id)) {
+            issues.push(issue('VP9', 'error', `${path}.id`, `命令 id「${rawCmd.id}」在本插件内重复`, '每个命令的 id 必须唯一'))
+            return
+          }
+          seen.add(rawCmd.id)
+          if (typeof rawCmd.title !== 'string' || !rawCmd.title.trim()) {
+            issues.push(issue('VP9', 'error', `${path}.title`, 'title 必填（QuickAction 与插件详情里直接显示）'))
+            return
+          }
+          list.push({
+            id: rawCmd.id,
+            title: rawCmd.title.trim(),
+            ...(typeof rawCmd.icon === 'string' && rawCmd.icon.trim() ? { icon: rawCmd.icon.trim() } : {}),
+          })
+        })
+        if (list.length > 0) provides.commands = list
+      }
+    }
   }
 
   /* ---- ★ VP7/VP9/VP10 顶层：入口、权限、引擎 ---- */
@@ -607,6 +648,13 @@ export function parsePluginManifest(raw: unknown): PluginParseResult {
   if (provides.tools && provides.tools.length > 0 && !mainEntry) {
     issues.push(
       issue('VP7', 'error', '$.main', '声明了 provides.tools 却没有 Host 半入口（main）—— 工具无处执行', '补 "main": "main.js"'),
+    )
+  }
+
+  // VP7：声明了命令，但没有 Host 半入口 → 命令无人处理
+  if (provides.commands && provides.commands.length > 0 && !mainEntry) {
+    issues.push(
+      issue('VP7', 'error', '$.main', '声明了 provides.commands 却没有 Host 半入口（main）—— 命令无人处理', '补 "main": "main.js"，或去掉 provides.commands'),
     )
   }
 
@@ -696,6 +744,7 @@ export function contributionLabelOf(m: PluginManifest): string {
   const extra: string[] = []
   if (m.provides.views?.length) extra.push(`视图 ×${m.provides.views.length}`)
   if (m.provides.tools?.length) extra.push(`工具 ×${m.provides.tools.length}`)
+  if (m.provides.commands?.length) extra.push(`命令 ×${m.provides.commands.length}`)
   const suffix = extra.length > 0 ? ` ＋ ${extra.join(' ＋ ')}` : ''
 
   switch (m.kind) {

@@ -50,7 +50,12 @@ export interface SeedResult {
   written: string[]
   /** v0.34.2：内容被升级覆盖的插件 id（磁盘副本未被用户改动过） */
   upgraded: string[]
-  /** 本次是否执行了落盘动作（写入或升级） */
+  /**
+   * ★ v0.36.0（D88）：仅**载荷文件**被同步（清单未动）的插件 id。
+   * 与 upgraded 分开报，是因为「清单没变但代码变了」正是旧实现静默漏掉的那一格。
+   */
+  refreshed: string[]
+  /** 本次是否执行了落盘动作（写入 / 升级 / 载荷同步） */
   seeded: boolean
 }
 
@@ -67,9 +72,17 @@ export const SEED_SIDECAR = '.arkwork-seed.json'
  * 方向恒定 `[旧, 新]` —— 测试里的「造旧副本」就是把它反过来用，方向写反会让
  * 「旧副本」造不出来（用例会直接红，不会静默失效）。
  *
- * 维护纪律（有护栏）：只要改动随包示例的内容（URL / 文案 / 字段），就必须在这里
- * 加一条，否则 `TC-SMPL-020`（拿上一版官方副本夹具做判定）会红 —— 那条用例就是
- * 「忘了声明迁移 = 存量用户永远收不到修正」这个静默失败模式的把守者。
+ * 维护纪律（护栏与**它的现状**）：只要改动随包示例的内容（URL / 文案 / 字段 /
+ * 图标名），就必须在这里加一条 —— 「忘了声明迁移 = 存量用户永远收不到修正」
+ * 是个纯静默的失败模式，必须有机器把守。
+ *
+ *   · 现役把守者 = `TC-SMPL-026`（**冻结的 v0.36.0 官方副本夹具**）：拿一份逐字
+ *     冻结的上一版官方清单，断言「无副文件的存量副本」仍被判为未改动 → 会被升级。
+ *     改了随包内容却没加迁移条目 → 归一化对不上 → 判成「用户副本」→ 用例红。
+ *   · ⚠️ 历史（避免下次退役示例时又悄悄丢把守）：v0.35.0 之前这条把守挂在
+ *     **股票插件夹具**上；v0.36.0 股票插件整体退役、夹具一并删除，把守出现空窗
+ *     （当时本注释还指向 `TC-SMPL-020`，而该编号早已改作「载荷逐字节落盘」用例）。
+ *     v0.36.0 · D91/D92 把空窗补上。
  */
 export const SEED_STRING_MIGRATIONS: ReadonlyArray<readonly [string, string]> = [
   // ① 数据源主机：push2 在真机实测不可达（net::ERR_EMPTY_RESPONSE）→ push2delay
@@ -87,11 +100,81 @@ export const SEED_STRING_MIGRATIONS: ReadonlyArray<readonly [string, string]> = 
     '自选股行情 + 个股详情 + 日 K 线（东方财富公开行情接口，真实联网数据）',
     '自选股实时行情（东方财富公开行情接口，真实联网数据）',
   ],
+  // ④ ★ v0.36.0（D91）：竖排栏标签预算收敛为 3 字（44px 栏宽），
+  //    官方示例的 view.title 随之从 'Git Manager' 收敛为 'Git'
+  ['Git Manager', 'Git'],
+  // ⑤ ★ v0.36.0（D92）：渲染层图标集里没有 'GitBranch'（只有 'Branch'），
+  //    写错会静默退化成一颗圆点 —— 修正图标名同样属于「随包内容改动」
+  ['GitBranch', 'Branch'],
 ]
 
 /** 落盘文本序列化口径（唯一真源：2 空格缩进 + 结尾换行） */
 export function seedTextOf(raw: Record<string, unknown>): string {
   return `${JSON.stringify(raw, null, 2)}\n`
+}
+
+/**
+ * v0.36.0：剥离 `files` 后的可落盘清单文本。
+ * `files` 是 seed 的**文件载荷**（main.js / panel.html 等随包源码），
+ * 不属于 plugin.json —— 写进清单既污染用户副本，也会让 VP 校验白担惊。
+ */
+function manifestTextOf(raw: Record<string, unknown>): string {
+  const { files: _files, ...manifest } = raw
+  return seedTextOf(manifest)
+}
+
+/** v0.36.0：落盘随包文件载荷（**无条件覆盖** —— 随包代码是本体的组成部分，与 plugin.json 升级同权） */
+function writeBundledFiles(sub: string, raw: Record<string, unknown>): void {
+  const files = raw.files
+  if (!files || typeof files !== 'object' || Array.isArray(files)) return
+  for (const [name, content] of Object.entries(files as Record<string, unknown>)) {
+    if (typeof content !== 'string') continue
+    const f = join(sub, name)
+    mkdirSync(join(f, '..'), { recursive: true })
+    writeFileSync(f, content, 'utf-8')
+  }
+}
+
+/**
+ * ★ v0.36.0（D88）：按指纹**同步**随包文件载荷（「清单已是最新」分支用）。
+ *
+ * 为什么不能只「补齐缺失文件」（D88 之前的实现）：指纹副文件当时只记了
+ * plugin.json 的哈希，载荷（main.js / panel.html）不在指纹里 ⇒ 磁盘文件一存在
+ * 就跳过 ⇒ 对随包插件**代码**的修正永远送不到存量用户。实机 B3 冒烟实录：
+ * 修好插件源码 → 重建 → 重跑，磁盘副本纹丝不动，同一个 TypeError 反复复现。
+ *
+ * 逐文件三分支（与清单升级判定同构，顺序有意义）：
+ *   ① 磁盘内容 == 新版内容    → 什么都不做；
+ *   ② 指纹记录的哈希 == 磁盘   → 官方副本未被改动 → 覆盖（这一步就是「修正送达」）；
+ *   ③ 指纹有记录但不命中       → 用户改过 → 一字不改；
+ *   ④ 指纹**没有**这个文件的记录（本特性之前的存量副文件 / 本版新增的载荷文件）
+ *      → 覆盖。取舍依据：此时无法证明被改动过，而「永不送达」是更坏的失败形态
+ *      （v0.34.2 D57「新增可达 ≠ 修正可达」的教训）；且能走到本分支的前提是
+ *      **清单已被证明未被改动**，用户只改代码不改清单的情形极罕见。
+ *
+ * @returns 被同步（写入/覆盖）的文件名，供调用方计入 SeedResult 与日志
+ */
+function syncBundledFiles(sub: string, raw: Record<string, unknown>, side: SeedSidecar | null): string[] {
+  const files = raw.files
+  if (!files || typeof files !== 'object' || Array.isArray(files)) return []
+  const synced: string[] = []
+  for (const [name, content] of Object.entries(files as Record<string, unknown>)) {
+    if (typeof content !== 'string') continue
+    const f = join(sub, name)
+    mkdirSync(join(f, '..'), { recursive: true })
+    if (!existsSync(f)) {
+      writeFileSync(f, content, 'utf-8')
+      synced.push(name)
+      continue
+    }
+    const disk = readFileSync(f, 'utf-8')
+    if (disk === content) continue
+    const recorded = side?.files?.[name]
+    if (recorded !== undefined && recorded !== sha256(disk)) continue // ③ 用户副本
+    writeFileSync(f, content, 'utf-8')
+    synced.push(name)
+  }
+  return synced
 }
 
 function sha256(text: string): string {
@@ -145,11 +228,21 @@ function dropVolatileFields(value: unknown): unknown {
 }
 
 interface SeedSidecar {
-  /** 落盘时写入的内容哈希 */
+  /** 落盘时写入的内容哈希（plugin.json 剥离 files 后的文本） */
   hash: string
   /** 落盘时该插件的 version（人可读，便于排查） */
   version: string
   seededAt: string
+  /**
+   * ★ v0.36.0（D88）：随包**文件载荷**的 sha256，键为文件名（main.js / panel.html…）。
+   *
+   * 为什么必须单独记：`hash` 只覆盖 plugin.json。代码插件的代码全在载荷里，
+   * 而载荷不在指纹内 ⇒ 「清单一字未动 → 走『已是最新』分支 → 文件已存在 → 跳过」
+   * ⇒ **对随包插件代码的任何修正永远送不到存量用户**（实机 B3 冒烟实录：
+   * 修好插件源码、重建、重跑，磁盘副本纹丝不动，同一个 TypeError 反复复现）。
+   * 与 plugin.json 同权：载荷也是随包本体的组成部分。
+   */
+  files?: Record<string, string>
 }
 
 function readSidecar(file: string): SeedSidecar | null {
@@ -157,15 +250,37 @@ function readSidecar(file: string): SeedSidecar | null {
     if (!existsSync(file)) return null
     const parsed = JSON.parse(readFileSync(file, 'utf-8')) as Partial<SeedSidecar>
     if (typeof parsed.hash !== 'string' || parsed.hash.length === 0) return null
-    return { hash: parsed.hash, version: String(parsed.version ?? ''), seededAt: String(parsed.seededAt ?? '') }
+    const files: Record<string, string> = {}
+    if (parsed.files && typeof parsed.files === 'object' && !Array.isArray(parsed.files)) {
+      for (const [k, v] of Object.entries(parsed.files)) if (typeof v === 'string' && v) files[k] = v
+    }
+    return {
+      hash: parsed.hash,
+      version: String(parsed.version ?? ''),
+      seededAt: String(parsed.seededAt ?? ''),
+      files,
+    }
   } catch {
     // 副文件坏掉 = 无法证明副本未被改动 → 按「用户副本」保守处理（绝不覆盖）
     return null
   }
 }
 
+/** 落盘指纹：plugin.json 文本哈希 + 每个载荷文件的哈希（D88） */
 function writeSidecar(file: string, raw: Record<string, unknown>, text: string): void {
-  const side: SeedSidecar = { hash: sha256(text), version: String(raw.version ?? ''), seededAt: new Date().toISOString() }
+  const files = raw.files
+  const fileHashes: Record<string, string> = {}
+  if (files && typeof files === 'object' && !Array.isArray(files)) {
+    for (const [name, content] of Object.entries(files as Record<string, unknown>)) {
+      if (typeof content === 'string') fileHashes[name] = sha256(content)
+    }
+  }
+  const side: SeedSidecar = {
+    hash: sha256(text),
+    version: String(raw.version ?? ''),
+    seededAt: new Date().toISOString(),
+    files: fileHashes,
+  }
   writeFileSync(file, `${JSON.stringify(side, null, 2)}\n`, 'utf-8')
 }
 
@@ -191,16 +306,19 @@ export function isUntouchedCopy(
   bundledRaw: Record<string, unknown>,
   sidecar: { hash?: string } | null,
 ): boolean {
-  const bundled = seedTextOf(bundledRaw)
+  // v0.36.0：files 是落盘**载荷**不是清单字段 —— 磁盘上的 plugin.json 永远没有它。
+  // 比对必须以「剥离后的清单」为准，否则所有路径都因多出的 files 而失配（升级永远送不到）。
+  const { files: _files, ...bundledManifest } = bundledRaw
+  const bundled = seedTextOf(bundledManifest)
   if (onDiskText === bundled) return true
   if (sidecar?.hash && sidecar.hash === sha256(onDiskText)) return true
   try {
     const parsed = JSON.parse(onDiskText) as unknown
-    if (contentSignature(parsed) === contentSignature(bundledRaw)) return true
+    if (contentSignature(parsed) === contentSignature(bundledManifest)) return true
     // ④ 结构级：把废弃面板摘掉后是否等于新版
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const { next, result } = migratePluginManifest(parsed as Record<string, unknown>)
-      if (result.changed && contentSignature(next) === contentSignature(bundledRaw)) return true
+      if (result.changed && contentSignature(next) === contentSignature(bundledManifest)) return true
     }
     return false
   } catch {
@@ -219,6 +337,8 @@ export const RETIRED_SAMPLE_PLUGIN_IDS: readonly string[] = [
   'ark.plugin.runtime-metrics',
   'ark.plugin.workspace-table',
   'ark.plugin.kchart-renderer',
+  // v0.36.0（F3.5）：股票插件被 Git 管理代码插件取代（用户裁决）
+  'ark.plugin.stock',
 ]
 
 /** 删除退役示例的残留目录（幂等；失败只 warn） */
@@ -256,39 +376,50 @@ export function ensureSamplePlugins(pluginDir: string): SeedResult {
     if (!existsSync(pluginDir)) mkdirSync(pluginDir, { recursive: true })
   } catch (err) {
     logger.warn('System', `[plugin] 示例插件目录准备失败：${String(err)}`)
-    return { written: [], upgraded: [], seeded: false }
+    return { written: [], upgraded: [], refreshed: [], seeded: false }
   }
 
   const written: string[] = []
   const upgraded: string[] = []
+  const refreshed: string[] = []
   for (const raw of RAW_SAMPLE_PLUGINS) {
     const id = String(raw.id)
     const sub = join(pluginDir, id)
     const file = join(sub, 'plugin.json')
     const sideFile = join(sub, SEED_SIDECAR)
-    const text = seedTextOf(raw)
+    const text = manifestTextOf(raw)
 
     try {
       if (!existsSync(file)) {
         if (!existsSync(sub)) mkdirSync(sub, { recursive: true })
         writeFileSync(file, text, 'utf-8')
+        writeBundledFiles(sub, raw)
         writeSidecar(sideFile, raw, text)
         written.push(id)
         continue
       }
 
       const onDisk = readFileSync(file, 'utf-8')
-      if (!isUntouchedCopy(onDisk, raw, readSidecar(sideFile))) {
+      const side = readSidecar(sideFile)
+      if (!isUntouchedCopy(onDisk, raw, side)) {
         // 用户（或第三方）改过 → 用户副本优先，一字不改
         logger.debug('System', `[plugin] 随包示例 ${id} 的磁盘副本已被修改，跳过升级（尊重用户副本）`)
         continue
       }
       if (onDisk === text) {
-        // 内容已是最新：只补齐可能缺失的指纹（存量用户路径），不写 plugin.json
-        if (!existsSync(sideFile)) writeSidecar(sideFile, raw, text)
+        // 清单已是最新：不写 plugin.json，但仍要**同步载荷文件**。
+        // ★ D88：旧实现只「补齐缺失文件」，于是「清单没变、代码变了」这一格被
+        //   静默吞掉（对随包插件代码的修正永远送不到存量用户）。
+        const synced = syncBundledFiles(sub, raw, side)
+        if (!existsSync(sideFile) || synced.length > 0) writeSidecar(sideFile, raw, text)
+        if (synced.length > 0) {
+          refreshed.push(id)
+          logger.info('System', `[plugin] 随包示例 ${id} 的载荷文件已同步（磁盘副本未被改动过）：${synced.join(', ')}`)
+        }
         continue
       }
       writeFileSync(file, text, 'utf-8')
+      writeBundledFiles(sub, raw)
       writeSidecar(sideFile, raw, text)
       upgraded.push(id)
     } catch (err) {
@@ -309,7 +440,12 @@ export function ensureSamplePlugins(pluginDir: string): SeedResult {
       `[plugin] 随包示例插件已升级 ${upgraded.length} 个（磁盘副本未被改动过）：${upgraded.join(', ')}`,
     )
   }
-  return { written, upgraded, seeded: written.length > 0 || upgraded.length > 0 }
+  return {
+    written,
+    upgraded,
+    refreshed,
+    seeded: written.length > 0 || upgraded.length > 0 || refreshed.length > 0,
+  }
 }
 
 /** 目录里是否已有插件子目录（隐藏目录/文件不计）—— 诊断与测试用 */

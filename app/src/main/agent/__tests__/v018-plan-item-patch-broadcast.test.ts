@@ -3,7 +3,7 @@
  *
  * 不 mock LLM，直接对源码做静态断言 + 正则匹配，覆盖：
  *  1. events.ts：broadcastPlanItemStatus / broadcastPlanListSnapshot / getPlanListVersion 三件套
- *  2. engine.ts：decidePlanAdvance 消费处、todo_update 拦截、plan 全量生成 三处接入 broadcastPlanItemStatus / broadcastPlanListSnapshot
+ *  2. engine.ts：decidePlanAdvance 消费处、task_plan 提交（v0.38.0 收敛，原 todo_update 拦截）、plan 全量生成 三处接入 broadcastPlanItemStatus / broadcastPlanListSnapshot
  *  3. ipc/plan-items.ts：注册 task:plan-item-cancel / retry / mark-done + list-snapshot 四个 handler
  *  4. shared types：PlanItemStatusChanged 字段固化（version / index / fromStatus / source）、PlanItem.source 字段
  *  5. PlanItem.source 类型 + 7 种 source 枚举值
@@ -115,12 +115,20 @@ test('v0.18.0 engine.ts: decidePlanAdvance 消费处接入 broadcastPlanItemStat
   assert.ok(matches && matches.length >= 1, `decidePlanAdvance 消费处应调 broadcastPlanItemStatus（实际 ${matches?.length ?? 0}）`)
 })
 
-test('v0.18.0 engine.ts: todo_update 拦截后接入 broadcastPlanItemStatus（source=todo-update）', () => {
-  // 在 todo_update 拦截块内应当 source: 'todo-update'
-  const section = engineSrc.match(
-    /todo-update['"][\s\S]{0,2500}?broadcastPlanItemStatus\([\s\S]{0,200}?source:\s*['"]todo-update['"]/,
+test('v0.38.0 engine/act.ts: decide 路径 patch source 收敛为引擎侧枚举（D154 后 todo-update 源下架）', () => {
+  // v0.38.1（D166 测试侧改写随新语义）：v0.18.0 的「todo_update 拦截 → source=todo-update」
+  // 接线已随 D154（工具收敛为 task_plan，清单走账本唯一写入口）整体移除；
+  // 现存 patch 通道只剩 decide 消费路径，source 按成败分叉为引擎侧枚举。
+  assert.match(
+    engineSrc,
+    /source:\s*item\.status === 'failed' \? 'engine-fail' : 'engine-decide'/,
+    'decide 消费路径 patch 的 source 应按成败分叉（engine-decide / engine-fail）',
   )
-  assert.ok(section, 'todo_update 拦截路径应通过 broadcastPlanItemStatus(source=todo-update) 推 patch')
+  assert.doesNotMatch(
+    engineSrc,
+    /source:\s*['"]todo-update['"]/,
+    'D154 下架 todo-update 后，引擎侧不应再产出 source=todo-update 的 patch',
+  )
 })
 
 test('v0.18.0 engine.ts: plan 全量生成后接入 broadcastPlanListSnapshot', () => {
@@ -297,7 +305,10 @@ test('v0.18.0 seed.ts: 不再含强制 todo-update 文案', () => {
     /每完成一个阶段性操作后.*todo-update/,
     'v0.18.0 seed.ts 不应再含强制 todo-update 文案',
   )
-  assert.match(seedSrc, /也调\s*todo-update/, '应保留 todo-update 作为显式推进入口')
+  // v0.38.1（D166 测试侧改写随新语义）：v0.38.0 D154 把 seed 提示词整体重写为
+  // task_plan 唯一入口（提交完整清单）后，「也调 todo-update」的显式推进文案不应回潮。
+  assert.doesNotMatch(seedSrc, /也调\s*todo-update/, 'D154 后 seed.ts 不应再教 todo-update 显式推进')
+  assert.match(seedSrc, /清单只有一个正常入口：task_plan/, '清单唯一入口应是 task_plan（提交完整清单）')
 })
 
 test('v0.25.0 seed.ts: 内置 Agent 带 version 字段（升级判定真源）', () => {

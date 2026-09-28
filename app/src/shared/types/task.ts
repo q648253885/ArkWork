@@ -16,11 +16,18 @@ export type TaskStatus =
 /**
  * v0.14.0 Task 1 — PlanItem 六态状态机。
  * 把 v0.13.1 的 done/failed 两态扩展为 pending / running / done / failed / cancelled / skipped 六态。
+ *
+ * v0.37.0：新增第七态 `paused`（中断保留）—— 与 TaskLedger 的 LedgerItemStatus.paused 对齐。
+ * 背景（缺陷 D131）：此前「可恢复的暂停」被当成「不可恢复的取消」，未完成项一律标
+ * cancelled，续聊时模型无从判断"上次做到哪"，只能重新规划 → 重复执行第一个任务。
+ * `paused` 表示"中断时正在做、尚未完成、可以接着做"，与 cancelled（作废）严格区分。
+ *
  * 注意：与 {@link TaskStatus}（任务级）独立，本枚举描述的是 PlanItem 步骤级状态。
  */
 export type PlanItemStatus =
   | 'pending'
   | 'running'
+  | 'paused'
   | 'done'
   | 'failed'
   | 'cancelled'
@@ -37,7 +44,8 @@ export type LegacyPlanItemStatus = 'done' | 'failed'
  * v0.18.0：planItem 状态变更的来源标记。
  * Main 端唯一写入，Renderer 不可注入（IPC 入口拒绝 source 字段）。
  *  - engine-decide  / engine-fail：引擎独立判断（act 成功/失败）
- *  - todo-update：LLM 主动调 todo_update 工具
+ *  - task-plan：LLM 经 `task_plan`（v0.38.0 清单控制面唯一入口）提交完整清单
+ *  - todo-update：v0.17–v0.37 的历史值（旧任务数据里仍会出现，工具已下架）
  *  - user-cancel / user-retry / user-mark-done：用户在 TodoPanel 行手动切状态
  *  - plan-regen：plan 全量重新生成（snapshot 兜底）
  */
@@ -50,8 +58,29 @@ export type PlanItemSource =
   | 'user-mark-done'
   | 'plan-regen'
   | 'plan-fallback'
+  /** v0.37.0：中断保留（park）—— 未完成项暂停而非作废 */
+  | 'park'
+  /** v0.37.0：恢复点判定（产出物校验后决定 done / pending） */
+  | 'resume'
+  /** v0.37.0：过期巡检 —— running 太久无进展 → paused */
+  | 'sweep-stale'
+  /** v0.37.0：回合收口 —— 与任务终态对齐 */
+  | 'seal'
+  /** v0.37.0：账本同步（清欠账） */
+  | 'ledger-sync'
   /** v0.21.0：续聊时旧清单全完成后，引擎自动追加的「新需求承接项」 */
   | 'continuation'
+  /**
+   * v0.38.0（D154）：模型经 `task_plan`（清单控制面唯一入口）提交完整清单后
+   * 由引擎算差异落库。它取代 `'todo-update'` 成为"模型显式写回"的来源标记；
+   * 旧值保留只为读取历史任务数据（`tasks.migrate.ts` 仍接受）。
+   */
+  | 'task-plan'
+  /**
+   * v0.38.1（D177）：正则清单提取回退 —— 模型未发起原生 tool_calls，
+   * 引擎从答复正文解析出清单草案并**代为**提交（与 task-plan 同一条管线）。
+   */
+  | 'plan-regex'
 
 export interface PlanItem {
   /** 计划项 ID（v0.14.0 新增；旧数据缺失时由迁移层补齐） */
@@ -70,6 +99,13 @@ export interface PlanItem {
   completedAt?: number
   /** v0.18.0 新增：该项状态来源（用于三视图与"引擎"/"推断"徽标） */
   source?: PlanItemSource
+  /**
+   * v0.39.0（D185）：父项 id —— 任务层级在这里才第一次穿透到既有 UI 通道。
+   * 此前 `toPlanItems` 直接丢弃 `LedgerItem.parentId`，于是"账本里挂着层级、
+   * 界面上看不到层级"，子任务看起来就像一串平级的普通条目。
+   * 为 null / undefined 表示顶级项。
+   */
+  parentId?: string | null
 }
 
 export interface TaskInput {

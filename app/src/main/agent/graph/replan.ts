@@ -36,6 +36,8 @@ import {
   type TaskGraph,
   type TaskNode,
 } from '@shared/types/graph'
+// v0.39.0（D186）：模型可见的清单控制面文案唯一事实源
+import { PLAN_TOOL_HINT } from '../ledger/hint.js'
 import { validateWrite } from './invariants.js'
 import { runGate } from './gate.js'
 import { validateGraphShape } from './store.js'
@@ -80,7 +82,7 @@ export function buildPatch(
       error: {
         code: 'SCHEMA_INVALID',
         message: 'Replan 的 ops 为空',
-        hint: '补丁至少包含一个操作（add / remove / update / reorder / relink）。若你认为不需要改动，请不要调用 replan。',
+        hint: '补丁至少包含一个操作（add / remove / update / reorder / relink）。若你认为不需要改动，请不要调用本工具。',
       },
     }
   }
@@ -94,7 +96,7 @@ export function buildPatch(
           error: {
             code: 'NOT_FOUND',
             message: `Replan op 引用了不存在的节点：${op.id}`,
-            hint: '请先调用 task_list 读取当前任务图，确认节点 id 后再提交补丁。',
+            hint: `请先确认节点 id 后再提交补丁（${PLAN_TOOL_HINT.read}）。`,
             violatedBy: { nodeId: op.id },
           },
         }
@@ -107,7 +109,7 @@ export function buildPatch(
           error: {
             code: 'NOT_FOUND',
             message: `Replan reorder 引用了不存在的节点：${missing.join(', ')}`,
-            hint: '请先调用 task_list 读取当前节点列表。',
+            hint: `请先确认当前节点列表（${PLAN_TOOL_HINT.read}）。`,
           },
         }
       }

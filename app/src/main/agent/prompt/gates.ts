@@ -197,7 +197,8 @@ export function checkGateBeforeAdvance(task: Task, itemText: string): GateBlockR
       instruction:
         `门禁未确认：清单项「${itemText}」关联门禁 ${g.gateId} 尚未通过（触发点：${after}）。` +
         `请先调用 ask_user 向用户确认（问题：${g.ask ?? after}，附 2~4 个 suggestions），` +
-        `用户确认后再重试 todo_update 把该项标 done。禁止未经用户确认跳过门禁。`,
+        // v0.38.1（D166）：todo_update 已下架（D154），软失败行动指令改指 task_plan。
+        `用户确认后再通过 task_plan 提交完整最新清单把该项标 done。禁止未经用户确认跳过门禁。`,
     }
   }
   return null

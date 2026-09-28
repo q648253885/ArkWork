@@ -14,7 +14,13 @@ import { genId } from '@shared/utils/id'
 import { drainContinuations } from '../inbox.js'
 import { emitTurnStopping } from '../turn-stopping.js'
 import { emitEvent } from './broadcast.js'
-import { discardIncompletePlanItems, sealGraphForTaskOutcome } from './gates.js'
+import {
+  discardIncompletePlanItems,
+  parkIncompletePlanItems,
+  sealGraphForTaskOutcome,
+} from './gates.js'
+// v0.39.0（D184）：取消路径的账本封口（此前只有成功路径封）
+import { sealLedger } from '../ledger/engine.js'
 
 /**
  * v0.27.0 R1：用户中断时，把本轮已流出的部分文本落盘。
@@ -86,11 +92,27 @@ export async function handleAbort(
     // 注意只有这里（不可恢复的取消）封口；**下面的 paused 分支刻意不封**
     // —— 暂停是可恢复的，封成终态会让「继续」后的图状态与执行事实不符。
     await sealGraphForTaskOutcome(current ?? task, 'cancelled', '任务已取消，未完成清单项丢弃')
+    // v0.39.0（D184）：**取消路径也要封账本**（与图同口径）。此前 `sealLedger` 只在
+    // 两条成功路径调用 —— 用户取消后任务 `cancelled`、图 `cancelled`，账本却仍 `open`，
+    // 清单在 UI 里继续显示"进行中"，归档侧也拿不到终态（`archiveLedger` 以 outcome 为判据）。
+    // 暂停分支**刻意不封**（可恢复，封成终态会让"继续"后与执行事实不符 —— D131 同向）。
+    try {
+      const sealRes = await sealLedger(current?.id ?? task.id, 'cancelled', '任务已取消，未完成清单项丢弃')
+      if (!sealRes.ok) {
+        logger.warn('Agent', `取消路径封账本未成功：${sealRes.error?.message ?? '未知'}`, current?.id ?? task.id)
+      }
+    } catch (sealErr) {
+      logger.warn('Agent', `取消路径封账本抛错（忽略）：${(sealErr as Error).message}`, current?.id ?? task.id)
+    }
     return
   }
   await emitEvent(task.id, { type: 'task_paused', iteration })
   await updateTask(task.id, { status: 'paused' })
-  await discardIncompletePlanItems(current ?? task, '任务已暂停，未完成清单项丢弃')
+  // v0.37.0（缺陷 D131）：**暂停 ≠ 作废**。此前这里调 discardIncompletePlanItems，
+  // 把「可恢复的暂停」当成「不可恢复的取消」处理 —— 未完成项一律 cancelled，
+  // 续聊时"当前生效计划"消失，模型只能重新规划 → 重复执行第一个任务（诊断 §2 L1）。
+  // 现在走 park：running → paused 保留，pending 原样不动，并写入人话恢复点。
+  await parkIncompletePlanItems(current ?? task, '任务已暂停，未完成项保留待续')
   broadcastTaskStatus({ ...task, status: 'paused' })
 }
 

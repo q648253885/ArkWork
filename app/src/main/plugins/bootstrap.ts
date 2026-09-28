@@ -21,6 +21,7 @@ import { join } from 'node:path'
 import { app } from 'electron'
 
 import { logger } from '../system/logger.js'
+import { pluginFetch } from '../net/fetch-stack.js'
 import { pluginBroadcaster } from '../ipc/plugin.js'
 import { setPluginViewOpenEmitter } from '../agent/tools/plugins.js'
 import { setHostVersion, setPluginTeardownHook } from './registry.js'
@@ -62,15 +63,30 @@ export async function bootstrapPluginRuntime(opts: { mainDir: string }): Promise
   })
 
   // ② 宿主服务（唯一知道「插件进程」存在的地方）
+  // v0.36.0（D81 修复 as-built §14.1 P0-2）：注入真源取数栈。v0.35.0 装配时
+  // 没传 fetch，`net.fetch` 能力拿到的是 deps() 里的空壳默认值 —— 插件发出去的
+  // 请求永远 `{status:0, body:''}`，即「插件取数不可用」。取栈真源与面板共用
+  // （net/fetch-stack.ts：net 栈认系统代理，undici 不认）。
   initPluginHostService({
     entryPath,
     broadcast: pluginBroadcaster(),
+    fetch: pluginFetch(),
   })
+
+  // ②.5 守护进程接线（D82 修复 as-built §14.1 P0-3）：心跳看门狗 + 空闲回收
+  //   只在 v0.35.0 的测试里被调过，生产装配从未启动 —— 插件宿主死掉/卡死时
+  //   phase 永远停在旧状态（UI 显示 running 实际已死），空闲会话也永不回收。
+  //   停表收口在 host-service.shutdown()（已补 stopWatchdog）；idle sweeper
+  //   是 unref 的 setInterval，随进程退出自然销毁。
+  const svc = getPluginHostService()
+  svc?.supervisor.startWatchdog()
+  svc?.supervisor.startIdleSweeper()
 
   // ③ 拔插与运行期连通：禁用/卸载插件时先拆掉它的进程与会话
   //    （不接这条 → 插件被禁用后进程还在跑、工具还挂在模型可见集里，D74 的同型错）
-  setPluginTeardownHook(async (id) => {
-    await teardownPlugin(id)
+  //    v0.36.0：opts.purgeData 透传 —— 卸载勾选「删除数据」时连私有 KV 一起清
+  setPluginTeardownHook(async (id, opts) => {
+    await teardownPlugin(id, opts)
   })
 
   // ③.5 模型侧控制工具的「请打开视图」出口。

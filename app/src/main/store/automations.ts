@@ -14,11 +14,10 @@
  *    并把 mcpIds → skillIds 注入，让 createTask 携带完整资源
  *  - runTask 异常不再被吞，向上 throw → IPC 自动回传 Renderer
  * ============================================================ */
-import { join, dirname } from 'node:path'
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { randomBytes } from 'node:crypto'
-import { getArkworkDir } from './db.js'
+import { getArkworkDir, atomicWriteFile } from './db.js'
 import { createTask } from './tasks.js'
 import { isValidCron, nextCronTime } from '../automation/cron.js'
 import { getAgent, getModel } from './agents.js'
@@ -47,16 +46,11 @@ async function readAutomations(): Promise<Automation[]> {
 }
 
 /**
- * 原子写：先写临时文件，再 rename 替换（POSIX rename 原子）。
+ * 原子写：v0.36.4（D119）收敛到 db.atomicWriteFile（tmp + rename + Windows 撞锁重试 + 直写兜底）。
  * 防止崩溃或被杀进程时留下半截 JSON 导致整组自动化丢失。
  */
 async function writeAutomations(items: Automation[]): Promise<void> {
-  const path = automationsPath()
-  await mkdir(dirname(path), { recursive: true })
-  const tmp = `${path}.${randomBytes(4).toString('hex')}.tmp`
-  const payload = JSON.stringify(items, null, 2)
-  await writeFile(tmp, payload, 'utf-8')
-  await rename(tmp, path)
+  await atomicWriteFile(automationsPath(), JSON.stringify(items, null, 2))
 }
 
 /** 列出所有自动化规则（按创建时间倒序）；v0.9.1：cron 且 active 的规则附带下次触发时间 */

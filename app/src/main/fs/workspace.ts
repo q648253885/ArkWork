@@ -65,14 +65,29 @@ export async function pickWorkspace(): Promise<string | undefined> {
   return dir
 }
 
+/** 文件树默认 ignore（B11/P1：.arkwork 是 agent 自身内容区，文件树一律不展示） */
+export const DEFAULT_TREE_IGNORE = ['.git', '.arkwork', 'node_modules', '.DS_Store']
+
 /** 列出指定目录下的文件树（深度受限） */
 export async function listTree(
   root: string,
   opts: { maxDepth?: number; ignore?: string[] } = {},
 ): Promise<FsNode[]> {
   const maxDepth = opts.maxDepth ?? 6
-  const ignore = new Set(opts.ignore ?? ['.git', 'node_modules', '.DS_Store'])
+  const ignore = new Set(opts.ignore ?? DEFAULT_TREE_IGNORE)
   return walk(root, 0, maxDepth, ignore)
+}
+
+/**
+ * B11/P1：列出单层目录（懒加载 IPC `fs:list-dir` 的数据源）。
+ * 子目录一律 `children: undefined`（语义=「未加载」），由渲染层逐层按需拉取。
+ */
+export async function listDir(
+  dir: string,
+  opts: { ignore?: string[] } = {},
+): Promise<FsNode[]> {
+  const ignore = new Set(opts.ignore ?? DEFAULT_TREE_IGNORE)
+  return walk(dir, 0, 1, ignore)
 }
 
 import type { FsNode } from '@shared/types/ipc'
@@ -97,7 +112,10 @@ async function walk(
     if (ignore.has(entry.name)) continue
     const fullPath = join(dir, entry.name)
     if (entry.isDirectory()) {
-      const children = await walk(fullPath, depth + 1, maxDepth, ignore)
+      // B11/P1：达到深度边界的目录返回 `children: undefined`（=「未加载」），
+      // 与「确认为空目录」的 `children: []` 区分 —— 渲染层据此触发懒加载。
+      // 此前返回 `[]` 导致第 maxDepth 层目录「点了没反应」，无法继续展开。
+      const children = depth + 1 >= maxDepth ? undefined : await walk(fullPath, depth + 1, maxDepth, ignore)
       nodes.push({
         name: entry.name,
         path: fullPath,

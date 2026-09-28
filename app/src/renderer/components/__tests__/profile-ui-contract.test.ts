@@ -14,10 +14,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { stripComments } from '@shared/utils/source-guard'
 
 const R = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf-8')
 /** 去注释后的源码（避免注释里的示例串被误判为真实代码） */
-const CODE = (rel: string): string => R(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+const CODE = (rel: string): string => stripComments(R(rel))
 
 const APP = '../../../..'
 
@@ -128,7 +129,11 @@ test('TC-PUI-008 切换失败不得改写视图态（事务性在 UI 侧的镜�
 test('TC-PUI-010 工具集联动只加不减：assembleTools 并入 profile 技能而非替换', () => {
   const src = CODE(`${APP}/src/main/agent/engine/messages.ts`)
   assert.match(src, /getLastSnapshot\(\)/, '必须读取当前工作台快照')
-  assert.match(src, /skillIdSet\.add\(t\.ref\)/, '并入是叠加语义')
+  // v0.36.0 F2.1：叠加语义的实现随 CapabilityRegistry 收敛移入 capability/registry.ts
+  // 的 project()（两段式锚点 —— 消费方经注册表投影 + 注册表内保留叠加语义，D97 纪律）
+  const regSrc = CODE(`${APP}/src/main/capability/registry.ts`)
+  assert.match(regSrc, /skillIdSet\.add\(t\.ref\)/, '并入是叠加语义（现居 project()）')
+  assert.match(src, /capabilityRegistry\.project\(/, 'assembleTools 必须经注册表投影（实现单点）')
   assert.ok(!/return \[\.\.\.snap/.test(src), '不得用快照整体替换既有工具集')
 })
 
@@ -232,7 +237,7 @@ test('TC-PUI-017 CenterStage 无任务分支读取 profileHomeModule（首页模
 test('TC-PUI-018 profileSlice 调用 ark.profile.slots() 并落 store（插槽消费链路存在）', () => {
   const slice = CODE(`${APP}/src/renderer/store/slices/profileSlice.ts`)
   assert.match(slice, /ark\.profile\.slots\(\)/, '必须从主进程拉插槽快照')
-  assert.match(slice, /deriveFromSlots/, '插槽快照必须经纯函数派生（panels/renderer/theme）')
+  assert.match(slice, /deriveFromSlots/, '插槽快照必须经纯函数派生（★ v0.36.0 D5：panels/theme 两份）')
 })
 
 test('TC-PUI-019 主题覆盖在 App 层落地（applyResolvedTheme + 清理对称）', () => {

@@ -21,6 +21,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { stripComments } from '@shared/utils/source-guard'
 
 const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf-8')
 
@@ -36,8 +37,8 @@ const HOST = read('../plugins/PluginViewHost.tsx')
  * 直接对原文做否定断言，会把「正确地写明不做这件事」判成「做了这件事」——
  * 那是最典型的假红，且会诱使后来者删掉那条好注释。
  */
-const strip = (s: string): string =>
-  s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+/** 注释剥离唯一真源见 `shared/utils/source-guard`（D101/D102）；`strip` 别名保留，避免改动全部下游调用点 */
+const strip = (s: string): string => stripComments(s)
 
 const HOST_CODE = strip(HOST)
 

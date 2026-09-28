@@ -52,6 +52,19 @@ export function getTaskMemoryDir(taskId: string): string {
   return join(getWorkspaceDir(), '.arkwork', 'memory', taskId)
 }
 
+/**
+ * v0.37.0：任务清单账本目录 —— {workspaceDir}/.arkwork/ledger/
+ * 与 tasks.json / graph.json 同域（隐藏区），文件树 IPC 对 .arkwork 整体忽略。
+ */
+export function getLedgerDir(): string {
+  return join(getWorkspaceDir(), '.arkwork', 'ledger')
+}
+
+/** v0.37.0：单任务清单账本文件 —— {workspaceDir}/.arkwork/ledger/{taskId}.json */
+export function getLedgerPath(taskId: string): string {
+  return join(getLedgerDir(), `${taskId}.json`)
+}
+
 async function ensureDir(path: string): Promise<void> {
   if (!existsSync(path)) {
     await mkdir(path, { recursive: true })
@@ -69,13 +82,106 @@ async function readJson<T>(path: string, fallback: T): Promise<T> {
   }
 }
 
-async function writeJson<T>(path: string, data: T): Promise<void> {
+/* ============================================================
+ * v0.36.4（D119）：原子写加固 —— 重试 + 降级直写
+ *
+ * 背景（Windows 10 用户实测）：writeJson 原子写 = writeFile(tmp) → rename(tmp, dest)。
+ * Windows 上 rename 的目标文件被杀毒软件 / Windows 索引器 / 同步盘（OneDrive 等）
+ * 短暂持有时抛 EPERM；Node 不自动重试。任务图每轮 Sync 都 persist，高频写入
+ * 把「一次锁冲突」放大成「一直报图落盘失败（内存状态保留）」——数据只在内存，
+ * 重启即丢。
+ *
+ * 策略（设计 16-v0364-windows-compat-design.md §二 D119）：
+ *  1. 退避重试 ×4（25/50/100/200ms + 抖动）—— 消化瞬时锁；
+ *  2. unlink(dest)（尽力）后再 rename 一次 —— 处理只读属性 / 残留句柄；
+ *  3. 仍失败 → 直写 dest（非原子）+ unlink(tmp)（尽力）+ warn 留痕。
+ *     语义取舍：直写打破「旧完整或新完整」的原子性，但「数据到手」优于
+ *     「数据只在内存」——这是落盘场景的实际优先级。
+ */
+
+/** rename 撞锁类错误（Windows EPERM/EACCES/EBUSY；POSIX 上一般不出现） */
+function isRenameLockError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException)?.code
+  return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY'
+}
+
+const ATOMIC_RETRIES = [25, 50, 100, 200]
+
+/** rename 退避用 sleep（避免引入 timers/promises 的顶层依赖差异） */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** 可注入 fs 依赖（仅测试用；默认真实 fs。测试注入失败的 rename 模拟 Windows 撞锁） */
+export interface AtomicWriteDeps {
+  rename: typeof rename
+  writeFile: typeof writeFile
+  unlink: typeof unlink
+}
+
+/**
+ * 原子写统一入口：tmp + rename，Windows 撞锁时重试，最终直写兜底。
+ * db.ts 内所有「tmp + rename」形态的写入都必须走这里（单一事实源，
+ * 守卫用例断言 db.ts 外无新增 tmp+rename 拷贝）。
+ */
+export async function atomicWriteFile(
+  path: string,
+  data: string,
+  deps: AtomicWriteDeps = { rename, writeFile, unlink },
+): Promise<void> {
   await ensureDir(dirname(path))
-  // v0.6.5 修复：原子写入——先写临时文件再 rename，防止并发读写时读到空文件
-  // 导致 readJson 返回 fallback []，进而丢失全部已有数据
   const tmp = `${path}.${randomBytes(4).toString('hex')}.tmp`
-  await writeFile(tmp, JSON.stringify(data, null, 2), 'utf-8')
-  await rename(tmp, path)
+  await deps.writeFile(tmp, data, 'utf-8')
+  try {
+    await deps.rename(tmp, path)
+    return
+  } catch (err) {
+    if (!isRenameLockError(err)) {
+      // 非锁类错误（如 ENOSPC）不做重试表演，直接抛——原语义不变
+      await deps.unlink(tmp).catch(() => {})
+      throw err
+    }
+    // ---- 退避重试 ----
+    let lastErr = err
+    for (const ms of ATOMIC_RETRIES) {
+      await sleep(ms + Math.floor(Math.random() * 15))
+      try {
+        await deps.rename(tmp, path)
+        return
+      } catch (retryErr) {
+        if (!isRenameLockError(retryErr)) {
+          await deps.unlink(tmp).catch(() => {})
+          throw retryErr
+        }
+        lastErr = retryErr
+      }
+    }
+    // ---- unlink + rename 再试一次（只读属性 / 残留句柄） ----
+    try {
+      await deps.unlink(path).catch(() => {})
+      await deps.rename(tmp, path)
+      return
+    } catch {
+      /* 落到直写兜底 */
+    }
+    // ---- 直写兜底（非原子；数据到手 > 教条原子性） ----
+    try {
+      await deps.writeFile(path, data, 'utf-8')
+      await deps.unlink(tmp).catch(() => {})
+      console.warn(
+        `[store] atomic rename failed after retries (${(lastErr as Error).message}); fell back to direct write: ${path}`,
+      )
+      return
+    } catch (directErr) {
+      await deps.unlink(tmp).catch(() => {})
+      throw directErr
+    }
+  }
+}
+
+async function writeJson<T>(path: string, data: T): Promise<void> {
+  // v0.36.4（D119）：原子写收敛到 atomicWriteFile（重试 + 直写兜底，见上）
+  await atomicWriteFile(path, JSON.stringify(data, null, 2))
 }
 
 /** 通用集合存储 — 单文件 JSON 数组 */
@@ -236,13 +342,10 @@ export class JsonlCollection<T extends { id: string }> {
     })
   }
 
-  /** 锁内重写：先写临时文件再 rename，并发读者要么读到旧完整文件、要么读到新完整文件 */
+  /** 锁内重写：先写临时文件再 rename（v0.36.4 D119：收敛到 atomicWriteFile，Windows 撞锁重试+直写兜底） */
   private async rewriteLocked(items: T[]): Promise<void> {
-    await ensureDir(dirname(this.filePath))
     const block = items.map((i) => JSON.stringify(i)).join('\n') + '\n'
-    const tmp = `${this.filePath}.${randomBytes(4).toString('hex')}.tmp`
-    await writeFile(tmp, block, 'utf-8')
-    await rename(tmp, this.filePath)
+    await atomicWriteFile(this.filePath, block)
   }
 
   async delete(id: string): Promise<void> {

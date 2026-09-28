@@ -12,6 +12,8 @@ import { getAgent } from '../store/agents.js'
 import { getModel } from '../store/agents.js'
 import { runReActLoop } from './engine/index.js'
 import { sealGraphForTaskOutcome } from './engine/gates.js'
+// v0.39.0（D184）：失败 / 取消 / 孤儿任务三条终态路径的账本封口
+import { sealLedger } from './ledger/engine.js'
 import { broadcastTaskStatus } from './events.js'
 import { maybeGenerateTaskTitle } from './task-title.js'
 import { logger } from '../system/logger.js'
@@ -89,7 +91,8 @@ export async function runTask(taskId: string): Promise<void> {
   if (updated) broadcastTaskStatus(updated)
 
   // v0.31.0 C2：fire-and-forget 生成任务标题（不阻塞主循环；内部自带
-  // titleSource 竞态保护与 20s 超时，失败静默保留原标题）。
+  // titleSource 竞态保护与 45s 超时（v0.34.x 调升，见 task-title.ts
+  // TITLE_TIMEOUT_MS），失败静默保留原标题）。
   void maybeGenerateTaskTitle(taskId)
 
   // generation 自增：每次 runTask 都把计数 +1，并记下本次的 startGeneration。
@@ -130,6 +133,14 @@ export async function runTask(taskId: string): Promise<void> {
       } catch {
         /* 收口失败不阻断终态写入 */
       }
+      // v0.39.0（D184）：**账本也要封**。上面封的是图，账本若停在 `open`，
+      // 清单会一直显示"进行中"、归档侧也拿不到终态（与 D184 的 loop/abort 分支同口径）。
+      // 幂等且失败不阻断 —— 这里的语义是"绝不留下 task=failed 而账本未封的残留"。
+      try {
+        await sealLedger(taskId, 'failed', `run 异常终止：${message.slice(0, 120)}`)
+      } catch {
+        /* 同上 */
+      }
       const failed = await updateTask(taskId, {
         status: 'failed',
         completedAt: Date.now(),
@@ -140,6 +151,11 @@ export async function runTask(taskId: string): Promise<void> {
     })
     .finally(() => {
       if (controllers.get(taskId) === controller) controllers.delete(taskId)
+      // v0.36.4（D120）：任务终态兜底重试 —— 启动时的 fire-and-forget 标题生成
+      // 在本地大思考模型上可能超时静默失败（titleSource 仍空 → 永远「未命名任务」）。
+      // 收尾时任务已产出完整内容，此时再试一次成功率最高；内部 titleSource
+      // 竞态保护保证：已生成/用户已改名则自动跳过，fire-and-forget 不影响终态。
+      void maybeGenerateTaskTitle(taskId)
     })
 }
 
@@ -178,6 +194,9 @@ export async function cancelTask(
   // 收口幂等：已在跑的场景下这里先封一次，循环随后的收口成为无操作。
   // （「取消后又被继续」不会因此失真 —— 新一轮启动会 reopen 图，见 loop.ts。）
   if (updated) await sealGraphForTaskOutcome(updated, 'cancelled', '任务已取消')
+  // v0.39.0（D184）：账本同步封口（与图同口径）—— 任务 cancelled 而账本 `open`
+  // 会让清单一直显示"进行中"，归档侧也拿不到终态 outcome。
+  if (updated) await sealLedger(taskId, 'cancelled', '任务已取消')
 }
 
 export function isTaskRunning(taskId: string): boolean {
@@ -228,6 +247,9 @@ export async function reconcileOrphanRunning(): Promise<void> {
       // v0.32.1（缺陷 D36）：崩溃重启修正孤儿任务时同样要封图 —— 否则重启后
       // 任务列表显示「失败」，任务面板里那张图却还挂着「进行中」。
       if (updated) await sealGraphForTaskOutcome(updated, 'failed', '进程异常退出，孤儿任务已修正')
+      // v0.39.0（D184）：孤儿任务（进程崩溃残留）同样要封账本 —— 否则重启后
+      // 任务显示 failed，清单却永远停在"进行中"。
+      if (updated) await sealLedger(task.id, 'failed', '进程异常退出，孤儿任务已修正')
       logger.warn('Agent', `reconcile: orphan running ${task.id} → failed`, task.id)
     } catch (err) {
       logger.warn('Agent', `reconcile fix failed for ${task.id}: ${(err as Error).message}`)

@@ -19,6 +19,7 @@ import { useStore } from '../../store'
 import { ark } from '../../ipc/client'
 import { ActivationReportView } from './ActivationReportView'
 import { ProfileEditor } from './ProfileEditor'
+import { ProfileWizard } from './ProfileWizard'
 import { ImportDialog } from './ImportDialog'
 
 function iconOf(name?: string) {
@@ -41,6 +42,7 @@ export function ProfilesView() {
 
   const [editing, setEditing] = useState<{ id: string; source: 'builtin' | 'user' } | null>(null)
   const [importing, setImporting] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [showReport, setShowReport] = useState(false)
 
   const active = profiles.find((p) => p.id === activeId)
@@ -132,10 +134,20 @@ export function ProfilesView() {
 
       {/* ---------- 操作条 ---------- */}
       <section className="flex items-center gap-2 flex-wrap">
+        {/* ★ v0.36.0（F5.3）：从零建台 → 四步向导（主路径）。
+            导入/克隆仍是「有素材时」的次路径，故降为次级按钮。 */}
+        <button
+          type="button"
+          onClick={() => setCreating(true)}
+          className="flex items-center gap-1.5 h-8 px-3 rounded-md bg-business-primary text-text-inverse text-xs hover:bg-business-primary-hover focus-ring"
+        >
+          <Icon.Sparkle width={13} height={13} aria-hidden />
+          {t('workbench.wizard.title')}
+        </button>
         <button
           type="button"
           onClick={() => setImporting(true)}
-          className="flex items-center gap-1.5 h-8 px-3 rounded-md bg-business-primary text-text-inverse text-xs hover:bg-business-primary-hover focus-ring"
+          className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-border-subtle text-xs text-text-secondary hover:bg-bg-hover focus-ring"
         >
           <Icon.Upload width={13} height={13} aria-hidden />
           {t('workbench.profiles.import')}
@@ -242,6 +254,7 @@ export function ProfilesView() {
         />
       )}
       {importing && <ImportDialog onClose={() => setImporting(false)} onImported={reload} />}
+      {creating && <ProfileWizard plugins={plugins} onClose={() => setCreating(false)} onCreated={reload} />}
     </div>
   )
 }

@@ -18,42 +18,15 @@
  * 避免「内置走特殊通道、校验被绕过」。
  * ============================================================ */
 import { parseManifest } from '@shared/utils/profile-manifest'
-import { BUILTIN_EXT_RENDERER } from '@shared/utils/renderer-ext'
-import { RENDERER_KIND_WHITELIST } from '@shared/types/vlib'
-import type { SlotEntry, WorkbenchProfile } from '@shared/types/profile'
+import type { WorkbenchProfile } from '@shared/types/profile'
 
 /** 底座默认命名空间（v0.30.x 既有单空间记忆的归属） */
 export const BASE_NAMESPACE = 'default'
 
-/**
- * ★ v0.33.0：内置渲染器登记 —— 8 条 `ui.renderer`（7 渲染器 + editor）。
- *
- * 为什么内置渲染器要**入槽**（正本 04 §2「存量迁移第一批」）：
- *  - 插件接管扩展名的判定需要「内置占用了哪些扩展名」这个事实，入槽即成为可查数据；
- *  - 渲染侧的覆盖表（`rendererOverrides`）由此表 + profile/plugin 声明合成，
- *    `detectRenderer` 不再硬编码（迁移期行为不变，见 renderer-ext.ts 的对齐纪律）。
- *
- * 来源恒为 `builtin`：`resetProfileSlots('profile'|'plugin')` 不会误删它们（缺陷 D42）。
- */
-export function builtinRendererSlotEntries(): SlotEntry[] {
-  const byKind: Record<string, string[]> = {}
-  for (const [ext, kind] of Object.entries(BUILTIN_EXT_RENDERER)) {
-    ;(byKind[kind] ??= []).push(ext)
-  }
-  return RENDERER_KIND_WHITELIST.map((kind, i) => ({
-    id: `renderer:${kind}`,
-    kind: 'ui.renderer' as const,
-    label: kind,
-    source: 'builtin' as const,
-    position: i,
-    payload: {
-      rendererKind: kind,
-      extensions: (byKind[kind] ?? []).slice().sort(),
-      override: false,
-      labelKey: `preview.registry.${kind}`,
-    },
-  }))
-}
+/* ★ v0.36.0（D5）：`builtinRendererSlotEntries()` 已删除 ——
+ * 它登记的 8 条 `ui.renderer` 条目随插槽契约收缩一并消失。
+ * 「内置扩展名 → 渲染器」的唯一真源现在是 `shared/utils/renderer-ext.ts` 的
+ * `BUILTIN_EXT_RENDERER`（`detectRendererKind()` 直读它），不再经插槽中转。 */
 
 const RAW_BUILTINS: Array<Record<string, unknown>> = [
   /* ---------- 通用工作台：底座等价形态 ---------- */
@@ -133,7 +106,7 @@ const RAW_BUILTINS: Array<Record<string, unknown>> = [
     name: '研究工作台',
     icon: 'Book',
     version: '1.0.0',
-    description: '面向调研与写作：检索/抓取/知识库技能 + 知识库首页 + 独立记忆域。',
+    description: '面向调研与写作：检索/抓取/知识库技能 + 独立记忆域。',
     author: 'local',
     agents: [
       {
@@ -150,7 +123,8 @@ const RAW_BUILTINS: Array<Record<string, unknown>> = [
       dockTabs: ['context', 'files', 'todos', 'browser'],
       // v0.34.0（D55）：同 wb.coding —— 原挂 `panel:runtime-metrics`（示例插件贡献），
       // 与「示例插件默认禁用」冲突；内置台不得依赖可选插件，已移除。
-      homeModule: 'kb',
+      // v0.36.0（B11/P2）：移除 homeModule:'kb' —— 点研究工作台应落在工作台本位，
+      // 知识库从左侧导航进入；此前无选中任务时中栏直接渲染知识库页，形同误跳。
       composerChips: ['找资料', '写综述', '列未知区'],
     },
     data: { memoryNamespace: 'research', shareCoreProfile: true },

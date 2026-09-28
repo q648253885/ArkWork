@@ -13,7 +13,7 @@
  * ============================================================ */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { SAMPLE_PLUGIN_MANIFESTS } from '../sample-plugins.js'
 import {
   BUILTIN_PANEL_REFS,
@@ -26,12 +26,10 @@ import {
   getHostVersion,
 } from '../registry.js'
 import { parsePluginManifest } from '@shared/utils/plugin-manifest'
-import { BUILTIN_EXTENSIONS } from '@shared/utils/renderer-ext'
+import { stripComments } from '@shared/utils/source-guard'
 import type { InstalledPlugin, PluginManifest } from '@shared/types/plugin'
 
-const REGISTRY_SRC = readFileSync(new URL('../registry.ts', import.meta.url), 'utf-8')
-  .replace(/\/\*[\s\S]*?\*\//g, '')
-  .replace(/\/\/.*$/gm, '')
+const REGISTRY_SRC = stripComments(readFileSync(new URL('../registry.ts', import.meta.url), 'utf-8'))
 
 function manifestOf(id: string, over: Record<string, unknown> = {}): PluginManifest {
   const raw = {
@@ -77,17 +75,29 @@ test('TC-PLGR-001 随包示例齐备且每个都通过 parsePluginManifest（同
 test('TC-PLGR-001b ★ 随包示例必须是真实功能插件（不得再有 static 假数据示例）', () => {
   // 为什么钉这条：v0.34.0 的四个示例全是 `data.kind: 'static'` 的假数据，
   // 它们只证明「机制能跑」，用户却会以为插件就是放示例表格的 —— 范例本身在说谎。
+  // v0.36.0：Git Manager 是代码插件（provides.views / commands），没有声明式面板 ——
+  // 不变量从「必须贡献面板」放宽为「必须贡献真实能力点」，但 static 禁令原样保留。
   for (const m of SAMPLE_PLUGIN_MANIFESTS) {
     const panels = [m.provides.panel, ...(m.provides.panels ?? [])].filter(
       (x): x is NonNullable<typeof x> => !!x,
     )
-    assert.ok(panels.length > 0, `${m.id} 必须贡献至少一个面板`)
+    const views = m.provides.views ?? []
+    const commands = m.provides.commands ?? []
+    assert.ok(
+      panels.length + views.length + commands.length > 0,
+      `${m.id} 必须贡献至少一个真实能力点（面板/视图/命令）`,
+    )
     for (const pd of panels) {
       assert.notEqual(
         pd.data.kind,
         'static',
         `${m.id}/${pd.panelRef} 不得用 static 假数据 —— 随包示例必须是真实功能`,
       )
+    }
+    // 代码视图：renderer 必须存在（有 Client 半真页面），placement 只能 dock/float
+    for (const v of views) {
+      assert.ok(v.renderer, `${m.id}/${v.viewRef} 代码视图必须有 renderer（Client 半）`)
+      assert.ok(['dock', 'float'].includes(v.placement), `${m.id}/${v.viewRef} placement 只能 dock/float`)
     }
   }
 })
@@ -170,7 +180,7 @@ test('TC-PLGR-007 uninstall 对随包示例插件拒绝（源码契约 + 真实�
   }
 })
 
-test('TC-PLGR-008 renderer 接管内置扩展名：未 override 不产出；override 产出', () => {
+test('TC-PLGR-008 ★ v0.36.0（D5）：renderer 插件不再产插槽条目，但必须**显式 warn**（不静默）', () => {
   const mk = (override: boolean): InstalledPlugin => {
     const m = manifestOf('ark.plugin.r8', {
       kind: 'renderer',
@@ -178,19 +188,21 @@ test('TC-PLGR-008 renderer 接管内置扩展名：未 override 不产出；over
     })
     return installed(m)
   }
-  assert.equal(pluginContributions([mk(false)]).length, 0, '.csv 已被内置占用且未 override → 忽略')
-  const out = pluginContributions([mk(true)])
-  assert.equal(out.length, 1)
-  assert.equal(out[0]!.kind, 'ui.renderer')
-  assert.equal(out[0]!.id, 'renderer:csv')
-  // 夹具本身占用的是真内置扩展名（否则这条用例没有测到目标分支）
-  assert.ok(BUILTIN_EXTENSIONS.includes('csv'))
-  // 非占用扩展名（kchart）无需 override 也产出
+  // 原用例守「.csv 被内置占用且未 override → 忽略；override → 产出 ui.renderer 条目」。
+  // `ui.renderer` 随 D5 从契约删除后，**两种情形都不再产条目** ——
+  // 但「声明了却什么也没发生」是典型静默退化，故必须留人话（源码契约把守那行 warn）。
+  assert.equal(pluginContributions([mk(false)]).length, 0)
+  assert.equal(pluginContributions([mk(true)]).length, 0, 'override:true 也不再产条目（插槽已不存在）')
   const fresh = manifestOf('ark.plugin.r8b', {
     kind: 'renderer',
     provides: { renderer: { rendererKind: 'table', extensions: ['kchart'], override: false } },
   })
-  assert.equal(pluginContributions([installed(fresh)]).length, 1)
+  assert.equal(pluginContributions([installed(fresh)]).length, 0)
+  assert.match(
+    REGISTRY_SRC,
+    /ui\.renderer 插槽已在 v0\.36\.0 从契约删除/,
+    '必须留下「已删除 → 不生效」的人话 warn（纪律⑨：静默退化是复合缺陷的粘合剂）',
+  )
 })
 
 /* ============================================================
@@ -257,12 +269,35 @@ test('TC-PLGR-013 ★ 反向保险：占位值 0.0.0 必须判为不满足 —�
 })
 
 test('TC-PLGR-014 ★ 接线契约：bootstrap 必须注入真实宿主版本，且**早于**首次扫描', () => {
-  const bootSrc = readFileSync(new URL('../bootstrap.ts', import.meta.url), 'utf-8')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/.*$/gm, '')
+  const bootSrc = stripComments(readFileSync(new URL('../bootstrap.ts', import.meta.url), 'utf-8'))
   assert.match(bootSrc, /setHostVersion\(app\.getVersion\(\)\)/, '必须注入 app.getVersion()，不是别的来源')
   const atInject = bootSrc.indexOf('setHostVersion(app.getVersion())')
   const atScan = bootSrc.indexOf('refreshPluginsAndIndex()')
   assert.ok(atScan > 0, '前提：bootstrap 里确实有首次扫描（否则本用例空转）')
   assert.ok(atInject < atScan, '注入必须早于首次扫描 —— 顺序反了 VP8 仍读到占位值')
+})
+
+test('TC-PLGR-015 ★ 接线契约（D95）：main 层不得出现 pluginSummaries(裸 listPlugins) —— UI 只许走 listPluginSummaries', () => {
+  // 为什么钉这条：D95 的实际故障就是 IPC List 写了
+  // `pluginSummaries(await listPlugins())`。listPlugins() 的 enabled 是**占位 false**，
+  // 真实值要经 applyEnabled() 三级解析（工作区→全局→清单缺省）才写回。
+  // 结果：插件在跑、plugins.json 也写着 true，管理页却显示「0 个启用」、开关永远关。
+  // 这条契约把「忘记解析」这个高频形态钉死在源码层；行为层由 TC-PI-018 真跑一遍。
+  const root = new URL('../', import.meta.url)
+  const bad: string[] = []
+  const walk = (dir: URL): void => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === '__tests__' || e.name.startsWith('.')) continue
+      const p = new URL(`${e.name}${e.isDirectory() ? '/' : ''}`, dir)
+      if (e.isDirectory()) void walk(p)
+      else if (e.name.endsWith('.ts')) {
+        // 纪律 12：先剥注释 —— 否则注释里提到坏写法会误报
+        const src = stripComments(readFileSync(p, 'utf-8')).replace(/\s+/g, ' ')
+        if (/pluginSummaries\(\s*await\s+listPlugins\(\)/.test(src)) bad.push(p.pathname)
+        if (/pluginSummaries\(\s*\(?\s*await\s+listPlugins/.test(src)) bad.push(p.pathname)
+      }
+    }
+  }
+  void walk(root)
+  assert.deepEqual(bad, [], `以下文件直接把裸 listPlugins() 喂给 pluginSummaries —— 必须改用 listPluginSummaries()（D95）：\n${bad.join('\n')}`)
 })

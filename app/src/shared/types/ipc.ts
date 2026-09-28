@@ -22,7 +22,7 @@ import type {
 } from './memory'
 import type { Agent, Skill, McpServer, LlmModel, LlmProviderKind, SkillSource } from './agent'
 import type { Automation, KnowledgeBase } from './conversation'
-import type { PermissionMode, ResolvedRules, PermissionDecision } from './permission'
+import type { PermissionMode, ResolvedRules, PermissionDecision, PermissionRuleEntry, PermissionRuleBehavior } from './permission'
 // v0.32.0：Workbench Profile（插件模式）
 import type {
   ActivationReport,
@@ -193,13 +193,26 @@ export interface TaskUpdatePatch {
  * v0.15.0：权限模型 IPC
  * - getMode / setMode：会话级 PermissionMode 切换
  * - resolveRules：返回四级配置合并后的最终规则（供 UI 调试展示）
+ *
+ * ★ v0.36.0（F6.1 / P9）新增三条 —— 面板要「逐行来源 + 逐行开关 + 逐行删除」：
+ * - listRules：带 scope / enabled / editable 的条目列表
+ * - removeRule / setRuleEnabled：只作用于 `local`（其余三级是只读配置文件）
  */
 export const PermissionChannel = {
   GetMode: 'permission:getMode',
   SetMode: 'permission:setMode',
   ResolveRules: 'permission:resolveRules',
   AddRule: 'permission:addRule',
+  ListRules: 'permission:listRules',
+  RemoveRule: 'permission:removeRule',
+  SetRuleEnabled: 'permission:setRuleEnabled',
 } as const
+
+/** 规则的定位键（原文 + 行为；原文可能同时出现在多张行为表里，故必须带行为） */
+export interface PermissionRuleRef {
+  rule: string
+  behavior: PermissionRuleBehavior
+}
 
 export interface PermissionModeEvent {
   taskId?: string
@@ -596,6 +609,8 @@ export interface ContextBreakdownResult {
 /* ---- fs ---- */
 export const FsChannel = {
   ListFiles: 'fs:list-files',
+  // v0.36.0 B11/P1：单层目录懒加载（文件树深层展开）
+  ListDir: 'fs:list-dir',
   ReadFile: 'fs:read-file',
   WriteFile: 'fs:write-file',
   StatFile: 'fs:stat-file',
@@ -712,6 +727,7 @@ export const PLUGIN_VIEW_METHODS = [
   'data.request',
   'storage.get',
   'storage.set',
+  'host.call', // v0.36.0：转发到 Host 半 ctx.views.onCall 注册表（params = { method, params }）
 ] as const
 export type PluginViewMethod = (typeof PLUGIN_VIEW_METHODS)[number]
 
@@ -770,7 +786,55 @@ export const PluginChannel = {
   ViewPost: 'plugin:view-post',
   /** main → renderer：插件试图打开/聚焦某个视图（模型侧控制工具用） */
   ViewOpenRequest: 'plugin:view-open-request',
+
+  /* ---------- ★ v0.36.0：安装 / 命令 ---------- */
+  /** 安装插件包（.zip）；无 zipPath 时弹文件选择框 */
+  InstallZip: 'plugin:install-zip',
+  /** 列出某插件（或全部）贡献的命令（QuickAction 与插件详情共用） */
+  ListCommands: 'plugin:list-commands',
+  /** 触发一条插件命令（supervisor 直发 host/emit，delivered=0 即报错） */
+  RunCommand: 'plugin:run-command',
 } as const
+
+/* ============================================================
+ * ★ v0.36.0：插件安装 / 命令 IPC 载荷
+ * ============================================================ */
+
+/** 安装结果（install-zip 出参；errors 为设计文档 §3.4 五枚举之一） */
+export interface PluginInstallZipResult {
+  ok: boolean
+  /** 未传 confirmed（首次）时返回预览，等用户确认后带 confirmed:true 再调一次 */
+  needsConfirm?: boolean
+  /** needsConfirm 时的清单预览（校验通过的插件才走到这步） */
+  manifest?: {
+    id: string
+    name: string
+    version: string
+    author?: string
+    description?: string
+  }
+  /** needsConfirm 时的能力/权限预告（安装确认弹窗展示用） */
+  capabilities?: string[]
+  permissions?: string[]
+  /** 已存在同 id 且版本相同 → 需 overwrite 才覆盖 */
+  alreadyExists?: boolean
+  /** 安装成功后的 id */
+  id?: string
+  /** 失败错误码（人话 message 并行给出） */
+  error?: string
+  message?: string
+}
+
+/** 命令条目（list-commands 出参行） */
+export interface PluginCommandEntry {
+  pluginId: string
+  pluginName: string
+  id: string
+  title: string
+  icon?: string
+  /** 当前插件是否可用（enabled 且校验通过） */
+  runnable: boolean
+}
 
 /** v0.4.0：主题三态（浅色 / 深色 / 跟随系统） */
 export type ThemeMode = 'light' | 'dark' | 'system'
@@ -885,6 +949,26 @@ export interface AppSettings {
    * 设置后不得指向 .arkwork 目录（Agent 自身内容区域）。
    */
   artifactsDir?: string
+  /**
+   * v0.36.4（PERF-1）：性能模式三态。
+   * - 'auto'（缺省）：按 GPU 状态自动判定（软件渲染/VM 漏判修补后仍走自动）；
+   * - 'on'：强制性能降级（抑制连续动画 + 流式攒批放大）——低配 VM 用户可直接在设置页开启；
+   * - 'off'：强制关闭降级（自动判定误判时的逃生门）。
+   */
+  perfMode?: 'auto' | 'on' | 'off'
+  /**
+   * v0.36.4（D120）：旁路轻量模型 id（OpenCode small_model 同款）。
+   * 用于任务标题等高频低价值旁路 LLM 调用；空 = 用任务自身模型（行为不变）。
+   * 本地大模型（如 27B 思考模型）场景下，指到 0.6b/4b 级小模型可秒级返回。
+   */
+  lightweightModelId?: string
+  /**
+   * v0.39.0（F1）：规划模型 id —— 规划通道（Planner Pass）专用的独立 LLM 回合。
+   * 空 = 与任务同模型（默认，行为不变）；
+   * 想复刻 Cline「Plan 用强模型、Act 用快模型」时可以在这里指向另一个模型。
+   * 刻意**不提供 UI**： Planning 质量优于命中率的场合才配，属高级配置。
+   */
+  plannerModelId?: string
 }
 
 /** 本地 keychain 风格的密钥表（按 key 存字符串） */
@@ -994,10 +1078,92 @@ export interface PlanItemListSnapshotPayload {
   ts: number
 }
 
+/* ============================================================
+ * v0.37.0：TaskLedger（任务清单唯一真相源）
+ * 设计文档：docs/versions/v0.37.0/04-system-design.md §2 / §7
+ * ============================================================ */
+
+/** 清单项状态（与 main/agent/ledger/types.ts 的 LedgerItemStatus 同构，供 Renderer 只读消费） */
+export type LedgerItemStatusView =
+  | 'pending'
+  | 'running'
+  | 'paused'
+  | 'blocked'
+  | 'verifying'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+  | 'skipped'
+
+/** UI 只读的清单项投影（不含可变入口） */
+export interface LedgerItemView {
+  id: string
+  text: string
+  status: LedgerItemStatusView
+  parentId: string | null
+  acceptance: string[]
+  note?: string
+  attempts: number
+  completedAt?: number
+}
+
+/** UI 只读的账本快照 */
+export interface LedgerSnapshotView {
+  taskId: string
+  /** chat / plan / spec —— **由模型自选**，UI 只展示不提供选择 */
+  mode: 'chat' | 'plan' | 'spec'
+  modeReason: string
+  modeBy: 'model' | 'engine'
+  revision: number
+  updatedAt: number
+  items: LedgerItemView[]
+  /** 恢复点人话提示（中断后续聊显示） */
+  resumeHint?: string
+  hasResumePoint: boolean
+  /** 未收口项数量（完成门禁与 UI 徽标共用） */
+  openCount: number
+}
+
+/** v0.39.0（D187）：单条清单变更日志（永久审计与 UI 时间线共用同一形状） */
+export interface LedgerLogEntryView {
+  at: number
+  op: string
+  itemId?: string
+  from?: string
+  to?: string
+  by: string
+  note?: string
+}
+
+/** v0.39.0（D187）：清单历史查询返回 */
+export interface LedgerHistoryView {
+  taskId: string
+  /** 最新在前 */
+  entries: LedgerLogEntryView[]
+  /** 是否有终态归档快照 */
+  archived: boolean
+  archivedAt?: number
+  outcome?: 'completed' | 'failed' | 'cancelled'
+  reason?: string
+}
+
+export interface LedgerSnapshotPayload {
+  taskId: string
+  snapshot: LedgerSnapshotView
+  version: number
+  ts: number
+}
+
 /** v0.18.0：用户手动切状态的回执 */
 export type PlanItemActionResult =
   | { ok: true; version: number; effectiveStatus: PlanItemStatus }
   | { ok: false; error: { code: 'E_NOT_FOUND' | 'E_INVALID_STATE' | 'E_PERMISSION_DENIED'; message: string } }
+
+/**
+ * v0.36.0（F4.2）：并行子 agent 单卡操作回执（取消 / 重试）。
+ * 失败一律带人话 message —— 静默失败在这条链路上等于用户点了没反应（纪律⑨）。
+ */
+export type SubagentActionResult = { ok: true; message?: string } | { ok: false; message: string }
 
 /** bugfix 续跑模式（⌘K 可切换） */
 export type BugfixMode = 'multi-attempt' | 'single-attempt'
@@ -1136,9 +1302,29 @@ export interface ArkApi {
     markDonePlanItem: (payload: { taskId: string; planItemId: string }) => Promise<PlanItemActionResult>
     /** v0.18.0：Renderer 主动拉取 planItems 整对象（patch 落后兜底） */
     fetchPlanItemList: (taskId: string) => Promise<PlanItem[]>
+    /** v0.37.0：拉取任务清单账本快照（唯一真相源，只读） */
+    fetchLedgerSnapshot: (taskId: string) => Promise<LedgerSnapshotView | null>
+    /** v0.39.0（D187）：清单变更历史（永久日志 + 归档状态） */
+    fetchLedgerHistory: (taskId: string, limit?: number) => Promise<LedgerHistoryView | null>
+    /** v0.37.0：订阅账本变更（Main → Renderer 单向） */
+    onLedgerChanged: (cb: (payload: LedgerSnapshotPayload) => void) => () => void
     /** Task 9：任务侧边栏进度摘要持久化（独立 IPC 通道，避免污染 task:status 主链路） */
     progressSave: (payload: { taskId: string; progress: TaskProgress }) => Promise<void>
     progressLoad: () => Promise<Record<string, TaskProgress> | null>
+    /**
+     * v0.36.0（F4.2）：取消单个并行子 agent（P5 卡「取消」按钮）。
+     * 只中断该子任务，父任务与同批其它子任务不受影响；子任务已终结时 ok:false。
+     */
+    cancelSubagent: (childTaskId: string) => Promise<SubagentActionResult>
+    /**
+     * v0.36.0（F4.2）：重试失败的子 agent（P5 卡「重试该子任务」）。
+     * 复用 delegate 通道单发目标 —— 产生新的 childTaskId，进度事件照常回到父任务。
+     */
+    retrySubagent: (payload: {
+      parentTaskId: string
+      agentId: string
+      objective: string
+    }) => Promise<SubagentActionResult>
   }
   /** v0.14.0 Task 11：bugfix 技能 — 进度订阅（操作岛台）与模式切换（⌘K） */
   bugfix: {
@@ -1198,8 +1384,22 @@ export interface ArkApi {
     getMode: () => Promise<PermissionMode>
     setMode: (mode: PermissionMode) => Promise<PermissionMode>
     resolveRules: () => Promise<ResolvedRules>
-    /** 把一条规则追加写入 .arkwork/settings.local.json（仅 allow 规则） */
-    addRule: (rule: string, scope?: 'allow') => Promise<void>
+    /**
+     * 把一条规则追加写入 .arkwork/settings.local.json。
+     * ★ v0.36.0（F6.1 / P9）：第二个参数由 `'allow'` 放宽为完整行为（allow/ask/deny）——
+     * 旧名 `scope` 是历史命名（当时只能写 allow），语义一直是「行为」。
+     */
+    addRule: (rule: string, behavior?: PermissionRuleBehavior) => Promise<void>
+    /**
+     * ★ v0.36.0（F6.1 / P9）：带**来源与生效态**的规则条目（面板消费的就是它）。
+     * 与 `resolveRules` 的分工：`resolveRules` 是「合并后用于评估的集合」，
+     * 本方法是「逐条的来源 + 生效态」，两者不可互相替代。
+     */
+    listRules: () => Promise<PermissionRuleEntry[]>
+    /** ★ v0.36.0：删除一条 local 规则（其余作用域只读，主进程会拒绝） */
+    removeRule: (req: PermissionRuleRef) => Promise<void>
+    /** ★ v0.36.0：开关一条 local 规则的生效态（登记式关停，可再打开） */
+    setRuleEnabled: (req: PermissionRuleRef & { enabled: boolean }) => Promise<void>
     /** 会话模式变更推送（Shift+Tab / UI 切换时主进程广播） */
     onModeChanged: (cb: (payload: PermissionModeEvent) => void) => () => void
   }
@@ -1267,6 +1467,8 @@ export interface ArkApi {
   }
   fs: {
     listFiles: (taskId?: string) => Promise<FsNode[]>
+    /** v0.36.0 B11/P1：单层目录懒加载；子目录 children 恒为 undefined（未加载） */
+    listDir: (dirPath: string) => Promise<FsNode[]>
     readFile: (path: string) => Promise<FileContent>
     writeFile: (path: string, content: string) => Promise<void>
     revealInFolder: (path: string) => Promise<void>
@@ -1426,8 +1628,8 @@ export interface ArkApi {
       ok: boolean
       reason?: string
     }>
-    /** 卸载用户插件（内置插件会被拒） */
-    uninstall: (args: { id: string }) => Promise<{ ok: boolean; reason?: string }>
+    /** 卸载用户插件（内置插件会被拒）；v0.36.0 起 purgeData 可连私有 KV 一起清 */
+    uninstall: (args: { id: string; purgeData?: boolean }) => Promise<{ ok: boolean; reason?: string }>
     /** 重新扫描插件目录（文件系统外部改动后手动刷新） */
     rescan: () => Promise<PluginSummary[]>
     /** 在系统文件管理器中打开插件目录（给用户放插件用） */
@@ -1464,6 +1666,14 @@ export interface ArkApi {
     onViewPost: (cb: (payload: { sessionId: string; payload: unknown }) => void) => () => void
     /** 订阅「请打开某视图」（模型侧控制工具触发） */
     onViewOpenRequest: (cb: (payload: { pluginId: string; viewRef: string }) => void) => () => void
+
+    /* ---------- ★ v0.36.0：安装 / 命令 ---------- */
+    /** 安装插件包（zip）。不传 zipPath 时 main 弹文件选择框；两段式：首次回 needsConfirm 预览，确认后带 confirmed 重调 */
+    installZip: (args?: { zipPath?: string; confirmed?: boolean; overwrite?: boolean }) => Promise<PluginInstallZipResult>
+    /** 列出启用插件贡献的命令（QuickAction 与插件详情共用） */
+    listCommands: (args?: { pluginId?: string }) => Promise<PluginCommandEntry[]>
+    /** 触发一条插件命令（未激活会先懒激活；失败如实报错） */
+    runCommand: (args: { pluginId: string; commandId: string }) => Promise<{ ok: boolean; message?: string }>
   }
   /** v0.4.0：主题（同步原生界面 + 监听系统主题变化） */
   theme: {
@@ -1547,6 +1757,8 @@ export interface ArkApi {
     pendingPlan: (taskId: string) => Promise<PlanApproval | null>
     /** P8：决定计划闸门（approve 冻结 AC 并放行 / reject 打回 / edit 反向解析校验后合并） */
     decidePlan: (payload: GraphPlanDecisionPayload) => Promise<GraphResult<GraphSnapshot | null>>
+    /** v0.38.1（D173）：关闭降级错误卡（仅 degraded 闸门可关；幂等，已不存在返回 ok） */
+    dismissPlanDegraded: (taskId: string) => Promise<GraphResult<null>>
     /** 指标快照（幻影完成率 / 同步开销率，用于开发期观测） */
     metrics: () => Promise<MetricsSnapshot>
     /** v0.30.1 F3-1：无图时返回默认策略块（面板降级展示，纯新增频道） */
@@ -1642,6 +1854,8 @@ export interface GraphConvergePayload {
  * P8 · 计划闸门决策载荷。
  *
  * - `approve`：`spec.state` 置 `approved` + AC 快照为 `frozenTests`（I3 生效）→ 放行执行；
+ *   F6.2 增强：`approvedItemIds` 勾选子集（缺省 = 全选；未勾选项按 `cancelled` 收口）、
+ *   `nodeEdits` 行内改题（合并进图并记 Revision）、`startExecution:false` = 仅保留计划不执行；
  * - `reject` ：记 `Revision.reason='user-rejected'`，`userNote` 作为用户消息注入，Planner 重规划；
  * - `edit`   ：`markdown` 走反向解析 + schema 校验，通过则合并进 spec（仍待批准），
  *              失败返回 `SCHEMA_INVALID` + `violatedBy.field`（前端高亮该字段并保留原 JSON）。
@@ -1653,6 +1867,12 @@ export interface GraphPlanDecisionPayload {
   userNote?: string
   /** edit 时改写后的 Markdown（只读渲染产物 graph.md 的内容） */
   markdown?: string
+  /** F6.2：approve 时勾选的结构行节点 id；缺省 = 全部；空数组 = 拒绝（SCHEMA_INVALID） */
+  approvedItemIds?: string[]
+  /** F6.2：approve 时用户行内改过的计划项标题（合并进图并记 Revision） */
+  nodeEdits?: { id: string; title: string }[]
+  /** F6.2：approve 后是否随即放行执行；`false` = 仅保留计划不执行（不注入续跑消息） */
+  startExecution?: boolean
 }
 
 /**

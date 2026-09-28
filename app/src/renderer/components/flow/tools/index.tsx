@@ -4,14 +4,12 @@
  * 六类渲染器各有独立组件：Generic / Terminal / Read / Search / Web / Write。
  * ============================================================ */
 import type { ToolCallView, ToolResultView } from '@shared/types/tool-present'
-import { GenericCallView, GenericResultView, ResultSummaryLine } from './GenericCard'
+import { GenericCallView, GenericResultView } from './GenericCard'
 import { TerminalCallView, TerminalResultView } from './TerminalCard'
 import { ReadResultView } from './ReadCard'
 import { SearchMatchesView, SearchPathsView } from './SearchCard'
 import { WebSearchView, WebFetchView } from './WebCard'
 import { WriteCallView, WriteResultView } from './WriteCard'
-
-export { ResultSummaryLine }
 
 export function ToolCallBody({ call }: { call: ToolCallView }) {
   switch (call.card) {

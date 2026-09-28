@@ -4,6 +4,7 @@
  * 不 mock LLM，纯源码契约断言：
  *  1. isProductiveTool 白名单不含 file-writer/file-editor/shell（避免清单抢跑）
  *  2. isProductiveTool 白名单仍含 task_complete/spec/plan/bugfix（引擎该推进的工具）
+ *  2'. v0.39.0（D186）：todo-update/todo_update 已从产成性工具下架 + 必须在 RETIRED_PLAN_TOOLS 内
  *  3. buildObservationSummary 对 file-writer/file-editor 只回传路径+字节数/行数/替换数，
  *     不包含文件内容
  *  4. shell 摘要对 command 做了 120 字符截断（防 heredoc 全文泄露）
@@ -12,7 +13,7 @@
  *  7. ThoughtStream：ToolCard 结果默认折叠（resultOpen 初始 false）
  *  8. ThoughtStream：content/oldStr/newStr 等内容类参数按 60 字符摘要显示
  *  9. constants：TOOL_DISPLAY 已补 file-writer/file-editor/glob-search/grep-search
- * 10. seed：内置提示词明确写「阶段内工具不会自动推进」
+ * 10. seed：内置提示词教 task_plan 唯一入口（v0.38.0 D154 收敛，原「阶段内工具不会自动推进」）
  * 11. ThoughtStream：内部机制/门禁拦截（softFail）用中性「guarded」样式，不红色报错
  * 12. engine：ask_user 校验放宽（仅校验 question，suggestions 不足注入兜底）
  * 13. engine：计划生成首项标 running；任务失败时 markRunningPlanItemFailed 标 failed
@@ -69,6 +70,20 @@ function extractProductiveSet(): string[] {
   return items
 }
 
+/**
+ * 提取 `work-class.ts` 的 `RETIRED_PLAN_TOOLS` 集合（v0.39.0 新增）。
+ * engineSrc 是 `agent/engine/` 下全部 .ts 的拼接，故 work-class.ts 已在其中。
+ */
+function extractRetiredPlanSet(): string[] {
+  const m = engineSrc.match(/RETIRED_PLAN_TOOLS\s*=\s*\[([\s\S]*?)\]\s*as const/)
+  assert.ok(m, '应能提取 work-class.ts 的 RETIRED_PLAN_TOOLS 退役表')
+  const items: string[] = []
+  const re = /'([^']+)'/g
+  let mm: RegExpExecArray | null
+  while ((mm = re.exec(m![1]!)) !== null) items.push(mm[1]!)
+  return items
+}
+
 test('v0.18.x fix: 阶段内写操作（file-writer/file-editor）不再自动推进清单', () => {
   const items = extractProductiveSet()
   assert.ok(
@@ -94,9 +109,31 @@ test('v0.18.x: 引擎仍自动推进的"产成性"工具保留', () => {
   for (const keep of ['task_complete', 'spec', 'plan', 'bugfix', 'react-core-skills']) {
     assert.ok(items.includes(keep), `${keep} 应保留在白名单中`)
   }
-  // todo_update 走显式拦截路径，也应保留
-  assert.ok(items.includes('todo-update') || items.includes('todo_update'),
-    'todo-update 应保留（LLM 显式推进入口）')
+})
+
+/**
+ * v0.39.0（D186 清创 + D154 收敛）：`todo-update` / `todo_update` 从"产成性工具"里下架。
+ *
+ * 本用例是 **v0.18 旧断言的正式反转**（纪律㉛：清创守卫必须反映真实做过的清创）。
+ * 旧断言 `items.includes('todo-update') || items.includes('todo_update')` 已随 D154
+ * 失效——旧名是「清单操作」而非「产成性工作」，它现在既不在 PRODUCTIVE 白名单里
+ * （即它不会被引擎当作"干了活"），又必须在 RETIRED_PLAN_TOOLS 里（即模型调它会被
+ * `act.ts` 兜底软失败，而不是掉进 registry 的 `No handler` 静默路径）。
+ *
+ * 两侧都断言，才能保证清创是**双向钉死**的：既不能悄悄复活（回到 PRODUCTIVE），
+ * 也不能从退役表里悄悄消失（退回静默 No handler）。
+ */
+test('v0.39.0: todo-update/todo_update 已从产成性工具下架，且在退役表内（双向钉死）', () => {
+  const productive = extractProductiveSet()
+  assert.ok(
+    !productive.includes('todo-update') && !productive.includes('todo_update'),
+    `todo-update/todo_update 不应再是产成性工具（v0.39 已下架），当前集合：${productive.join(',')}`,
+  )
+  const retired = extractRetiredPlanSet()
+  assert.ok(
+    retired.includes('todo-update') && retired.includes('todo_update'),
+    `todo-update/todo_update 必须在 RETIRED_PLAN_TOOLS 内（否则会掉进静默 No handler），当前：${retired.join(',')}`,
+  )
 })
 
 /* ---------- 3-4. file-writer/file-editor/shell 摘要契约 ---------- */
@@ -220,14 +257,13 @@ test('v0.18.x: TOOL_DISPLAY 已补 file-writer/file-editor/glob-search/grep-sear
 
 /* ---------- 10. seed.ts 提示词契约 ---------- */
 
-test('v0.18.x: seed.ts 提示词明确「阶段内工具不会自动推进」', () => {
-  assert.match(
-    seedSrc,
-    /阶段内工具[^。\n]*不会自动推进|阶段内工具[\s\S]{0,30}不会自动推进|不会[\s\S]{0,10}自动推进/,
-    '应说明阶段内工具不会自动推进清单',
-  )
-  // 同时保留显式推进入口
-  assert.match(seedSrc, /todo-update/, '应保留 todo-update 显式推进入口')
+test('v0.38.x: seed.ts 提示词契约随 D154 收敛（task_plan 唯一入口）', () => {
+  // v0.38.1（D166 测试侧改写随新语义）：v0.18.x 的「阶段内工具不会自动推进 +
+  // todo-update 显式推进」文案已随 D154 提示词整体重写移除 —— 清单唯一读写入口
+  // 收敛为 task_plan（提交完整清单，引擎 diff）。
+  assert.match(seedSrc, /清单只有一个正常入口：task_plan/, 'seed 应教 task_plan 唯一入口（提交完整清单）')
+  assert.doesNotMatch(seedSrc, /不会自动推进/, '旧「阶段内工具不会自动推进」文案不应回潮')
+  assert.doesNotMatch(seedSrc, /也调\s*todo-update/, '旧 todo-update 显式推进文案不应回潮')
 })
 
 /* ---------- 11. 软失败（内部机制/门禁拦截）中性显示契约（v0.31.0 B4：载体 ThoughtStream → flow/project 投影 + ToolBlock 渲染） ---------- */
@@ -293,7 +329,14 @@ test('v0.18.x fix: 任务失败时 markRunningPlanItemFailed 把 running 项标 
     /findIndex\(\(p\)\s*=>\s*p\.status\s*===\s*['"]running['"]\)/,
     '应优先查找 running 项',
   )
-  assert.match(engineSrc, /target\.status\s*=\s*['"]failed['"]/, '目标项应标 failed')
+  // v0.37.0（缺陷 D132）**语义变更**：失败标记不再直改 `target.status`
+  // （那是第二个写入者），改经账本 `set-status`（`to: 'failed'` + force），
+  // 再由 ledger 投影回写 `planItems`。
+  assert.match(
+    engineSrc,
+    /to:\s*['"]failed['"][\s\S]{0,200}source:\s*['"]engine-fail['"]/,
+    '目标项应经账本标 failed（唯一写入口）',
+  )
   assert.match(engineSrc, /source:\s*['"]engine-fail['"]/, '失败来源应为 engine-fail')
   // 失败路径接入该函数（v0.23.2：max-iterations 改为优雅暂停不再标 failed，
   // 真实失败路径剩 catch task_failed 与上下文溢出 fast-fail 等 ≥2 处）

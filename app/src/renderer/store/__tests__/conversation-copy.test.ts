@@ -14,6 +14,11 @@
  *   ② 有挂点：类型 / store 实现 / 头部菜单 / 命令面板四处全接线（少一处 = 功能不可达）；
  *   ③ 有反馈：空内容 / 成功 / 失败三态各有 toast，且四语言 key 齐备（否则静默失败）。
  *
+ * ★ v0.36.0（B9）迁移说明：②的「命令面板」挂点原锚在 `CommandPalette.tsx`，
+ * 但该组件自 v0.13.0 起就不再挂载（被 QuickAction 取代），B9 已将其删除。
+ * 命令随之迁入**活的** ⌘K 面板 `QuickAction.tsx` —— 否则本功能只剩头部菜单
+ * 一条通路，键盘不可达。本文件同步改锚到 QuickAction。
+ *
  * 运行（cwd=app）：
  *   npx tsx --test src/renderer/store/__tests__/conversation-copy.test.ts
  */
@@ -27,7 +32,8 @@ const SLICE = read('../slices/tasksSlice.ts')
 const TYPES = read('../types.ts')
 const STORE = read('../index.ts')
 const HEADER = read('../../components/CenterStage.tsx')
-const PALETTE = read('../../components/CommandPalette.tsx')
+/** ★ v0.36.0（B9）：⌘K 面板的活载体（原 CommandPalette 已删） */
+const PALETTE = read('../../components/QuickAction.tsx')
 const LOCALES = ['zh', 'en', 'ja', 'ko'].map((l) => ({
   lang: l,
   json: JSON.parse(read(`../../i18n/locales/${l}.json`)) as Record<string, unknown>,
@@ -144,19 +150,25 @@ test('TC-CPCV-007 命令面板注册 copyConversation 命令（键盘可达）',
   assert.match(
     PALETTE,
     /copyConversation/,
-    'CommandPalette 应引用 copyConversation',
+    'QuickAction 应引用 copyConversation',
   )
   assert.match(
     PALETTE,
-    /palette\.command\.copyConversation/,
-    'CommandPalette 应有复制对话的命令文案',
+    /quickaction\.commands\.copyConversation/,
+    'QuickAction 应有复制对话的命令文案',
   )
   // 依赖数组漏项 = 命令闭包捕获旧引用（v0.31.0 已踩过同类坑）。
-  // 定位：命令列表 useMemo 结束于 `] as PaletteItem[]`，紧随其后就是它的 deps。
-  const anchor = PALETTE.indexOf('] as PaletteItem[]')
-  assert.ok(anchor > 0, 'CommandPalette 应有命令列表 useMemo（`] as PaletteItem[]`）')
-  const deps = PALETTE.slice(anchor, anchor + 1500)
+  // 定位：内置命令列表 useMemo 的声明处 → 其 deps 数组（`}, [` … `])`）。
+  // ★ v0.36.0（B9）：锚点由 CommandPalette 的 `] as PaletteItem[]` 改为
+  // QuickAction 的 `useMemo<QuickItem[]>` 声明（前者已随组件删除）。
+  const start = PALETTE.indexOf('const items = useMemo<QuickItem[]>')
+  assert.ok(start > 0, 'QuickAction 应有内置命令列表 useMemo（`useMemo<QuickItem[]>`）')
+  const open = PALETTE.indexOf('  }, [', start)
+  const close = PALETTE.indexOf('\n  ])', open)
+  assert.ok(open > start && close > open, '应能切出 items useMemo 的依赖数组')
+  const deps = PALETTE.slice(open, close)
   assert.match(deps, /copyConversation/, 'copyConversation 必须进 useMemo 依赖数组')
+  assert.match(deps, /exportConversation/, 'exportConversation 应仍在依赖数组内（防切错区间）')
 })
 
 /* ============================================================
@@ -184,7 +196,9 @@ test('TC-CPCV-008 三态反馈与四语言文案齐备（空 / 成功 / 失败�
     'slice.tasks.copyConversationCopied',
     'slice.tasks.copyConversationFailed',
     'slice.tasks.copyConversationEmpty',
-    'palette.command.copyConversation',
+    // ★ v0.36.0（B9）：随 ⌘K 面板迁移，键名由 palette.command.* 改为
+    // quickaction.commands.*（旧键按 v0.34.0 §4.3 保留一个版本，见 TC-I18NI-007）
+    'quickaction.commands.copyConversation',
   ]
   /** i18n 是**嵌套**结构（如 centerstage.header.copy），按路径取值 */
   const pick = (obj: Record<string, unknown>, path: string): unknown =>

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { PermissionMode } from './permission-mode.js'
-import { ResolvedRules, loadRulesFromConfig, mergeRules } from './rules.js'
+import { ResolvedRules, loadRulesFromConfig, mergeRules, type RuleScope } from './rules.js'
 
 export interface ShellSettings {
   defaultTimeoutMs?: number
@@ -108,12 +108,44 @@ function mergeCompaction(...scopes: CompactionSettings[]): CompactionSettings {
   }
 }
 
-export async function loadPermissionSettings(workspaceDir: string): Promise<PermissionSettings> {
+/** 四个作用域的原始配置（读取顺序 = 优先级顺序） */
+export interface ScopeConfigs {
+  managed: Record<string, unknown>
+  local: Record<string, unknown>
+  project: Record<string, unknown>
+  user: Record<string, unknown>
+}
+
+/** 读取四级配置文件（**唯一读取点**：`loadPermissionSettings` 与 `loadRuleScopes` 共用） */
+export async function readScopeConfigs(workspaceDir: string): Promise<ScopeConfigs> {
   const managedPath = managedSettingsPath()
-  const managed = managedPath ? await readSettingsFile(managedPath) : {}
-  const local = workspaceDir ? await readSettingsFile(join(workspaceDir, '.arkwork', 'settings.local.json')) : {}
-  const project = workspaceDir ? await readSettingsFile(join(workspaceDir, '.arkwork', 'settings.json')) : {}
-  const user = await readSettingsFile(join(homedir(), '.arkwork', 'settings.json'))
+  return {
+    managed: managedPath ? await readSettingsFile(managedPath) : {},
+    local: workspaceDir ? await readSettingsFile(join(workspaceDir, '.arkwork', 'settings.local.json')) : {},
+    project: workspaceDir ? await readSettingsFile(join(workspaceDir, '.arkwork', 'settings.json')) : {},
+    user: await readSettingsFile(join(homedir(), '.arkwork', 'settings.json')),
+  }
+}
+
+/**
+ * ★ v0.36.0（F6.1 / P9）：四级作用域**各自**的规则集合（不合并）。
+ *
+ * 面板需要「这条规则是谁写的」与「这条现在生效吗」两个信息，而合并结果
+ * （`loadPermissionSettings` 的 allow/ask/deny）把两者都丢掉了 —— 见
+ * `shared/types/permission.ts` 的 PermissionRuleEntry 头注释。
+ */
+export async function loadRuleScopes(workspaceDir: string): Promise<Record<RuleScope, ResolvedRules>> {
+  const c = await readScopeConfigs(workspaceDir)
+  return {
+    managed: loadRulesFromConfig('managed', c.managed),
+    local: loadRulesFromConfig('local', c.local),
+    project: loadRulesFromConfig('project', c.project),
+    user: loadRulesFromConfig('user', c.user),
+  }
+}
+
+export async function loadPermissionSettings(workspaceDir: string): Promise<PermissionSettings> {
+  const { managed, local, project, user } = await readScopeConfigs(workspaceDir)
 
   const managedRules = loadRulesFromConfig('managed', managed)
   const localRules = loadRulesFromConfig('local', local)

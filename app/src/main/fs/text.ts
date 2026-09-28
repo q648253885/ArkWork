@@ -316,6 +316,13 @@ export interface TextProbeDeps {
   maxBytes?: number
   /** `agent-writing` 只读原因的判定钩子（B5 的 agent 写盘登记表注入；B2 恒为 undefined） */
   isAgentWriting?: (absPath: string) => boolean
+  /**
+   * 是否落在工作区内（v0.36.3 · D115 用户面口径）。
+   * `false` ⇒ 追加 `outside-workspace` 只读原因：文件**照常可读可预览**，
+   * 但编辑器标只读、写盘被拒。缺省（undefined）表示不参与判定 —— 保留旧行为，
+   * 使 `probeText` 的既有单测与 LLM 工具面调用零影响。
+   */
+  insideWorkspace?: boolean
 }
 
 function humanBytes(n: number): string {
@@ -418,6 +425,8 @@ export async function probeText(absPath: string, deps: TextProbeDeps = {}): Prom
 
   const candidates: Array<ReadonlyReason | null | undefined> = []
   let readonlyDetail: string | undefined
+  // 工作区外（D115）：不是拒绝，只是只读。优先于编码/体积类原因 —— 见 READONLY_ORDER。
+  if (deps.insideWorkspace === false) candidates.push('outside-workspace')
   if (encoding === 'binary') {
     candidates.push('binary')
     readonlyDetail = `NUL @ 0x${hasNulByte(buf).toString(16)}`

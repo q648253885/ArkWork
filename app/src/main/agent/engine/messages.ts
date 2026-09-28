@@ -3,38 +3,38 @@
  * 由 engine.ts 纯移动而来（行区间 3012-3323）。
  */
 
-import type { Task, PlanItem } from '@shared/types/task'
-import type {
-  ReActEvent,
-  ReActAction,
-  ReActStep,
-  PlanContent,
-} from '@shared/types/react'
-import type { Agent } from '@shared/types/agent'
-import { getAdapter, getModel } from '../../llm/registry.js'
-import type { LlmMessage, LlmTool, LlmCompleteResponse } from '../../llm/adapter.js'
-// agent-context-compaction-robustness：LLM 调用健壮性（120s 超时 / 中止短路 / 重试分级）
-import { callLlmWithRetry, withLlmTimeout, isContextOverflowError } from '../llm-call.js'
-import { invokeSkill, skillToLlmTool, skillToolName, listSkills, getSkill, type SkillContext } from '../registry.js'
-// v0.19.0 M1：系统提示词组装器（收敛 parts.push 硬拼逻辑）
-import { buildSystemSections, renderSystemPrompt, buildPersonalitySegment } from '../prompt-assembly.js'
-// v0.25.0 F1：提示词契约层（契约注册 + always-on 技能段 + 契约装配 + 门禁状态机）
-import { collectAlwaysOnSections, assembleSystemPrompt } from '../prompt/sections.js'
 import {
+  type Task,
+  type PlanItem,
+  type ReActEvent,
+  type ReActAction,
+  type ReActStep,
+  type PlanContent,
+  type Agent,
+  getAdapter,
+  getModel,
+  type LlmMessage,
+  type LlmTool,
+  type LlmCompleteResponse,
+  callLlmWithRetry,
+  withLlmTimeout,
+  isContextOverflowError,
+  type SkillContext,
+  buildSystemSections,
+  renderSystemPrompt,
+  buildPersonalitySegment,
+  collectAlwaysOnSections,
+  assembleSystemPrompt,
   collectGateSpecs,
   initGateStates,
   checkGateBeforeAdvance,
   confirmGate,
   findGateForStageDoc,
   isDocDrivenAgent,
-} from '../prompt/gates.js'
-import type { GateSpec } from '@shared/types/agent'
-// v0.19.0 M2：唯一真源会话事件日志（Reason/Act/tool 事件落盘 session.jsonl）
-import { appendSessionEvent } from '../session-log.js'
-// v0.19.0 M3：轮次/步骤收件箱 + 停止候选钩子（turn/step 语义）
-import { drainContinuations } from '../inbox.js'
-import { emitTurnStopping } from '../turn-stopping.js'
-import {
+  type GateSpec,
+  appendSessionEvent,
+  drainContinuations,
+  emitTurnStopping,
   matchStageGate,
   isCoreSkillsEnabled,
   buildGateBlockObservation,
@@ -43,17 +43,19 @@ import {
   matchForbiddenWritePath,
   matchForbiddenShellCommand,
   type StageGate,
-} from '../../skills/builtin/react-core-skills/stage-gates.js'
-import { appendL1, listEnabledL1, listL1, totalTokens } from '../../memory/l1-working.js'
-import { persistRawL2 } from '../../memory/l2-file.js'
-import { logger } from '../../system/logger.js'
-import { genId } from '@shared/utils/id'
-import { isNoisePlanItem } from '@shared/utils/plan-noise'
-import { describeAction } from '@shared/utils/action-description'
-import { createHash } from 'node:crypto'
-import { updateTask, getTask } from '../../store/tasks.js'
-import { getAgent } from '../../store/agents.js'
-import {
+  appendL1,
+  listEnabledL1,
+  listL1,
+  totalTokens,
+  persistRawL2,
+  logger,
+  genId,
+  isNoisePlanItem,
+  describeAction,
+  createHash,
+  updateTask,
+  getTask,
+  getAgent,
   broadcastStep,
   broadcastTaskStatus,
   broadcastToolProgress,
@@ -62,24 +64,26 @@ import {
   broadcastPlanListSnapshot,
   broadcastTextDelta,
   type ToolProgress,
-} from '../events.js'
-// v0.27.0 R1：流式管道（completeWithStream 静默降级 + text-delta 增量泵）
-import { completeWithStream, createTextDeltaPump, type TextDeltaPump } from '../llm-stream.js'
-import { getWorkspaceDir } from '../../store/db.js'
-import { saveCheckpoint, checkpointId } from '../../checkpoint/store.js'
-// v0.8.0 记忆系统钩子
-import { applyPending, getCuratedSnapshot } from '../../memory/l3-curated.js'
-import { archiveTaskL1, initArchiveIndex } from '../../memory/l3-archive.js'
-import { getProfile, synthesizeFromTaskL1 } from '../../memory/l4-profile.js'
-import { evaluateDistillTrigger, autoPromoteDistill, getDistillMetrics } from '../../memory/distill.js'
-import { runForSkillForge } from '../../memory/skill-forge.js'
-import { compressMemory } from '../../ipc/memory.js'
-// v0.15.0：统一压缩路径——自动压缩与 Turn Phase-0 均走两阶段 compact()（联动 L3b + 压缩后蒸馏）
-import { compactTask } from '../../memory/compaction.js'
-import { createMemoryPhase0 } from '../../memory/compaction-hook.js'
-import type { CompressPolicy } from '@shared/types/memory'
-// agent-context-compaction-robustness：上下文预算与分层压缩纯工具模块
-import {
+  completeWithStream,
+  createTextDeltaPump,
+  type TextDeltaPump,
+  getWorkspaceDir,
+  saveCheckpoint,
+  checkpointId,
+  applyPending,
+  getCuratedSnapshot,
+  archiveTaskL1,
+  initArchiveIndex,
+  getProfile,
+  synthesizeFromTaskL1,
+  evaluateDistillTrigger,
+  autoPromoteDistill,
+  getDistillMetrics,
+  runForSkillForge,
+  compressMemory,
+  compactTask,
+  createMemoryPhase0,
+  type CompressPolicy,
   estimatePayloadTokens,
   estimatePayloadTokensDetailed,
   estimateTextTokens,
@@ -90,21 +94,26 @@ import {
   MAX_OBSERVATION_CONTENT,
   MICRO_COMPACT_PLACEHOLDER,
   OBSERVATION_TRUNCATED_MARK,
-} from '../context.js'
-import { getMemoryConfig, getSettings } from '../../ipc/settings.js'
-// v0.8.0 知识库钩子
-import { listKb, listEnabledKb } from '../../kb/store.js'
-import { searchKb, initKbIndex } from '../../kb/index.js'
-import { readFile } from 'node:fs/promises'
-// Task 6：上下文占比可视化与下钻
-import {
+  getMemoryConfig,
+  getSettings,
+  listKb,
+  listEnabledKb,
+  searchKb,
+  initKbIndex,
+  readFile,
   computeContextBreakdown,
   type ContextBreakdownInput,
   type ContextBreakdownResult,
   type ContextToolEntry,
   type ContextSkillInstruction,
-} from '../context-breakdown.js'
+} from './engine-context.js'
 import { emitEvent } from './broadcast.js'
+// v0.36.0 F2.1：工具面组装收敛到统一能力注册表（assembleTools 退化为纯投影）
+import {
+  capabilityRegistry,
+  syncCapabilityRegistry,
+  type ProjectRequest,
+} from '../../capability/registry.js'
 
 /**
  * Task 2 Layer 2 — 每轮调用前（plan 生成与主循环 Reason 共用）的上下文预算检查。
@@ -227,9 +236,12 @@ export async function assembleMessages(
       // v0.34.x：只注入最新一条快照；死计划（全部终态）不注入——对已收口计划说
       // 「严格按此执行」会诱导模型跑偏到与新指令无关的陈旧步骤。
       if (dedup.planDead || idx !== dedup.lastPlanIdx) continue
+      // v0.36.5 D125：前缀改中性权威（对齐 ZCode formatTodoStateForModel 只声明权威性）——
+      // 旧「请严格按此计划执行」在续聊场景与 replan 通道直接冲突，是清单不随新指令
+      // 重评的三重强信号之一；「按当前生效计划推进」语义由 system plan-constraint 段承载。
       messages.push({
         role: 'user',
-        content: `[计划清单 — 请严格按此计划执行，每步完成后继续下一步]\n${m.content}`,
+        content: `[计划清单 — 初始计划快照（各项当前状态以「清单状态」消息为准）]\n${m.content}`,
       })
     } else if (m.role === 'assistant' && m.kind === 'skill_instruction') {
       // v0.25.0 F1：on-demand 技能指令体（持续生效至任务结束，与 plan_status 同管道）。
@@ -346,6 +358,31 @@ export async function assembleMessages(
   }
   // v0.34.x：清单状态快照置尾（最新一条）——见循环前的降噪注释
   if (planStatusTail) messages.push(planStatusTail)
+
+  // ============================================================
+  // v0.37.0（缺陷 D138）：**每轮注入账本权威快照**（opencode / ZCode 同构机制）。
+  //
+  // 为什么必须额外加这一条，而不是继续依赖上面的 plan_status：
+  //  plan_status 是「上一轮写进 L1 的历史消息」，模型看到的是**上一轮结束时的状态**；
+  //  而 ledger 文件在中断恢复、过期巡检、用户手动点击之后都可能已经变了。
+  //  诊断里那个 31 步会话就是活例子——模型每一轮都读到同一份"T-01 in_progress"的
+  //  旧快照，于是每一轮都重新进入"执行 T-01"。
+  //
+  // 这里注入的是**文件当前状态**，且带恢复点与「已完成项禁止重做」的显式声明。
+  // 失败静默：账本不可用时退回 plan_status，不让装配链路因它挂掉。
+  // ============================================================
+  try {
+    const { loadLedger, renderSnapshot } = await import('../ledger/index.js')
+    const ledger = await loadLedger(task.id)
+    if (ledger && ledger.items.length > 0) {
+      messages.push({
+        role: 'user',
+        content: `[任务清单状态 — 来自任务清单账本（唯一真相源），你必须以此为准]\n${renderSnapshot(ledger)}`,
+      })
+    }
+  } catch (err) {
+    logger.warn('Agent', `ledger 快照注入失败（沿用 plan_status）：${(err as Error).message}`, task.id)
+  }
   // v0.23.2 缓存修复：移除每轮滑动的 applyMicroCompact。
   // 旧逻辑每迭代把"3 轮前"的完整工具结果原地替换为占位符 → 相邻两次请求的前缀
   // 在倒数第 3 轮处分叉，尾部全量内容永不命中前缀缓存（实测命中率 ~50%）。
@@ -465,15 +502,20 @@ export function reconcileToolCalls(messages: LlmMessage[]): LlmMessage[] {
   return out
 }
 
+/**
+ * v0.36.0 F2.1：工具面组装 → 纯投影。
+ *
+ * 原 86 行装配逻辑（技能/MCP/插件三类来源的合并、过滤、排序）收敛到
+ * `capability/registry.ts` 的 CapabilityRegistry.project()，输出**逐字节一致**
+ * （golden 镜像测试锁死，见 capability-registry.test.ts）。本函数只负责：
+ *   ① 构造 ProjectRequest（agent/task/profile 三源提取，profile 缺席降级）；
+ *   ② 触发惰性重扫（syncCapabilityRegistry，与 invalidateSkillCache 同频）；
+ *   ③ 空集转换（[] → undefined，保持既有签名）。
+ * 唯一新增行为：F2.2 —— profile 快照的 mcp 引用（tail = M-{ns}.{tool} 工具 id）
+ * 现在也汇入工具集（改造前只汇 skill 引用）。
+ */
 export async function assembleTools(agent: Agent, task: Task): Promise<LlmTool[] | undefined> {
-  const skills = await listSkills()
-  // v0.6.0（F1）：合并 agent 默认 skills + task 会话级 skills，去重，过滤已禁用
-  // v0.24.2.1：补上 MCP — agent.defaultMcpIds 与 task.mcpIds 内的 server 对应的全部
-  //   source='mcp' Skill 一并纳入工具集（与 automations.ts:204 的合并方式对齐）。
-  const skillIdSet = new Set<string>([
-    ...agent.defaultSkillIds,
-    ...(task.skillIds || []),
-  ])
+  const profileToolRefs: ProjectRequest['profileToolRefs'] = []
   // v0.32.0 G1：当前工作台声明的技能**叠加**进来（只加不减）
   //   —— profile 的 capabilities/agents[].skills 是「这个垂直台需要的能力」，
   //     不是「替换掉 agent 默认工具」；做减法会让用户在切台后莫名失去工具，
@@ -484,71 +526,21 @@ export async function assembleTools(agent: Agent, task: Task): Promise<LlmTool[]
     const snap = await getLastSnapshot()
     if (snap) {
       for (const t of snap.layers.tools) {
-        if (t.kind === 'skill' && t.found) skillIdSet.add(t.ref)
+        if ((t.kind === 'skill' || t.kind === 'mcp') && t.found) {
+          profileToolRefs.push({ kind: t.kind, ref: t.ref, found: t.found })
+        }
       }
     }
   } catch {
     // profile 模块不可用（未启用 / 加载失败）→ 不阻断主路径，工具集退回 v0.31 语义
   }
-  const mcpServerIdSet = new Set<string>([
-    ...(agent.defaultMcpIds || []),
-    ...(task.mcpIds || []),
-  ])
-  for (const s of skills) {
-    if (s.source === 'mcp' && s.mcpRef && mcpServerIdSet.has(s.mcpRef.serverId)) {
-      skillIdSet.add(s.id)
-    }
-  }
-  const mergedIds = [...skillIdSet]
-  const available = skills.filter(
-    (s) => mergedIds.includes(s.id) && s.enabled !== false,
-  )
-  // v0.20.0 缓存优化：按工具名确定性排序，避免技能发现顺序抖动导致 tools 前缀变化
-  //（MiniMax 缓存前缀顺序为 tools → system → messages，tools 抖动会破坏整段缓存）。
-  const out: LlmTool[] = available.map(skillToLlmTool)
 
-  /* ------------------------------------------------------------
-   * ★ v0.35.0：并上插件工具（`plugin__<pluginId>__<name>`）
-   *
-   * 三个要点：
-   *  ① 数据源是**清单声明**（`declaredTools`）而不是运行期注册 ——
-   *     插件是懒激活的，用运行期注册会让「看不见 → 不调用 → 不激活 →
-   *     仍然看不见」变成死锁（详见 host-service 该方法的注释）；
-   *  ② 插件运行时**未装配**（例如单测里只跑 engine）时静默跳过：
-   *     工具集退回 v0.34 语义，不该因为插件子系统缺席就连主链路都不可用；
-   *  ③ 名字带命名空间前缀，且**不与 skill 去重合并** —— 撞名是插件的错误，
-   *     要让它表现为「两个工具都在」，而不是让插件静默顶掉宿主的同名工具。
-   * ------------------------------------------------------------ */
-  try {
-    const { getPluginHostService } = await import('../../plugins/runtime/host-service.js')
-    const declared = getPluginHostService()?.declaredTools() ?? []
-    for (const t of declared) {
-      out.push({
-        type: 'function',
-        function: {
-          name: t.globalName,
-          description: `[插件 ${t.pluginId}] ${t.description}`,
-          parameters: t.inputSchema,
-        },
-      })
-    }
-
-    /* ------------------------------------------------------------
-     * ★ v0.35.0：并上**插件控制工具**（`plugin_list` / `plugin_detail`
-     * / `plugin_set_enabled` / `plugin_open_view`）。
-     *
-     * 这是「大模型可以控制插件」（用户裁决）的落地。与上面那批的区别：
-     * 上面是插件自带的工具（要插件活着才有用），这四个是**宿主**的工具
-     * —— 插件坏了 / 没激活 / 被禁用了，它们照样能用。
-     * 少了这一条，模型就无法自己查「插件为什么不生效」（只能让用户去看界面）。
-     * ------------------------------------------------------------ */
-    const { PLUGIN_CONTROL_TOOLS } = await import('../tools/plugins.js')
-    out.push(...PLUGIN_CONTROL_TOOLS)
-  } catch (err) {
-    logger.warn('Tool', `assembleTools: 插件工具汇入失败（已跳过）：${String(err)}`)
-  }
-
-  if (out.length === 0) return undefined
-  // 排序放在最后：插件工具的全局名以 `plugin__` 开头，混排后仍保持确定性
-  return out.sort((a, b) => a.function.name.localeCompare(b.function.name))
+  await syncCapabilityRegistry()
+  const out = capabilityRegistry.project({
+    agentDefaultSkillIds: [...agent.defaultSkillIds],
+    taskSkillIds: [...(task.skillIds || [])],
+    profileToolRefs,
+    connectedMcpIds: [...(agent.defaultMcpIds || []), ...(task.mcpIds || [])],
+  })
+  return out.length > 0 ? out : undefined
 }

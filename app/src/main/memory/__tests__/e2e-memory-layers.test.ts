@@ -25,7 +25,21 @@ import { setWorkspaceDir, getWorkspaceDir } from '../../store/db.js'
 import { appendL1, listL1 } from '../l1-working.js'
 import { persistRawL2, listRawL2 } from '../l2-file.js'
 import { addPendingLine, applyPending } from '../l3-curated.js'
+import { agentSpacePath } from '../agent-space.js'
 import { initArchiveIndex, archiveTaskL1, searchArchive } from '../l3-archive.js'
+
+/**
+ * 诊断输出一律走 **stderr**，禁止写 stdout（D100）。
+ *
+ * node:test 的子进程把测试结果报文序列化后写 **stdout**；测试代码再往 stdout
+ * 写日志就会与协议帧争用，父进程反序列化失败并把**整份文件**判成
+ * `Unable to deserialize cloned data`（uncaughtException）—— 测试全对也会假红。
+ * 该竞态在并发满载时放大（实测：同形状 14 文件异步套件，写 stdout 20/20 复现，
+ * 写 stderr 0/20）。本纪律由 TC-HARN-001 把守。
+ */
+const log = (...args: unknown[]): void => {
+  process.stderr.write(args.map((a) => String(a)).join(' ') + '\n')
+}
 
 const TASK_ID = 'T-E2E-layers-001'
 const TASK_TITLE = '验证记忆分层端到端产物'
@@ -50,7 +64,7 @@ test('L1: appendL1 → l1.jsonl 出现产物', async () => {
   const l1File = join(WS, '.arkwork', 'memory', TASK_ID, 'l1.jsonl')
   assert.equal(existsSync(l1File), true)
   const raw = await readFile(l1File, 'utf-8')
-  console.log(`\n✅ L1 产物: ${l1File} (${raw.split('\n').filter(Boolean).length} 条)`)
+  log(`\n✅ L1 产物: ${l1File} (${raw.split('\n').filter(Boolean).length} 条)`)
 })
 
 test('L2: persistRawL2 大结果 → steps/{stepId}.json 出现产物', async () => {
@@ -60,7 +74,7 @@ test('L2: persistRawL2 大结果 → steps/{stepId}.json 出现产物', async ()
   const path = await persistRawL2(TASK_ID, stepId, JSON.parse(bigOutput))
   assert.equal(existsSync(path), true)
   const size = (await readFile(path, 'utf-8')).length
-  console.log(`✅ L2 产物: ${path} (${size} 字符)`)
+  log(`✅ L2 产物: ${path} (${size} 字符)`)
 })
 
 test('L2: listRawL2 可枚举产物（memory:list 聚合的数据源）', async () => {
@@ -69,7 +83,7 @@ test('L2: listRawL2 可枚举产物（memory:list 聚合的数据源）', async 
   const art = artifacts[0]
   assert.equal(art.stepId, 'step-e2e-raw')
   assert.ok(art.size > 4000)
-  console.log(`✅ L2 枚举: ${art.path} (stepId=${art.stepId}, ${art.size} 字节)`)
+  log(`✅ L2 枚举: ${art.path} (stepId=${art.stepId}, ${art.size} 字节)`)
 })
 
 test('L3a: addPendingLine + applyPending → memory.md / user.md 出现产物', async () => {
@@ -77,10 +91,12 @@ test('L3a: addPendingLine + applyPending → memory.md / user.md 出现产物', 
   await addPendingLine('user.md', '用户偏好简洁、注释充足的代码', TASK_ID)
   const result = await applyPending() // 无 modelId：仅追加不调 LLM
   assert.equal(result.applied, 2)
-  for (const f of ['memory.md', 'user.md']) {
-    const p = join(WS, '.arkwork', f)
-    assert.equal(existsSync(p), true, `${f} 应存在`)
-    console.log(`✅ L3a 产物: ${p} (${(await readFile(p, 'utf-8')).length} 字符)`)
+  for (const f of ['memory.md', 'user.md'] as const) {
+    // ★ v0.36.3（设计文档 §4.1 归属修订）：memory.md 回迁**工作区**（项目偏好/规则
+    //   天然属于项目），user.md 留在 Agent 空间（跨工作区）。位置细节见 agent-space.test.ts。
+    const p = f === 'memory.md' ? join(WS, '.arkwork', f) : agentSpacePath(f)
+    assert.equal(existsSync(p), true, `${f} 应存在于其归属位置`)
+    log(`✅ L3a 产物: ${p} (${(await readFile(p, 'utf-8')).length} 字符)`)
   }
 })
 
@@ -100,9 +116,9 @@ test('L3b: archiveTaskL1 → archive/items.jsonl + index.json 出现产物并可
   assert.equal(existsSync(indexFile), true, 'index.json 应在防抖窗口内落盘')
   const lines = (await readFile(itemsFile, 'utf-8')).split('\n').filter(Boolean)
   assert.ok(lines.length >= 4, `归档至少 4 条（排除 system_prompt），实际 ${lines.length}`)
-  console.log(`✅ L3b 产物: ${itemsFile} (${lines.length} 条) + ${indexFile} (等待 ${waited}ms)`)
+  log(`✅ L3b 产物: ${itemsFile} (${lines.length} 条) + ${indexFile} (等待 ${waited}ms)`)
 
   const hits = await searchArchive('csv 统计', 3)
   assert.ok(hits.length > 0, 'archiveSearch 应检索到归档内容')
-  console.log(`   archiveSearch("csv 统计") → ${hits.length} 条命中: ${hits[0]?.taskTitle}`)
+  log(`   archiveSearch("csv 统计") → ${hits.length} 条命中: ${hits[0]?.taskTitle}`)
 })

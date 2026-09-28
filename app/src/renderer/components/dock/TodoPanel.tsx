@@ -17,8 +17,8 @@ import type { PlanItemStatus, PlanItem, PlanItemSource } from '@shared/types/tas
 import { PLAN_STATUS_META, planStatusTextClass, planItemToolSteps } from '../../utils/plan-status'
 import { ark } from '../../ipc/client'
 
-/** v0.17.0 F8 + v0.18.0：状态筛选顺序（全部 + 六态） */
-const FILTER_ORDER: PlanItemStatus[] = ['pending', 'running', 'done', 'skipped', 'failed', 'cancelled']
+/** v0.17.0 F8 + v0.18.0：状态筛选顺序（全部 + 六态）v0.37.0：+ paused 共七态 */
+const FILTER_ORDER: PlanItemStatus[] = ['pending', 'running', 'paused', 'done', 'skipped', 'failed', 'cancelled']
 const TERMINAL: ReadonlySet<PlanItemStatus> = new Set(['done', 'failed', 'cancelled', 'skipped'])
 
 /** 行级有效状态 = optimisticOverlay（若存在） > planItem.status > 'pending' */
@@ -37,6 +37,8 @@ export function TodoPanel() {
   const task = useStore((s) => s.tasks.find((t) => t.id === s.selectedTaskId))
   const optimisticOverlay = useStore((s) => s.optimisticOverlay)
   const planItemInFlight = useStore((s) => s.planItemInFlight)
+  // v0.37.0：任务清单账本快照（模式徽标 + 恢复点提示条的唯一数据源）
+  const ledger = useStore((s) => (task ? s.ledgerSnapshots[task.id] : undefined))
   const markPlanItemOptimistic = useStore((s) => s.markPlanItemOptimistic)
   const rejectPlanItemOptimistic = useStore((s) => s.rejectPlanItemOptimistic)
 
@@ -205,6 +207,25 @@ export function TodoPanel() {
       {/* 头部：目标 + 进度 */}
       <div className="flex items-center gap-2 px-3 h-9 flex-shrink-0 border-b border-border-subtle">
         <span className="flex-1 min-w-0 text-sm text-text-primary font-medium truncate">{goal}</span>
+        {/* v0.37.0：任务模式徽标 —— **只读**，点击不弹选择器。
+            模式由模型根据任务复杂度自选（set-task-mode），UI 不提供手动切换入口。 */}
+        {ledger && (
+          <Tooltip label={t('ledger.modeTooltip')}>
+            <span
+              data-testid="ledger-mode-badge"
+              data-mode={ledger.mode}
+              className="flex-shrink-0 whitespace-nowrap px-1.5 h-5 inline-flex items-center rounded border border-border-subtle text-2xs text-text-tertiary"
+            >
+              {t(
+                ledger.mode === 'chat'
+                  ? 'ledger.modeChat'
+                  : ledger.mode === 'spec'
+                    ? 'ledger.modeSpec'
+                    : 'ledger.modePlan',
+              )}
+            </span>
+          </Tooltip>
+        )}
         <span className="flex-shrink-0 whitespace-nowrap text-2xs text-text-tertiary tabular">
           {doneCount} / {items.length}
         </span>
@@ -255,6 +276,28 @@ export function TodoPanel() {
           )
         })}
       </div>
+
+      {/* v0.37.0：恢复点提示条 —— 中断保留后告诉用户"上次做到哪、还剩几项"。
+          只读展示，不提供操作：恢复由模型在下一轮按产出物判定。 */}
+      {ledger?.hasResumePoint && ledger.resumeHint && (
+        <div
+          data-testid="ledger-resume-bar"
+          className="mx-3 mt-2 flex-shrink-0 rounded-md border border-warning bg-bg-elevated px-2 py-1.5"
+        >
+          <div className="flex items-center gap-1.5">
+            <Icon.Warning width={12} height={12} className="text-warning flex-shrink-0" />
+            <span className="text-2xs font-medium text-warning flex-shrink-0">{t('ledger.resumeBar')}</span>
+            {ledger.openCount > 0 && (
+              <span className="text-2xs text-text-tertiary flex-shrink-0">
+                {t('ledger.openCount', { n: ledger.openCount })}
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 text-2xs leading-relaxed text-text-secondary select-text">
+            {ledger.resumeHint}
+          </p>
+        </div>
+      )}
 
       {/* 进度条 */}
       {items.length > 0 && (
@@ -316,7 +359,8 @@ export function TodoPanel() {
                       </svg>
                     </span>
                   ) : st === 'running' ? (
-                    <span className="flex-shrink-0 w-4 h-4 mt-0.5 rounded-full border-[1.5px] border-accent border-t-transparent animate-spin" />
+                    // v0.36.3 D116：旋转环 → 完整圆环纯色呼吸（无 GPU 环境禁连续 transform）
+                    <span className="flex-shrink-0 w-4 h-4 mt-0.5 rounded-full border-[1.5px] border-accent breathe" />
                   ) : st === 'failed' ? (
                     <span className="flex-shrink-0 w-4 h-4 mt-0.5 rounded-full bg-danger flex items-center justify-center text-white text-2xs font-semibold">
                       ✕
@@ -464,7 +508,7 @@ export function TodoPanel() {
         {isInferred && (
           <div className="mt-3 px-3 py-2 rounded-md border border-border-subtle bg-bg-surface-2 space-y-1.5">
             <div className="flex items-center gap-2 text-2xs text-text-secondary">
-              <span className="w-2.5 h-2.5 rounded-full border-[1.5px] border-accent border-t-transparent animate-spin" />
+              <span className="w-2.5 h-2.5 rounded-full border-[1.5px] border-accent breathe" />
               <span>{t('dock.todo.infer_title')}</span>
             </div>
             <div className="text-2xs text-text-tertiary">

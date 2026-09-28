@@ -1,6 +1,6 @@
 {
   "name": "arkwork",
-  "version": "0.35.0",
+  "version": "0.40.0",
   "description": "Local-first AI Agent workbench — ReAct loop visible, controllable, reusable.",
   "main": "out/main/index.js",
   "author": {
@@ -163,9 +163,15 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
         }
       ],
-      "artifactName": "ArkWork-Setup-${version}-${arch}.${ext}",
+      "artifactName": "ArkWork-${version}-win-${arch}.${ext}",
       "files": [
         "out/**/*",
         "!out/**/*.{map,ts}",
@@ -184,7 +190,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "ArkWork"
+      "shortcutName": "ArkWork",
+      "artifactName": "ArkWork-Setup-${version}-${arch}.${ext}"
     },
     "portable": {
       "artifactName": "ArkWork-Portable-${version}-${arch}.${ext}"
@@ -215,6 +222,7 @@
     "generateUpdatesFilesForAllChannels": false
   },
   "optionalDependencies": {
-    "app-builder-bin": "^4.2.0"
+    "app-builder-bin": "^4.2.0",
+    "dugite": "^3.2.3"
   }
 }

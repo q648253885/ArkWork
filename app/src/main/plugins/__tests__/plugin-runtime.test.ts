@@ -468,6 +468,22 @@ test('TC-PLG2-019 心跳只在显式开启时发送，且可停', async () => {
   assert.equal(main.notifies.filter((n) => n.method === 'host/heartbeat').length, after, '停后不得再发')
 })
 
+test('TC-PLG2-027 ctx.ark.log 双参（level, msg）与单参（msg）都把内容送到主进程', async () => {
+  // B2 实机冒烟发现：单参写法 log('内容') 按位置硬解会把消息丢进 level 位，
+  // 主进程只见 `[plugin:x] ` 空前缀。此用例钉住两种形态都不丢内容。
+  const { host, main } = makeHostPair()
+  await main.rpc('host/prepare', {
+    pluginId: 'test.logforms',
+    dir: join(FIXTURES, 'logforms'),
+    manifest: manifestOf({ id: 'test.logforms', main: 'main.js' }),
+    permissions: [],
+  })
+  await main.rpc('host/activate')
+  assert.ok(main.logs.includes('单参日志内容'), `单参日志内容必须到达主进程，实际：${JSON.stringify(main.logs)}`)
+  assert.ok(main.logs.includes('双参日志内容'), `双参日志内容必须到达主进程，实际：${JSON.stringify(main.logs)}`)
+  assert.equal(host.state().activated, true)
+})
+
 test('TC-PLG2-020 未知 rpc 方法 → E_NOT_FOUND（Host 半不实现的动作不装作成功）', async () => {
   const { main } = makeHostPair()
   const r = await main.rpc('host/nonexistent')

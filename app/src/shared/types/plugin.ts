@@ -67,6 +67,7 @@ export const PLUGIN_PERMISSIONS = [
   'fs:workspace-write', // 写工作区内文本
   'net', // 主进程代发 HTTP（规避 CORS）
   'shell', // 执行外部命令
+  'git', // v0.36.0：git 封闭白名单操作（读免审批；写走权限模式 + 审计）
   'tools.register', // 向模型注册工具
   'views.register', // 注册 iframe 视图
   'panels.register', // 注册白名单组件面板
@@ -157,7 +158,32 @@ export interface PluginThemeProvide {
   dark?: Record<string, string>
 }
 
+/**
+ * ★ v0.36.0：命令贡献点（对齐 VS Code `contributes.commands`）。
+ *
+ * 命令是插件**主动能力**的最小暴露单元：
+ *  - UI 侧出现在 QuickAction（Mod+K）与插件面板的操作列表里；
+ *  - 触发后经 `plugin:run-command` → supervisor 直发 `host/emit`
+ *    （event=`command:<id>`），插件在 `ctx.on('command:<id>')` 里执行。
+ *
+ * 与 `tools` 的分工：tool 是**模型可见**的（进模型工具表），command 是**用户可见**的
+ * （进 UI 命令面板）—— 两者可以指向同一份逻辑，但登记渠道互不替代。
+ */
+export interface PluginCommandContribution {
+  /** 命令全名（`<pluginId内可读段>.<动作>`；同插件内唯一，跨插件允许重复触发隔离） */
+  id: string
+  /** 展示名（QuickAction / 插件详情里直接显示） */
+  title: string
+  /** 可选图标（emoji 或 vlib 图标名） */
+  icon?: string
+}
+
 export interface PluginProvides {
+  /**
+   * ★ v0.36.0：命令贡献（不与 kind 联动 —— 任何 kind 的插件都可附带命令；
+   * 但声明了命令就必须有 Host 半代码 `main`，否则命令无人处理（VP9））。
+   */
+  commands?: PluginCommandContribution[]
   panel?: PluginPanelProvide
   /**
    * v0.34.1：一个插件贡献**多个**面板。
@@ -294,6 +320,8 @@ export interface PluginSummary {
   viewRefs: string[]
   /** 该插件贡献的模型工具名 */
   toolNames: string[]
+  /** ★ v0.36.0：该插件贡献的命令 id（QuickAction 与插件详情用） */
+  commandIds: string[]
   /** Host 半入口是否存在（作者视角「我是代码插件还是声明式插件」的判据） */
   hasHostCode: boolean
   /** Client 半入口是否存在 */

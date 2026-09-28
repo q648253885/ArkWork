@@ -76,6 +76,12 @@ export interface Agent {
    *  - default/plan：不改变行为
    */
   defaultPermissionMode?: 'default' | 'acceptEdits' | 'plan'
+  /**
+   * v0.36.0 F2.3：工作区内置 agent（`.arkwork/agents/*.json`，随工作区分发）。
+   * true = 来自工作区目录（打开该工作区即可用，不写全局 agents.json）；
+   * 缺省/undefined = 全局 agent（agents.json / 内置 seed）。
+   */
+  workspaceBuiltin?: boolean
 }
 
 /* ============================================================
@@ -133,6 +139,13 @@ export type BuiltinHandler =
   | 'submit_plan'
   | 'replan'
   | 'todo_update'
+  /* v0.38.0（D154）：清单控制面收敛后的两个新入口。
+   * 处理器不在 registry 的 handler 表里 —— 它们由 `engine/act.ts` 在
+   * `invokeSkill` 之前直接拦截（控制类工具，与 todo_update /
+   * set-task-mode 同族）。此处登记只为让工具规格通过类型校验、
+   * 并让 `assessToolRisk` 能按风险档归类。 */
+  | 'task_plan'
+  | 'turn_note'
 
 export interface Skill {
   id: string                    // S-core.web-search
@@ -264,6 +277,16 @@ export interface LlmModel {
   // v0.9.0 F904：能力静态声明（模型编辑器可勾选；缺省用命名启发式兜底，不做运行时探测）
   supportsThinking?: boolean   // 支持思考模式
   supportsTools?: boolean      // 支持工具调用
+  /**
+   * v0.38.0（D161）：是否允许思考 / 推理模式（请求侧开关）。
+   *
+   * `false` → 请求体附带 `think:false` / `enable_thinking:false`。
+   * 实证：Ollama 上的 qwen3 / qwen3.5 **默认开启思考**，思考会压掉原生
+   * `tool_calls`（模型改为把调用写成正文），并让下游 JSON 提取（标题 / 计划
+   * 生成）拿到空输出 —— 工具路由场景必须关闭。
+   * 未配置时：Ollama 形态端点（kind=ollama/vllm 或 baseURL 含 :11434）默认关闭。
+   */
+  think?: boolean
 }
 
 import type { TaskConfig } from './task'

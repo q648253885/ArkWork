@@ -68,10 +68,13 @@ export interface ProfileState {
   profileHomeModule: string | null
   /** profile 声明的 Composer chips */
   profileComposerChips: string[]
+  /**
+   * v0.36.0（B11/P3-b）：工作台级插件白名单。
+   * null = manifest 未声明（不过滤）；数组（含空）= 白名单生效。
+   */
+  profilePluginRefs: string[] | null
   /** v0.33.0：可渲染面板 Tab（来自插槽，顺序真源 = manifest position） */
   profilePanels: PanelTab[]
-  /** v0.33.0：扩展名 → 渲染器覆盖表 */
-  rendererOverrides: Record<string, string>
   /** v0.33.0：token 覆盖表 */
   themeOverrides: ThemeTokens
 
@@ -80,8 +83,9 @@ export interface ProfileState {
   /** 把快照里的 ui 层投影到视图字段（纯 set，不发 IPC） */
   applyProfileToView: (snapshot: CompositionSnapshot | null) => void
   /**
-   * v0.33.0：把**插槽明细**派生为面板 / 渲染器覆盖 / 主题三份数据。
+   * v0.33.0：把**插槽明细**派生为面板 / 主题两份数据。
    * 与 `applyProfileToView` 的分工见 `utils/profile-view.ts` 的模块注释。
+   * ★ v0.36.0（D5）：原第三份 `rendererOverrides` 已随 `ui.renderer` 插槽删除。
    */
   applySlotDerivations: (slots: Partial<Record<SlotKind, SlotEntry[]>>) => void
   /** 订阅主进程广播（App 挂载时调一次） */
@@ -100,8 +104,8 @@ export const profileSlice: StateCreator<AppState, [], [], ProfileState> = (set, 
   profileDockTabs: null,
   profileHomeModule: null,
   profileComposerChips: [],
+  profilePluginRefs: null,
   profilePanels: EMPTY_DERIVATIONS.panels,
-  rendererOverrides: EMPTY_DERIVATIONS.rendererOverrides,
   themeOverrides: EMPTY_DERIVATIONS.theme,
 
   loadProfiles: async () => {
@@ -147,6 +151,9 @@ export const profileSlice: StateCreator<AppState, [], [], ProfileState> = (set, 
         return false
       }
       const snapshot = report.snapshot ?? null
+      // B11/P2：切台必须复位 modulePage —— CenterStage 里 modulePage 优先级最高，
+      // 上一台停留的模块页（如知识库）会残留到新台，表现为「点研究台进了知识库」。
+      if (get().modulePage) get().closeModulePage()
       set({
         activeProfileId: report.profileId,
         profileSnapshot: snapshot,
@@ -177,15 +184,19 @@ export const profileSlice: StateCreator<AppState, [], [], ProfileState> = (set, 
   },
 
   applyProfileToView: (snapshot) => {
-    const { dockTabs, homeModule, composerChips } = projectUiLayer(snapshot)
-    set({ profileDockTabs: dockTabs, profileHomeModule: homeModule, profileComposerChips: composerChips })
+    const { dockTabs, homeModule, composerChips, pluginRefs } = projectUiLayer(snapshot)
+    set({
+      profileDockTabs: dockTabs,
+      profileHomeModule: homeModule,
+      profileComposerChips: composerChips,
+      profilePluginRefs: pluginRefs,
+    })
   },
 
   applySlotDerivations: (slots) => {
     const next: SlotDerivations = deriveFromSlots(slots)
     set({
       profilePanels: next.panels,
-      rendererOverrides: next.rendererOverrides,
       themeOverrides: next.theme,
     })
   },

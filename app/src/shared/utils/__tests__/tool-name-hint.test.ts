@@ -17,7 +17,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { suggestToolNames, unknownToolError } from '../tool-name-hint.js'
 
-/** 真实内置工具名的一个代表子集（取自 seed.ts 的 S-core.*） */
+/**
+ * 纯匹配算法的**真值表夹具**。
+ *
+ * ⚠️ 它刻意包含历史名（`todo_update` / `submit_plan`）：本函数只做*字符串*相似度，
+ * 不负责判断工具是否在册 —— "在册与否"由 `engine/work-class.ts` 的
+ * `RETIRED_PLAN_TOOLS` 单独负责（v0.38.0 D154 已下架这两个名字）。
+ * 把夹具换成当前在册集会让"词根优先于编辑距离"这条回归失去判别力
+ * （现网已没有 `todo_*` 族的名字可与 `todo-write` 首词根相同）。
+ * 曾经此处注释写成"取自 seed.ts 的 S-core.*"，与事实不符 → 已更正。
+ */
 const AVAILABLE = [
   'file-reader',
   'file-writer',

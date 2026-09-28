@@ -43,6 +43,7 @@ const { putGraphCache, dropGraphCache } = await import('../sync.js')
 const { registerPendingPatch, registerPlanApproval, dropTaskPlanApproval, getPlanApproval } = await import(
   '../pending.js'
 )
+const { listL1 } = await import('../../../memory/l1-working.js')
 
 /* electron-stub 扩展的 __invokeIpc（electron 官方 d.ts 不含它）：就地声明类型 */
 type IpcInvoke = <T = any>(channel: string, ...args: unknown[]) => Promise<T>
@@ -753,6 +754,125 @@ test('TC-IPC-017 graph:decide-plan：护栏（NOT_FOUND/CONFLICT）+ 覆盖率�
   dropTaskPlanApproval(tOk)
   dropGraphCache(gOk.id)
   dropGraphCache(gUncov.id)
+})
+
+test('TC-IPC-018 graph:decide-plan F6.2：勾选子集批准（未勾选+后代 cancelled，祖先受保护，覆盖率复算，改题入图）', async () => {
+  // 图：goal → m1/m2（里程碑）→ t1/t2（任务）。UI 只传结构行 id（m1），
+  // goal 是 m1 的祖先但不在勾选集合里 —— 必须受保护，否则会从根级联误杀全图。
+  const goal = node({ id: 't_f62g01', layer: 'goal', title: '目标', children: ['t_f62m1a', 't_f62m2a'] })
+  const m1 = node({ id: 't_f62m1a', layer: 'milestone', key: 'M-01', title: '里程碑一', parentId: 't_f62g01', children: ['t_f62t1a'] })
+  const m2 = node({ id: 't_f62m2a', layer: 'milestone', key: 'M-02', title: '里程碑二', parentId: 't_f62g01', children: ['t_f62t2a'] })
+  const t1 = node({ id: 't_f62t1a', key: 'T-01', title: '任务一', parentId: 't_f62m1a' })
+  const t2 = node({ id: 't_f62t2a', key: 'T-02', title: '任务二', parentId: 't_f62m2a' })
+  // AC-02 同时被 t1/t2 覆盖：t2 被取消后仍由 t1 覆盖（取消即无覆盖的复算见下一条）
+  const g = graph([goal, m1, m2, t1, t2], {
+    spec: {
+      state: 'draft',
+      scopeIn: [],
+      scopeOut: [],
+      assumptions: [],
+      constraints: [],
+      contextRefs: [],
+      acceptance: [ac('AC-01', { coveredBy: ['t_f62t1a'] }), ac('AC-02', { coveredBy: ['t_f62t1a', 't_f62t2a'] })],
+    },
+  })
+  const taskId = await taskWithGraph(g)
+  registerPlanApproval({ taskId, graphId: g.id, state: 'pending', proposedAt: Date.now(), uncovered: [] })
+
+  // 空数组 = 拒绝（取消全部勾选等于不执行）
+  const empty = await __invokeIpc('graph:decide-plan', { taskId, decision: 'approve', approvedItemIds: [] })
+  assert.equal(empty.ok, false)
+  assert.equal(empty.error.code, 'SCHEMA_INVALID')
+
+  // 未知 id = 拒绝（计划项可能已被 Planner 调整）
+  const unknown = await __invokeIpc('graph:decide-plan', { taskId, decision: 'approve', approvedItemIds: ['t_f62m1a', 't_ghost01'] })
+  assert.equal(unknown.ok, false)
+  assert.equal(unknown.error.code, 'SCHEMA_INVALID')
+
+  // 勾选子集 + 行内改题：只勾 m1（含后代 t1），m2/t2 级联 cancelled；t1 改题入图
+  const res = await __invokeIpc('graph:decide-plan', {
+    taskId,
+    decision: 'approve',
+    approvedItemIds: ['t_f62m1a'],
+    nodeEdits: [{ id: 't_f62t1a', title: '任务一（用户改过）' }],
+  })
+  assertOk(res)
+  const after = await loadGraph(g.id)
+  assert.equal(after!.spec.state, 'approved')
+  assert.equal(after!.nodes['t_f62m2a'].status, 'cancelled', '未勾选的里程碑按 cancelled 收口')
+  assert.equal(after!.nodes['t_f62t2a'].status, 'cancelled', '未勾选节点的后代级联 cancelled')
+  assert.equal(after!.nodes['t_f62m1a'].status, 'ready', '勾选项状态不变')
+  assert.equal(after!.nodes['t_f62t1a'].status, 'ready', '勾选项的后代随父执行，不被误取消')
+  assert.notEqual(after!.nodes['t_f62g01'].status, 'cancelled', '已批准节点的祖先（goal 根）受保护，不从根级联误杀')
+  assert.equal(after!.nodes['t_f62t1a'].title, '任务一（用户改过）', '行内改题合并进图')
+
+  const rev = after!.revisions.at(-1)!
+  assert.equal(rev.reason, 'plan-approved')
+  const revAfter = rev.after as { approvedItems?: number; cancelledItems?: number; editedItems?: number }
+  assert.equal(revAfter.approvedItems, 2, '含后代扩展：m1 + t1')
+  assert.equal(revAfter.cancelledItems, 2, 'm2 + t2')
+  assert.equal(revAfter.editedItems, 1)
+
+  const gate = getPlanApproval(taskId)!
+  assert.equal(gate.state, 'approved')
+  assert.deepEqual(gate.approvedItemIds, ['t_f62m1a'], '闸门瞬时态记录用户实际勾选的结构行')
+  assert.deepEqual(gate.editedItemIds, ['t_f62t1a'], '闸门瞬时态记录改过的项')
+
+  dropTaskPlanApproval(taskId)
+  dropGraphCache(g.id)
+
+  // 覆盖率复算：AC-02 只被将被取消的 t2 覆盖 → 拒绝（防「冻结了永远不跑的验收」）
+  const g2 = graph([m1, m2, t1, t2], {
+    spec: {
+      state: 'draft',
+      scopeIn: [],
+      scopeOut: [],
+      assumptions: [],
+      constraints: [],
+      contextRefs: [],
+      acceptance: [ac('AC-01', { coveredBy: ['t_f62t1a'] }), ac('AC-02', { coveredBy: ['t_f62t2a'] })],
+    },
+  })
+  const taskId2 = await taskWithGraph(g2)
+  registerPlanApproval({ taskId: taskId2, graphId: g2.id, state: 'pending', proposedAt: Date.now(), uncovered: [] })
+  const blocked = await __invokeIpc('graph:decide-plan', { taskId: taskId2, decision: 'approve', approvedItemIds: ['t_f62m1a'] })
+  assert.equal(blocked.ok, false)
+  assert.equal(blocked.error.code, 'INVARIANT_VIOLATION', '被取消节点覆盖的 AC 等同无覆盖')
+  dropTaskPlanApproval(taskId2)
+  dropGraphCache(g2.id)
+})
+
+test('TC-IPC-019 graph:decide-plan F6.2：startExecution=false 仅保留计划不执行（批准生效但不注入续跑消息）', async () => {
+  const g = graph([node({ id: 't_f62k01', key: 'T-01', title: '跑通' })], {
+    spec: {
+      state: 'draft',
+      scopeIn: [],
+      scopeOut: [],
+      assumptions: [],
+      constraints: [],
+      contextRefs: [],
+      acceptance: [ac('AC-01', { coveredBy: ['t_f62k01'] })],
+    },
+  })
+  const taskId = await taskWithGraph(g)
+  registerPlanApproval({ taskId, graphId: g.id, state: 'pending', proposedAt: Date.now(), uncovered: [] })
+
+  const before = await listL1(taskId)
+  const res = await __invokeIpc('graph:decide-plan', { taskId, decision: 'approve', startExecution: false })
+  assertOk(res)
+  const after = await loadGraph(g.id)
+  assert.equal(after!.spec.state, 'approved', '仅保留计划 = 仍然批准（AC 冻结生效）')
+  assert.equal(getPlanApproval(taskId)!.state, 'approved')
+
+  const l1 = await listL1(taskId)
+  assert.equal(l1.length, before.length, '仅保留计划不执行：不向对话流注入「我已批准计划」续跑消息')
+  assert.ok(
+    !l1.some((m) => m.content.includes('我已批准计划')),
+    'L1 不得出现批准续跑消息',
+  )
+
+  dropTaskPlanApproval(taskId)
+  dropGraphCache(g.id)
 })
 
 /* ---------------- 清理 --------------- */

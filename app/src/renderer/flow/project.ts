@@ -21,6 +21,7 @@ import type {
   FlowViewMode,
   ReasoningSource,
   SayBlock,
+  SubagentChildView,
   ToolBlock,
   ToolCallKind,
   ToolStatus,
@@ -31,6 +32,8 @@ import {
   reasoningText,
   firstSentence,
 } from '@shared/utils/reasoning'
+// v0.36.0（B11/P4-c）：渲染层 SAY 标记兜底剥离（纯函数）
+import { stripSayMarkers } from '../utils/say-strip'
 // v0.31.0 B4：工具呈现协议（main 侧纯模块，渲染层直接消费 —— added/removed
 // 计数全仓库唯一实现，§5.4.5 / U2）
 import { presentCallOrDefault, presentResultOrDefault } from '../../main/agent/tools/present'
@@ -60,6 +63,12 @@ export interface ProjectInput {
    * 故作为可选入参显式传入（缺省给空串，TurnHeader 自行回落）。
    */
   agent?: { id: string; name: string; avatarColor: string }
+  /**
+   * v0.36.0（F4.1）实装补充（已登记 §11）：并行子 agent 组卡数据源。
+   * live-only —— 来自 store.subagentGroups（task:subagent-progress 事件流）；
+   * 历史回放（session.jsonl 重载）不重建该卡（与压缩通告同口径）。
+   */
+  subagentGroups?: SubagentChildView[]
 }
 
 /** 纯函数：无 window / document / Date.now 依赖 */
@@ -239,7 +248,9 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
         //     让正文可见（否则被 native 完全遮蔽）；
         //   · `content` 源（无原生思考）→ **不回落**：那种情况下 ReasoningBlock
         //     已经承载了 `thought`，再产一个 say 块会让同一段文字出现两次。
-        const sayText = (s.say ?? '').trim() || (source === 'native' ? (s.thought ?? '').trim() : '')
+        const sayText = stripSayMarkers(
+          (s.say ?? '').trim() || (source === 'native' ? (s.thought ?? '').trim() : ''),
+        )
         if (sayText) {
           const sb: SayBlock = {
             kind: 'say',
@@ -426,7 +437,9 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
         id: item.id,
         turn: t.index,
         step: 0,
-        text: item.text ?? '',
+        // v0.36.0（B11/P4-c）：落定 answer 也过渲染层兜底剥离（主进程未剥干净
+        // 的未闭合/变体标记不再以满亮度 markdown 直出）
+        text: stripSayMarkers(item.text ?? ''),
         origin:
           lastReasonTool === 'task_complete'
             ? 'task-complete'
@@ -451,6 +464,56 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
     const hit = turns.find((t) => iter >= t.minIter && iter <= t.maxIter)
     return hit ?? turns[turns.length - 1]
   }
+
+  /* ---------- v0.38.0（A4/A5/A9）：阶段结论与门禁通告的挂载辅助 ----------
+   * 为什么挂 `FlowStep.blocks` 而不是 `outerBlocks`（03-interaction §三 3.2）：
+   *   note 有明确的 `iteration` —— 它回答"第 N 轮里产生了什么结论"；而 plan /
+   *   answer 是**轮级**产物（不属于某一轮迭代），才走 outerBlocks。挂错位置会
+   *   让它挤到轮头/轮尾，丢掉与相邻 thinking/tool 的时间邻接关系。
+   *
+   * 为什么"打断进程折叠"：`segmentFlow`（shared/utils/flow-fold）把非
+   * reasoning/tool 的块当作天然分界 —— note 一插进来，前后两段进程各自成 run。
+   * 这正是要的效果：用户看到结论后，后续思考**重新起算**，不会被卷进上一段
+   * 折叠里而看不见。
+   */
+  const stepForIteration = (t: MutableTurn, iteration: number): FlowStep => {
+    const hit = t.steps.find((s) => s.index === iteration)
+    if (hit) return hit
+    // 事件可能先于步骤到达（直播流里事件常比 steps 回写更早落地）→ 造空壳步骤占位。
+    // 占位是有意的：否则 note 只能退化成 outerBlocks 或被丢弃，两种都违反 §三 3.2。
+    const created: FlowStep = {
+      index: iteration,
+      summary: '',
+      status: t.status === 'running' ? 'running' : 'done',
+      collapsed: stepCollapsedDefault,
+      durationMs: 0,
+      blocks: [],
+    }
+    t.steps.push(created)
+    // 保持 steps 按 iteration 升序 —— 下游（流式缓冲出口）假定末步是最新迭代
+    t.steps.sort((a, b) => a.index - b.index)
+    t.minIter = Math.min(t.minIter, iteration)
+    t.maxIter = Math.max(t.maxIter, iteration)
+    return created
+  }
+
+  /** 按时间戳保序插入（缺时间戳的块恒落末尾）—— 让 note 出现在它**真实发生**的位置 */
+  const insertBlockByTs = (blocks: FlowBlock[], block: FlowBlock): void => {
+    const tsOf = (b: FlowBlock): number =>
+      'ts' in b ? b.ts : 'startedAt' in b ? b.startedAt : Number.MAX_SAFE_INTEGER
+    const target = tsOf(block)
+    let i = blocks.length
+    while (i > 0 && tsOf(blocks[i - 1]!) > target) i--
+    blocks.splice(i, 0, block)
+  }
+
+  /** `via` 白名单守卫（会话日志可能来自旧版本/外部编辑 —— 运行期输入一律不信任） */
+  const NOTE_VIAS = ['model', 'plan-commit', 'gate-refusal', 'engine-stop', 'plan-revision'] as const
+  const normalizeNoteVia = (v: unknown): (typeof NOTE_VIAS)[number] =>
+    typeof v === 'string' && (NOTE_VIAS as readonly string[]).includes(v)
+      ? (v as (typeof NOTE_VIAS)[number])
+      : 'model'
+
   for (const ev of input.events) {
     if (ev.type === 'memory_compressed' || ev.type === 'context_compacted') {
       const t = turnForIteration('iteration' in ev ? ev.iteration : undefined)
@@ -491,6 +554,40 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
         actions: [],
         ts: (ev as { ts?: number }).ts ?? t.startedAt,
       })
+    } else if (ev.type === 'turn_note') {
+      /* v0.38.0（A5/D156）：阶段结论 → NoteBlock（挂 FlowStep.blocks，§三 3.2）
+       * 「思考 8 次直接出最终结果」的直接对策：把模型/引擎中途得出的结论单独
+       * 成块投到交互区，用户不必等收尾才知道进展。 */
+      const t = turnForIteration(ev.iteration)
+      const text = ev.text?.trim()
+      if (text) {
+        insertBlockByTs(stepForIteration(t, ev.iteration).blocks, {
+          kind: 'note',
+          id: `${t.id}:s${ev.iteration}:note:${ev.id}`,
+          turn: t.index,
+          step: ev.iteration,
+          text,
+          via: normalizeNoteVia(ev.via),
+          ts: ev.ts ?? t.startedAt,
+        })
+      }
+      // 空文本直接丢弃（main 侧 emitTurnNote 已 trim 过；此处是第二道护栏，
+      // 防止外部编辑过的 session.jsonl 塞进空白结论 —— 纪律⑨：不投空卡片）
+    } else if (ev.type === 'gate_blocked') {
+      /* v0.38.0（A9/D153）：门禁拦截 → notice/gate-blocked（§四 4.2）
+       * 与给模型的 gate_hint（L1 system 通道）严格分离 —— 这里渲染的是
+       * **面向用户的人话**，不含 [tree-sync-required] 等内部标记（TC-UI-006）。 */
+      const t = turnForIteration(ev.iteration)
+      stepForIteration(t, ev.iteration).blocks.push({
+        kind: 'notice',
+        id: `${t.id}:s${ev.iteration}:gate-blocked:${ev.id}`,
+        turn: t.index,
+        step: ev.iteration,
+        noticeKind: 'gate-blocked',
+        text: ev.text,
+        level: 'warning',
+        ts: ev.ts ?? t.startedAt,
+      })
     }
   }
 
@@ -528,6 +625,66 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
       status: 'streaming',
     })
     t.status = 'running'
+  }
+
+  /* ---------- v0.36.0（B11/P4-a）：流式正文缓冲出口 ----------
+   * 修复「执行中只显示思考/过程行，正文最后才一次性出现」：
+   * 主进程双通道泵一直都在（reason-phase.ts 的 text/reasoning 两条
+   * createTextDeltaPump），但渲染层此前只订阅了 reasoning 通道 —— text 通道
+   * 缓冲没有消费点且落定时被删（settle.ts）。这里把 `:turn:text` 缓冲投影为
+   * 末轮的 streaming Answer 块（AnswerBlock 的流式 <pre> 分支由此激活）。
+   * 落定后 settle 删除缓冲、权威 answer/say 块接管 —— 去重护栏见下。 */
+  const textStreamKey = `${taskId}:turn:text`
+  const textBuf = input.streamBuffers[textStreamKey]
+  if (textBuf && textBuf.text.trim()) {
+    const t = turns[turns.length - 1]
+    const streamed = textBuf.text.trim()
+    // 去重护栏：落定 say/answer 已含同等内容时不再叠加（step 与缓冲删除
+    // 分两个 store 更新到达的瞬间，避免同段文字出现两份）
+    const alreadySettled = t.outerBlocks.some(
+      (b) =>
+        (b.kind === 'answer' && b.streaming !== true && (b as { text?: string }).text?.trim() === streamed) ||
+        t.steps.some((s) =>
+          s.blocks.some((sb) => sb.kind === 'say' && (sb as { text: string }).text.trim() === streamed),
+        ),
+    )
+    if (!alreadySettled) {
+      t.outerBlocks.push({
+        kind: 'answer',
+        id: `${taskId}:answer:stream`,
+        turn: t.index,
+        step: 0,
+        text: stripSayMarkers(textBuf.text),
+        origin: 'plain',
+        streaming: true,
+        ts: now,
+        tsLabel: fmtTime(now),
+      })
+      t.status = 'running'
+    }
+  }
+
+  /* ---------- v0.36.0（F4.1）：并行子 agent 组卡（live-only，挂末轮 outerBlocks） ----------
+   * 为什么挂在末轮：委派发生在父任务执行的最后一轮（delegate-agent 是阻塞式工具调用），
+   * 组卡与它同轮可见才符合"过程发生在哪一轮"的直觉。历史回放无事件源，故仅 live。
+   * settled 全部到达终态 → 组件折叠为汇总条；仍有 queued/running → 整轮保持 running。 */
+  const subChildren = input.subagentGroups
+  if (subChildren && subChildren.length > 0 && turns.length > 0) {
+    const t = turns[turns.length - 1]
+    const settled = subChildren.every(
+      (c) => c.status === 'done' || c.status === 'failed' || c.status === 'cancelled',
+    )
+    t.outerBlocks.push({
+      kind: 'subagent-group',
+      id: `${taskId}:subagent-group`,
+      turn: t.index,
+      step: 0,
+      parentTaskId: taskId,
+      children: subChildren,
+      settled,
+      ts: now,
+    })
+    if (!settled) t.status = 'running'
   }
 
   /* ---------- 出口组装（冻结 + 默认折叠态应用） ---------- */

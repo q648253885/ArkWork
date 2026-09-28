@@ -30,10 +30,28 @@ import { generatePlan } from './plan.js'
 import { migrateToGraph, needsGraphMigration } from '../graph/migrate.js'
 import { getPlanApproval, registerPlanApproval } from '../graph/pending.js'
 import { getGraphById, putGraphCache } from '../graph/sync.js'
-import { saveGraph } from '../graph/store.js'
+import { findGraphIdByTaskId, saveGraph } from '../graph/store.js'
 import { recordMetric } from '../graph/metrics.js'
-import { isPhaseHeader } from './plan-parser.js'
+import { isPhaseHeader, renderPlanTreeSnapshot } from './plan-parser.js'
 import { injectSkillInstruction, broadcastSkillAutoLoaded } from './skills.js'
+// v0.38.0（D155）：新输入的「请先判断」指令（system 通道 · 禁复述）
+import { injectInputJudgement, emitTurnNote } from './gate-channel.js'
+// v0.39.0（W4）：用户新指令 → 规划通道重排（判据 = 规划结果是否与当前清单不同）
+import { runPlannerPass, getPlannerModelId } from '../planning/runner.js'
+import type { PlannerRequestItem } from '../planning/types.js'
+import { commitPlanDraft } from './plan-commit-pipeline.js'
+import { safeSlice } from './broadcast.js'
+// v0.37.0：TaskLedger —— 任务清单唯一真相源（唯一写入口 + 恢复点语义）
+import {
+  ensureLedger,
+  loadLedger,
+  resumeLedger,
+  sweepStale,
+  renderSnapshot,
+  hasResumePoint,
+  toPlanItems,
+  DEFAULT_STALE_MAX_IDLE_MS,
+} from '../ledger/index.js'
 
 export type AlwaysOnContracts = Awaited<ReturnType<typeof collectAlwaysOnSections>>
 
@@ -45,6 +63,12 @@ export interface PreparedRun {
   coreSkillsEnabled: boolean
   allowedStage: number
   pendingSystemHint: string | undefined
+  /**
+   * v0.38.1（D170）：对话级任务标记 —— 首轮 plan 生成时模型显式表态「无需清单」
+   * （Tier 0：`[]` 或 direct-answer JSON）。此后的 ReAct 循环中，模型的正文答复
+   * 即为对用户的最终答复（答复即终局），不再按「未完成工作」走停滞守卫暂停。
+   */
+  chatMode: boolean
 }
 
 export async function prepareRun(args: {
@@ -203,6 +227,9 @@ export async function prepareRun(args: {
     }
   }
 
+  // v0.38.1（D170）：对话级任务标记 —— 首轮 plan 生成时模型显式表态「无需清单」
+  // （Tier 0：`[]` 或 direct-answer JSON）→ 本 run 为对话级（loop 守卫「答复即终局」）。
+  let chatMode = false
   // 任务计划清单必须先于记忆召回和任何 ReAct 思考/工具操作出现。
   // polish4 §B1：新任务流程必须经过 Plan，但 plan 生成失败时**不**写 fallback plan 到 L1，
   // 避免模型下一轮引用兜底清单。仅当 generatePlan 真正成功时才落入 plan_start 事件 + L1。
@@ -213,9 +240,20 @@ export async function prepareRun(args: {
     // 决定是否登记 Plan 闸门**错误态**（原型 page-08 error），让用户看见"为何没有图"。
     let planDegraded = false
     try {
-      plan = await generatePlan(task, agent, modelId, signal, alwaysOnPlanHint, docDriven, () => {
-        planDegraded = true
-      })
+      plan = await generatePlan(
+        task,
+        agent,
+        modelId,
+        signal,
+        alwaysOnPlanHint,
+        docDriven,
+        () => {
+          planDegraded = true
+        },
+        () => {
+          chatMode = true
+        },
+      )
     } catch (err) {
       logger.warn('Agent', `plan generation failed: ${(err as Error).message}`, task.id)
       plan = null
@@ -244,6 +282,13 @@ export async function prepareRun(args: {
       // 「确保任务图存在」块会据这份 planItems 建图（migrateToGraph），两通道按构造一致。
       task.planItems = planItems
       await updateTask(task.id, { planItems })
+      // v0.37.0：清单落账 —— 从这一刻起 TaskLedger 是唯一真相源，
+      // Task.planItems 降级为它的只读投影（由 ledger 单一写入者回写）。
+      try {
+        await ensureLedger(task, { goal: (task.input.text || task.title).split('\n')[0]?.slice(0, 200) })
+      } catch (err) {
+        logger.warn('Agent', `ledger 建账失败（清单仍可用，仅失去恢复点能力）：${(err as Error).message}`, task.id)
+      }
       // v0.18.0 F1/F2：plan 全量生成走 snapshot 通道（与 patch 分开，避免队列交叉）；
       // 一次性把整 planItems 推到 Renderer 端 hydrate 三视图 + reconcile。
       broadcastPlanListSnapshot(task.id, planItems, 'plan-regen')
@@ -303,6 +348,12 @@ export async function prepareRun(args: {
       task.planItems = fallbackPlanItems
       await updateTask(task.id, { planItems: fallbackPlanItems })
       broadcastPlanListSnapshot(task.id, fallbackPlanItems, 'plan-fallback')
+      // v0.37.0：兜底清单同样落账（保证后续 todo_update 有真相源可写）
+      try {
+        await ensureLedger(task, { goal: (task.input.text || task.title).split('\n')[0]?.slice(0, 200), mode: 'chat' })
+      } catch (err) {
+        logger.warn('Agent', `ledger 建账失败（兜底清单）：${(err as Error).message}`, task.id)
+      }
       logger.info('Agent', `plan-fallback: 写入兜底单步清单（${fallbackPlanItems[0]?.text}）`, task.id)
       // v0.30.0 / P8：三级降级链全败（且非模型显式空计划）→ 登记 Plan 闸门**错误态**。
       // 卡片 `PlanApprovalCard` 据此展示原型 page-08 的 error 态（三级降级顺序 + 重试/接受）。
@@ -377,20 +428,152 @@ export async function prepareRun(args: {
   // 引擎侧**不再清空重建**（v0.30.2 首版方案在 UAT 中误伤门禁答复，见 04-system-design §2.4）——
   // 图与清单的写入权回归受审计的 Replan 通道（task_create / replan 工具），引擎只注入性质判定提示。
   if (startIter > 0) {
+    // ============================================================
+    // v0.37.0（缺陷 D135）：**续聊绝不允许重建清单**。
+    //
+    // 旧路径问题：tasks.json 丢 graphId 时，`needsGraphMigration` 只看
+    // graphId 字段 → 用「过期全 pending 清单」重建第二张图 → 模型照单重做
+    // 已完成的任务（用户实测"续聊重复执行第一个任务"的直接来源，D122 残留）。
+    //
+    // 现在：清单真相源是账本文件，`ensureLedger` 在文件已存在时**原样返回**，
+    // 不重建、不整表替换；随后若存在中断痕迹，按产出物做三段式恢复判定。
+    // ============================================================
+    let ledger = null as Awaited<ReturnType<typeof loadLedger>>
+    try {
+      ledger = await ensureLedger(task, { seedFromPlanItems: true })
+      // 关键：把内存里的清单换成**账本投影**。后续图迁移 / 提示词装配都以它为准，
+      // 否则仍会拿 tasks.json 里可能过期的副本去重建（D135）。
+      if (ledger) task.planItems = toPlanItems(ledger)
+    } catch (err) {
+      logger.warn('Agent', `续聊建账失败（沿用既有清单）：${(err as Error).message}`, task.id)
+    }
+    let resumeHintText = ''
+    if (ledger && hasResumePoint(ledger)) {
+      try {
+        const resumed = await resumeLedger(task.id, '新一轮执行开始：按产出物判定中断项')
+        ledger = resumed.ledger ?? ledger
+        resumeHintText = resumed.ledger?.resume?.hint ?? ''
+        logger.info('Agent', `ledger resume：${resumeHintText.slice(0, 80)}`, task.id)
+      } catch (err) {
+        logger.warn('Agent', `恢复点判定失败：${(err as Error).message}`, task.id)
+      }
+    }
+    // 过期任务巡检：running 太久无进展 → paused（终态不动，防止误伤已完成项）
+    if (ledger) {
+      try {
+        const swept = await sweepStale(task.id, DEFAULT_STALE_MAX_IDLE_MS, '过期巡检')
+        if (swept.ok && swept.effective && swept.effective.length > 0) {
+          logger.info('Agent', `sweep-stale 暂停 ${swept.effective.length} 项无进展清单项`, task.id)
+          ledger = swept.ledger
+        }
+      } catch (err) {
+        logger.warn('Agent', `过期巡检失败：${(err as Error).message}`, task.id)
+      }
+    }
+    // 账本权威快照：模型重评的基准**必须是文件当前状态**，不是历史消息里的旧快照。
+    // v0.37.0：整份快照的注入**收口到 `messages.ts`（每轮 L1 段，D138）**，
+    // 这里只在"没有账本"（旧任务）时用树快照兜底 —— 同轮两处渲染同一份清单
+    // 既费 token，也让同一状态出现两种措辞（模型可能按其中一份行事）。
+    const resumeBlock = resumeHintText
+      ? `\n\n**上次中断的恢复点**：${resumeHintText}\n已完成项**不要重做**；确实需要重做的，先用 task_plan 提交把它改回 doing 并说明原因。`
+      : ''
+    // v0.36.5 D125：新指令型 hint 内联整棵树快照（ZCode：模型必须能看见权威快照才谈得上重评）。
+    // 答复型续聊不加快照 —— 门禁/ask_user 答复不是新指令，清单保持不变（D12 v2 不变量）。
+    const treeSnapshot = isReplyContinuation ? '' : renderPlanTreeSnapshot(task.planItems ?? [])
+    // v0.38.0（D154）：清单控制面收敛为 `task_plan` 单入口 —— 本节文案不得再出现
+    //   `task_create` / `replan` / `todo_update` 等已下架工具名（否则模型没有唯一答案）。
     const replanHint = isReplyContinuation
       ? `## 答复型续聊（v0.30.2 D12）
 本轮最新 user_message 是对引擎提问（门禁 / ask_user / 计划闸门 / 迭代上限）的**答复**，不是新指令：
 1. 任务清单保持不变 —— 直接继续推进当前进行中的节点；门禁状态已由引擎写回。
-2. 答复若隐含方向或范围调整 → 用 task_create 把调整挂为子任务，或 replan 增量补丁；禁止整体作废清单。`
-      : `## 续聊指令与清单（v0.30.2 D12）
-用户追加了新输入。先判断它与现有清单的关系，**三选一**处理（清单是活树，禁止未经批准擅自整体作废）：
-1. **子任务/细化**（属于当前目标的分解或补充）→ 用 task_create 新建节点（parent_id 挂到相关节点下，add-only 第 1 级自动应用，侧边栏树形显示）。
-2. **独立追加**（新增工作但不影响既有项）→ 用 replan 提交 add-only 补丁（第 1 级自动应用）。
-3. **真正切换任务**（旧目标作废，按新指令重来）→ 用 replan 提交 remove+add 重构补丁 → 第 2 级**等待用户批准**，批准后自动应用；未获批准前旧清单原样保留。
-4. 无清单的对话级任务 → 沿用对话式推进；新指令需要多步执行时用 task_create 建图登记。`
+2. 答复若隐含方向或范围调整 → 用 task_plan 提交更新后的**完整清单**（引擎自动比对差异）；禁止整体作废清单。`
+      : `## 续聊指令与清单（v0.38.0 — 先判断，后作答）
+用户追加了新输入，而当前生效清单是**上一段任务**留下的快照（见下方清单快照）。
+第一步只有一件事：判断「**这次输入是否产生了需要跟踪的新工作**」（不是"用户是否发了消息"）：
+1. **需要新工作**（新增 / 调整 / 切换目标）→ 用 task_plan 提交你更新后的**完整清单**（新增项、状态变化、删除项由引擎自动比对并保留已完成项），再开始执行。
+2. **只读问答 / 闲聊**（不产生需要跟踪的工作）→ 清单无需变化：用 task_plan 提交与现在**相同**的清单即可（引擎会记录你已做过检视判断），然后直接回答用户。
+重评口径：已完成项保持 done 不动（终态不可回退）；与新输入无关且未开始的项先保持原状。`
+    // v0.38.0（D155）：把"用户原输入 + 清单快照"直接摆给模型，让它**先读先判**（system 通道）。
+    //   取代此前由 `isReplyContinuation` 这类代理变量预判 —— 代理变量判不出
+    //   「只读提问」与「新指令」的区别（D150 根因）。
+    if (!isReplyContinuation && ledger) {
+      const latestUser = await listEnabledL1(task.id)
+        .then((ms) => [...ms].reverse().find((m) => m.kind === 'user_message' && m.content?.trim()))
+        .catch(() => undefined)
+      const userInputText = latestUser?.content?.trim() || task.input?.text || task.title
+      await injectInputJudgement({
+        taskId: task.id,
+        iteration: startIter,
+        inputText: userInputText,
+        items: ledger.items,
+      })
+      // ============================================================
+      // v0.39.0（W4 · F4）：**用户新指令 → 规划通道重排**。
+      //
+      // 上面那条指令是让模型「自己判、自己改」；这里先给规划通道一次机会 ——
+      // 它带着「用户新输入 + 当前清单」跑一个干净的回合，产出的清单直接提交。
+      //
+      // 判据刻意**不是**「用户有没有说话」（那是 D150 教训里的代理变量），而是
+      // **规划结果与当前清单是否不同**：相同 → 幂等不动（changed=0，什么都不发生）；
+      // 不同 → 提交并通过 `plan-revision` 通道告知用户「清单变了，是引擎重新规划的」。
+      //
+      // 失败即回落：planner 不可用 / 解析不出 / 落库失败 → 只有上面那条指令生效，
+      // 行为与 v0.38.1 完全一致。超时用默认 20s（非开局），不拖慢续聊手感。
+      // ============================================================
+      try {
+        const items: PlannerRequestItem[] = ledger.items.map((it) => ({
+          id: it.id,
+          text: it.text,
+          status: String(it.status),
+          parentId: it.parentId ?? null,
+        }))
+        const res = await runPlannerPass({
+          req: {
+            taskId: task.id,
+            trigger: 'new-instruction',
+            goal: safeSlice(String(userInputText ?? ''), 120),
+            items,
+            failures: [],
+          },
+          modelId: await getPlannerModelId(modelId),
+          signal,
+        })
+        if (res.ok && res.draft.length > 0) {
+          const committed = await commitPlanDraft({
+            task,
+            iteration: startIter,
+            draft: res.draft,
+            reason: '用户新指令，规划通道重新推演',
+            source: 'planner',
+          })
+          if (committed.ok && committed.changed > 0) {
+            logger.info(
+              'Agent',
+              `new-instruction replan 生效：${res.summary} → changed=${committed.changed}`,
+              task.id,
+            )
+            await emitTurnNote({
+              taskId: task.id,
+              iteration: startIter,
+              text: `收到新指令，引擎已重新规划：${res.summary}。`,
+              via: 'plan-revision',
+            })
+          }
+        }
+      } catch (err) {
+        if ((err as Error)?.name === 'AbortError' || signal.aborted) throw err
+        logger.warn('Agent', `新指令重排异常（回落既有判定提示）：${(err as Error).message}`, task.id)
+      }
+    }
+    const snapshotBlock = ledger
+      ? resumeBlock
+      : treeSnapshot
+        ? `\n\n**当前清单快照（重评基准）**：\n${treeSnapshot}${resumeBlock}`
+        : resumeBlock
+    const hintWithSnapshot = `${replanHint}${snapshotBlock}`
     pendingSystemHint = pendingSystemHint
-      ? `${pendingSystemHint}\n\n---\n${replanHint}`
-      : replanHint
+      ? `${pendingSystemHint}\n\n---\n${hintWithSnapshot}`
+      : hintWithSnapshot
   }
   // ============================================================
   // v0.30.0：确保任务图存在（TaskGraph 化的统一出入口）
@@ -417,7 +600,30 @@ export async function prepareRun(args: {
       } else {
         logger.warn('Agent', `graph 加载失败（graphId=${fresh.graphId}），回退扁平清单路径`, task.id)
       }
-    } else if (needsGraphMigration({ graphId: task.graphId, planItems: task.planItems })) {
+    } else {
+      // v0.36.4（D122）：tasks.json 可能因 D119 写失败丢过 graphId（镜像回写被跳过的历史窗口）。
+      // `needsGraphMigration` 只看 graphId 字段 → 会用过期全 pending 清单**重建第二张图**，
+      // 模型照单重做已完成的任务（用户实测续聊重做根因）。迁移前先查 specs 索引：
+      // 查到且可加载 → 收养既有图，绝不再迁移。
+      let adoptId: string | null = null
+      try {
+        adoptId = await findGraphIdByTaskId(task.id)
+      } catch {
+        /* 索引不可用按无图处理，回落迁移判定 */
+      }
+      if (adoptId) {
+        const adopted = await getGraphById(adoptId)
+        if (adopted) {
+          task.graphId = adopted.id
+          task.graphRevision = adopted.graphRevision
+          logger.warn(
+            'Agent',
+            `graph adopted via index: ${adopted.id}（tasks.json 缺 graphId，防过期清单再迁移）`,
+            task.id,
+          )
+        }
+      }
+      if (!task.graphId && needsGraphMigration({ graphId: task.graphId, planItems: task.planItems })) {
       const migrated = migrateToGraph({
         taskId: task.id,
         title: task.title,
@@ -453,6 +659,7 @@ export async function prepareRun(args: {
           task.id,
         )
       }
+      }
     }
   } catch (graphErr) {
     logger.warn(
@@ -462,6 +669,21 @@ export async function prepareRun(args: {
     )
   }
 
+  // ============================================================
+  // v0.38.0（D150/D151）：**已删除** v0.36.6 的「续聊树同步欠账」判定
+  //
+  //   `const pendingTreeSync = startIter > 0 && !isReplyContinuation && Boolean(task.graphId)`
+  //
+  // 删除理由：三个条件**全是代理变量**，没有一处读用户输入内容 ——
+  //   `startIter > 0`（不是首轮）、`!isReplyContinuation`（不是对引擎提问的答复）、
+  //   `Boolean(graphId)`（有图）。于是「这个工作区是什么」这类**纯只读提问**被判成
+  //   "新指令型续聊"，完成门禁要求它先写清单 → 现场连续三轮被拦。
+  //
+  // 替代：判据下沉到「本 run 实际调用过哪些工具」（`work-class.ts`），由
+  // `guardFinish({ workClass, touchedTree })` 客观裁决；续聊是否需要写清单，
+  // 由模型看到 `injectInputJudgement` 注入的「原输入 + 清单快照」后自己判断。
+  // ============================================================
+
   return {
     startIter,
     memoryInjection,
@@ -470,5 +692,6 @@ export async function prepareRun(args: {
     coreSkillsEnabled,
     allowedStage,
     pendingSystemHint,
+    chatMode,
   }
 }

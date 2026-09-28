@@ -30,13 +30,15 @@
 .bc-btn--chip {
   @apply w-auto gap-1 px-1.5;
 }
+/* v0.36.3 D116：旋转 → 纯色透明度呼吸
+   （rotate 是逐帧 transform，无 GPU 环境走软件光栅化；项目统一呼吸口径
+   1.6s ease-in-out，幅度 1 ↔ 0.55，起止满不透明以便降级模式停在终态） */
 .bc-btn--spin svg {
-  animation: bc-spin 0.9s linear infinite;
+  animation: bc-breathe 1.6s ease-in-out infinite;
 }
-@keyframes bc-spin {
-  to {
-    transform: rotate(360deg);
-  }
+@keyframes bc-breathe {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
 }
 
 .bc-addr {
@@ -62,21 +64,14 @@
   overflow: hidden;
   pointer-events: none;
 }
+/* v0.36.3 D116：原 40% 宽进度条 translateX 横扫 → 整条纯色呼吸
+   （横扫是逐帧 transform + 局部重绘，软件渲染下卡顿） */
 .bc-progress-line::after {
   content: '';
   position: absolute;
   inset: 0;
-  width: 40%;
   background: var(--accent);
-  animation: bc-indeterminate 1.1s ease-in-out infinite;
-}
-@keyframes bc-indeterminate {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(350%);
-  }
+  animation: bc-breathe 1.6s ease-in-out infinite;
 }
 
 /* float 模式无当前标签时的占位提示（导航行下方区域会被 WebContentsView 覆盖，

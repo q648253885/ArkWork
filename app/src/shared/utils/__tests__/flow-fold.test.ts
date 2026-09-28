@@ -24,6 +24,7 @@ import {
   runHasFailure,
   runHasRunning,
   segmentFlow,
+  thinkingCountOf,
   toolCountTotal,
   toolKindOf,
   toolRunParts,
@@ -179,13 +180,15 @@ test('TC-FOLD-003 连续同类进程块合并为单个 run（不产生 N 条折�
 })
 
 /* ============================================================
- * TC-FOLD-004 kind 变化即断组
+ * TC-FOLD-004 kind 变化不再断组（v0.36.1 过程组）
  * ============================================================ */
 
-test('TC-FOLD-004 kind 变化断组：思考紧接工具 → 两个 run', () => {
+test('TC-FOLD-004 思考紧接工具 → 单个混合 process run（v0.36.1：相关过程整体收起）', () => {
   const segs = segmentFlow([reasoning(), tool()])
-  assert.equal(segs.length, 2)
-  assert.deepEqual(foldScopes(segs), ['reasoning', 'tool'])
+  assert.equal(segs.length, 1)
+  assert.deepEqual(foldScopes(segs), ['process'])
+  const run = (segs[0] as { run: FlowFoldRun }).run
+  assert.equal(run.blocks.length, 2)
 })
 
 /* ============================================================
@@ -439,4 +442,54 @@ test('TC-FOLD-015 组合场景：思考×2 → 叙述 → 工具×3 → 计划 �
   assert.deepEqual(countToolRun(second.blocks), { read: 2, execute: 1 })
   const third = (segs[4] as { run: FlowFoldRun }).run
   assert.deepEqual(countToolRun(third.blocks), { search: 1 })
+})
+
+/* ============================================================
+ * v0.36.1 过程组（docs/versions/v0.36.0/13-process-group-design.md §四）
+ * ============================================================ */
+
+test('TC-FOLD-020 跨 step 混排整轮序列：思考/工具交替 → 单个 process run，say/answer 断组', () => {
+  // 模拟一个 3 迭代回合的整轮渲染序列（迭代边界不再断组）：
+  // [思考, 读×2] → [思考, 搜×1] → [思考, 执行×1] 全部连续 → 一个过程组
+  const blocks = [
+    reasoning(),
+    tool({}, 'read'),
+    tool({}, 'read'),
+    reasoning(),
+    tool({}, 'search'),
+    reasoning(),
+    tool({}, 'execute'),
+  ]
+  const segs = segmentFlow(blocks)
+  assert.equal(segs.length, 1, '混排进程块必须收成单个过程组（旧行为 6 条折叠行）')
+  const run = (segs[0] as { run: FlowFoldRun }).run
+  assert.equal(run.scope, 'process')
+  assert.equal(run.blocks.length, 7)
+  assert.deepEqual(countToolRun(run.blocks), { read: 2, search: 1, execute: 1 })
+  assert.equal(thinkingCountOf(run.blocks), 3)
+
+  // say / answer 插入即断组 —— 白字正文独立可见，过程分居前后
+  const withSay = segmentFlow([
+    reasoning(),
+    tool({}, 'read'),
+    say(),
+    reasoning(),
+    tool({}, 'execute'),
+    answer(),
+  ])
+  assert.deepEqual(segTypes(withSay), ['fold', 'block', 'fold', 'block'])
+  const runA = (withSay[0] as { run: FlowFoldRun }).run
+  const runB = (withSay[2] as { run: FlowFoldRun }).run
+  assert.deepEqual(foldScopes(withSay), ['process', 'process'])
+  assert.equal(runA.blocks.length, 2)
+  assert.equal(runB.blocks.length, 2)
+})
+
+test('TC-FOLD-021 thinkingCountOf：仅计 reasoning 块，空 run 得 0', () => {
+  assert.equal(thinkingCountOf([]), 0)
+  assert.equal(thinkingCountOf([tool({}, 'read'), say()]), 0)
+  assert.equal(
+    thinkingCountOf([reasoning(), reasoning(), tool({}, 'read'), reasoning()]),
+    3,
+  )
 })

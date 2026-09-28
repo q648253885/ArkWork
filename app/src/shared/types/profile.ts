@@ -18,29 +18,21 @@ export type { PanelSlotPayload, AnyPanelSlotPayload }
 /** manifest schema 版本（为未来字段演进留升级路径） */
 export const PROFILE_SCHEMA_VERSION = '1.0'
 
-/** 九类插槽（正本 04 §2；`ui.*` 四小类合计为一类的子键） */
-export type SlotKind =
-  | 'agent'
-  | 'tool'
-  | 'ui.panel'
-  | 'ui.renderer'
-  | 'ui.action'
-  | 'ui.homeModule'
-  | 'ui.theme'
-  | 'data'
-  | 'auto'
+/**
+ * 五类插槽（v0.36.0 D5 契约收缩；原九类）。
+ *
+ * 删除的四类（`ui.renderer` / `ui.homeModule` / `data` / `auto`）共同形态是
+ * **「只登记不消费」** —— 全仓有生产者、无消费者（PRD F5.2「只登记不消费的插槽配置」）：
+ *   · `ui.renderer` 的消费端只有诊断页（本版已删）与一个从未接进 `detectRenderer`
+ *     的 `rendererOverrides` 中转；
+ *   · `ui.homeModule` 的消费端是**快照行**（`layers.ui` 的 `ui.homeModule`），
+ *     与插槽无关 —— 删插槽不影响首页模块功能；
+ *   · `data` / `auto` 的 `namespaceSnapshotEntries` / cron 登记只有降级提示可看。
+ * 保留 `ui.action` 并由 F3.3 的插件 commands 做实消费端。
+ */
+export type SlotKind = 'agent' | 'tool' | 'ui.panel' | 'ui.action' | 'ui.theme'
 
-export const SLOT_KINDS: SlotKind[] = [
-  'agent',
-  'tool',
-  'ui.panel',
-  'ui.renderer',
-  'ui.action',
-  'ui.homeModule',
-  'ui.theme',
-  'data',
-  'auto',
-]
+export const SLOT_KINDS: SlotKind[] = ['agent', 'tool', 'ui.panel', 'ui.action', 'ui.theme']
 
 /** Profile 来源：内置（代码即真源，不可删）/ 用户（profiles.json） */
 export type ProfileSource = 'builtin' | 'user'
@@ -128,13 +120,8 @@ export interface ProfileUiDecl {
   /** Composer 快捷 chips（纯文本，不做 i18n key 解析） */
   composerChips?: string[]
   /**
-   * ★ v0.33.0 新增 —— 渲染器覆盖：`{ '<ext>': '<RendererKind>' }`。
-   * 让垂直台/插件自带文件类型渲染（正本 03 §3 `ui.previewRenderers`）。
-   */
-  previewRenderers?: Record<string, string>
-  /**
    * ★ v0.33.0 新增 —— 选中动作扩展（正本 03 §3 `ui.actionExtensions`）。
-   * v0.33.0 **只入槽登记 + 诊断可见**，消费端迁移属遗留 L-33-03。
+   * v0.36.0（F3.3）起由插件 `contributes.commands` 做实 `ui.action` 消费端。
    */
   actionExtensions?: string[]
   /**
@@ -196,6 +183,12 @@ export interface WorkbenchProfile {
   extends?: string
   agents: ProfileAgentDecl[]
   capabilities: ProfileCapabilityDecl[]
+  /**
+   * v0.36.0（B11/P3-b）：工作台级插件面板白名单（插件 manifest id）。
+   * 缺省（undefined）= 不过滤（全部启用插件的 ui.panel 都显示）；
+   * 显式空数组 = 不显示任何插件面板。**软兼容**：旧 manifest 无此字段行为不变。
+   */
+  pluginRefs?: string[]
   ui: ProfileUiDecl
   data: ProfileDataDecl
   automation: ProfileAutoDecl[]
@@ -252,21 +245,15 @@ export interface SnapshotUi {
   applied: boolean
 }
 
-export interface SnapshotData {
-  key: string
-  value: string
-  applied: boolean
-}
-
-export interface SnapshotAuto {
-  cron: string
-  taskTemplate: string
-  agent?: string
-  /** v1 恒为 false —— 只登记不注册（遗留 L5） */
-  registered: false
-}
-
-/** 装配快照（可追溯 / 可 diff / 可回滚） */
+/**
+ * 装配快照（可追溯 / 可 diff / 可回滚）。
+ *
+ * ★ v0.36.0（D5）：`data` / `auto` 两层**从装配与快照中删除** —— 它们的唯一
+ * 可观测面是「降级提示」（namespace 目录未就绪 / cron 只登记不注册），
+ * 而这两条信息在 `logger` 诊断通道仍然留有人话（纪律⑨），不需要在快照里
+ * 再复制一份「人话级的层」。`memoryNamespace` 与 `automation` 字段本身
+ * **保留在 manifest 契约里**（删的是插槽与快照层，不是清单字段）。
+ */
 export interface CompositionSnapshot {
   profileId: string
   profileVersion: string
@@ -275,13 +262,11 @@ export interface CompositionSnapshot {
     agents: SnapshotAgent[]
     tools: SnapshotTool[]
     ui: SnapshotUi[]
-    data: SnapshotData[]
-    auto: SnapshotAuto[]
   }
   degraded: Degradation[]
 }
 
-export type ProfileLayer = 'agents' | 'tools' | 'ui' | 'data' | 'auto'
+export type ProfileLayer = 'agents' | 'tools' | 'ui'
 
 /** 降级记录：任何降级都必须逐条可见（「永不静默半死」） */
 export interface Degradation {
@@ -368,31 +353,11 @@ export interface ToolSlotPayload {
   profileId: string
 }
 
-/** `ui.renderer` 载荷：接管一个/多个扩展名的渲染方式 */
-export interface RendererSlotPayload {
-  /** 必须是宿主 `RendererKind` 白名单成员（值级校验在 validateReferences / plugin-manifest） */
-  rendererKind: string
-  /** 小写、无点 */
-  extensions: string[]
-  /** 允许接管已被占用的扩展名（正本 04 §5） */
-  override?: boolean
-  labelKey: string
-}
-
 export interface ActionSlotPayload {
   actionId: string
   label: string
   /** 出处：`builtin` / `profile:<id>` / `plugin:<id>` / `chip`（快捷 chip 走此值） */
   origin: string
-}
-
-export interface HomeModuleSlotPayload {
-  /** 六个内置模块名，或 `module:<id>`（插件贡献） */
-  module: string
-  title?: string
-  icon?: string
-  pluginId?: string
-  profileId?: string
 }
 
 export interface ThemeSlotPayload {
@@ -402,30 +367,13 @@ export interface ThemeSlotPayload {
   profileId?: string
 }
 
-export interface DataSlotPayload {
-  namespace: string
-  shareCore?: boolean
-  profileId: string
-}
-
-export interface AutoSlotPayload {
-  cron: string
-  taskTemplate: string
-  agent?: string
-  required?: boolean
-}
-
-/** 九类插槽的载荷联合（判别键在 `SlotEntry.kind` 上，非 payload 内部） */
+/** 五类插槽的载荷联合（判别键在 `SlotEntry.kind` 上，非 payload 内部） */
 export type SlotEntryPayload =
   | AgentSlotPayload
   | ToolSlotPayload
   | AnyPanelSlotPayload
-  | RendererSlotPayload
   | ActionSlotPayload
-  | HomeModuleSlotPayload
   | ThemeSlotPayload
-  | DataSlotPayload
-  | AutoSlotPayload
 
 export interface SlotEntry {
   /** 插槽内唯一 id（规范 `<kind 域>:<name>`，如 'panel:todos' / 'tool:skill:x'） */

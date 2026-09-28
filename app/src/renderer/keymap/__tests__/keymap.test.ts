@@ -85,8 +85,31 @@ test('TC-KEY-001 迁移前 App.tsx 的 13 个 keydown 分支逐条落到 KEYMAP_
     assert.equal(typeof s.priority, 'number', `priority 非数值：${s.id}`)
   }
 
-  // ⑥ 键位总数出处：24 条（分支 10 / 11 各展开为 6 条，分支 1 为 2 个别名）
+  // ⑥ 键位总数出处：25 条（分支 10 / 11 各展开为 6 条，分支 1 为 2 个别名）
   assert.equal(KEYMAP_SPEC.length, 25, 'B0 键位声明应为 25 条')
+})
+
+/* ============================================================
+ * 一之二、TC-KEY-013 ★ 注释与实现一致：spec.ts 头部声明的条数 == 实际条数
+ * ------------------------------------------------------------
+ * 立此用例的原因（as-built §14.5 实测）：`spec.ts` 头部写「合计 24 条声明」，
+ * 而 `KEYMAP_SPEC.length` 是 **25** —— 注释漂移了整整数个月，谁也没发现，
+ * 因为**没有任何断言看过那个数字**。这类「文档说 A、代码是 B」的缺陷
+ * 与 D78/D79 同型：函数全对，没人接线。把数字接上机器即可永久免疫。
+ * ============================================================ */
+test('TC-KEY-013 ★ spec.ts 头部声明的条数与 KEYMAP_SPEC.length 一致（注释漂移守卫）', () => {
+  const src = readFileSync(fileURLToPath(new URL('../spec.ts', import.meta.url)), 'utf-8')
+  const m = /合计\s*\*\*(\d+)\s*条声明\*\*/.exec(src)
+  assert.ok(m, 'spec.ts 头部应声明「合计 **N 条声明**」（改了措辞请同步本用例）')
+  assert.equal(
+    Number(m[1]),
+    KEYMAP_SPEC.length,
+    `spec.ts 头部写「${m[1]} 条」但实际是 ${KEYMAP_SPEC.length} 条 —— 注释漂移，请同步`,
+  )
+  // 分支数同样接上机器：头部写「13 个分支」，MIGRATED_BRANCHES 必须相等
+  const b = /全局 keydown \*\*(\d+) 个分支\*\*/.exec(src)
+  assert.ok(b, 'spec.ts 头部应声明迁移来源分支数')
+  assert.equal(Number(b[1]), MIGRATED_BRANCHES.length, 'spec.ts 头部的分支数与 MIGRATED_BRANCHES.length 不一致')
 })
 
 /* ============================================================

@@ -39,6 +39,8 @@ import {
   type TaskGraph,
   type TaskNode,
 } from '@shared/types/graph'
+// v0.39.0（D186）：模型可见的清单控制面文案唯一事实源
+import { PLAN_TOOL_HINT } from '../ledger/hint.js'
 import { logger } from '../../system/logger.js'
 
 /* ============================================================
@@ -236,7 +238,7 @@ export function applyStatusChange(
       error: {
         code: 'NOT_FOUND',
         message: `节点不存在：${nodeId}`,
-        hint: '图可能已被其他操作修改。请调用 task_list 重新读取当前任务图。',
+        hint: `图可能已被其他操作修改。${PLAN_TOOL_HINT.stale}`,
       },
       warnings: [],
     }

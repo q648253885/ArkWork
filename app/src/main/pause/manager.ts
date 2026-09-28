@@ -105,13 +105,56 @@ export async function resumeTask(taskId: string): Promise<boolean> {
         )
       }
     } else {
-      const restored: PlanItem[] = cp.planItems.map((it) =>
-        it.status === 'running'
-          ? { ...it, status: 'pending' as const, updatedAt: Date.now() }
-          : it,
-      )
-      // 保持暂停前清单视图（done 不重跑，running 从该步继续）
-      await updateTask(taskId, { planItems: restored })
+      // v0.37.0（缺陷 D132 / D135）：恢复以**账本**为准，不再用 checkpoint 覆盖清单。
+      // checkpoint 是「暂停瞬间的快照」，账本是「之后所有写入的真相」——
+      // 用快照覆盖真相会把已 done 的项重新拉回 pending，这正是「续聊重复执行
+      // 第一项」的另一条触发路径（诊断 §2 L2 的放大形态）。
+      try {
+        const ledP = await import('../agent/ledger/engine.js')
+        const { toPlanItems } = await import('../agent/ledger/project.js')
+        let cur = await ledP.loadLedger(taskId)
+        if (!cur) {
+          // 旧任务无账本：以 checkpoint 为**种子**建账（此后一律走账本）
+          const seed: PlanItem[] = cp.planItems.map((it) =>
+            it.status === 'running'
+              ? { ...it, status: 'pending' as const, updatedAt: Date.now() }
+              : it,
+          )
+          // 先让内存态与盘上一致，再建账 —— ensureLedger 以 `task.planItems` 为种子，
+          // 只写盘不改内存会让账本种进**旧清单**（静默漂移，最难查的那一类）。
+          task.planItems = seed
+          await updateTask(taskId, { planItems: seed })
+          await ledP.ensureLedger(task, { seedFromPlanItems: true })
+          cur = await ledP.loadLedger(taskId)
+        } else {
+          for (const it of cur.items.filter((x) => x.status === 'running')) {
+            await ledP.mutate(
+              taskId,
+              {
+                kind: 'set-status',
+                itemId: it.id,
+                to: 'pending',
+                source: 'resume',
+                note: '恢复已暂停任务：running → pending',
+                force: true,
+              },
+              { actor: 'pause-manager' },
+            )
+          }
+          const fresh = await ledP.loadLedger(taskId)
+          if (fresh) await updateTask(taskId, { planItems: toPlanItems(fresh) })
+        }
+      } catch (err) {
+        // v0.37.0（纪律⑱）：降级路径**不回退成直写 planItems** ——
+        // 那会让「账本说 done、tasks.json 说 pending」的双通道漂移长期存在，
+        // 且下次续聊按 tasks.json 复现「重做第一项」。这里只留人话告警：
+        // 清单真相仍在账本里，run 入口的 ensureLedger / resumeLedger 会继续接管。
+        logger.warn(
+          'Agent',
+          `恢复时账本同步失败：${(err as Error).message}。清单以任务清单账本为准，未在本次恢复中改写（可继续，恢复点不会丢）。`,
+          taskId,
+        )
+      }
     }
   }
 

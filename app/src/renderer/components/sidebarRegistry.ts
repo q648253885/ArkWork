@@ -23,7 +23,6 @@ import { TaskPanel } from './dock/TaskPanel'
 import { ContextPanel } from './dock/ContextPanel'
 import { TerminalPanel } from './dock/TerminalPanel'
 import { BrowserPanel } from './dock/BrowserPanel'
-import { ProgressPanel } from './dock/ProgressPanel'
 import { FilesPanel } from './panels/FilesPanel'
 import { MemoryPanel } from './panels/MemoryPanel'
 import { LogsView } from './right/LogsView'
@@ -100,16 +99,15 @@ export const SIDEBAR_WIDGETS: SidebarWidget[] = [
     defaultEnabled: true,
     dockTabId: 'terminal',
   },
-  // Task 9：任务侧边栏进度摘要（默认不开启，避免打扰；用户可手动启用）
-  {
-    widgetId: 'progress',
-    name: 'sidelist.progress',
-    icon: 'ListChecks',
-    component: ProgressPanel,
-    supportedScenes: ['coding', 'general'],
-    defaultEnabled: false,
-    dockTabId: 'progress',
-  },
+  // Task 9：任务侧边栏进度摘要 —— ★ v0.36.0（B9）**条目已删除**。
+  // 删除理由（同 D40 体例：只服务于死组件的登记项要么有挂点、要么不留）：
+  //   · 该 widget 的 `dockTabId: 'progress'` 从不在 `INSPECTOR_TAB_REFS` 内
+  //     （内置 Tab 只有 todos/context/files/logs/terminal/browser），
+  //     `getEnabledWidgets()` 亦**零调用方** —— 即 `component: ProgressPanel`
+  //     永远不会被渲染，`ProgressPanel.tsx` 是死组件，已一并删除。
+  //   · `sidelist.progress` i18n 键按 v0.34.0 §4.3 保留一个版本（孤儿键）。
+  // 若将来要恢复「进度摘要」侧栏：请连同**挂点**一起加（Inspector 内置 Tab 或
+  // ui.panel 插槽），不要只把它放回这张表。
   // —— 以下为已注册扩展点：组件已就绪，暂不作为 Dock Tab 渲染 ——
   // 记忆中心：当前在模块页（ModulePage）全页消费；可按需提升为 Dock Tab
   {

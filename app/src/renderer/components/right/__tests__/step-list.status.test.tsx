@@ -26,14 +26,14 @@ import {
   derivePlanItems,
 } from '../../../utils/plan-status'
 
-/** 六态全集 — 必须与 PlanItemStatus 枚举严格一致 */
-const ALL_STATES: readonly PlanItemStatus[] = ['pending', 'running', 'done', 'failed', 'cancelled', 'skipped']
+/** v0.37.0：七态全集（新增 paused = 中断保留）— 必须与 PlanItemStatus 枚举严格一致 */
+const ALL_STATES: readonly PlanItemStatus[] = ['pending', 'running', 'paused', 'done', 'failed', 'cancelled', 'skipped']
 
-test('六态映射表覆盖全部 6 个状态（无缺失 / 无多余）', () => {
+test('七态映射表覆盖全部 7 个状态（无缺失 / 无多余）', () => {
   assert.deepEqual(
     [...Object.keys(PLAN_STATUS_META)].sort(),
     [...ALL_STATES].sort(),
-    'PLAN_STATUS_META 键集合应恰好等于六态枚举',
+    'PLAN_STATUS_META 键集合应恰好等于七态枚举',
   )
 })
 

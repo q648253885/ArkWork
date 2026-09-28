@@ -5,7 +5,7 @@
  * 本文件是渲染层与主进程共用的展示层契约；不改变落盘真源
  * （steps.jsonl / session.jsonl / tasks.json）。
  * ============================================================ */
-import type { PlanContent } from './react.js'
+import type { PlanContent, SubagentRunStatus } from './react.js'
 import type { PlanItemStatus } from './task.js'
 import type { ToolCallView, ToolResultView, ToolCallKind } from './tool-present.js'
 
@@ -65,7 +65,7 @@ export interface UserBlock {
   kind: 'user'
   id: string
   turn: number
-  /** outerBlock 恒 0（TurnView 以 step>0 分组进 StepView，§三 I4） */
+  /** outerBlock 恒 0（TurnView 以 turnRenderSequence 归并渲染，§三 I4） */
   step: number
   text: string
   ts: number
@@ -208,10 +208,62 @@ export interface ErrorBlock {
   ts: number
 }
 
+/* ============================================================
+ * v0.36.0（F4.1）：并行子 agent 组卡（live-only 渲染投影）
+ * 数据源：task:subagent-progress 事件流（renderer store subagentGroups），
+ * 历史回放（session.jsonl 重载）暂不重建该卡 —— 与压缩通告同口径（已登记偏差）。
+ * ============================================================ */
+
+/** 并行组卡单行视图（= store subagentGroups 的元素） */
+export interface SubagentChildView {
+  childTaskId: string
+  agentId: string
+  agentName: string
+  objective: string
+  /** 子任务所用模型 id（继承父任务；渲染为模型徽标） */
+  modelId?: string
+  status: SubagentRunStatus
+  stepSummary?: string
+  durationMs?: number
+}
+
+export interface SubagentGroupBlock {
+  kind: 'subagent-group'
+  id: string
+  turn: number
+  /** outerBlock 恒 0 */
+  step: number
+  parentTaskId: string
+  children: SubagentChildView[]
+  /** 全部子任务到达终态（done/failed/cancelled）→ 折叠为汇总条 */
+  settled: boolean
+  ts: number
+}
+
+/* ============================================================
+ * v0.38.0（A5/D156）：阶段结论块
+ * 数据源：ReActEvent{type:'turn_note'} → project.ts 投影。
+ * 与 AnswerBlock 的分工：answer 是一轮的**最终**答复；note 是过程中的**阶段**结论。
+ * 折叠：**不参与** process 折叠（scope 仅 reasoning/tool/process），
+ * 且会打断前后两段 process run —— 这是刻意的（用户看到结论后，后续思考重新起算）。
+ * ============================================================ */
+export interface NoteBlock {
+  kind: 'note'
+  id: string
+  turn: number
+  step: number
+  /** 结论正文（1–3 句）；main 侧已定文案，渲染层不再改写 */
+  text: string
+  /** 触发来源：模型主动 / 计划提交自动 / 收尾被拒保底 */
+  via: 'model' | 'plan-commit' | 'gate-refusal' | 'engine-stop' | 'plan-revision'
+  ts: number
+}
+
 /** Block 判别联合（唯一有序数组，顺序 = 真实发生顺序） */
 export type FlowBlock =
   | UserBlock | SayBlock | ReasoningBlock | ToolBlock
   | PlanBlock | ApprovalBlock | NoticeBlock | AnswerBlock | ErrorBlock
+  | SubagentGroupBlock | NoteBlock
 
 /* ---------- Step / Turn ---------- */
 
@@ -241,10 +293,15 @@ export interface FlowTurn {
  * 只把块的线性序列按「连续性」切成 主展示块 / 进程 run 交替的渲染段。
  */
 
-/** 可折叠的进程域：思考 / 工具（技能与 MCP 调用同归 tool） */
-export type FoldScope = 'reasoning' | 'tool'
+/**
+ * 可折叠的进程域（v0.36.1 过程组）：
+ *  - `reasoning` / `tool` —— run 内只有一种进程块（纯段，保持原口径）；
+ *  - `process` —— 思考与工具**混排**的连续段（v0.36.1：kind 变化不再断组，
+ *    关联的思考与工具调用作为整体收起，对齐 TraeWork 展示逻辑）。
+ */
+export type FoldScope = 'reasoning' | 'tool' | 'process'
 
-/** 一段连续的同类进程块（按连续性分组，kind 变化即断组） */
+/** 一段连续的进程块（主展示块断组；v0.36.1 起 kind 变化不再断组） */
 export interface FlowFoldRun {
   /** run id = 该 run 首个块的 id（投影层块 id 确定性生成，故 run id 稳定可持久化） */
   id: string

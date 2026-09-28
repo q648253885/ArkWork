@@ -37,6 +37,7 @@ import { PluginViewHost } from './plugins/PluginViewHost'
 import {
   builtinTabsOf,
   mergePanelOrder,
+  filterTabsByPluginRefs,
   isPanelTabRef,
   INSPECTOR_TAB_REFS,
   type PanelTab,
@@ -48,7 +49,8 @@ import { computeRailLayout, hiddenBlockHeight, pickVisibleTabs } from '../utils/
 // 坐标由它按触发器矩形现算（见 utils/anchored-menu.ts 文件头）
 import { computeAnchoredMenu, type AnchoredMenuStyle } from '../utils/anchored-menu'
 // v0.34.0（D54）：展示名防御（未解析模板串 + 超长名）—— 竖排栏与面板宿主共用同一真源
-import { guardLabel } from '../utils/label-guard'
+// v0.36.0（D91）：拆成两档 —— 竖排栏 3 字（栏宽硬约束）、横向条 8 字
+import { guardLabel, guardRailLabel } from '../utils/label-guard'
 
 const TOOL_BAR_WIDTH = 44 // 垂直标签栏宽度（保持紧凑、足够容纳 16px 图标 + 文字）
 
@@ -60,9 +62,38 @@ const MORE_MENU_ID = 'inspector-more-tabs-menu'
 
 /**
  * v0.34.0（D54）：展示层防御（真源在 `utils/label-guard.ts`，此处转出便于既有调用点与测试复用）。
- * 竖排栏用 `guardLabel`（模板防御 + 8 字符截断）。
+ * v0.36.0（D91）：本组件内**竖排栏**用 `guardRailLabel`（3 字，栏宽 44px 的硬约束），
+ * 「更多」弹层用 `guardLabel`（8 字，弹层宽 ≥160px）。
+ * 转出 `guardRailLabel` 供插件代码视图容器（PluginViewHost）等复用。
  */
-export { guardLabel }
+export { guardLabel, guardRailLabel }
+
+/* ============================================================
+ * 图标名解析（v0.36.0 · D92）
+ *
+ * 缺陷形态：插件声明 `icon: 'GitBranch'`，而渲染层图标集里只有 `Branch`
+ * （60 个图标，见 icons.tsx），于是 `Icon[name] ?? Icon.Dot` 静默退化成一颗
+ * **圆点** —— 界面上「能看但不对劲」，控制台里一个字都没有（纪律⑨：
+ * 静默退化是复合缺陷的粘合剂）。实机复验时才靠截图肉眼发现。
+ *
+ * 所以兜底保留（绝不因为图标名写错就白屏/崩），但**必须留人话**；
+ * 用 Set 去重，避免每帧渲染刷屏。
+ * ============================================================ */
+const warnedIcons = new Set<string>()
+
+/** 把插件声明的图标名解析成组件；未登记的名字退化为 Dot 并 warn（每名一次） */
+function resolveTabIcon(name: string) {
+  const found = Icon[name as IconName]
+  if (found) return found
+  if (!warnedIcons.has(name)) {
+    warnedIcons.add(name)
+    console.warn(
+      `[inspector] 图标名「${name}」不在渲染层图标集内，已退化为圆点。` +
+        '请改用 icons.tsx 中已登记的名字（插件 manifest 的 provides.views[].icon）。',
+    )
+  }
+  return Icon.Dot
+}
 
 /** 内置 Tab 的内容分支（六项穷尽；面板走 PanelHost） */
 function BuiltinBody({ tab }: { tab: InspectorTabId }) {
@@ -100,6 +131,8 @@ export function Inspector() {
   const profilePanels = useStore((s) => s.profilePanels)
   // ★ v0.35.0：插件**代码视图**（运行期来的，与 profilePanels 分两路 —— 见 pluginSlice 头注释）
   const pluginViews = useStore((s) => s.pluginViews)
+  // v0.36.0（B11/P3-b）：工作台级插件白名单（null = 未声明不过滤）
+  const profilePluginRefs = useStore((s) => s.profilePluginRefs)
 
   const isBuiltin = useCallback((ref: string): ref is InspectorTabId => {
     return (INSPECTOR_TAB_REFS as readonly string[]).includes(ref)
@@ -115,8 +148,12 @@ export function Inspector() {
       // ★ v0.35.0：三层拼接 —— 内置（用户顺序）→ 工作台面板（manifest position）
       //   → 插件代码视图（运行期 order）。第二层合并已完成一次「不重复插入」，
       //   第三层再走一次 `mergePanelOrder` 复用同一条去重与插入规则。
-      mergePanelOrder(mergePanelOrder(builtinTabsOf(visibleBuiltin), profilePanels), pluginViews),
-    [visibleBuiltin, profilePanels, pluginViews],
+      // v0.36.0（B11/P3-b）：拼接后按工作台 pluginRefs 白名单过滤插件 Tab。
+      filterTabsByPluginRefs(
+        mergePanelOrder(mergePanelOrder(builtinTabsOf(visibleBuiltin), profilePanels), pluginViews),
+        profilePluginRefs,
+      ),
+    [visibleBuiltin, profilePanels, pluginViews, profilePluginRefs],
   )
   /* v0.34.3（D58）：竖排栏高度 → 可见条数
    * 用户口径（本版纠正）：「**在铺满的时候才有更多**」——
@@ -454,11 +491,13 @@ export function Inspector() {
           const builtin = tab.builtin
           const meta = builtin ? INSPECTOR_TAB_META[tab.ref as InspectorTabId] : null
           const label = builtin && meta ? t(meta.label) : tab.title
-          // v0.34.0（D54）：竖排栏展示名强制截断（含未解析模板串的情况），
-          // tooltip / aria 仍用完整的 label，信息不丢
-          const railLabel = builtin && meta ? label : guardLabel(label)
+          // v0.34.0（D54）+ v0.36.0（D91）：竖排栏展示名强制截断到 **3 字**（含未解析模板串的情况），
+          // 与内置项（「上下文」「浏览器」= 3 字）同宽；tooltip / aria 仍用完整的 label，信息不丢。
+          // 为什么不是 8：8 字在 44px 栏里放不下（实机 scrollWidth 52 / clientWidth 37），
+          // 会被渲染成裁切而不是省略号 —— 详见 utils/label-guard.ts 文件头。
+          const railLabel = builtin && meta ? label : guardRailLabel(label)
           const iconName = builtin && meta ? meta.icon : (tab.icon ?? 'Plug')
-          const TabIcon = Icon[iconName as IconName] ?? Icon.Dot
+          const TabIcon = resolveTabIcon(iconName)
           const active = tab.ref === inspectorTab
           const isDragOver = dragOverTab === tab.ref
           // 面板 Tab 不参与拖拽重排/隐藏（纪律 ②）
@@ -546,7 +585,7 @@ export function Inspector() {
                   {overflowTabList.map((tab) => {
                     const meta = tab.builtin ? INSPECTOR_TAB_META[tab.ref as InspectorTabId] : null
                     const label = meta ? t(meta.label) : guardLabel(tab.title)
-                    const TabIcon = Icon[(meta?.icon ?? tab.icon ?? 'Plug') as IconName] ?? Icon.Dot
+                    const TabIcon = resolveTabIcon(meta?.icon ?? tab.icon ?? 'Plug')
                     const active = tab.ref === inspectorTab
                     return (
                       <button
@@ -598,7 +637,7 @@ export function Inspector() {
           >
             {hiddenInspectorTabs.map((tab) => {
               const meta = INSPECTOR_TAB_META[tab]
-              const TabIcon = Icon[meta.icon as IconName] ?? Icon.Dot
+              const TabIcon = resolveTabIcon(meta.icon)
               return (
                 <Tooltip key={tab} label={t('inspector.restoreTab', { label: t(meta.label) })} placement="left" delay={150}>
                   <button

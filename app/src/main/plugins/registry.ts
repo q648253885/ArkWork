@@ -43,7 +43,6 @@ import {
 } from './store.js'
 import { pluginEffects } from './effects.js'
 import { parsePluginManifest, contributionLabelOf, satisfiesEngineRange } from '@shared/utils/plugin-manifest'
-import { BUILTIN_EXTENSIONS } from '@shared/utils/renderer-ext'
 import {
   PLUGIN_SOURCE_ORDER,
   type InstalledPlugin,
@@ -91,9 +90,9 @@ let cache: InstalledPlugin[] | null = null
  * 为什么不放在 IPC 层调用：**所有**改启用态的入口（IPC、模型控制工具、将来的
  * CLI）都必然经过本文件，钩子挂在这里才不会被某条新入口漏掉。
  */
-let teardownHook: ((id: string) => Promise<void>) | null = null
+let teardownHook: ((id: string, opts?: { purgeData?: boolean }) => Promise<void>) | null = null
 
-export function setPluginTeardownHook(fn: ((id: string) => Promise<void>) | null): void {
+export function setPluginTeardownHook(fn: ((id: string, opts?: { purgeData?: boolean }) => Promise<void>) | null): void {
   teardownHook = fn
 }
 
@@ -331,6 +330,8 @@ export function pluginSummaries(plugins: InstalledPlugin[]): PluginSummary[] {
       /* ★ v0.35.0 */
       viewRefs: usable ? (p.manifest.provides.views ?? []).map((v) => v.viewRef) : [],
       toolNames: usable ? (p.manifest.provides.tools ?? []).map((t) => t.name) : [],
+      /* ★ v0.36.0 */
+      commandIds: usable ? (p.manifest.provides.commands ?? []).map((c) => c.id) : [],
       hasHostCode: !!p.manifest.main,
       hasClientCode: !!p.manifest.renderer || (p.manifest.provides.views ?? []).some((v) => !!v.renderer),
       shadowedBy: p.shadowedBy,
@@ -341,6 +342,24 @@ export function pluginSummaries(plugins: InstalledPlugin[]): PluginSummary[] {
 /** `listPlugins()` + enabled 三级解析（对外统一入口，避免调用方忘记解析） */
 export async function listInstalledPlugins(): Promise<InstalledPlugin[]> {
   return applyEnabled(await listPlugins())
+}
+
+/**
+ * ★ v0.36.0（D95）：**给 UI 的唯一列表入口** = 扫描 + 三级 enabled 解析 + 摘要。
+ *
+ * 为什么必须存在这个函数：
+ *   `listPlugins()` 里 `enabled` 是**占位值 false**（真正的值由 `applyEnabled()`
+ *   依「工作区 → 全局 → 清单缺省」三级解析后写回）。任何直接
+ *   `pluginSummaries(await listPlugins())` 的调用点都会把「已启用」的插件
+ *   显示成未启用 —— D95 的实际故障：plugins.json 里
+ *   `enabled:{"ark.plugin.git-manager":true}`，Git 侧边栏在跑，
+ *   管理页却显示「1 个插件 · 0 个启用」，开关永远处于关闭态。
+ *
+ * 纪律：UI（IPC 层）**只许**调本函数；内部扫描仍用 `listPlugins()`。
+ * 守门用例：TC-PLGR-009（源码契约）+ TC-PI-018（真跑一遍）。
+ */
+export async function listPluginSummaries(): Promise<PluginSummary[]> {
+  return pluginSummaries(await listInstalledPlugins())
 }
 
 /** 清缓存（重新扫描 / 测试用） */
@@ -356,8 +375,9 @@ export function invalidatePlugins(): void {
 /**
  * 把启用的插件贡献点转成插槽条目。
  *
- * 关键规则：`renderer` 插件命中**已被内置占用**的扩展名且未 `override: true`
- * → 该扩展名不产出条目（正本 04 §5）。
+ * ★ v0.36.0（D5）：`ui.renderer` / `ui.homeModule` 两条分支已不再产条目
+ * （插槽随契约删除），但仍保留 case 以**显式 warn** —— 插件清单的 `kind`
+ * 枚举未收缩，静默忽略等于把「声明了却没生效」藏起来（纪律⑨）。
  */
 export function pluginContributions(plugins: InstalledPlugin[]): SlotEntry[] {
   const out: SlotEntry[] = []
@@ -431,31 +451,18 @@ export function pluginContributions(plugins: InstalledPlugin[]): SlotEntry[] {
           break
         }
         case 'renderer': {
-          const rd = m.provides.renderer
-          if (!rd) break
-          rd.extensions.forEach((ext, i) => {
-            const taken = BUILTIN_EXTENSIONS.includes(ext)
-            if (taken && rd.override !== true) {
-              logger.warn(
-                'System',
-                `[plugin] ${m.id} 想接管已被内置占用的扩展名 .${ext}，但未声明 override:true → 已忽略`,
-              )
-              return
-            }
-            out.push({
-              id: `renderer:${ext}`,
-              kind: 'ui.renderer',
-              label: m.name,
-              source: 'plugin',
-              position: i,
-              payload: {
-                rendererKind: rd.rendererKind,
-                extensions: [ext],
-                override: rd.override === true,
-                labelKey: rd.labelKey ?? 'preview.registry.fallback',
-              },
-            })
-          })
+          /* ★ v0.36.0（D5）：`ui.renderer` 插槽已从契约删除 —— 这里不再产条目。
+           * 仍然**显式 warn**（纪律⑨：静默退化是复合缺陷的粘合剂）：插件清单的
+           * `kind` 枚举本版未收缩（那是另一份带 schemaVersion 的契约），
+           * 所以「声明了 renderer 却什么也没发生」必须留下人话，不能静默。 */
+          if (m.provides.renderer) {
+            logger.warn(
+              'System',
+              `[plugin] ${m.id} 声明了 kind='renderer'（接管扩展名 ${m.provides.renderer.extensions.join(', ')}），` +
+                `但 ui.renderer 插槽已在 v0.36.0 从契约删除（D5）→ 本贡献**不生效**。` +
+                `扩展名 → 渲染器的唯一真源是宿主内置表（renderer-ext.ts）。`,
+            )
+          }
           break
         }
         case 'action': {
@@ -471,15 +478,18 @@ export function pluginContributions(plugins: InstalledPlugin[]): SlotEntry[] {
           break
         }
         case 'homeModule': {
-          const hd = m.provides.homeModule
-          if (!hd) break
-          out.push({
-            id: `${hd.module}`,
-            kind: 'ui.homeModule',
-            label: hd.title,
-            source: 'plugin',
-            payload: { module: hd.module, title: hd.title, icon: hd.icon, pluginId: m.id },
-          })
+          /* ★ v0.36.0（D5）：`ui.homeModule` 插槽已从契约删除 —— 不再产条目。
+           * 注意**这不影响首页模块功能**：`availableHomeModules()` 直读清单
+           * （见本文件下方），装配器的 `ui.homeModule` 快照行读 profile 字段，
+           * 两者都不经过插槽表。这里同样留人话，不留静默。 */
+          if (m.provides.homeModule) {
+            logger.warn(
+              'System',
+              `[plugin] ${m.id} 声明了 kind='homeModule'（模块 ${m.provides.homeModule.module}），` +
+                `但 ui.homeModule 插槽已在 v0.36.0 从契约删除（D5）。` +
+                `模块仍可被工作台引用（availableHomeModules 直读清单），只是不再产生插槽条目。`,
+            )
+          }
           break
         }
         case 'theme': {
@@ -496,6 +506,20 @@ export function pluginContributions(plugins: InstalledPlugin[]): SlotEntry[] {
         }
         default:
           break
+      }
+      // ★ v0.36.0（F3.3）：命令贡献 → ui.action 可见性登记。
+      //   与 kind 无关（任何 kind 的插件都可附带 provides.commands），
+      //   所以放在 switch 之外。真正的执行链在 `plugin:run-command`
+      //   （IPC → supervisor 直发 host/emit），消费端是 QuickAction 与插件详情；
+      //   此条目只让能力视图/诊断能看到登记。
+      for (const c of m.provides.commands ?? []) {
+        out.push({
+          id: `plugin-command:${m.id}:${c.id}`,
+          kind: 'ui.action',
+          label: c.title,
+          source: 'plugin',
+          payload: { actionId: c.id, label: c.title, origin: `plugin:${m.id}` },
+        })
       }
     } catch (err) {
       // 逐插件隔离：一个插件产条目时炸了，不影响其他插件
@@ -687,6 +711,21 @@ export async function declaredPluginTools(): Promise<
   return out
 }
 
+/** ★ v0.36.0：全部启用插件声明的命令（QuickAction `plugin:list-commands` 的数据源） */
+export async function declaredPluginCommands(): Promise<
+  Array<{ pluginId: string; pluginName: string; command: { id: string; title: string; icon?: string } }>
+> {
+  const plugins = await listInstalledPlugins()
+  const out: Array<{ pluginId: string; pluginName: string; command: { id: string; title: string; icon?: string } }> = []
+  for (const p of plugins) {
+    if (!p.enabled || p.invalidReason) continue
+    for (const c of p.manifest.provides.commands ?? []) {
+      out.push({ pluginId: p.manifest.id, pluginName: p.manifest.name, command: c })
+    }
+  }
+  return out
+}
+
 /* ============================================================
  * 启停 / 卸载
  * ============================================================ */
@@ -710,7 +749,10 @@ export async function setPluginEnabled(
   return { ok: true }
 }
 
-export async function uninstallPlugin(id: string): Promise<{ ok: boolean; reason?: string }> {
+export async function uninstallPlugin(
+  id: string,
+  opts: { purgeData?: boolean } = {},
+): Promise<{ ok: boolean; reason?: string }> {
   const plugins = await listPlugins()
   const target = plugins.find((p) => p.manifest.id === id)
   if (!target) return { ok: false, reason: 'not-found' }
@@ -721,7 +763,8 @@ export async function uninstallPlugin(id: string): Promise<{ ok: boolean; reason
   }
   try {
     // 先撤销运行期与插槽副作用（纪律⑬），再删目录 —— 顺序反了会留下指向已删目录的挂点
-    await teardownHook?.(id)
+    // v0.36.0：purgeData 把插件私有 KV（plugin-storage/<id>.json）一并清掉
+    await teardownHook?.(id, { purgeData: opts.purgeData === true })
     await pluginEffects.revokeAll(id)
     rmSync(target.dir, { recursive: true, force: true })
   } catch (err) {
@@ -730,7 +773,7 @@ export async function uninstallPlugin(id: string): Promise<{ ok: boolean; reason
   }
   invalidatePlugins()
   await refreshPluginSlots()
-  logger.info('System', `[plugin] 已卸载 ${id}`)
+  logger.info('System', `[plugin] 已卸载 ${id}${opts.purgeData ? '（含数据）' : ''}`)
   return { ok: true }
 }
 

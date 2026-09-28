@@ -112,16 +112,22 @@ export function updatePlanApproval(taskId: string, patch: Partial<PlanApproval>)
  * 同 `markPatchDecided`：**不从表里删除**，只改 state —— 前端需要把卡片折叠成
  * 一行"✓ 计划已批准（4 项任务 · 4 条验收）"并保留在对话流。真正的清理发生在
  * `dropTaskPlanApproval`（任务结束）或重启。
+ *
+ * F6.2（v0.36.0）：`extra.approvedItemIds` 记录用户批准时实际勾选的计划项，
+ * 供折叠条展示「已批准 N/M 项」；`extra.editedItemIds` 记录被行内改过标题的项。
  */
 export function decidePlanApproval(
   taskId: string,
   state: PlanApproval['state'],
   userNote?: string,
+  extra?: { approvedItemIds?: string[]; editedItemIds?: string[] },
 ): PlanApproval | undefined {
   const cur = pendingPlans.get(taskId)
   if (!cur) return undefined
   const next: PlanApproval = { ...cur, state, decidedAt: Date.now() }
   if (userNote) next.userNote = userNote
+  if (extra?.approvedItemIds) next.approvedItemIds = extra.approvedItemIds
+  if (extra?.editedItemIds) next.editedItemIds = extra.editedItemIds
   pendingPlans.set(taskId, next)
   return next
 }

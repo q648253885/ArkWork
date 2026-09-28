@@ -295,26 +295,30 @@ async function executePatch(deps: BugfixDeps, command: string | undefined, goal:
     }
     return `已执行修复命令：${command.trim()}`
   }
-  const result = await delegateAgent(
+  const { results } = await delegateAgent(
     {
-      agentId: '@coding',
-      task: [
-        '你是缺陷修复执行子 Agent。请针对以下目标定位问题并修复代码。',
-        '只做修复本身，不要扩大范围；必要时可运行测试确认。',
-        '完成后用 task_complete 摘要说明改动了哪些文件。',
-        '',
-        goal.goal,
-        '',
-        '验收标准：',
-        ...goal.acceptanceCriteria.map((c) => `- ${c}`),
-      ].join('\n'),
+      targets: [{
+        agentId: '@coding',
+        objective: [
+          '你是缺陷修复执行子 Agent。请针对以下目标定位问题并修复代码。',
+          '只做修复本身，不要扩大范围；必要时可运行测试确认。',
+          '完成后用 task_complete 摘要说明改动了哪些文件。',
+          '',
+          goal.goal,
+          '',
+          '验收标准：',
+          ...goal.acceptanceCriteria.map((c) => `- ${c}`),
+        ].join('\n'),
+      }],
     },
     deps.ctx,
   )
-  if (result.status !== 'done') {
-    throw new Error(`修复委派未完成：${result.summary}`)
+  // v0.36.0 F4.1：delegate 改并行 —— 单目标取 results[0]
+  const child = results[0]
+  if (!child || child.status !== 'done') {
+    throw new Error(`修复委派未完成：${child?.summary ?? '子任务未返回结果'}`)
   }
-  return `已委派编码 Agent 修复：${result.summary.slice(0, 200)}`
+  return `已委派编码 Agent 修复：${child.summary.slice(0, 200)}`
 }
 
 /** diff 摘要（git diff --stat；非 git 仓库时给出提示） */

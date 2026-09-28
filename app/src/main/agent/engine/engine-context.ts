@@ -1,0 +1,58 @@
+/* ============================================================
+ * ArkWork — EngineContext（v0.36.0 F1.6，设计文档 §2/§3.3）
+ *
+ * agent/engine/ 拆分文件此前各自复制同一大块 import（memory/l3、l4、蒸馏、
+ * 技能炼制、压缩、kb、settings、events、checkpoint…约 100 行 × 12 文件）。
+ * 本模块收敛为单一导入面：各 engine 文件从 './engine-context.js' 一次导入。
+ *
+ * 纯再导出（barrel）——不新增任何逻辑，模块图拓扑不变（barrel 不反向依赖
+ * engine 内部文件，无环）。
+ * ============================================================ */
+export { checkpointId, saveCheckpoint } from '../../checkpoint/store.js'
+export { compressMemory } from '../../ipc/memory.js'
+export { getMemoryConfig, getSettings } from '../../ipc/settings.js'
+export { initKbIndex, searchKb } from '../../kb/index.js'
+export { listEnabledKb, listKb } from '../../kb/store.js'
+export type { LlmCompleteResponse, LlmMessage, LlmTool } from '../../llm/adapter.js'
+export { getAdapter, getModel } from '../../llm/registry.js'
+export { createMemoryPhase0 } from '../../memory/compaction-hook.js'
+export { compactTask, resolveAutoCompactThreshold, resolveModelMaxTokens } from '../../memory/compaction.js'
+export { autoPromoteDistill, evaluateDistillTrigger, getDistillMetrics } from '../../memory/distill.js'
+export { appendL1, listEnabledL1, listL1, totalTokens } from '../../memory/l1-working.js'
+export { persistRawL2 } from '../../memory/l2-file.js'
+export { archiveTaskL1, initArchiveIndex } from '../../memory/l3-archive.js'
+export { applyPending, getCuratedSnapshot } from '../../memory/l3-curated.js'
+export { getProfile, synthesizeFromTaskL1 } from '../../memory/l4-profile.js'
+export { runForSkillForge } from '../../memory/skill-forge.js'
+export { buildGateBlockObservation, computeAllowedStage, describeGateForLog, isCoreSkillsEnabled, matchForbiddenShellCommand, matchForbiddenWritePath, matchStageGate } from '../../skills/builtin/react-core-skills/stage-gates.js'
+export type { StageGate } from '../../skills/builtin/react-core-skills/stage-gates.js'
+export { builtinAgentRegistry, getAgent } from '../../store/agents.js'
+export { getWorkspaceDir } from '../../store/db.js'
+export { getTask, updateTask } from '../../store/tasks.js'
+export { logger } from '../../system/logger.js'
+export { computeContextBreakdown } from '../context-breakdown.js'
+export type { ContextBreakdownInput, ContextBreakdownResult, ContextSkillInstruction, ContextToolEntry } from '../context-breakdown.js'
+export { MAX_OBSERVATION_CONTENT, MAX_REASONING_CONTENT, MICRO_COMPACT_PLACEHOLDER, OBSERVATION_TRUNCATED_MARK, contextBudget, estimatePayloadTokens, estimatePayloadTokensDetailed, estimateTextTokens, shouldCompact, truncateLongContent } from '../context.js'
+export { broadcastPlanItemStatus, broadcastPlanListSnapshot, broadcastStep, broadcastTaskStatus, broadcastTextDelta, broadcastToolProgress, clearToolProgress } from '../events.js'
+export type { ToolProgress } from '../events.js'
+export { drainContinuations } from '../inbox.js'
+export { callLlmWithRetry, isContextOverflowError, withLlmTimeout } from '../llm-call.js'
+export { completeWithStream, createTextDeltaPump } from '../llm-stream.js'
+export type { TextDeltaPump } from '../llm-stream.js'
+export { buildPersonalitySegment, buildSystemSections, renderSystemPrompt } from '../prompt-assembly.js'
+export { checkGateBeforeAdvance, collectGateSpecs, confirmGate, findGateForStageDoc, initGateStates, isDocDrivenAgent } from '../prompt/gates.js'
+export { assembleSystemPrompt, collectAlwaysOnSections } from '../prompt/sections.js'
+export { getSkill, invokeSkill, listSkills, skillToLlmTool, skillToolName } from '../registry.js'
+export type { SkillContext } from '../registry.js'
+export { appendSessionEvent } from '../session-log.js'
+export { emitTurnStopping } from '../turn-stopping.js'
+export type { Agent, GateSpec } from '@shared/types/agent'
+export type { CompressPolicy } from '@shared/types/memory'
+export type { PlanContent, ReActAction, ReActEvent, ReActStep } from '@shared/types/react'
+export type { PlanItem, PlanItemStatus, Task } from '@shared/types/task'
+export { describeAction, describeActionKey } from '@shared/utils/action-description'
+export { genId } from '@shared/utils/id'
+export { isNoisePlanItem } from '@shared/utils/plan-noise'
+export { isPluginControlTool, isPluginToolName } from '@shared/utils/plugin-tool-name'
+export { createHash } from 'node:crypto'
+export { readFile } from 'node:fs/promises'

@@ -109,7 +109,7 @@ test('TC-STALLG-006 allReadonly 认「写类 shell 命令」，不能只看工�
   const call = actBlock.slice(actBlock.indexOf('allReadonly:'), actBlock.indexOf('hasSayOutput:'))
   assert.match(call, /a\.tool === 'shell'/, 'shell 是读写同源工具，必须先分流')
   assert.match(call, /WRITE_COMMAND_RE\.test\(/, 'shell 必须按命令行判定是否写类')
-  assert.match(call, /READONLY_TOOLS\.has\(a\.tool\)/, '非 shell 工具走只读白名单')
+  assert.match(call, /isReadonlyTool\(a\.tool\)/, '非 shell 工具走只读白名单（v0.38.0 纪律⑧：收敛为 work-class.isReadonlyTool 单源）')
   // 分流方向不能反：命中写命令 → 非只读
   assert.match(
     call,
@@ -380,3 +380,72 @@ test('TC-STALLG-022 ★ [D65] 预算耗尽文案四语言齐备且含 {count} �
   }
 })
 
+
+test('TC-STALLG-023 ★ [D168] 无工具纯答复停滞守卫：连满 NO_TOOL_STOP_ROUNDS 转人工', () => {
+  // 阈值语义：强提示（MAX_CONSECUTIVE_NO_TOOL=2）之后再给 2 轮自纠 → 第 4 轮转人工
+  assert.match(loopSrc, /const NO_TOOL_STOP_ROUNDS = 4/, '阈值常量必须存在（0.8b 实测烧 60 轮的根因修复）')
+  // 守卫位置：伪调用处置之后（consecutivePseudoNoTool = 0 归锚），先于提示注入
+  const guard = slice('consecutivePseudoNoTool = 0', 'v0.31.0 D22', loopSrc)
+  assert.match(guard, /consecutiveNoToolFinal >= NO_TOOL_STOP_ROUNDS/, '连满阈值必须触发暂停')
+  assert.match(guard, /pauseForNoToolAnswerStall\(task, iteration, unfinishedCount, consecutiveNoToolFinal\)/, '暂停必须带上未完成项数与轮数')
+  // 人话说明函数：与 D160 同形态（paused + ask_user + turn_note 双通道）
+  assert.match(loopSrc, /async function pauseForNoToolAnswerStall\(/, '人话暂停函数必须存在')
+  const fn = slice('async function pauseForNoToolAnswerStall(', 'v0.34.4（D65）', loopSrc)
+  assert.match(fn, /status: 'paused'/, '必须走 paused（进度保留、可继续）')
+  assert.match(fn, /pendingAskUser/, '必须挂 ask_user')
+  assert.match(fn, /emitTurnNote/, '正文必须额外走 turn_note（NoteBlock 可见通道，同 D160）')
+  assert.match(fn, /task_plan \/ task_complete/, '原因说明必须讲到清单收尾工具')
+})
+
+/* ============================================================
+ * v0.38.1 D170/D171：对话级自动降级 + 「就此结束」硬终局
+ * 实测根因：qwen3.5 对「你好」被 plan 兜底成单项清单后，正文答复被守卫视为
+ * unfinished work → 4 轮暂停 → 用户点「就此结束」又被当普通答复发回模型续跑。
+ * ============================================================ */
+
+test('TC-STALLG-024 ★ [D170] chatMode 接线：守卫在对话级任务上短路', () => {
+  // loop 侧：解构 + unfinishedCount 短路（答复即终局，不进停滞守卫链）
+  assert.match(loopSrc, /const chatMode = prepared\.chatMode/, 'loop 必须从 prepared 解构 chatMode')
+  assert.match(
+    loopSrc,
+    /const unfinishedCount = chatMode\s*\n\s*\? 0/,
+    'chatMode 时 unfinishedCount 恒为 0 → 自然落到「最终答复收尾」路径',
+  )
+  // run-setup 侧：PreparedRun 声明 + onExplicitEmpty 回调置位 + return 携带
+  const setupSrc = readFileSync(fileURLToPath(new URL('../engine/run-setup.ts', import.meta.url)), 'utf-8')
+  assert.match(setupSrc, /chatMode: boolean/, 'PreparedRun 必须声明 chatMode 字段')
+  assert.match(setupSrc, /let chatMode = false/, 'chatMode 必须是 run 级局部变量（默认非对话级）')
+  assert.match(setupSrc, /chatMode = true/, 'plan 显式空回调必须置 chatMode = true')
+  assert.match(setupSrc, /\n\s+chatMode,\s*\n/, 'return 块必须携带 chatMode 交给 loop')
+})
+
+test('TC-STALLG-025 ★ [D170] chatMode 收尾：兜底占位项随任务完成经账本真实收口', () => {
+  // ledger seal 语义：seal:completed 不动节点（ops.ts L388）——对话级终局必须
+  // 在 sealLedger 前把在途项标 done，否则任务 done 而清单项永远 pending。
+  // v0.38.1（TC-WIRE-008 修正）：收口必须走账本 mutate（唯一写入口），
+  // 不得直写 task.planItems（第二个写入者 → 真相源分裂）。
+  const closeBlock = slice("if (chatMode) {", "sealLedger(", loopSrc)
+  assert.match(closeBlock, /kind: 'set-status'/, '收口必须经账本 set-status（唯一写入口）')
+  assert.match(closeBlock, /to: 'done'/, '在途项必须标 done')
+  assert.match(closeBlock, /对话级交互：模型已直接答复/, '必须带人话 note（诚实 UI）')
+  // 否定性不变量：收口路径不得直写 planItems
+  assert.doesNotMatch(
+    closeBlock,
+    /updateTask\([\s\S]{0,200}planItems/,
+    'chatMode 收口不得直写 planItems（TC-WIRE-008）',
+  )
+})
+
+test('TC-STALLG-026 ★ [D171] 「就此结束」走停止通道，不再当普通答复续跑', () => {
+  // loop 侧：5 处 ask_user 建议全部带结构化 action（弱模型不调 task_complete 时
+  // 用户点击「就此结束」必须立即 cancelTask，而非把 label 文本发回模型空转）
+  const finishHits = loopSrc.match(/action: 'finish'/g) ?? []
+  assert.ok(finishHits.length >= 5, `「就此结束」建议必须全部带 action: 'finish'（实测 ${finishHits.length} 处，需覆盖 5 处）`)
+  // 渲染侧：点击与 Enter 两条路径都分流到 onStop（= cancelTask），不再 answer(label)
+  const gateSrc = readFileSync(
+    fileURLToPath(new URL('../../../renderer/components/AskUserGate.tsx', import.meta.url)),
+    'utf-8',
+  )
+  assert.match(gateSrc, /if \(s\.action === 'finish'\)/, '点击路径必须按 action 分流')
+  assert.match(gateSrc, /selectedSuggestion\?\.action === 'finish'/, 'Enter 快捷键必须同口径分流')
+})

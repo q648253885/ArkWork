@@ -87,7 +87,14 @@ export function toErrorPayload(err: unknown): RpcErrorPayload {
  * ============================================================ */
 
 /** main → host 的方法名（闭集；不在集合内的 method 一律 E_NOT_FOUND） */
-export const HOST_METHODS = ['host/prepare', 'host/activate', 'host/tool-call', 'host/dispose', 'host/emit'] as const
+export const HOST_METHODS = [
+  'host/prepare',
+  'host/activate',
+  'host/tool-call',
+  'host/dispose',
+  'host/emit',
+  'host/view-call', // v0.36.0：插件 Client 半经桥 `host.call` 转发到 `ctx.views.onCall` 注册表
+] as const
 export type HostMethod = (typeof HOST_METHODS)[number]
 
 /** host → main 的反向能力名（闭集；与 `ctx.ark.*` 一一对应） */
@@ -108,6 +115,7 @@ export const ARK_CAPS = [
   'storage.get',
   'storage.set',
   'storage.delete',
+  'git', // v0.36.0：params = { op, args }；op 为封闭白名单（git/service.ts）
   'renderer.post',
 ] as const
 export type ArkCap = (typeof ARK_CAPS)[number]

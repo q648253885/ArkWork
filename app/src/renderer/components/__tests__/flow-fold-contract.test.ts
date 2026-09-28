@@ -12,18 +12,21 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { stripComments } from '@shared/utils/source-guard'
 
 const R = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf-8')
-const CODE = (rel: string): string => R(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+const CODE = (rel: string): string => stripComments(R(rel))
 
-const STEP = '../../../../src/renderer/components/flow/StepView.tsx'
+const TURN = '../../../../src/renderer/components/flow/TurnView.tsx'
 const FOLD = '../../../../src/renderer/components/flow/ProcessFold.tsx'
 const CSS = '../../../../src/renderer/styles/globals.css'
 
-test('TC-FOLD-013 StepView 走 segmentFlow 分段渲染，不再平铺全部块', () => {
-  const src = CODE(STEP)
+test('TC-FOLD-013 TurnView 整轮 segmentFlow 分段渲染，不再按 step 平铺（v0.36.1 过程组）', () => {
+  const src = CODE(TURN)
+  assert.match(src, /turnRenderSequence\(/, '必须先取整轮渲染序列（跨 step 合并）')
   assert.match(src, /segmentFlow\(/, '必须消费纯函数的分段结果')
   assert.match(src, /<ProcessFold/, '进程段必须交给 ProcessFold 渲染')
+  assert.ok(!/StepView/.test(src), 'v0.36.1 起不得再按 step 分组渲染（StepView 已退役）')
 })
 
 test('TC-FOLD-014 展开态存 store 而非组件 useState（虚拟化后组件态会丢）', () => {
@@ -36,9 +39,14 @@ test('TC-FOLD-014 展开态存 store 而非组件 useState（虚拟化后组件�
 
 test('TC-FOLD-015 折叠行有信息量：工具按八分类计数，思考按时长/条数，不再是空壳摘要', () => {
   const fold = CODE(FOLD)
-  assert.match(fold, /countToolRun\(run\.blocks\)/, '必须有工具 run 计数')
+  assert.match(
+    fold,
+    /countToolRun\((?:run\.blocks|visibleBlocks)\)/,
+    '必须有工具 run 计数（v0.36.1：showThinking 过滤后仍按可见块集统计）',
+  )
   assert.match(fold, /toolRunParts\(counts\)/, '摘要必须按类别分列（禁止「已调用 N 次」式空壳）')
   assert.match(fold, /flow-fold__duration/, '必须展示耗时（空壳摘要的头号投诉点）')
+  assert.match(fold, /thinkingCountOf\(/, '混合过程组必须带「思考 N 次」计数（v0.36.1）')
   const pure = R('../../../../src/shared/utils/flow-fold.ts')
   // 八分类真源：shared/types/tool-present.ts 的 ToolCallKind
   for (const kind of ['read', 'edit', 'delete', 'move', 'search', 'execute', 'fetch', 'other']) {

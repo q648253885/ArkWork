@@ -12,6 +12,7 @@ import { initStore } from './store/db.js'
 import { reconcileStaleTasks } from './store/tasks.js'
 import { ensureWorkspace } from './fs/workspace.js'
 import { seedDefaults } from './store/seed.js'
+import { migrateAgentSpace, seedWorkspaceMemoryFromAgentSpace } from './memory/agent-space.js'
 import { seedBuiltinSkillsToFolders } from './agent/registry.js'
 import { startAutomationScheduler, stopAutomationScheduler } from './automation/scheduler.js'
 import { scheduleCleanup } from './fs/cleanup.js'
@@ -20,6 +21,7 @@ import { scheduleCleanup } from './fs/cleanup.js'
 //   `standard: true` 的协议特权注册只被 Electron 在 ready 前接受，之后调用静默无效。
 import { registerPluginSchemePrivileges } from './plugins/protocol.js'
 import { bootstrapPluginRuntime, shutdownPluginRuntime } from './plugins/bootstrap.js'
+import { setHostVersion } from './plugins/registry.js'
 import { logger } from './system/logger.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -105,9 +107,33 @@ registerPluginSchemePrivileges()
 app.whenReady().then(async () => {
   logger.info('System', `ArkWork v${app.getVersion()} starting…`)
 
+  // ★ v0.36.0（D84）：宿主版本必须**先于一切插件扫描**注入。
+  //   profile 挂载（下方 bootstrapIpcSideEffects）会触发插件索引刷新，
+  //   而 bootstrapPluginRuntime 的 setHostVersion 在它之后 —— 早扫描看到的是
+  //   占位版本 0.0.0，任何声明了 engines 的插件都被误判「版本不满足」而跳过
+  //   （实机冒烟：ark.test.hostsmoke 连续 3 次「0.0.0 不满足」后才被后续扫描救回）。
+  setHostVersion(app.getVersion())
+
   // 初始化存储与工作区
   await initStore()
   await ensureWorkspace()
+
+  // ★ v0.36.0（F1.1 / 决策 D1）：记忆分层归位 —— L1/L2 留在工作区，
+  //   L3a 策展记忆与 L4a 用户画像迁入 Agent 空间（跨工作区公共）。
+  //   幂等：只在首次（无 .migrated 标记）真正搬文件；失败不阻断启动（下次重试）。
+  try {
+    const r = await migrateAgentSpace(app.getVersion())
+    if (r.moved.length > 0) {
+      logger.info('System', `[agent-space] 记忆已迁入公共空间：${r.moved.join(', ')}`)
+    }
+    // ★ v0.36.3：memory.md 回迁工作区（项目偏好/规则属于项目）。
+    //   幂等 + 不覆盖 + 不删源：老版本迁进 Agent 空间的那份复制回工作区。
+    const seed = await seedWorkspaceMemoryFromAgentSpace()
+    if (seed.copied) logger.info('System', `[l3a] 项目记忆已回迁：${seed.to}`)
+  } catch (err) {
+    logger.warn('System', `[agent-space] 迁移跳过（不阻断启动）：${String(err)}`)
+  }
+
   // v0.8.0：回收上次意外退出遗留的 running/paused 任务 → cancelled，避免前端卡在暂停/中止
   await reconcileStaleTasks()
   // v0.4.0：写入种子数据（agents/skills/settings）——writeIfMissing 不会覆盖已有文件
@@ -144,6 +170,18 @@ app.whenReady().then(async () => {
   // 浏览器统一由 view-manager 单轨承载。
 
   logger.info('System', 'ArkWork ready')
+
+  // v0.36.0 B2 实机冒烟（dev-only）：ARKWORK_B2_SMOKE=1 时跑插件生命周期门槛
+  // 「zip 安装 → 启用 → 命令触发 → 卸载无残留」，结果落 .arkwork/b2-smoke/result.json 后退出
+  if (process.env.ARKWORK_B2_SMOKE === '1') {
+    void import('./dev/b2-smoke.js').then((m) => m.maybeRunB2Smoke())
+  }
+  // v0.36.0 B3 实机冒烟（dev-only）：ARKWORK_B3_SMOKE=1 时跑 git 门槛
+  // 「真仓 → 真插件激活 → 真桥 status/write → 审计落盘」，结果落 .arkwork/b3-smoke/result.json 后退出
+  // ⚠️ 会把工作区切到冒烟仓库，必须配 --user-data-dir 独立数据目录运行
+  if (process.env.ARKWORK_B3_SMOKE === '1') {
+    void import('./dev/b3-smoke.js').then((m) => m.maybeRunB3Smoke())
+  }
 })
 
 app.on('window-all-closed', () => {

@@ -20,6 +20,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createSayStripper, type StripChunk } from '../stream-strip.js'
 import { MAX_SAY_CHARS, extractSayMarker } from '../say-marker.js'
+import { stripComments } from '@shared/utils/source-guard'
 
 const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf-8')
 const SRC = read('../stream-strip.ts')
@@ -98,7 +99,7 @@ describe('stream-strip · TC-STREAM', () => {
     )
     assert.match(SRC, /MAX_SAY_CHARS\s*\*\s*2/, 'R5 阈值必须写作 MAX_SAY_CHARS × 2（可追溯来源）')
     // 允许出现在注释里的说明，但不得作为**字面量**出现在代码中
-    const codeOnly = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+    const codeOnly = stripComments(SRC)
     assert.doesNotMatch(codeOnly, /\b1200\b/, '不得硬编码 1200')
     assert.doesNotMatch(codeOnly, /\b600\b/, '不得硬编码 600')
   })

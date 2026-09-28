@@ -9,9 +9,9 @@
  *  - 内存缓存失效机制：CRUD 后清空 listAgents 缓存
  * ============================================================ */
 import { join } from 'node:path'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, writeFile, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { getArkworkDir } from './db.js'
+import { getArkworkDir, getWorkspaceDir } from './db.js'
 import type { Agent, LlmModel } from '@shared/types/agent'
 import type { AgentAddInput } from '@shared/types/ipc'
 import { builtinAgents, builtinModels } from './seed.js'
@@ -83,8 +83,56 @@ export async function getAgent(id: string): Promise<Agent | null> {
     '@coding': '@coder',
   }
   const resolvedId = idAliases[id] ?? id
+  // v0.36.0 F2.3：工作区 agent 优先（近层遮蔽远层，与 skills 的 project > user 同惯例；
+  // 工作区 agent 目录是 v0.36.0 新事物，无存量遮蔽风险）
+  const ws = await listWorkspaceAgents()
+  const wsHit = ws.find((a) => a.id === resolvedId)
+  if (wsHit) return wsHit
   const agents = await listAgents()
   return agents.find((a) => a.id === resolvedId) ?? null
+}
+
+/* ============================================================
+ * v0.36.0 F2.3：工作区内置 agent（`.arkwork/agents/*.json`）
+ *
+ * 数据源：{workspaceDir}/.arkwork/agents/*.json，每文件一个 Agent 对象。
+ *  - 只读视图：打开工作区即可用；写通道（把 agent 分发进工作区）由
+ *    工作台配置（B8）按需开放，本模块不提供写 API 以免出现无人调用的入口。
+ *  - workspaceBuiltin 缺省补 true（UI 区分来源用）。
+ *  - 单文件解析失败 → 跳过 + warn（一个坏文件不拖垮整个工作区的 agent 面）。
+ *  - 缓存按工作区隔离，invalidateAgentCache() 一并失效（外部修改目录后调用）。
+ * ============================================================ */
+const wsAgentsCacheByWorkspace = new Map<string, Agent[]>()
+
+export async function listWorkspaceAgents(): Promise<Agent[]> {
+  const workspaceDir = getWorkspaceDir()
+  const cached = wsAgentsCacheByWorkspace.get(workspaceDir)
+  if (cached) return cached
+  const dir = join(workspaceDir, '.arkwork', 'agents')
+  const out: Agent[] = []
+  if (existsSync(dir)) {
+    let entries: string[] = []
+    try {
+      entries = (await readdir(dir)).filter((n) => n.endsWith('.json')).sort()
+    } catch (err) {
+      logger.warn('System', `listWorkspaceAgents: readdir failed: ${(err as Error).message}`)
+    }
+    for (const name of entries) {
+      try {
+        const raw = await readFile(join(dir, name), 'utf-8')
+        const parsed = JSON.parse(raw) as Agent
+        if (!parsed || typeof parsed.id !== 'string' || !parsed.id) {
+          logger.warn('System', `listWorkspaceAgents: ${name} 缺少 id，已跳过`)
+          continue
+        }
+        out.push({ ...parsed, workspaceBuiltin: parsed.workspaceBuiltin ?? true })
+      } catch (err) {
+        logger.warn('System', `listWorkspaceAgents: ${name} 解析失败已跳过: ${(err as Error).message}`)
+      }
+    }
+  }
+  wsAgentsCacheByWorkspace.set(workspaceDir, out)
+  return out
 }
 
 /**
@@ -195,9 +243,10 @@ export async function removeAgent(id: string): Promise<void> {
   logger.info('System', `agent removed: ${id}`)
 }
 
-/** 失效缓存（外部修改 agents.json 后调用） */
+/** 失效缓存（外部修改 agents.json 后调用；v0.36.0 起同时失效工作区 agent 目录缓存） */
 export function invalidateAgentCache(): void {
   cachedAgents = null
+  wsAgentsCacheByWorkspace.clear()
 }
 
 async function writeAgents(agents: Agent[]): Promise<void> {

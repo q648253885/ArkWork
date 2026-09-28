@@ -31,6 +31,10 @@ export const BRIDGE_METHODS = [
   'data.request',
   'storage.get',
   'storage.set',
+  // v0.36.0：转发到该插件 Host 半的 `ctx.views.onCall(method, handler)` 注册表 ——
+  // params = { method: string, params?: unknown }。Handler 由插件自己的代码注册，
+  // 宿主不经手任何业务逻辑（只做搬运与超时），因此不构成额外攻击面。
+  'host.call',
 ] as const
 export type BridgeMethod = (typeof BRIDGE_METHODS)[number]
 

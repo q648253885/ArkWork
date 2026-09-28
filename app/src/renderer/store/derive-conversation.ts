@@ -10,6 +10,8 @@ import type { Task } from '@shared/types/task'
 import type { ReActStep } from '@shared/types/react'
 import type { MemoryItem } from '@shared/types/memory'
 import type { ConversationItem } from '@shared/types/conversation'
+// v0.36.0（B11/P4-c）：渲染层 SAY 兜底剥离（纯函数，node:test 可密闭单测）
+import { stripSayMarkers } from '../utils/say-strip'
 
 export function deriveConversation(
   task: Task | null,
@@ -99,11 +101,15 @@ export function deriveConversation(
       items.push({
         id: `${task.id}-final-${iter}`,
         type: 'assistant',
-        text: isComplete
-          ? (reasonStep.action?.args?.summary as string) ?? reasonStep.thought ?? ''
-          : isAskUser
-            ? (reasonStep.action?.args?.question as string) ?? reasonStep.thought ?? ''
-            : reasonStep.thought ?? '',
+        // v0.36.0（B11/P4-c）：最终回复过渲染层 SAY 兜底剥离 ——
+        // `args.summary` 此前从未过 say-marker 解析，裸标记直出 UI（实机截图）。
+        text: stripSayMarkers(
+          isComplete
+            ? (reasonStep.action?.args?.summary as string) ?? reasonStep.thought ?? ''
+            : isAskUser
+              ? (reasonStep.action?.args?.question as string) ?? reasonStep.thought ?? ''
+              : reasonStep.thought ?? '',
+        ),
         ts: reasonStep.startedAt,
         tsLabel: formatTimeLabel(reasonStep.startedAt),
       })

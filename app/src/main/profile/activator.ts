@@ -11,7 +11,7 @@
  *        ↓
  *   validate()        V1–V6；**required 项缺失 = error = 阻断**
  *        ↓
- *   compose()         五层落地：agents / tools / ui / data / auto
+ *   compose()         三层落地：agents / tools / ui（★ v0.36.0 D5：原五层）
  *        ↓
  *   persist()         只有全部成功才写 activeProfileId + 快照
  *
@@ -20,6 +20,8 @@
  *
  * 「永不静默半死」（G5）：每一项没挂上的东西都要进 `degraded[]`，
  * 带 layer / ref / reason / blocking 四要素，由 UI 逐条可见。
+ *
+ * ★ v0.36.0（D5）：`data` / `auto` 两层随插槽契约删除（详见 composeProfile 尾注）。
  * ============================================================ */
 import { MAX_EXTENDS_DEPTH, detectExtendsCycle, extendsDepthOf, mergeProfile, parseManifest, refResolves, refTail, stableHash, toReport, validateReferences } from '@shared/utils/profile-manifest'
 import { DOCK_TAB_TO_INSPECTOR } from '@shared/utils/panel-model'
@@ -38,8 +40,8 @@ import {
 import { listSkills } from '../agent/registry.js'
 import { logger } from '../system/logger.js'
 import { getActiveProfileId, getLastSnapshot, getProfile, listProfiles, saveLastSnapshot, setActiveProfileId } from './store.js'
-import { ensureMemoryNamespace, namespaceSnapshotEntries } from './namespace.js'
-import { BASE_NAMESPACE, builtinRendererSlotEntries } from './builtins.js'
+import { ensureMemoryNamespace } from './namespace.js'
+import { BASE_NAMESPACE } from './builtins.js'
 import { registerSlot, resetProfileSlots, slotStats } from './slots.js'
 import { availableHomeModules, availablePanelRefs, pluginPanelPayloads, refreshPluginSlots } from '../plugins/registry.js'
 
@@ -202,7 +204,7 @@ export interface ComposePanels {
 
 const EMPTY_PANELS: ComposePanels = { payloads: new Map(), available: new Set() }
 
-/* ---------- 五层装配 ---------- */
+/* ---------- 三层装配 ---------- */
 
 export interface ComposeResult {
   snapshot: CompositionSnapshot
@@ -213,7 +215,6 @@ export interface ComposeResult {
 export function composeProfile(
   profile: WorkbenchProfile,
   inv: BaseInventory,
-  nsApplied: boolean,
   panels: ComposePanels = EMPTY_PANELS,
 ): ComposeResult {
   const degraded: Degradation[] = []
@@ -311,7 +312,6 @@ export function composeProfile(
 
   /* --- ui 层 --- */
   const themeTokens = profile.ui.theme ?? {}
-  const previewRenderers = Object.entries(profile.ui.previewRenderers ?? {})
   const actionExts = profile.ui.actionExtensions ?? []
   const ui: SnapshotUi[] = [
     {
@@ -324,7 +324,17 @@ export function composeProfile(
       value: (profile.ui.dockPanels ?? []).map((d) => d.panelRef).join(','),
       applied: (profile.ui.dockPanels ?? []).length > 0,
     },
+    // ★ v0.36.0（D5）：`ui.homeModule` **不是插槽**（插槽已随契约删除），
+    //   而是「首页模块」字段的人话级快照行 —— `projectUiLayer()` 读它。
+    //   删插槽不影响首页模块功能（profile.ts 的 SlotKind 注释同口径）。
     { slot: 'ui.homeModule', value: profile.ui.homeModule ?? '', applied: Boolean(profile.ui.homeModule) },
+    // v0.36.0（B11/P3-b）：工作台级插件白名单快照行。applied = manifest 显式
+    // 声明了 pluginRefs（含空数组）—— 与「未声明=不过滤」必须可区分。
+    {
+      slot: 'ui.pluginRefs',
+      value: (profile.pluginRefs ?? []).join(','),
+      applied: profile.pluginRefs !== undefined,
+    },
     {
       slot: 'ui.composerChips',
       value: (profile.ui.composerChips ?? []).join(','),
@@ -334,11 +344,6 @@ export function composeProfile(
       slot: 'ui.theme',
       value: [...Object.keys(themeTokens.light ?? {}), ...Object.keys(themeTokens.dark ?? {})].join(','),
       applied: Object.keys(themeTokens.light ?? {}).length + Object.keys(themeTokens.dark ?? {}).length > 0,
-    },
-    {
-      slot: 'ui.previewRenderers',
-      value: previewRenderers.map(([k, v]) => `${k}=${v}`).join(','),
-      applied: previewRenderers.length > 0,
     },
     {
       slot: 'ui.actionExtensions',
@@ -400,18 +405,9 @@ export function composeProfile(
   for (const t of profile.ui.dockTabs ?? []) pushPanelEntry(t, undefined)
   for (const d of profile.ui.dockPanels ?? []) pushPanelEntry(d.panelRef, d.position)
 
-  /* --- ui.homeModule --- */
-  if (profile.ui.homeModule) {
-    slots.push({
-      id: `homeModule:${profile.ui.homeModule}`,
-      kind: 'ui.homeModule',
-      label: profile.ui.homeModule,
-      source: 'profile',
-      payload: { module: profile.ui.homeModule, profileId: profile.id },
-    })
-  }
-
-  /* --- ui.action：chips 与动作扩展分开登记（缺陷 D45：语义不再污染） --- */
+  /* --- ui.action：chips 与动作扩展分开登记（缺陷 D45：语义不再污染） ---
+   * ★ v0.36.0：`ui.homeModule` / `ui.renderer` 两条注册分支随 D5 契约删除
+   * （前者与首页模块功能无关，后者全仓无消费者 —— 唯一读它的是已删的诊断页）。 */
   ;(profile.ui.composerChips ?? []).forEach((chip, i) => {
     slots.push({
       id: `action:chip:${i}`,
@@ -433,18 +429,6 @@ export function composeProfile(
     })
   })
 
-  /* --- ui.renderer：previewRenderers 覆盖声明（每个扩展名一条） --- */
-  previewRenderers.forEach(([ext, kind], i) => {
-    slots.push({
-      id: `renderer:${ext}`,
-      kind: 'ui.renderer',
-      label: ext,
-      source: 'profile',
-      position: 1000 + i,
-      payload: { rendererKind: kind, extensions: [ext], override: true, labelKey: `preview.registry.${kind}` },
-    })
-  })
-
   /* --- ui.theme：token 覆盖（空集不产条目 —— 避免无谓的样式重算） --- */
   if (Object.keys(themeTokens.light ?? {}).length + Object.keys(themeTokens.dark ?? {}).length > 0) {
     slots.push({
@@ -456,49 +440,17 @@ export function composeProfile(
     })
   }
 
-  /* --- data 层 --- */
-  const ns = profile.data.memoryNamespace || BASE_NAMESPACE
-  const data = namespaceSnapshotEntries(ns, profile.data.shareCoreProfile !== false).map((e) => ({
-    key: e.key,
-    value: e.value,
-    applied: nsApplied ? e.applied : false,
-  }))
-  if (!nsApplied) {
-    degraded.push({ layer: 'data', ref: ns, reason: '记忆命名空间目录未就绪', blocking: false })
-  }
-  slots.push({
-    id: `data:ns:${ns}`,
-    kind: 'data',
-    label: ns,
-    source: 'profile',
-    payload: { namespace: ns, shareCore: profile.data.shareCoreProfile !== false, profileId: profile.id },
-  })
-
-  /* --- auto 层（本版只登记不注册 → 遗留 L-33-07） --- */
-  const auto = profile.automation.map((a) => ({ cron: a.cron, taskTemplate: a.taskTemplate, agent: a.agent, registered: false as const }))
-  for (const a of profile.automation) {
-    const required = (a as { required?: boolean }).required === true
-    degraded.push({
-      layer: 'auto',
-      ref: a.cron,
-      reason: '定时任务本版只登记不注册（automation 模块尚未开放 profile 来源）',
-      blocking: false,
-    })
-    slots.push({
-      id: `auto:${a.cron}`,
-      kind: 'auto',
-      label: a.cron,
-      source: 'profile',
-      payload: { cron: a.cron, taskTemplate: a.taskTemplate, agent: a.agent, required },
-    })
-  }
+  /* --- ★ v0.36.0（D5）：data / auto 两层的插槽与快照登记已删除 ---
+   * 事实未变（`ensureMemoryNamespace()` 仍在激活前真落地命名空间目录、
+   * `automation` 仍在 manifest 里声明并被 V4 校验），变的是**不再复制一份
+   * 只给诊断页看的「层」**：它们的失败信息走 logger 诊断通道（纪律⑨）。 */
 
   return {
     snapshot: {
       profileId: profile.id,
       profileVersion: profile.version,
       resolvedAt: now,
-      layers: { agents, tools, ui, data, auto },
+      layers: { agents, tools, ui },
       degraded,
     },
     degraded,
@@ -567,15 +519,14 @@ export async function activateProfile(id: string): Promise<ActivationReport> {
     }
   }
 
-  // 4) 装配 —— data 层先落地（目录就绪失败不阻断，只降级）
-  let nsApplied = true
+  // 4) 装配 —— 记忆命名空间目录先落地（★ v0.36.0 D5：data 层已从装配中删除，
+  //    但目录本身仍必须真建；失败只留诊断日志，不再复制一份「降级层」给 UI）。
   try {
     ensureMemoryNamespace(profile.data.memoryNamespace || BASE_NAMESPACE)
   } catch (err) {
-    nsApplied = false
-    logger.warn('System', `[profile] ns ensure failed: ${String(err)}`)
+    logger.warn('System', `[profile] ns ensure failed（记忆命名空间目录未就绪）：${String(err)}`)
   }
-  const composed = composeProfile(profile, inv, nsApplied, panelsCtx)
+  const composed = composeProfile(profile, inv, panelsCtx)
 
   // 5) required 缺失 → 阻断（required 语义：宁可激活失败，也不半死）
   const blockers = composed.degraded.filter((d) => d.blocking)
@@ -622,7 +573,7 @@ export async function activateProfile(id: string): Promise<ActivationReport> {
         const prevInv = await probeBaseInventory()
         const prevPanelMap = await pluginPanelPayloads()
         const prevPanelRefs = await availablePanelRefs()
-        const prevComposed = composeProfile(prev, prevInv, true, {
+        const prevComposed = composeProfile(prev, prevInv, {
           payloads: prevPanelMap,
           available: new Set(prevPanelRefs),
         })
@@ -677,7 +628,7 @@ function validatePureStructure(p: WorkbenchProfile): ValidationIssue[] {
 }
 
 /* ============================================================
- * 插槽提交与内置登记（★ v0.33.0）
+ * 插槽提交（★ v0.33.0；v0.36.0 收缩）
  * ============================================================ */
 
 /**
@@ -701,48 +652,21 @@ export function applyProfileSlots(entries: SlotEntry[]): number {
   return n
 }
 
-let builtinSlotsInstalled = false
-
-/**
- * 登记**内置**插槽条目（来源 `builtin`）。
- *
- * 幂等：重复调用直接返回（`registerSlot` 对同来源同 id 会 throw —— 那是「启动期
- * 编程错误」的守卫，不该被幂等性要求破坏）。启动期在 `bootstrapActiveProfile`
- * 里调一次即可；测试可先 `resetProfileSlots()` 再调。
- */
-export function ensureBuiltinSlots(): number {
-  if (builtinSlotsInstalled) return 0
-  const entries = builtinRendererSlotEntries()
-  let n = 0
-  for (const e of entries) {
-    try {
-      registerSlot(e.kind, e, 'builtin')
-      n += 1
-    } catch (err) {
-      logger.warn('System', `[profile] 内置插槽注册失败（${e.kind} ${e.id}）：${String(err)}`)
-    }
-  }
-  builtinSlotsInstalled = true
-  logger.info('System', `[profile] 内置插槽登记：${n} 条（ui.renderer）`)
-  return n
-}
-
-/** 测试用：重置「内置已登记」标记（配合 `resetProfileSlots()`） */
-export function resetBuiltinSlotFlag(): void {
-  builtinSlotsInstalled = false
-}
-
 /**
  * 启动期：把持久化下来的 activeProfileId 重新挂起来（幂等）。
  *
  * 顺序固定（`04-system-design.md` §4.4）：
- *   ① 内置插槽（builtin 来源）
- *   ② 装配当前 profile（profile 来源）
- *   ③ 插件贡献（plugin 来源）
- * 三者来源隔离，顺序固定的意义只是**消除不确定性**。
+ *   ① 装配当前 profile（profile 来源）
+ *   ② 插件贡献（plugin 来源）
+ * 两者来源隔离，顺序固定的意义只是**消除不确定性**。
+ *
+ * ★ v0.36.0（D5）：原第一步「登记内置插槽（builtin 来源）」已删除 ——
+ * 它登记的全部是 `ui.renderer` 条目（8 条内置渲染器），而该插槽随契约
+ * 收缩不复存在。`builtin` 来源这一维本身**保留**（`builtin` 面板条目仍由
+ * `pushPanelEntry()` 以 `source:'profile'` 产出、`resetProfileSlots('plugin')`
+ * 的隔离语义不变），只是启动期不再有内置条目要登记。
  */
 export async function bootstrapActiveProfile(): Promise<ActivationReport> {
-  ensureBuiltinSlots()
   const id = await getActiveProfileId()
   const report = await activateProfile(id)
   try {

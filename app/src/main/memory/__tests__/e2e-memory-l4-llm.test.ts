@@ -22,6 +22,15 @@ import { setWorkspaceDir, getWorkspaceDir, getArkworkDir } from '../../store/db.
 import { listL1 } from '../l1-working.js'
 import { synthesizeFromTaskL1, getProfile } from '../l4-profile.js'
 
+/**
+ * 诊断输出一律走 stderr（D100）：node:test 子进程协议走 stdout，
+ * 测试内写 stdout 会在并发满载时与协议帧争用 → 整份文件假红。
+ * 本套件虽在 EXCLUSIONS（需真实 apiKey + 外网），纪律同源、一并遵守。
+ */
+const log = (...args: unknown[]): void => {
+  process.stderr.write(args.map((a) => String(a)).join(' ') + '\n')
+}
+
 const TASK_ID = 'T-E2E-layers-001'
 
 // 与 layers 套件同一隔离 workspace（复用其 L1 产物；单独跑时请先跑 layers 套件）
@@ -41,9 +50,9 @@ async function ensureModels(): Promise<string> {
 
 test('L4: synthesizeFromTaskL1 → profile.json 出现产物（真实 LLM 合成）', async () => {
   const modelFile = await ensureModels()
-  console.log(`   models.json: ${modelFile}`)
+  log(`   models.json: ${modelFile}`)
   if (modelFile === 'NO_SOURCE') {
-    console.log('   ⚠️ 未找到真实 models.json，跳过 L4 真实 LLM 合成')
+    log('   ⚠️ 未找到真实 models.json，跳过 L4 真实 LLM 合成')
     return
   }
   const l1Items = await listL1(TASK_ID)
@@ -51,7 +60,7 @@ test('L4: synthesizeFromTaskL1 → profile.json 出现产物（真实 LLM 合成
   const p = join(WS, '.arkwork', 'profile.json')
   assert.equal(existsSync(p), true)
   const profile = await getProfile()
-  console.log(`✅ L4 产物: ${p} (version=${profile.version}, observations=${profile.observations.length}, synthesis=${profile.synthesis.length} 字符)`)
+  log(`✅ L4 产物: ${p} (version=${profile.version}, observations=${profile.observations.length}, synthesis=${profile.synthesis.length} 字符)`)
   assert.ok(result.newObservations > 0 || profile.version >= 1, 'L4 应至少产生一条观察或版本推进')
   assert.equal(existsSync(dirname(p)), true)
 })

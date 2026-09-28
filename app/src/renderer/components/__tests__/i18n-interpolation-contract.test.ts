@@ -25,6 +25,8 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+/** 源码守卫的注释剥离器唯一真源（v0.36.0 · D101） */
+import { stripComments } from '@shared/utils/source-guard'
 
 const RENDERER_ROOT = fileURLToPath(new URL('../../', import.meta.url))
 const LOCALES_ROOT = join(RENDERER_ROOT, 'i18n', 'locales')
@@ -244,7 +246,7 @@ test('TC-I18NI-006 v0.34.0 新增的 Tab / 插件管理键 4 语言齐备', () =
   }
 })
 
-test('TC-I18NI-007 孤儿键：PluginsView 删除后其独占键不得再被任何源码引用', () => {
+test('TC-I18NI-007 孤儿键：PluginsView / DiagnosticsView 删除后其独占键不得再被任何源码引用', () => {
   // 设计 §4.3：键定义保留一个版本（向后兼容），但**不得再有引用**
   const orphans = [
     'workbench.plugins.showSample',
@@ -254,14 +256,60 @@ test('TC-I18NI-007 孤儿键：PluginsView 删除后其独占键不得再被任�
     'workbench.plugins.issuesTitle',
     'workbench.tab.plugins',
     'workbench.tab.pluginsBadge',
+    // ★ v0.36.0（F5.1）：诊断子页 + 诊断方框删除，其独占键同样按 §4.3 保留一个版本
+    'workbench.tab.diagnostics',
+    'workbench.diag.slotsTitle',
+    'workbench.diag.colKind',
+    'workbench.diag.colEffective',
+    'workbench.diag.renderersTitle',
+    'workbench.diag.themeTitle',
+    'workbench.plugins.diagTitle',
+    'workbench.plugins.diagActivation',
+    'workbench.plugins.diagHostPid',
+    'workbench.plugins.diagPermissions',
+    'workbench.plugins.diagNoPermission',
+    'workbench.plugins.diagViews',
   ]
   const { sites } = collectCallSites()
   const referenced = new Set(sites.filter((s) => isI18nKey(s.key)).map((s) => s.key))
   for (const k of orphans) {
-    assert.equal(referenced.has(k), false, `${k} 是原 PluginsView 的独占键，不应再被引用`)
+    assert.equal(referenced.has(k), false, `${k} 是已删页面的独占键，不应再被引用`)
     // 键本身仍应在（保留一个版本）
     assert.ok(bundles.zh!.has(k), `${k} 应保留定义（设计 §4.3：保留一个版本）`)
   }
+})
+
+test('TC-I18NI-010 ★ v0.36.0（B9）：整棵 `palette.*` 随 CommandPalette 退役，成为孤儿命名空间', () => {
+  // CommandPalette 自 v0.13.0 起被 QuickAction 取代、B9 物理删除 ⇒ 它的专属命名空间
+  // `palette.*` 整棵变成孤儿。按 v0.34.0 §4.3「保留一个版本」，**定义**保留、
+  // **引用**必须为零 —— 这条同时也替 TC-CPCV-007 守住「命令已迁到 quickaction」的事实。
+  const paletteKeys = [...bundles.zh!.keys()].filter((k) => k.startsWith('palette.'))
+  assert.ok(paletteKeys.length >= 20, `palette.* 应仍保留定义（孤儿），实际 ${paletteKeys.length} 条`)
+
+  const { sites } = collectCallSites()
+  const referenced = new Set(sites.filter((s) => isI18nKey(s.key)).map((s) => s.key))
+  const resurrected = paletteKeys.filter((k) => referenced.has(k))
+  assert.deepEqual(
+    resurrected,
+    [],
+    `palette.* 是已删 CommandPalette 的独占键，不得再被引用：${resurrected.join(', ')}`,
+  )
+  // 迁移后的活键必须真的存在（否则命令面板上的文案会渲染成裸键）
+  for (const l of LANGS) {
+    assert.ok(
+      bundles[l]!.get('quickaction.commands.copyConversation')?.length,
+      `${l} 缺 quickaction.commands.copyConversation（B9 迁移后的活键）`,
+    )
+  }
+})
+
+test('TC-I18NI-011 ★ v0.36.0（B9）：`sidelist.progress` 随 ProgressPanel 退役（孤儿键）', () => {
+  // ProgressPanel 无挂点（见 TC-DEAD-005）⇒ 其 widget 条目已删。
+  // 键按 §4.3 保留一个版本，但不得再被任何源码引用。
+  assert.ok(bundles.zh!.has('sidelist.progress'), 'sidelist.progress 应保留定义（设计 §4.3）')
+  const { sites } = collectCallSites()
+  const referenced = new Set(sites.filter((s) => isI18nKey(s.key)).map((s) => s.key))
+  assert.equal(referenced.has('sidelist.progress'), false, 'sidelist.progress 不得再被引用')
 })
 
 test('TC-I18NI-008 能力页三 Tab 与工作台中心两子页的 key 契约', () => {
@@ -277,12 +325,212 @@ test('TC-I18NI-008 能力页三 Tab 与工作台中心两子页的 key 契约', 
       assert.ok(bundles[l]!.get(hint)?.length, `${l} 的 ${hint} 不得为空`)
     }
   }
-  // 工作台中心：只剩两个子页；plugins 键保留（孤儿，见 TC-I18NI-007）
-  const center = readFileSync(join(RENDERER_ROOT, 'components/workbench/WorkbenchCenter.tsx'), 'utf-8')
-  assert.match(center, /type Tab = 'profiles' \| 'diagnostics'/, '工作台中心必须收敛为两子页')
+  // 工作台中心：★ v0.36.0（F5.1）收敛为**单页**（诊断子页已删）；plugins 键保留（孤儿，见 TC-I18NI-007）
+  // 注：断言前剥注释 —— 组件头注释会写明「原 DiagnosticsView 已物理删除」，不剥即误报（纪律⑫）
+  const center = stripComments(readFileSync(join(RENDERER_ROOT, 'components/workbench/WorkbenchCenter.tsx'), 'utf-8'))
+  assert.doesNotMatch(center, /type Tab = /, '工作台中心必须收敛为单页')
   assert.doesNotMatch(center, /tab === 'plugins'/, '不得再渲染 plugins 子页')
   assert.doesNotMatch(center, /from '\.\/PluginsView'/, '不得再引用已删除的 PluginsView')
-  for (const id of ['profiles', 'diagnostics']) {
-    for (const l of LANGS) assert.ok(bundles[l]!.has(`workbench.tab.${id}`), `${l} 缺 workbench.tab.${id}`)
+  assert.doesNotMatch(center, /DiagnosticsView/, '不得再引用已删除的 DiagnosticsView')
+})
+
+test('TC-I18NI-009 ★ v0.36.0（F5.2/F5.3）：向导四步与编辑器两组化文案四语言齐备', () => {
+  // 新增界面必须四语言同步落地 —— 缺一语言时 i18next 会把键名原样显示在界面上，
+  // 那正是插值契约要防的那类「界面出现裸键」。
+  const wizardKeys = [
+    'workbench.wizard.title',
+    'workbench.wizard.step.template',
+    'workbench.wizard.step.agent',
+    'workbench.wizard.step.capabilities',
+    'workbench.wizard.step.name',
+    'workbench.wizard.templateHint',
+    'workbench.wizard.agentHint',
+    'workbench.wizard.capHint',
+    'workbench.wizard.nameLabel',
+    'workbench.wizard.idLabel',
+    'workbench.wizard.idHint',
+    'workbench.wizard.back',
+    'workbench.wizard.next',
+    'workbench.wizard.finish',
+    'workbench.wizard.creating',
+    'workbench.wizard.created',
+    'workbench.wizard.createFailed',
+    'workbench.wizard.loadFailed',
+  ]
+  const editorKeys = [
+    'workbench.editor.group.base',
+    'workbench.editor.group.advanced',
+    'workbench.editor.group.advancedHint',
+    'workbench.editor.group.identity',
+    'workbench.editor.agentTitle',
+    'workbench.editor.agentHint',
+    'workbench.editor.agentDefaultAria',
+    'workbench.editor.agentInclude',
+    'workbench.editor.noAgents',
+    'workbench.editor.capTitle',
+    'workbench.editor.capHint',
+    'workbench.editor.skillsTitle',
+    'workbench.editor.noSkills',
+    'workbench.editor.skillAdd',
+    'workbench.editor.skillAddPlaceholder',
+    'workbench.editor.pluginsTitle',
+    'workbench.editor.noPlugins',
+    'workbench.editor.dockTitle',
+    'workbench.editor.extends',
+    'workbench.editor.extendsHint',
+    'workbench.editor.extendsPlaceholder',
+    'workbench.editor.memoryNamespaceHint',
+    'workbench.editor.shareCoreProfileHint',
+  ]
+  const bannerKeys = ['profile.banner.partial', 'profile.banner.blocking']
+  for (const key of [...wizardKeys, ...editorKeys, ...bannerKeys]) {
+    for (const l of LANGS) {
+      assert.ok(bundles[l]!.get(key)?.length, `${l} 缺 ${key}（或为空）`)
+    }
+  }
+  // 横幅两个变量一条都不能少（缺一个界面就会出现 `{{name}}`）
+  for (const l of LANGS) {
+    assert.deepEqual(
+      templateVars(bundles[l]!.get('profile.banner.partial')!).sort(),
+      ['count', 'name'],
+      `${l} 的 banner.partial 变量名必须为 {name, count}`,
+    )
+    assert.deepEqual(
+      templateVars(bundles[l]!.get('profile.banner.blocking')!).sort(),
+      ['count', 'name'],
+      `${l} 的 banner.blocking 变量名必须为 {name, count}`,
+    )
+  }
+})
+
+/* ============================================================
+ * ★ v0.36.0（B9.3 / F6.1 / P9）：权限规则面板的键契约
+ *
+ * 为什么必须**显式**列一遍，而不能指望上面的自动扫描：
+ *   `PermissionRulesPanel` 的来源徽标与提示走的是**模板串动态键** ——
+ *     t(`settings.permission.rules.scope.${entry.scope}`)
+ *     t(`settings.permission.rules.scope.${entry.scope}Hint`)
+ *   静态正则 PARAM_RE 只认 `t('字面量')`，动态键一律扫不到（TC-I18NI-005 看不见它们）。
+ *   于是「少翻一种语言的 scope.userHint」会**静默**通过所有自动守卫，
+ *   只在用户切到该语言、且列表里恰好有 user 来源规则时才露出裸键。
+ * ============================================================ */
+
+/** P9 面板 + 拦截浮层用到的全部字面量键 */
+const P9_RULE_KEYS = [
+  'title',
+  'listTitle',
+  'count',
+  'loading',
+  'loadFailed',
+  'retry',
+  'emptyTitle',
+  'emptyHint',
+  'addTitle',
+  'toolLabel',
+  'patternLabel',
+  'patternPlaceholder',
+  'behaviorLabel',
+  'add',
+  'preview',
+  'toolScopeHint',
+  'enabled',
+  'disabled',
+  'readonly',
+  'readonlyHint',
+  'remove',
+] as const
+
+/** 四作用的来源名 + 悬停提示（**动态键**，自动扫描的盲区） */
+const P9_SCOPES = ['managed', 'local', 'project', 'user'] as const
+
+test('TC-I18NI-012 ★ v0.36.0（B9.3 / P9）：权限规则面板 + 拦截浮层四语言键齐备', () => {
+  for (const key of P9_RULE_KEYS) {
+    for (const l of LANGS) {
+      assert.ok(
+        bundles[l]!.get(`settings.permission.rules.${key}`)?.length,
+        `${l} 缺 settings.permission.rules.${key}（或为空）`,
+      )
+    }
+  }
+  for (const scope of P9_SCOPES) {
+    for (const l of LANGS) {
+      assert.ok(
+        bundles[l]!.get(`settings.permission.rules.scope.${scope}`)?.length,
+        `${l} 缺 scope.${scope}（来源徽标：动态键，静态扫描扫不到）`,
+      )
+      assert.ok(
+        bundles[l]!.get(`settings.permission.rules.scope.${scope}Hint`)?.length,
+        `${l} 缺 scope.${scope}Hint（来源说明：动态键，静态扫描扫不到）`,
+      )
+    }
+  }
+  for (const key of ['remember', 'rememberBehavior', 'rememberPreview', 'ruleRemembered']) {
+    for (const l of LANGS) {
+      assert.ok(bundles[l]!.get(`toolconfirm.${key}`)?.length, `${l} 缺 toolconfirm.${key}（或为空）`)
+    }
+  }
+})
+
+test('TC-I18NI-013 ★ v0.36.0（B9.3 / P9）：插值变量契约（缺一个界面就出现 `{{var}}`）', () => {
+  for (const l of LANGS) {
+    assert.deepEqual(
+      templateVars(bundles[l]!.get('settings.permission.rules.count')!),
+      ['count'],
+      `${l} 的 rules.count 变量名必须为 {count}`,
+    )
+    assert.deepEqual(
+      templateVars(bundles[l]!.get('settings.permission.rules.toolScopeHint')!),
+      ['tools'],
+      `${l} 的 rules.toolScopeHint 变量名必须为 {tools}`,
+    )
+    // 浮层「已记住规则」提示必须回显规则原文，否则用户不知道记住了哪一条
+    assert.deepEqual(
+      templateVars(bundles[l]!.get('toolconfirm.ruleRemembered')!),
+      ['rule'],
+      `${l} 的 toolconfirm.ruleRemembered 变量名必须为 {rule}`,
+    )
+  }
+})
+
+test('TC-I18NI-014 v0.36.0（B9.3）：`ruleGroups.*` 是**活键**而非孤儿键', () => {
+  // 反向断言，防「顺手清理孤儿键」时误删 P9 仍在用的行为名映射：
+  //   PermissionRulesPanel 与 ToolConfirmLayer 都以 t(`settings.permission.ruleGroups.${b}`) 取「允许/询问/拒绝」。
+  // 若哪天这里被列入孤儿清单，本用例会红。
+  for (const behavior of ['allow', 'ask', 'deny']) {
+    for (const l of LANGS) {
+      assert.ok(
+        bundles[l]!.get(`settings.permission.ruleGroups.${behavior}`)?.length,
+        `${l} 缺 settings.permission.ruleGroups.${behavior} —— 它在 P9 仍被引用，不是孤儿键`,
+      )
+    }
+  }
+})
+
+test('TC-I18NI-015 ★ v0.36.0（B9.3）：内联三栏 + 「总是允许」退役 → 10 条键成为孤儿（保定义、零引用）', () => {
+  // 按 v0.34.0 §4.3「保留一个版本」：定义保留（向后兼容 + 方便对账），
+  // 但**不得再被任何源码引用** —— 否则说明有旧入口没清干净。
+  const orphans = [
+    // 旧「总是允许」单按钮 → 换成「记住此选择 + 行为下拉 + 规则预览」
+    'toolconfirm.alwaysAllow',
+    'toolconfirm.addedAllowRule',
+    'toolconfirm.addAllowRuleFailed',
+    // 旧 SettingsContent 内联三栏 chips + 自定义 allow 输入框
+    'settings.permission.addAllowRule',
+    'settings.permission.customAllowRules',
+    'settings.permission.noCustomRules',
+    'settings.permission.addRulePlaceholder',
+    'settings.permission.ruleMerged',
+    'settings.permission.ruleCount',
+    'settings.permission.none',
+  ]
+  const { sites } = collectCallSites()
+  const referenced = new Set(sites.filter((s) => isI18nKey(s.key)).map((s) => s.key))
+  for (const k of orphans) {
+    assert.ok(bundles.zh!.has(k), `${k} 应保留定义（设计 §4.3：保留一个版本）`)
+    assert.equal(
+      referenced.has(k),
+      false,
+      `${k} 是 B9.3 退役入口的独占键，不应再被引用（若确有新引用点，请从本清单移除并说明）`,
+    )
   }
 })

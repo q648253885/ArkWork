@@ -7,9 +7,11 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getArkworkDir, getWorkspaceDir } from '../store/db.js'
 import type { Agent, LlmModel, Skill } from '@shared/types/agent'
-// v0.30.0：TaskGraph 任务工具集（9 个）的规格。定义放在 graph/tools.ts，
+// v0.30.0：TaskGraph 任务工具集的规格。定义放在 graph/tools.ts，
 // 此处只 spread —— 保证工具规格与 handler 定义同源，不会两处漂移。
-import { GRAPH_TOOL_SPECS } from '../agent/graph/tools.js'
+// v0.38.0（D154）：改为 spread **可见子集**（VISIBLE_GRAPH_TOOL_SPECS），
+// 控制面收敛后只剩 task_evidence 对模型可见。
+import { VISIBLE_GRAPH_TOOL_SPECS } from '../agent/graph/tools.js'
 
 const SEED_FLAG = 'seeded.v0.6.0.json'
 const LEGACY_SEED_FLAGS = ['seeded.v1.json']  // 旧版本 flag，需触发升级迁移
@@ -70,6 +72,8 @@ const BUILTIN_AGENTS: Agent[] = [
 - 用户明确说 "Use Skill: X" → 立即调用 X。
 - 用户提到 spec / plan / bugfix / react-core-skills / 文档驱动 / 先出文档 / 设计稿 → 立即调用对应 Skill 作为首个工具调用。
 - 任务本身涉及写代码、改 bug、UI 设计、新项目 → 优先调用 react-core-skills（如可用）获取场景路由和文档链规则。
+- **用户的新输入优先于一切既有计划**：收到新输入时先读它、先判断"这是新工作，还是只是问答 / 闲聊"，
+  再决定要不要动清单。不要把旧清单当成命令照做，也不要为了"有活干"而给问答造任务项。
 - 禁止只引用 Skill 名称而不调用；禁止说"我会用 X"却直接写代码。
 
 ## 2. 工具选择层级（强制）
@@ -102,25 +106,40 @@ const BUILTIN_AGENTS: Agent[] = [
 2. 如果工具返回错误/空/与预期不符，是换参数重试、换工具，还是基于已有信息继续？
 3. 本次调用是否重复了之前同一参数？如果是，立即改策略，禁止再次调用。
 
-## 6. 任务清单（todo-update）
-- **清单由引擎在计划阶段自动生成**，你不需要（也没有工具可以）自己去"创建"清单。
-- 你只负责**更新已有项**：todo-update({ item_index, status, comment })，item_index 从 **0** 开始，合法 status 为 done/running/pending/skipped/failed/cancelled。禁止传 -1 或负数。
-- 清单状态推进规则（v0.18.0）：act 失败时引擎自动把当前项标 failed；写文件 / 跑命令等阶段内工具**不会**自动推进清单，避免清单抢跑、与真实执行进度错位。
-- 每个子任务**真正完成**时，必须调用 todo-update 把当前项标 done 并说明下一步；跳过 / 重试 / 取消也调 todo-update（标 skipped / retry 等），但不要批量打标。
-- 中断续聊时，先读取当前 Todo 状态；若发现"全部完成却又继续"的冲突，可调 todo-update 修正并告知用户。
-- 最终交付前检查清单全部完成。
+## 6. 任务清单（task_plan）—— 唯一入口
+- **清单只有一个正常入口：task_plan。** 它接收**完整清单**（不是增量），引擎自动与当前清单比对，
+  算出新增 / 状态变化 / 删除。你不持有任何 id 或下标，也不要尝试自己维护"第几项"。
+- 什么时候调用：① 首轮把要做的事提交成清单；② 某个子项**真正完成**（该项状态改为 done）；
+  ③ 计划需要增删项；④ 卡住需要人介入（该项 status 用 blocked，并在 note 里写清在等什么）。
+- 什么时候**不**调用：纯问候 / 闲聊 / 对已答复内容的简短确认 —— 这类不产生需要跟踪的工作。此时**不要**为了留痕而造项。
+- **分析、调研、评审、方案类请求属于实质工作**（如"分析这个项目需要什么技术"）：应提交清单（可为 1~3 项的轻量结构，如"分析→汇总结论"），答复后如实标注完成；不要因为"一次答复就能说完"而跳过清单。
+- status 只有 5 个：todo / doing / done / skipped / blocked。同一时刻最多一项 doing。
+- 每项可用 note 写一句依据（如"已跑 npm test 通过"）。跳过 / 失败也如实标注，禁止批量打标。
+- **成果产物（artifact）**：把一项标为 done 时必须为它声明 artifact —— 产出了文件/目录的填
+  {path: "相对工作区路径", kind: "file" 或 "dir"}；以命令结果为产物的填 {kind: "command", check: "如何校验"}。
+  收尾前引擎会逐项核对产物，缺声明或产物不在盘上都会被拦下，届时补 artifact 后重新收尾即可。
+- 续聊时**先读当前清单再判断**：新输入产生了需要跟踪的工作就更新清单；确属只读问答就原样提交
+  同一份清单（引擎会记录你已检视过），然后直接回答用户。
+- 最终交付前检查清单里没有在途项（todo / doing / blocked）。
 
-## 7. 终止与交付
+## 7. 阶段结论与终止
+- **长任务要中途汇报**：每完成一个有意义的阶段，调 turn_note 把"已确认什么 / 下一步做什么"写成
+  1–3 句给用户（不要复述思考过程，不要写"我正在思考"）。用户看不到你的内部推理，只看到你投出的
+  结论 —— 长时间沉默会被当成卡住。
 - 任务完成调用 task_complete，参数包含：改了什么 / 验证结果 / 遗留风险。
 - 需要用户输入或门禁确认时调用 ask_user。
 - 最多 60 次迭代；单次工具超时 30 秒。工具调用预算按签名/类别动态管控（写入类 40、只读类 16），避免重复调用。`,
-    defaultSkillIds: ['S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.web-search', 'S-core.fetch-url', 'S-core.shell', 'S-core.browser', 'S-core.todo-update'],
+    defaultSkillIds: ['S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.web-search', 'S-core.fetch-url', 'S-core.shell', 'S-core.browser', 'S-core.task-plan', 'S-core.turn-note'],
     defaultMcpIds: [],
     defaultModelId: '',
     defaultKbIds: [],
     defaultConfig: { temperature: 0.5, maxIterations: 60 },
     isBuiltin: true,
-    version: '0.34.4',
+    // v0.38.0：清单控制面收敛为 task_plan/turn_note —— 提示词整体重写，
+    // 必须升版本，否则存量装机器的 systemPrompt 永远不会更新（syncBuiltinAgentsToLatest
+    // 只在 version 落后时同步）。
+    // v0.38.1（D176）：§6 增成果产物（artifact）规则；0.38.1 已被 BUILD7 消费 → 升 0.38.2 触发同步。
+    version: '0.38.2',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
   },
@@ -203,26 +222,39 @@ const BUILTIN_AGENTS: Agent[] = [
 - 改后必测：修改后跑测试或冒烟验证；UI 改动对照原型 1:1 还原。
 - 文档/注释/实现三者一致，禁止静默分叉。
 
-## 7. 任务清单（todo-update）
-- **清单由引擎在计划阶段自动生成**（场景 A 会一并列出文档链阶段），你不需要（也没有工具可以）自己去"创建"清单。
-- 你只负责**更新已有项**：todo-update({ item_index, status, comment })，item_index 从 **0** 开始，合法 status 为 done/running/pending/skipped/failed/cancelled。禁止传 -1 或负数。
-- 清单状态推进规则（v0.18.0）：act 失败时引擎自动把当前项标 failed；写文件 / 跑命令等阶段内工具**不会**自动推进清单，避免清单抢跑、与真实执行进度错位。
-- 每个子任务**真正完成**时，必须调用 todo-update 把当前项标 done 并说明下一步；跳过 / 重试 / 把失败项标 cancelled 也调 todo-update，但不要批量打标。
-- 中断续聊时，先读取当前 Todo 状态；若发现"全部完成却又继续"的冲突，可调 todo-update 修正并告知用户。
-- 最终交付前检查清单全部完成，并在 task_complete 摘要中说明验证结果与文档同步情况。
+## 7. 任务清单（task_plan）—— 唯一入口
+- **清单只有一个正常入口：task_plan。** 它接收**完整清单**（不是增量），引擎自动与当前清单比对，
+  算出新增 / 状态变化 / 删除。你不持有任何 id 或下标，也不要尝试自己维护"第几项"。
+- 什么时候调用：① 首轮把文档链 / 编码步骤提交成清单（场景 A 会一并列出文档链阶段）；
+  ② 某个子项**真正完成**（该项状态改为 done）；③ 计划需要增删项；
+  ④ 卡住需要人介入（该项 status 用 blocked，并在 note 里写清在等什么）。
+- 什么时候**不**调用：纯问候 / 闲聊 / 对已答复内容的简短确认 —— 这类不产生需要跟踪的工作，不要为了留痕而造项。
+- **分析、调研、评审、方案类请求属于实质工作**（如"分析这个项目需要什么技术"）：应提交清单（可为 1~3 项的轻量结构），答复后如实标注完成；不要因为"一次答复就能说完"而跳过清单。
+- status 只有 5 个：todo / doing / done / skipped / blocked。同一时刻最多一项 doing。
+- 每项可用 note 写一句依据（如"已跑 npm test 通过"）。跳过 / 失败也如实标注，禁止批量打标。
+- **成果产物（artifact）**：把一项标为 done 时必须为它声明 artifact —— 产出了文件/目录的填
+  {path: "相对工作区路径", kind: "file" 或 "dir"}；以命令结果为产物的填 {kind: "command", check: "如何校验"}。
+  收尾前引擎会逐项核对产物，缺声明或产物不在盘上都会被拦下，届时补 artifact 后重新收尾即可。
+- 续聊时**先读当前清单再判断**：新输入产生了需要跟踪的工作就更新清单；确属只读问答就原样提交
+  同一份清单（引擎会记录你已检视过），然后直接回答用户。
+- 最终交付前检查清单里没有在途项，并在 task_complete 摘要中说明验证结果与文档同步情况。
 
-## 8. 终止与交付
+## 8. 阶段结论与终止
+- 文档链阶段之间、编码里程碑达成时，调 turn_note 把"已确认什么 / 下一步做什么"写成 1–3 句给用户
+  （不要复述思考过程）。用户看不到你的内部推理，长时间沉默会被当成卡住。
 - 任务完成调用 task_complete，参数包含：改了什么 / 验证结果 / 文档同步情况 / 遗留风险。
 - 需要用户输入或门禁确认时调用 ask_user。
 - 最多 80 次迭代；单次工具超时 30 秒。工具调用预算按签名/类别动态管控（写入类 40、只读类 16），避免重复调用。`,
-    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.browser', 'S-core.todo-update',
-      // v0.30.0：TaskGraph 任务工具集
-      'S-core.task-create', 'S-core.task-update', 'S-core.task-get', 'S-core.task-list',
-      'S-core.task-evidence', 'S-core.task-block', 'S-core.request-plan', 'S-core.submit-plan', 'S-core.replan'],
+    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.browser', 'S-core.task-plan', 'S-core.turn-note',
+      // v0.38.0（D154）：清单控制面收敛后，图工具对模型只剩 task_evidence（V 层能力）。
+      // 其余 8 个（task-create / task-update / task-get / task-list / task-block /
+      // request-plan / submit-plan / replan）的规格已不再下发，此处同步删掉引用 ——
+      // 留着就是悬挂 id（会被静默过滤，属于"看不见的失效引用"）。
+      'S-core.task-evidence'],
     defaultMcpIds: [],
     // v0.25.0 F1：常驻能力 — run 启动时把 SKILL.md 指令体注入 system agent-static 段，
     // 任务全程生效。react-core-skills 的 frontmatter gates 同步初始化 task.gateStates，
-    // 门禁机制阻断跳过阶段的行为（todo_update 标 done 时校验）。
+    // 门禁机制阻断跳过阶段的行为（task_plan 把阶段项标 done 时校验）。
     alwaysOnSkillIds: ['S-core.react-core-skills'],
     defaultModelId: '',
     defaultKbIds: [],
@@ -231,7 +263,8 @@ const BUILTIN_AGENTS: Agent[] = [
     // v0.34.1：更名后必须升版本 —— syncBuiltinAgentsToLatest 只在 version 落后时同步
     // v0.34.4（D66）：提示词 §7 修正（"创建 TodoWrite 清单" → 清单由计划阶段生成），
     //                 再次升版本以触发已装机器的同步。
-    version: '0.34.4',
+    // v0.38.0：清单控制面收敛为 task_plan/turn_note，§7/§8 重写 → 再升版本。
+    version: '0.38.2',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
     // v0.15.0 Task 6：@coder 默认 acceptEdits —— 工作区内轻写（sed -i/tee/mkdir/cp/...）不再每次弹确认；
@@ -313,20 +346,27 @@ const BUILTIN_AGENTS: Agent[] = [
 2. 返回错误/空/不符预期时：换参数重试、换工具，还是基于已有信息继续？
 3. 本次调用是否重复了之前同一参数？若是，立即改策略。
 
-## 8. 任务清单（todo-update）
-- 收到任务后首轮创建清单（场景 A 还要列出文档链阶段）。
-- 每个子任务**真正完成**时调 todo-update 标 done 并说明下一步；跳过/重试/失败项也如实标注，禁止批量打标。
-- 清单状态推进规则：act 失败时引擎自动标 failed；写文件/跑命令不会自动推进清单。
-- 最终交付前检查清单全部完成。
+## 8. 任务清单（task_plan）—— 唯一入口
+- 收到任务后，首轮用 task_plan 提交**完整清单**（场景 A 还要列出文档链阶段）。引擎自动算差异，
+  你不持有任何 id 或下标。
+- 每个子项**真正完成**时才把该项 status 改为 done；跳过 / 失败 / 卡住也如实标注
+  （skipped / blocked + note 写清等什么），禁止批量打标。status 只有 5 个：
+  todo / doing / done / skipped / blocked，同一时刻最多一项 doing。
+- **成果产物（artifact）**：把一项标为 done 时必须为它声明 artifact —— 产出了文件/目录的填
+  {path: "相对工作区路径", kind: "file" 或 "dir"}；以命令结果为产物的填 {kind: "command", check: "如何校验"}。
+  收尾前引擎会逐项核对产物，缺声明或产物不在盘上都会被拦下，届时补 artifact 后重新收尾即可。
+- 续聊时**先读当前清单再判断**：新输入产生了需要跟踪的工作就更新清单；确属只读问答就原样提交
+  同一份清单，然后直接回答用户 —— 不要为了留痕给问答造项。
+- 阶段里程碑达成时调 turn_note 写 1–3 句结论给用户（不要复述思考过程）。
+- 最终交付前检查清单里没有在途项。
 
 ## 9. 终止与交付
 - 任务完成调 task_complete，参数包含：改了哪些文件 / 构建与测试结果（真实命令输出摘要）/ 文档同步情况 / 遗留风险与后续建议。
 - 需要用户输入或门禁确认时调 ask_user。
 - 最多 80 次迭代；单次工具超时 30 秒。工具调用预算按签名/类别动态管控（写入类 40、只读类 16）。`,
-    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.browser', 'S-core.todo-update',
-      // v0.30.0：TaskGraph 任务工具集
-      'S-core.task-create', 'S-core.task-update', 'S-core.task-get', 'S-core.task-list',
-      'S-core.task-evidence', 'S-core.task-block', 'S-core.request-plan', 'S-core.submit-plan', 'S-core.replan'],
+    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.browser', 'S-core.task-plan', 'S-core.turn-note',
+      // v0.38.0（D154）：图工具对模型只剩 task_evidence（理由同 @coder）
+      'S-core.task-evidence'],
     defaultMcpIds: [],
     alwaysOnSkillIds: ['S-core.react-core-skills'],
     defaultModelId: '',
@@ -334,7 +374,8 @@ const BUILTIN_AGENTS: Agent[] = [
     // Java 工程编译比解释型语言慢：迭代上限与温度与 @coder 一致，但构建命令超时由工具侧兜底
     defaultConfig: { temperature: 0.2, maxIterations: 80 },
     isBuiltin: true,
-    version: '0.34.1',
+    // v0.38.0：清单控制面收敛为 task_plan/turn_note，§8/§9 重写 → 升版本触发存量同步
+    version: '0.38.2',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
     defaultPermissionMode: 'acceptEdits',
@@ -649,45 +690,132 @@ const BUILTIN_SKILLS: Skill[] = [
     enabled: true,
     tags: ['control'],
   },
+  // ============================================================
+  // v0.38.0（D154）：清单控制面收敛 —— 11 → 2
+  //
+  // 旧工具（v0.37 及以前）：todo_update（按 item_index）+ graph/tools.ts 的 9 个
+  // （task_create / task_update / task_get / task_list / task_block / replan /
+  // submit_plan / request_plan，按 node_id）—— **两套定位语义、语义还重叠**，
+  // 模型没有唯一正确答案可选。现场形态就是「用 todo_update 冒充 task_create」。
+  //
+  // 现在模型只看到两个动作：
+  //   task_plan —— 清单的唯一读写入口（提交完整清单，引擎 diff）
+  //   turn_note —— 阶段性结论的唯一投递入口
+  // 其余能力由引擎承担：task_get/task_list → 每轮注入的清单快照；
+  // task_block → task_plan 的 status:'blocked' + note；task_evidence 保留（V 层）。
+  // ============================================================
   {
-    // v0.17.5：todo_update — 让 LLM 主动更新任务清单状态（对齐 Claude Code TodoWrite）。
-    // 引擎层不再全凭感觉自动打标，改为 LLM 每完成一个阶段操作后主动调用本工具
-    // 更新清单 + 说明下一步，实现「执行 → 检查 → 更新 → 反馈」闭环。
-    id: 'S-core.todo-update',
-    name: 'todo_update',
+    id: 'S-core.task-plan',
+    name: 'task_plan',
     description:
-      '更新任务清单（planItems）中某一项的状态。每完成一个阶段性操作后必须调用，把当前项标为 done 并说明下一步；发现偏离计划或需跳过时也要调用。item_index 是清单中的 0-based 序号，status 取值 done/running/pending/skipped/failed。',
+      // v0.40.0（D202）：补一句「不调用也可以」—— 原描述把「每完成一个小任务…
+      // 就调用」写成隐含的硬性要求，弱模型做不到时会被 D160 伪调用 / D168 停滞
+      // 守卫判为「不用工具」，最终演变成空转。清单推进的责任已由引擎侧的清单
+      // 操作通道（planning/ops）承担，本工具降为**可选快路径**。
+      '提交你当前认为正确的**完整**任务清单（不是增量）。引擎会与当前清单比对，自动计算新增 / 状态变化 / 删除，' +
+      '并保留已完成项（已完成项不会被回退、也不会消失）。每完成一个小任务、得出中间结论、' +
+      '或发现清单与现实不符时可调用；判断「清单无需变化」时，提交与现在**相同**的清单即可 —— 引擎会记录你已做过检视。' +
+      '**不调用本工具也不会让任务停滞**：引擎会依据实际进展独立维护清单，本工具只是你想立即改动清单时的快路径。',
     namespace: 'core',
     source: 'builtin',
-    builtinHandler: 'todo_update',
+    builtinHandler: 'task_plan',
     inputSchema: {
       type: 'object',
       properties: {
-        item_index: { type: 'number', description: '要更新的清单项索引（0-based，对应清单顺序）' },
-        status: { type: 'string', description: '目标状态：done（已完成）/ running（进行中）/ pending（待办）/ skipped（跳过）/ failed（失败）' },
-        comment: { type: 'string', description: '进度说明：完成了什么、下一步要做什么、或偏离原因' },
+        items: {
+          type: 'array',
+          minItems: 1,
+          description: '完整清单，按你希望的执行顺序排列（包含已完成的项）',
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: '要做什么，动宾短语，≤80 字' },
+              status: {
+                type: 'string',
+                enum: ['todo', 'doing', 'done', 'skipped', 'blocked'],
+                description: 'todo 待做 / doing 正在做 / done 已完成 / skipped 已跳过 / blocked 受阻（需 note 说明）',
+              },
+              note: { type: 'string', description: '一句话说明（为什么 / 结果），可选' },
+              parent: {
+                // v0.39.0（D185）：子任务 —— 把「这一步拆小」从一句话变成数据模型里的层级。
+                // 三种写法都收（引擎统一解析）：父项序号 `#3` / 父项 id / 父项文本前几个字。
+                // 只支持两层（父 + 子）：再深一层对"集中注意力"没有帮助，反而让快照难以阅读。
+                type: 'string',
+                description:
+                  '可选：本项是某个父项的子任务。填父项序号（如 "#3"）、父项 id，或父项文本的前几个字；' +
+                  '引擎自动解析。最多两层（父 → 子）。父项未命中时本项按顶级处理。',
+              },
+              artifact: {
+                // v0.38.1（D176）：成果产物声明 —— done 项必须可核对（完成门禁 ARTIFACT 判据）
+                type: 'object',
+                description: '成果产物声明（标 done 的项必须提供）：file/dir 填相对工作区的 path；command 填 check 校验说明',
+                properties: {
+                  path: { type: 'string', description: '产物路径（相对工作区）；kind=command 时可省' },
+                  kind: { type: 'string', enum: ['file', 'dir', 'command'], description: '产物形态' },
+                  check: { type: 'string', description: '完整性校验说明（command 必填，其余可选）' },
+                },
+                required: ['kind'],
+              },
+            },
+            required: ['text', 'status'],
+          },
+        },
+        reason: { type: 'string', description: '本次调整的原因（改结构时建议填写）' },
       },
-      required: ['item_index', 'status'],
+      required: ['items'],
     },
     timeout: 5_000,
     needsConfirmation: false,
     enabled: true,
-    tags: ['control'],
+    tags: ['control', 'plan'],
+  },
+  {
+    id: 'S-core.turn-note',
+    name: 'turn_note',
+    description:
+      '向用户展示一条**阶段性结论**（不是最终答复）。用于：得出一个中间结论、完成一个小任务、判断出下一步该做什么时。' +
+      '用户在长任务中需要看到你的进展，不要等全部做完才一次性汇报。内容要具体（"已确认 X，接下来做 Y"），不要写"正在处理中"。',
+    namespace: 'core',
+    source: 'builtin',
+    builtinHandler: 'turn_note',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: '结论正文（1–3 句，人话）' },
+      },
+      required: ['text'],
+    },
+    timeout: 3_000,
+    needsConfirmation: false,
+    enabled: true,
+    tags: ['control', 'output'],
   },
   {
     id: 'S-core.delegate-agent',
     name: 'delegate-agent',
-    description: '将子任务委派给另一个 Agent 执行，返回其摘要结果（用于多 Agent 协作）',
+    description: '将一个或多个子任务并行委派给其他 Agent 执行（并发上限 4），返回各子任务摘要结果（用于多 Agent 协作）',
     namespace: 'core',
     source: 'builtin',
     builtinHandler: 'delegate-agent',
     inputSchema: {
       type: 'object',
       properties: {
-        agentId: { type: 'string', description: '要委派的目标 Agent id（如 @researcher）' },
-        task: { type: 'string', description: '委派给子 Agent 的任务描述' },
+        targets: {
+          type: 'array',
+          description: '并行委派目标列表（并发上限 4，失败隔离；也接受单个对象 = 单目标委派）',
+          items: {
+            type: 'object',
+            properties: {
+              agentId: { type: 'string', description: '要委派的目标 Agent id（如 @researcher）' },
+              objective: { type: 'string', description: '委派给子 Agent 的任务描述' },
+            },
+            required: ['agentId', 'objective'],
+          },
+        },
+        agentId: { type: 'string', description: '（旧参数，兼容保留）单目标委派的目标 Agent id' },
+        task: { type: 'string', description: '（旧参数，兼容保留）单目标委派的任务描述' },
       },
-      required: ['agentId', 'task'],
+      required: ['targets'],
     },
     timeout: 300_000,
     needsConfirmation: false,
@@ -842,10 +970,12 @@ const BUILTIN_SKILLS: Skill[] = [
     enabled: true,
     tags: ['coding', 'docs', 'swe'],
   },
-  // v0.30.0：TaskGraph 任务工具集（task_create / task_update / task_get /
-  // task_list / task_evidence / task_block / request_plan / submit_plan / replan）。
-  // 描述与 schema 在 graph/tools.ts 中定义（与 handler 同源）。
-  ...GRAPH_TOOL_SPECS,
+  // v0.30.0：TaskGraph 任务工具集。描述与 schema 在 graph/tools.ts 中定义（与 handler 同源）。
+  // v0.38.0（D154）：**只 spread 模型可见的子集** —— 收敛后仅剩 task_evidence。
+  // 其余 8 个（task_create / task_update / task_get / task_list / task_block /
+  // replan / submit_plan / request_plan）的能力已并入 task_plan 或引擎快照；
+  // handler 仍注册在 registry（引擎内部能力保留），只是不再出现在模型工具表里。
+  ...VISIBLE_GRAPH_TOOL_SPECS,
 ]
 
 const BUILTIN_MODELS: LlmModel[] = [

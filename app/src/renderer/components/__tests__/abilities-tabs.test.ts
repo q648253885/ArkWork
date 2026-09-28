@@ -33,8 +33,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+/** ★ v0.36.0（D101）：源码守卫一律在**剥离注释后**断言 ——
+ *  本项目注释里天然会写反面教材（「原 DiagnosticsView 已删除」「不要写 console.log」），
+ *  不剥就会把注释本身当违规（纪律⑫）。剥离器唯一真源见 @shared/utils/source-guard。 */
+import { stripComments } from '@shared/utils/source-guard'
 
-const src = (rel: string): string => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf-8')
+const src = (rel: string): string => stripComments(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf-8'))
 
 const abilitiesSrc = src('../panels/AbilitiesPanel.tsx')
 const capabilitySrc = src('../panels/CapabilityPluginsPanel.tsx')
@@ -42,6 +46,12 @@ const workbenchSrc = src('../workbench/WorkbenchCenter.tsx')
 const mcpPanelSrc = src('../panels/PluginsPanel.tsx')
 
 const PLUGINS_VIEW = fileURLToPath(new URL('../workbench/PluginsView.tsx', import.meta.url))
+const DIAGNOSTICS_VIEW = fileURLToPath(new URL('../workbench/DiagnosticsView.tsx', import.meta.url))
+const PROFILE_WIZARD = fileURLToPath(new URL('../workbench/ProfileWizard.tsx', import.meta.url))
+
+const profilesViewSrc = src('../workbench/ProfilesView.tsx')
+const profileEditorSrc = src('../workbench/ProfileEditor.tsx')
+const wizardSrc = src('../workbench/ProfileWizard.tsx')
 
 /* ============================================================
  * 1. 能力页：三 Tab 顺序与内容归属
@@ -119,7 +129,11 @@ test('TC-ABL-007 一行一插件：行节点带插件 id，开关是 role=switch
   assert.match(capabilitySrc, /useStore\(\(s\) => s\.uninstallPlugin\)/, '必须绑定既有 uninstallPlugin')
   assert.match(capabilitySrc, /useStore\(\(s\) => s\.openPluginsDir\)/, '绑定既有 openPluginsDir')
   assert.match(capabilitySrc, /useStore\(\(s\) => s\.rescanPlugins\)/, '绑定既有 rescanPlugins')
-  assert.match(capabilitySrc, /uninstall\(p\.id\)/, '卸载调用点必须落在绑定好的动作上')
+  assert.match(capabilitySrc, /uninstall\(\s*confirmUninstallId/, '卸载调用点必须落在绑定好的动作上')
+  // ★ v0.36.0：卸载改为「确认框 + 可选清数据」两段式 —— 契约随之变为
+  // 「确认对象来自当前行插件 id」（防串号：确认框弹的是 A，卸的却是 B）
+  assert.match(capabilitySrc, /setConfirmUninstallId\(p\.id\)/, '卸载确认对象必须取自当前行插件 id')
+  assert.match(capabilitySrc, /uninstall\(\s*confirmUninstallId,\s*\{\s*purgeData/, '卸载必须能带「删除插件数据」选项')
   assert.match(capabilitySrc, /rescan\(\)/, '重新扫描走既有 IPC')
 })
 
@@ -186,14 +200,25 @@ test('TC-ABL-011b v0.35.0 脚手架前的入口守卫：id/name 为空必须拦�
  * 3. 工作台中心：收敛两子页 + PluginsView 真删除
  * ============================================================ */
 
-test('TC-ABL-012 ★ 工作台中心恰为两子页，且不再渲染 plugins', () => {
-  assert.match(workbenchSrc, /type Tab = 'profiles' \| 'diagnostics'/, '类型收敛为两值')
-  assert.match(workbenchSrc, /const TABS: Array<\{ id: Tab; icon: IconName \}> = \[\s*\{ id: 'profiles'/, 'TABS 数组以 profiles 起始')
+test('TC-ABL-012 ★ v0.36.0（F5.1/F5.2）：工作台中心改为**单页**，诊断子页不再存在', () => {
+  // v0.34.0 的形态是两子页（profiles | diagnostics）。v0.36.0 把「我声明了什么 /
+  // 实际生效了什么」合成一页：列表 + 详情三步分区，降级与校验问题就地以横幅呈现。
+  assert.doesNotMatch(workbenchSrc, /type Tab = /, 'Tab 联合类型必须整块消失（留一半就是残骸）')
+  assert.doesNotMatch(workbenchSrc, /const TABS/, 'TABS 数组必须删除')
   assert.doesNotMatch(workbenchSrc, /id: 'plugins'/, 'TABS 不得再含 plugins')
-  assert.doesNotMatch(workbenchSrc, /\{tab === 'plugins'/, '不得再渲染 plugins 子页')
+  assert.doesNotMatch(workbenchSrc, /\{tab === /, '不得再有子页分支渲染')
+  assert.doesNotMatch(workbenchSrc, /DiagnosticsView/, '不得再引用 DiagnosticsView')
   assert.doesNotMatch(workbenchSrc, /PluginsView/, '不得再引用 PluginsView')
-  assert.match(workbenchSrc, /\{tab === 'profiles' && <ProfilesView \/>\}/, 'profiles 分支保留')
-  assert.match(workbenchSrc, /\{tab === 'diagnostics' && <DiagnosticsView \/>\}/, 'diagnostics 分支保留')
+  assert.match(workbenchSrc, /^import \{ ProfilesView \} from '\.\/ProfilesView'$/m, '必须直接渲染 ProfilesView')
+  assert.match(workbenchSrc, /<ProfilesView \/>/, 'ProfilesView 必须无条件挂载（单页）')
+})
+
+test('TC-ABL-012b ★ v0.36.0：DiagnosticsView.tsx 必须**物理删除**（与 PluginsView 同一条纪律）', () => {
+  assert.equal(
+    existsSync(DIAGNOSTICS_VIEW),
+    false,
+    '文件必须删除 —— 留着不引用就是 v0.32.2 审计里的「死组件」，下一个人会以为它还活着',
+  )
 })
 
 test('TC-ABL-013 ★ PluginsView.tsx 必须**物理删除**（不是仅取消引用）', () => {
@@ -209,4 +234,76 @@ test('TC-ABL-014 MCP 面板「仅更名」：PluginsPanel 行为未被改动', (
   // 用一个最小指纹把守：它仍然管理 MCP server 列表（而不是被改成别的用途）
   assert.ok(mcpPanelSrc.length > 200, 'PluginsPanel 应仍是实体组件')
   assert.match(mcpPanelSrc, /mcp/i, 'PluginsPanel 仍是 MCP 管理（含 mcp 语义）')
+})
+
+/* ============================================================
+ * 4. ★ v0.36.0（F5.1/F5.2/F5.3）：工作台重构三件套
+ *    与 TC-PUI-009 同一条教训：只 grep 到符号不算数 —— 必须钉**渲染树位置**。
+ * ============================================================ */
+
+test('TC-ABL-015 ★ F5.3：新建工作台向导存在且**真被 ProfilesView 挂载**（不是文件里有这个名字）', () => {
+  // 反例来源（v0.32.2 审计）：TC-PUI-009 曾断言 RightDock「组件存在」，
+  // 而它根本没进渲染树 —— 全绿却把一个死组件钉成了正确。
+  assert.ok(existsSync(PROFILE_WIZARD), '向导文件必须存在')
+  assert.match(
+    profilesViewSrc,
+    /^import \{ ProfileWizard \} from '\.\/ProfileWizard'$/m,
+    'ProfilesView 必须 import 向导',
+  )
+  assert.match(
+    profilesViewSrc,
+    /\{creating && <ProfileWizard plugins=\{plugins\} onClose=\{[\s\S]*?\} onCreated=\{[\s\S]*?\} \/>\}/,
+    '创建态分支必须渲染向导，且把 plugins 作为属性传入（否则第三步没有可选项）',
+  )
+  assert.match(profilesViewSrc, /onClick=\{\(\) => setCreating\(true\)\}/, '必须有触发向导的入口按钮')
+  // 四步是设计约束，不是巧合：步进数组必须显式且恰四步
+  assert.match(wizardSrc, /const WIZARD_STEPS = \['template', 'agent', 'capabilities', 'name'\] as const/, '恰四步')
+  assert.match(wizardSrc, /data-testid="wizard-steps"/, '步进条须可定位（e2e/调试）')
+})
+
+test('TC-ABL-016 ★ F5.3：向导**到第 4 步才落盘**（前三步只改内存态，中途退出不留半个台）', () => {
+  // 事务纪律：向导的价值之一是「不会建出半成品」。若在 template 步就 clone 落盘，
+  // 用户中途关窗就会在磁盘上留下一个没人要的工作台。
+  const cloneSites = wizardSrc.match(/ark\.profile\.clone\(/g) ?? []
+  assert.equal(cloneSites.length, 1, `clone 只允许出现在 finish() 一处，实际 ${cloneSites.length} 处`)
+  // finish 必须串起「克隆 → update（同一条校验管道）→ activate」三段
+  assert.match(wizardSrc, /await ark\.profile\.clone\(/, '必须克隆模板台取初始 manifest')
+  assert.match(wizardSrc, /await ark\.profile\.update\(/, '落盘必须走 update（与导入/编辑同一根校验管道）')
+  assert.match(wizardSrc, /await ark\.profile\.activate\(/, '完成后必须激活（否则用户建了个看不见的台）')
+  // 序列化层复用编辑器导出的 draftOf/patchOf，不重写一份字段映射
+  assert.match(
+    wizardSrc,
+    /^import \{ capKey, draftOf, patchOf, type Draft \} from '\.\/ProfileEditor'$/m,
+    '必须复用编辑器的序列化层（同一份字段映射，避免双份漂移）',
+  )
+})
+
+test('TC-ABL-017 ★ F5.2：ProfileEditor 两组化 —— 基础默认可见、高级默认折叠', () => {
+  // 用户实测诉求原文：「不想填十几个插槽字段」。
+  assert.match(profileEditorSrc, /const \[showAdvanced, setShowAdvanced\] = useState\(false\)/, '高级组必须**默认折叠**')
+  assert.match(profileEditorSrc, /data-testid="advanced-toggle"/, '折叠开关须可定位')
+  assert.match(profileEditorSrc, /aria-expanded=\{showAdvanced\}/, '折叠态须暴露（无障碍）')
+  assert.match(profileEditorSrc, /\{showAdvanced && \(/, '高级内容按展开态条件渲染')
+  assert.match(profileEditorSrc, /data-testid="advanced-panel"/, '高级面板容器须可定位')
+  // 基础组三件事必须都在：智能体 / 插件与技能 / Dock 面板
+  for (const g of ['agent', 'capabilities', 'dock']) {
+    assert.match(profileEditorSrc, new RegExp(`data-group="${g}"`), `基础组必须含 ${g} 分区`)
+  }
+  // 黑话人话化（两处文案键必须在场）
+  assert.match(profileEditorSrc, /workbench\.editor\.memoryNamespaceHint/, '记忆归属必须给人话说明')
+  assert.match(profileEditorSrc, /workbench\.editor\.shareCoreProfileHint/, '共享核心画像必须给人话说明')
+})
+
+test('TC-ABL-018 ★ F5.1：插件面板的「运行期诊断」方框 → 行内**状态徽标**（黑话不再进用户界面）', () => {
+  // 动机（设计 §3.7 原文）：诊断黑话把「插件没生效」这类真问题淹没了。
+  assert.doesNotMatch(capabilitySrc, /data-testid="plugin-diag"/, '原诊断方框必须删除')
+  assert.doesNotMatch(capabilitySrc, /workbench\.plugins\.diagTitle/, '「运行期诊断」标题不得再渲染')
+  assert.doesNotMatch(capabilitySrc, /workbench\.plugins\.diagHostPid/, '进程号属作者态信息，不进用户界面')
+  assert.doesNotMatch(capabilitySrc, /workbench\.plugins\.diagActivation/, '装载耗时属作者态信息，不进用户界面')
+  // 取而代之：徽标必须**在行内**（不展开就能看见），且带 phase 供 e2e 断言
+  assert.match(capabilitySrc, /data-testid="plugin-runtime-badge"/, '必须有状态徽标')
+  assert.match(capabilitySrc, /data-phase=\{phase\}/, '徽标须暴露机器可读状态')
+  // 纪律⑦：静默退化仍在（失败原因与覆盖冲突必须留人话）
+  assert.match(capabilitySrc, /data-testid="plugin-facts"/, '事实块须可定位')
+  assert.match(capabilitySrc, /workbench\.plugins\.diagLastError/, '失败原因必须留人话（纪律⑦）')
 })

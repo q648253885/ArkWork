@@ -24,16 +24,22 @@ export async function spec(args: SpecArgs, ctx: SkillContext): Promise<SpecResul
     if (!taskName) return { status: 'failed', error: 'spec: taskName 不能为空' }
     const workspace = ctx.workspaceDir ?? getWorkspaceDir()
     const directory = join(workspace, '.arkwork', 'specs', taskName)
-    const result = await delegateAgent({
-      agentId: '@coding',
-      task: `${PROMPT_SPEC}\n\n任务名称：${taskName}\n范围：${args.scope?.trim() || '未指定'}\n目标目录：${directory}`,
+    const { results } = await delegateAgent({
+      targets: [{
+        agentId: '@coding',
+        objective: `${PROMPT_SPEC}\n\n任务名称：${taskName}\n范围：${args.scope?.trim() || '未指定'}\n目标目录：${directory}`,
+      }],
     }, ctx)
-    if (result.status !== 'done') return { status: 'failed', error: result.summary }
+    // v0.36.0 F4.1：delegate 改并行 —— 单目标取 results[0]；无结果即视为失败（不静默用空摘要）
+    const child = results[0]
+    if (!child || child.status !== 'done') {
+      return { status: 'failed', error: child?.summary ?? 'spec: 子任务未返回结果' }
+    }
     const output: SpecResult = {
       specPath: join(directory, 'spec.md'),
       tasksPath: join(directory, 'tasks.md'),
       checklistPath: join(directory, 'checklist.md'),
-      goal: result.summary,
+      goal: child.summary,
     }
     logger.info('Tool', `spec: generated ${directory}`, ctx.taskId)
     return output

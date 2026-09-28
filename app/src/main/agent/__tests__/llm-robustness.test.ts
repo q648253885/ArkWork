@@ -143,8 +143,8 @@ test('callLlmWithRetry: retryable 错误耗尽重试次数后仍失败 → 上�
   assert.equal(calls, backoff.length + 1)
 })
 
-test('callLlmWithRetry: 不传 backoffMs 时默认使用 RETRY_BACKOFF_MS', async () => {
-  assert.deepEqual(RETRY_BACKOFF_MS, [500, 2000])
+test('callLlmWithRetry: 不传 backoffMs 时默认使用 RETRY_BACKOFF_MS（v0.36.0 统一 [500,2000,4000]×3）', async () => {
+  assert.deepEqual(RETRY_BACKOFF_MS, [500, 2000, 4000])
   let calls = 0
   const resp = await callLlmWithRetry(async () => {
     calls++
@@ -153,6 +153,18 @@ test('callLlmWithRetry: 不传 backoffMs 时默认使用 RETRY_BACKOFF_MS', asyn
   })
   assert.equal(resp.content, 'ok')
   assert.equal(calls, 2)
+})
+
+test('callLlmWithRetry: 默认 3 次尝试（backoffMs.length+1），耗尽后上抛最后错误', async () => {
+  let calls = 0
+  await assert.rejects(
+    callLlmWithRetry(async () => {
+      calls++
+      throw new Error('429 too many requests')
+    }, undefined, [1, 2]), // 显式 2 段 backoff → 3 次尝试
+    /429/,
+  )
+  assert.equal(calls, 3)
 })
 
 /* ---------- withLlmTimeout ---------- */

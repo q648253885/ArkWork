@@ -19,6 +19,9 @@ import type {
   LlmStreamHandlers,
 } from '../llm/adapter.js'
 import type { TaskTextDeltaPayload } from '@shared/types/ipc'
+// v0.36.4（PERF-1）：perf-lite 激活时攒批窗口放大（150–250ms）——
+// 低配 VM 上高频 IPC + markdown 重渲抢 CPU；权威数据不受影响（正文落定值不变）
+import { isPerfLiteActive, PERF_LITE_WINDOW_MIN_MS, PERF_LITE_WINDOW_MAX_MS } from '../system/perf-mode.js'
 
 export type TextDeltaScope = TaskTextDeltaPayload['scope']
 /** v0.31.0 B1：通道维度（text = 叙述/正文；reasoning = 思考）。与 scope 正交。 */
@@ -60,6 +63,14 @@ const WINDOW_MIN_MS = 40
 const WINDOW_MAX_MS = 80
 /** 相邻批次间隔低于该阈值视为「到达密集」→ 用长窗口攒批 */
 const DENSE_GAP_MS = 100
+
+/** 当前生效的攒批窗口（perf-lite 动态读取，窗口启动期间切换设置即时生效） */
+function activeWindows(): { min: number; max: number; dense: number } {
+  if (isPerfLiteActive()) {
+    return { min: PERF_LITE_WINDOW_MIN_MS, max: PERF_LITE_WINDOW_MAX_MS, dense: DENSE_GAP_MS * 2 }
+  }
+  return { min: WINDOW_MIN_MS, max: WINDOW_MAX_MS, dense: DENSE_GAP_MS }
+}
 
 /**
  * v0.27.0 R1：流式文本增量泵。
@@ -106,8 +117,9 @@ export function createTextDeltaPump(
         return
       }
       if (timer) return
+      const w = activeWindows()
       const gap = Date.now() - lastSentAt
-      const window = gap < DENSE_GAP_MS ? WINDOW_MAX_MS : WINDOW_MIN_MS
+      const window = gap < w.dense ? w.max : w.min
       timer = setTimeout(flushLocked, window)
     },
     flush() {

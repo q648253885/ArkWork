@@ -29,6 +29,11 @@ import { simplifyFirstLine } from '../../utils/title'
 import { projectConversation } from '../../flow/project'
 import { renderTurnsMarkdown } from '../conversation-markdown'
 import type { AppState, DockPrefs, Workspace } from '../types'
+// v0.36.0（F4.1）：并行子 agent 组卡视图类型
+import type { SubagentChildView } from '@shared/types/flow'
+// v0.38.0（A4/A5/A9）：投影事件（turn_note / gate_blocked）的落库类型
+import type { ReActEvent } from '@shared/types/react'
+import type { SessionEvent } from '@shared/types/conversation'
 
 /* ============================================================
  * v0.18.0 (03 §5)：Optimistic UI 2s TTL
@@ -62,7 +67,7 @@ function buildConversationMarkdown(title: string, agentId: string, state: AppSta
     taskId,
     items: state.conversation,
     steps: state.steps,
-    events: [], // 与 TurnList 同口径：渲染层暂无 session 事件通道（§11 登记）
+    events: state.flowEvents[taskId] ?? [], // v0.38.0：阶段结论/门禁通告（与 TurnList 同一入参）
     streamBuffers: streamBuffer ? { [`${taskId}:turn:reasoning`]: streamBuffer } : {},
     planItems: task?.planItems ?? [],
     viewMode: state.flow.viewMode,
@@ -72,6 +77,8 @@ function buildConversationMarkdown(title: string, agentId: string, state: AppSta
     agent: activeAgent
       ? { id: activeAgent, name: agentMeta?.name ?? activeAgent, avatarColor: agentMeta?.avatarColor ?? '' }
       : undefined,
+    // v0.36.0（F4.1）：与 TurnList 同一入参 —— 导出/复制也必须看到并行组卡（D69 纪律）
+    subagentGroups: state.subagentGroups[taskId],
   })
   return renderTurnsMarkdown(title, agentId, turns)
 }
@@ -97,6 +104,8 @@ export const tasksSlice: StateCreator<
     | 'optimisticOverlay'
     | 'planListVersion'
     | 'planItemInFlight'
+    | 'ledgerSnapshots'
+    | 'setLedgerSnapshot'
     | 'markPlanItemOptimistic'
     | 'commitPlanItemOptimistic'
     | 'rejectPlanItemOptimistic'
@@ -131,6 +140,13 @@ export const tasksSlice: StateCreator<
     | 'workspaceConfirmedForTask'
     | 'confirmWorkspace'
     | 'resetWorkspaceConfirm'
+    | 'subagentGroups'
+    | 'applySubagentProgress'
+    | 'backfillSubagentStep'
+    | 'cancelSubagent'
+    | 'retrySubagent'
+    | 'flowEvents'
+    | 'appendFlowEvent'
   >
 > = (set, get) => {
   const setAll = set as unknown as (
@@ -146,6 +162,16 @@ export const tasksSlice: StateCreator<
   optimisticOverlay: {},
   planListVersion: {},
   planItemInFlight: {},
+  // v0.37.0：任务清单账本快照（唯一真相源只读投影）
+  ledgerSnapshots: {},
+  setLedgerSnapshot: (taskId, snapshot) => {
+    setAll((s) => {
+      const next = { ...s.ledgerSnapshots }
+      if (snapshot) next[taskId] = snapshot
+      else delete next[taskId]
+      return { ledgerSnapshots: next }
+    })
+  },
   markPlanItemOptimistic: (taskId, planItemId, targetStatus) => {
     const current = get().planListVersion[taskId] ?? 0
     // 客户端预测：patch 到达后 version 必然 = current + 1；用 clientVersion 标乐观版本
@@ -252,6 +278,13 @@ export const tasksSlice: StateCreator<
       void current
     } catch (err) {
       // 静默忽略：hydrate 失败不影响主链路；后续 patch 仍能推进
+      void err
+    }
+    // v0.37.0：切换任务时同步拉取一次账本快照（模式徽标 / 恢复点提示条要立即正确）
+    try {
+      const snapshot = await ark.task.fetchLedgerSnapshot(id)
+      get().setLedgerSnapshot(id, snapshot)
+    } catch (err) {
       void err
     }
   },
@@ -500,10 +533,16 @@ export const tasksSlice: StateCreator<
       // Task 9：删除任务时同步清理内存中的进度摘要（持久化缓存由 IPC 层清理，
       // 这里只清理前端状态，避免下次同名任务误读旧进度）
       setAll((s) => {
-        if (!(id in s.taskProgress)) return {}
+        // v0.36.0（F4.1）：并行子 agent 组随任务一起清（live-only 状态不残留）
+        const groups = { ...s.subagentGroups }
+        delete groups[id]
+        // v0.38.0（A4/A5/A9）：投影事件同口径清理（任务没了，阶段结论也不该留）
+        const flowEvents = { ...s.flowEvents }
+        delete flowEvents[id]
+        if (!(id in s.taskProgress)) return { subagentGroups: groups, flowEvents }
         const next = { ...s.taskProgress }
         delete next[id]
-        return { taskProgress: next }
+        return { taskProgress: next, subagentGroups: groups, flowEvents }
       })
       await get().refreshTasks()
     } catch (err) {
@@ -667,6 +706,97 @@ export const tasksSlice: StateCreator<
     } catch (err) {
       get().pushToast({ type: 'danger', message: i18n.t('slice.tasks.switchWorkspaceFailed', { error: (err as Error).message }), duration: 0 })
     }
+  },
+
+  /* ============================================================
+   * v0.36.0（F4.1/F4.2）— 并行子 agent 组（live-only）
+   *
+   * 为什么放渲染层而不是从落盘重建：委派进度是"过程态"，父任务 session.jsonl
+   * 里有事件但历史回放要重建整个时序成本高、收益低（与压缩通告同口径，§11 登记）。
+   * 关键约束：事件按 childTaskId upsert —— 重试会产生新 childTaskId，
+   * 于是同一 agent 的两次尝试各占一行（用户能看见"第一次失败、重试成功"）。
+   * ============================================================ */
+  subagentGroups: {},
+  applySubagentProgress: (payload) => {
+    setAll((s) => {
+      const list = s.subagentGroups[payload.parentTaskId] ?? []
+      const idx = list.findIndex((c) => c.childTaskId === payload.childTaskId)
+      const prev = idx >= 0 ? list[idx]! : undefined
+      const view: SubagentChildView = {
+        childTaskId: payload.childTaskId,
+        agentId: payload.agentId,
+        agentName: payload.agentName ?? prev?.agentName ?? payload.agentId,
+        // 校验失败/取消的 preflight 事件可能不带 objective → 保留已有值，避免闪空
+        objective: payload.objective ?? prev?.objective ?? '',
+        modelId: payload.modelId ?? prev?.modelId,
+        status: payload.status,
+        stepSummary: payload.stepSummary ?? prev?.stepSummary,
+        durationMs: payload.durationMs ?? prev?.durationMs,
+      }
+      const next = idx >= 0 ? list.map((c, i) => (i === idx ? view : c)) : [...list, view]
+      return { subagentGroups: { ...s.subagentGroups, [payload.parentTaskId]: next } }
+    })
+  },
+  backfillSubagentStep: (childTaskId, summary) => {
+    setAll((s) => {
+      for (const [parentId, children] of Object.entries(s.subagentGroups)) {
+        const hit = children.find((c) => c.childTaskId === childTaskId)
+        if (!hit) continue
+        // 终态行不再被中间步覆盖（终态摘要更权威）
+        if (hit.status === 'done' || hit.status === 'failed' || hit.status === 'cancelled') return s
+        if (hit.stepSummary === summary) return s
+        return {
+          subagentGroups: {
+            ...s.subagentGroups,
+            [parentId]: children.map((c) =>
+              c.childTaskId === childTaskId ? { ...c, stepSummary: summary } : c,
+            ),
+          },
+        }
+      }
+      return s
+    })
+  },
+  cancelSubagent: async (childTaskId) => {
+    try {
+      const r = await ark.task.cancelSubagent(childTaskId)
+      if (!r.ok) get().pushToast({ type: 'warning', message: r.message, duration: 3000 })
+    } catch (err) {
+      get().pushToast({ type: 'danger', message: friendlyError(err), duration: 0 })
+    }
+  },
+  retrySubagent: async (payload) => {
+    try {
+      const r = await ark.task.retrySubagent(payload)
+      if (!r.ok) get().pushToast({ type: 'danger', message: r.message, duration: 0 })
+    } catch (err) {
+      get().pushToast({ type: 'danger', message: friendlyError(err), duration: 0 })
+    }
+  },
+
+  /* ============================================================
+   * v0.38.0（A4/A5/A9）— 交互区投影事件（turn_note / gate_blocked）
+   *
+   * 只有这两类事件进 store：它们是「过程输出」，既不属于 ConversationItem
+   * 也不属于 ReActStep —— 若不给它们一条到投影层的通道，NoteBlock 与
+   * gate-blocked 通告就是**永远不显示的成品代码**（本仓最怕的"接线缺失"）。
+   *
+   * id / seq / ts 在此补齐：IPC 只送裸 ReActEvent。id 用「taskId + 单调计数」，
+   * 同一条事件重投影恒得同一 id → 块 id 稳定、不产生重复块。
+   * ============================================================ */
+  flowEvents: {},
+  appendFlowEvent: (taskId, event) => {
+    setAll((s) => {
+      const list = s.flowEvents[taskId] ?? []
+      const seq = list.length
+      const wrapped: SessionEvent = {
+        ...(event as ReActEvent & { type: 'turn_note' | 'gate_blocked' }),
+        id: `flowev-${taskId}-${seq}`,
+        seq,
+        ts: Date.now(),
+      } as SessionEvent
+      return { flowEvents: { ...s.flowEvents, [taskId]: [...list, wrapped] } }
+    })
   },
   }
 }

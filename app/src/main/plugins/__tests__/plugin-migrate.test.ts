@@ -173,7 +173,7 @@ test('TC-PMIG-012 退役集可注入（未来再退役面板时，调用点不�
   assert.ok(panelsOf(next).some((p) => p.panelRef === 'panel:stock-detail'), '未列入的不该被摘')
 })
 
-test('TC-PMIG-013 ★ 与真实随包清单结构对齐：v0.34.1 官方副本迁移后 == 现行随包清单的骨架', () => {
+test('TC-PMIG-013 ★ 与真实随包清单结构对齐：真实夹具迁移后干净；现行随包清单本就免迁移', () => {
   const fixture = JSON.parse(
     readFileSync(new URL('./fixtures/sample-plugins.v0.34.1.json', import.meta.url), 'utf-8'),
   ) as Record<string, unknown>
@@ -181,16 +181,18 @@ test('TC-PMIG-013 ★ 与真实随包清单结构对齐：v0.34.1 官方副本�
   const bundled = RAW_SAMPLE_PLUGINS[0]!
   assert.equal(result.changed, true, '真实夹具里确实有待退役项（否则本用例空转）')
 
-  // 只比对**骨架**（面板身份与顺序）：URL 主机/文案由 seed.ts 的字符串迁移另行归一，
-  // 不属本模块职责 —— 混进来会让两条迁移机制互相耦合。
-  const skeleton = (raw: Record<string, unknown>) =>
-    panelsOf(raw).map((p) => ({ ref: p.panelRef, title: p.title, component: p.component, icon: p.icon }))
-  assert.deepEqual(skeleton(next), skeleton(bundled), '迁移后的面板骨架必须与随包清单一致')
-
-  // 并且迁移结果里不应再有任何指向退役面板的引用（含 interact）
+  // v0.36.0：股票插件整体退役、随包示例换成了 Git Manager —— 股票夹具与现行
+  // 随包清单**没有迁移连续性**，骨架比对已失去意义。改钉两条仍然成立的不变量：
+  //
+  // ① 股票夹具迁移后不再有任何指向退役面板的引用（含 interact）
   assert.ok(!JSON.stringify(next).includes('panel:stock-detail'))
   assert.ok(!JSON.stringify(next).includes('panel:stock-kline'))
-  assert.ok(!JSON.stringify(bundled).includes('panel:stock-detail'), '随包清单自身也已清干净')
+
+  // ② 现行随包清单（Git Manager）自身干净：不含退役面板引用，迁移它 → changed=false
+  //    （否则新装机用户每次启动都会被无谓重写）
+  assert.ok(!JSON.stringify(bundled).includes('panel:stock-detail'), '随包清单自身已清干净')
+  const { result: bundledResult } = migratePluginManifest(bundled)
+  assert.equal(bundledResult.changed, false, '现行随包清单不得触发迁移（新清单本就干净）')
 })
 
 /* ============================================================

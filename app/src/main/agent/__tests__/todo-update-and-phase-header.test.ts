@@ -4,7 +4,7 @@
  * 通过源码静态断言 + 单源导入的 isPhaseHeader（r10-F8a），覆盖：
  *  1. isPhaseHeader：纯阶段标题型条目被识别为 phase header（含子项保留）
  *  2. 计划生成时调用 isPhaseHeader 过滤（engine 模块组源码契约）
- *  3. todo-update / todo_update 两种 tool name 都被 executeAct 拦截
+ *  3. task_plan 单入口被 executeAct 拦截；下架清单工具走 isRetiredPlanTool 守卫（v0.38.0 D154）
  *  4. 工具失败时自动把 running 项标 failed 并在 resultSummary 追加清单概览
  *  5. file-writer 错误信息对 LLM 友好的字段名提示（file-tools.test.ts 已覆盖）
  * ============================================================ */
@@ -16,6 +16,8 @@ import { fileURLToPath } from 'node:url'
 // v0.27.0 r10-F8a：isPhaseHeader 导入单源实现，删除原「并行副本」（其 actionVerbs
 // 白名单已与现行实现漂移：缺 定位/输出/联调/排查/修改 五个动词）
 import { isPhaseHeader } from '@shared/utils/plan-parse'
+// v0.37.0：注释剥离的唯一真源（纪律⑲）
+import { stripComments } from '@shared/utils/source-guard'
 
 // v0.27.0 R2：engine.ts 已拆分为 engine/ 目录，源码契约改为拼接全部模块后断言
 const ENGINE_DIR = fileURLToPath(new URL('../engine/', import.meta.url))
@@ -86,52 +88,52 @@ test('engine.ts: isPhaseHeader 含动作动词白名单', () => {
   }
 })
 
-/* ---------- 3. todo_update / todo-update 双 tool name 拦截 ---------- */
+/* ---------- 3. task_plan 单入口拦截 + 下架守卫（D154） ---------- */
 
-test('engine.ts: executeAct 拦截 todo-update 与 todo_update 两种 tool name', () => {
-  const m = engineSrc.match(
-    /if\s*\(\s*action\.tool\s*===\s*['"]todo-update['"]\s*\|\|\s*action\.tool\s*===\s*['"]todo_update['"]\s*\)\s*\{/,
+test('engine.ts: executeAct 拦截 task_plan 单入口；下架清单工具走 isRetiredPlanTool 统一守卫（D154）', () => {
+  // v0.38.1（D166 测试侧改写随新语义）：v0.18 的「todo-update/todo_update 双名拦截」
+  // 已随 D154 工具收敛移除 —— 模型侧唯一清单入口是 task_plan；旧工具名由统一守卫软失败。
+  assert.match(
+    engineSrc,
+    /if\s*\(\s*action\.tool\s*===\s*['"]task_plan['"]\s*\)\s*\{/,
+    'task_plan 应在 executeAct 内拦截（清单唯一控制入口）',
   )
-  assert.ok(m, 'executeAct 应同时拦截 todo-update 与 todo_update 两种 tool name')
+  assert.match(
+    engineSrc,
+    /if\s*\(\s*isRetiredPlanTool\(action\.tool\)\s*\)\s*\{/,
+    '下架清单工具应走 isRetiredPlanTool 统一守卫（不逐个 case，纪律⑧）',
+  )
 })
 
-test('seed.ts: todo_update 内置工具定义完整', () => {
-  assert.match(seedSrc, /id:\s*['"]S-core\.todo-update['"]/, '应定义 S-core.todo-update 工具')
-  assert.match(seedSrc, /builtinHandler:\s*['"]todo_update['"]/, 'builtinHandler 应为 todo_update')
+test('seed.ts: task_plan 内置工具定义完整（D154 收敛后）', () => {
+  assert.match(seedSrc, /id:\s*['"]S-core\.task-plan['"]/, '应定义 S-core.task-plan 工具')
+  assert.match(seedSrc, /builtinHandler:\s*['"]task_plan['"]/, 'builtinHandler 应为 task_plan')
   assert.match(
     seedSrc,
-    /item_index:[\s\S]*?status:[\s\S]*?comment:/,
-    'inputSchema 应包含 item_index/status/comment 三个字段',
+    /enum:\s*\[\s*'todo',\s*'doing',\s*'done',\s*'skipped',\s*'blocked'\s*\]/,
+    'inputSchema 应把 status 钉在对外 5 态',
   )
-  assert.match(seedSrc, /tags:\s*\[\s*['"]control['"]\s*\]/, '应打 control 标签')
+  assert.match(seedSrc, /required:\s*\[\s*['"]items['"]\s*\]/, 'items 应为必填（完整清单语义）')
+  assert.match(seedSrc, /tags:\s*\[\s*['"]control['"],\s*['"]plan['"]\s*\]/, '应打 control 标签')
 })
 
-test('seed.ts: @default 与 @coder defaultSkillIds 含 todo-update', () => {
+test('seed.ts: @default 与 @coder defaultSkillIds 含 task-plan（D154 收敛后）', () => {
   assert.match(
     seedSrc,
-    /defaultSkillIds:\s*\[[^\]]*'S-core\.todo-update'[^\]]*\]/,
-    '@default 或 @coder 的 defaultSkillIds 应含 S-core.todo-update（实际工具名 todo-update）',
+    /defaultSkillIds:\s*\[[^\]]*'S-core\.task-plan'[^\]]*\]/,
+    'defaultSkillIds 应含 S-core.task-plan（清单唯一推进入口）',
   )
   // 至少出现 2 次（@default + @coder）
-  const matches = seedSrc.match(/'S-core\.todo-update'/g)
+  const matches = seedSrc.match(/'S-core\.task-plan'/g)
   assert.ok(matches && matches.length >= 2, `应出现 ≥2 次，实际 ${matches?.length ?? 0}`)
 })
 
-test('seed.ts: @default / @coder systemPrompt 由引擎推进 + todo-update 显式推进清单（v0.18.x）', () => {
-  // v0.18.x：写文件/跑命令等阶段内工具不再自动推进清单，改由 LLM 在子任务完成时调 todo-update 显式推进
-  assert.match(
-    seedSrc,
-    /每个子任务[\s\S]{0,40}todo-update/,
-    '每个子任务真正完成时应显式调用 todo-update 推进清单',
-  )
-  // 写文件/跑命令不再自动推进（避免清单抢跑、与真实执行进度错位）
-  assert.match(
-    seedSrc,
-    /阶段内工具[\s\S]{0,10}不会[\s\S]{0,10}自动推进/,
-    '写文件/跑命令等阶段内工具不应自动推进清单',
-  )
-  // 仍然禁止批量打标
-  assert.match(seedSrc, /不要批量打标|禁止.*批量标/, '仍应禁止批量打标')
+test('seed.ts: systemPrompt 教 task_plan 唯一入口 + 禁止批量打标（D154 收敛后）', () => {
+  // v0.38.1（D166 测试侧改写随新语义）：v0.18.x 的「每个子任务完成后调 todo-update」
+  // 文案已随 D154 移除 —— seed 现教「task_plan 唯一入口（提交完整清单，引擎 diff）」。
+  assert.match(seedSrc, /清单只有一个正常入口：task_plan/, '应教 task_plan 唯一入口（提交完整清单）')
+  assert.doesNotMatch(seedSrc, /每个子任务[\s\S]{0,40}todo-update/, '旧「每个子任务调 todo-update」文案不得回潮')
+  assert.match(seedSrc, /禁止批量打标/, '仍应禁止批量打标')
 })
 
 /* ---------- 4. 工具失败与清单推进（源码契约） ---------- */
@@ -179,21 +181,20 @@ test('engine.ts: PLAN_SYSTEM_PROMPT Spec 级明确禁止阶段标题作为清单
   assert.match(prompt, /动作动词|动作的动词/, '应要求每项含动作动词')
 })
 
-test('engine.ts: todo_update 处理逻辑完整（校验 + 自动推进 + 概览）', () => {
-  // 校验 item_index 越界
-  assert.match(engineSrc, /item_index=.*越界|item_index.*range|item_index.*越界/, '应校验 item_index 越界')
-  // 校验 status 合法值（v0.19.1 新增 cancelled，共 6 态）
-  assert.match(engineSrc, /VALID_STATUSES\s*=\s*new\s+Set/, '应定义合法状态集合')
-  assert.match(
-    engineSrc,
-    /done.*running.*pending.*skipped.*failed.*cancelled|'done'.*'running'.*'pending'.*'skipped'.*'failed'.*'cancelled'/,
-    '合法状态集合应含 6 种（含 cancelled）',
-  )
+test('engine.ts: task_plan 处理逻辑完整（参数校验 + done 自动推进 + 概览）（D154 收敛后）', () => {
+  // v0.38.1（D166 测试侧改写随新语义）：item_index / VALID_STATUSES 是 todo_update
+  // 增量语义的载体；D154 后参数校验改为「完整清单形状校验」（items 非空 + status 5 态），
+  // done 自动推进改由账本 advance 算子承担（applyDecision，D132）。
+  assert.match(engineSrc, /task_plan 参数非法/, '应有完整清单形状校验（items 非空 / status 5 态）')
+  assert.match(engineSrc, /todo\/doing\/done\/skipped\/blocked/, '校验回执应讲清对外 5 态')
   // done 时自动推进下一项为 running
+  //
+  // v0.37.0（缺陷 D132）**语义变更**：推进不再由 act.ts 直改 `task.planItems`
+  // （那是第二个写入者），改由账本 `advance` 算子完成 —— 由 ledger 投影回写。
   assert.match(
     engineSrc,
-    /status\s*===\s*['"]done['"][\s\S]{0,200}status\s*=\s*['"]running['"]/,
-    '标 done 时应把下一项 pending 推进为 running',
+    /d\.after === ['"]done['"][\s\S]{0,120}kind:\s*['"]advance['"]/,
+    'engine 判定 done 时应触发账本 advance（自动把下一项 pending 推进为 running）',
   )
   // 生成清单概览
   assert.match(engineSrc, /\[\s*x\s*\][\s\S]*\[\s*~\s*\][\s\S]*\[\s*!/, '清单概览应含 done/running/failed 三种 mark')
@@ -229,11 +230,11 @@ test('v0.17.6: 引擎兜底取代 LLM 自调 todo_update（act 结果驱动）',
     /decidePlanAdvance\(\s*ctx\.task\.planItems,\s*action\.tool,\s*ok/,
     '应使用 decidePlanAdvance 综合判断（ok 也可触发推进）',
   )
-  // 不应对 todo_update 自己再调 decidePlanAdvance（避免循环）
+  // 不应对清单工具自身再调 decidePlanAdvance（避免循环）—— D154 后排除面收敛为 isPlanTool 统一判定
   assert.match(
     engineSrc,
-    /action\.tool\s*!==\s*['"]todo-update['"][\s\S]{0,40}action\.tool\s*!==\s*['"]todo_update['"]/,
-    '应排除 todo_update 自身避免循环',
+    /!isPlanTool\(action\.tool\)/,
+    '应排除清单工具自身（isPlanTool 统一判定，避免循环）',
   )
 })
 
@@ -243,7 +244,10 @@ test('v0.17.6: 每轮 Reason 前注入 plan_status（独立 user 消息）', () 
   const emitIdx = engineSrc.indexOf('emitPlanStatus(task, iteration', reasonIdx)
   assert.ok(reasonIdx > 0, '应先有 reason_start 事件')
   assert.ok(emitIdx > reasonIdx, 'emitPlanStatus 应在 reason_start 之后调用')
-  assert.ok(emitIdx - reasonIdx < 2000, 'emitPlanStatus 距离 reason_start 不应过远')
+  // v0.37.0（D138）：首轮「置 running / 候选推进」改走账本后，两点之间多了
+  // 一小段账本代码 —— 阈值从 2000 放宽到 4000。断言意图不变：必须在同一段落内，
+  // 不能跑到文件尾（那意味着注入被挪到了循环外）。
+  assert.ok(emitIdx - reasonIdx < 4000, 'emitPlanStatus 距离 reason_start 不应过远')
 })
 
 test('v0.17.6: plan_status 在 assembleMessages 时作为独立 user 消息注入', () => {
@@ -295,26 +299,44 @@ test('v0.19.1: parsePlanItems 调用 isNoisePlanItem 过滤噪声项', () => {
   )
 })
 
-test('v0.19.1: 中断/取消时 discardIncompletePlanItems 把未完成项标 cancelled', () => {
+/**
+ * v0.37.0（缺陷 D131）**语义变更**：中断（paused）与取消（cancelled）不再是同一件事。
+ *
+ * 旧契约（v0.19.1）要求 handleAbort 的 cancelled / paused **两条分支都**调用
+ * discardIncompletePlanItems —— 那正是"续聊重复执行第一个任务"的根因：
+ * 用户按停止 → 未完成项一律 cancelled → 续聊时"当前生效计划"消失 → 模型只能重新规划。
+ *
+ * 新契约：
+ *   · cancelled 分支 → discardIncompletePlanItems（不可恢复，作废）
+ *   · paused 分支    → parkIncompletePlanItems（可恢复：running → paused，pending 保留）
+ */
+test('v0.37.0: 中断走 parkIncompletePlanItems（保留），取消走 discardIncompletePlanItems（作废）', () => {
+  assert.match(engineSrc, /async\s+function\s+discardIncompletePlanItems\(/, '应定义 discardIncompletePlanItems')
+  assert.match(engineSrc, /async\s+function\s+parkIncompletePlanItems\(/, '应定义 parkIncompletePlanItems（D131）')
+  const abortSrc = readFileSync(ENGINE_DIR + 'abort.ts', 'utf-8')
+  // cancelled 分支 → discard
   assert.match(
-    engineSrc,
-    /async\s+function\s+discardIncompletePlanItems\(/,
-    '应定义 discardIncompletePlanItems 函数',
+    abortSrc,
+    /await\s+discardIncompletePlanItems\(/,
+    'handleAbort 的 cancelled 分支应调用 discardIncompletePlanItems',
   )
-  // handleAbort 的 cancelled / paused 两条分支都应调用 discardIncompletePlanItems
-  const calls = engineSrc.match(/discardIncompletePlanItems\(current\s*\?\?\s*task,\s*['"][^'"]+['"]\)/g)
-  assert.ok(calls && calls.length >= 2, 'handleAbort 的 cancelled 与 paused 分支都应调用 discardIncompletePlanItems')
-  // 未完成项（running/pending）→ cancelled，并写入 source=user-cancel
+  // paused 分支 → park（且**不再**调用 discard）
   assert.match(
-    engineSrc,
-    /p\.status\s*===\s*['"]running['"]\s*\|\|\s*p\.status\s*===\s*['"]pending['"]/,
-    '应将 running/pending 视为未完成项',
+    abortSrc,
+    /await\s+parkIncompletePlanItems\(/,
+    'handleAbort 的 paused 分支应调用 parkIncompletePlanItems（保留而非作废）',
   )
-  assert.match(
-    engineSrc,
-    /p\.source\s*=\s*['"]user-cancel['"]/,
-    '丢弃的清单项 source 应为 user-cancel',
+  const pausedBranch = abortSrc.slice(abortSrc.indexOf("await updateTask(task.id, { status: 'paused' })"))
+  // 纪律⑫/⑲：源码守卫断言前必须剥注释 —— paused 分支的注释里**专门写了**
+  // "此前这里调 discardIncompletePlanItems" 作为历史备案，不剥注释会把它当违规。
+  assert.doesNotMatch(
+    stripComments(pausedBranch),
+    /discardIncompletePlanItems/,
+    'paused 分支不得再调用 discard —— 否则中断保留语义被抹掉（D131 回归防线）',
   )
+  // 两者都必须落账到 TaskLedger（唯一写入口）
+  assert.match(engineSrc, /parkLedger\(/, 'parkIncompletePlanItems 应写入账本')
+  assert.match(engineSrc, /discardLedger\(/, 'discardIncompletePlanItems 应写入账本')
 })
 
 test('v0.19.1: 计划生成排除历史 plan/plan_status 上下文（excludePlanContext）', () => {
@@ -330,11 +352,13 @@ test('v0.19.1: 计划生成排除历史 plan/plan_status 上下文（excludePlan
   )
 })
 
-test('v0.19.1: emitPlanStatus 注入同步义务硬约束（实时维护清单）', () => {
+test('v0.38.1: emitPlanStatus 注入同步义务硬约束（实时维护清单）', () => {
+  // v0.38.1（D166）：同步义务文案随 D154 收敛改指 task_plan（todo_update 已下架，
+  // 模型照旧文案调旧工具必吃软失败、空耗轮次）。
   assert.match(
     engineSrc,
-    /同步义务[\s\S]{0,120}todo_update[\s\S]{0,120}cancelled/,
-    'emitPlanStatus 末尾应注入同步义务（含 todo_update 与 cancelled）',
+    /同步义务[\s\S]{0,120}task_plan[\s\S]{0,160}cancelled/,
+    'emitPlanStatus 末尾应注入同步义务（含 task_plan 与 cancelled）',
   )
   assert.match(
     engineSrc,

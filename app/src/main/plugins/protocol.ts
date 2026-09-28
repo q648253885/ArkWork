@@ -14,6 +14,14 @@
  *  · 响应带 `connect-src 'none'` 的 CSP —— Client 半**拿不到直连网络**，
  *    要联网必须回 Host 半走 `ctx.ark.net.fetch`（那条路有权限闸门与审计）。
  *    这不是「不给功能」，而是把网络的唯一出口钉在有闸门的地方。
+ *
+ * ★ v0.36.0（D90）**装载接线契约**：本协议的 iframe 能不能真的装上，取决于
+ *   两处 CSP **同时**成立，缺一即白屏，且两处报的不是同一个错：
+ *     ① 宿主渲染页 `src/renderer/index.html` 的 meta CSP `frame-src` 必须列
+ *        `arkwork-plugin:` —— 缺 → `net::ERR_BLOCKED_BY_CSP`（建框阶段就拒，
+ *        子框架退化成 `chrome-error://chromewebdata/`，宿主零报错）；
+ *     ② 本文件 `PLUGIN_VIEW_CSP` 里**不得**出现 `frame-ancestors` —— 见下方注。
+ *   两处各有纯函数契约用例把守，不再依赖「作者记得」。
  * ============================================================ */
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path'
@@ -131,6 +139,20 @@ export function mimeOf(rel: string): string {
  * 其余放宽（inline / eval）是因为 iframe 本身已是完全不可信来源，
  * 真正的边界在进程与网关，不在这一层脚本策略上 —— 与其做一层会误伤打包器
  * 的严格策略，不如把边界做在**能审计的地方**。
+ *
+ * ★ v0.36.0（D90）：**刻意不设 `frame-ancestors`**。
+ *   它曾写作 `frame-ancestors 'self'`，语义是「只许与本资源同源的页面嵌我」——
+ *   而宿主渲染页的源生产环境是 `file://`、开发环境是 `http://localhost:*`，
+ *   与本资源的 `arkwork-plugin://<pluginId>` **永不可能相等**，于是这条指令
+ *   把宿主自己挡在门外：子框架退化成 `ERR_BLOCKED_BY_RESPONSE`（实机表现同样是
+ *   纯白面板）。Electron 对照实验（同页两个 iframe，唯一变量就是这条指令）：
+ *     · 含 `frame-ancestors 'self'` → ERR_BLOCKED_BY_RESPONSE
+ *     · 不含                        → 正常装载
+ *
+ *   为什么直接删而不是放宽成白名单：**「谁能嵌我」的真正闸门是宿主页那条
+ *   `frame-src`**（只有宿主渲染页放行了 `arkwork-plugin:`）。而一条只能被自身协议
+ *   加载、且只注册在本进程内的资源，本来也不存在「被别的站点嵌入」这一威胁 ——
+ *   留着它只会不断制造「看起来更安全、实际整块功能不可用」的假防线。
  */
 export const PLUGIN_VIEW_CSP = [
   "default-src 'none'",
@@ -140,7 +162,6 @@ export const PLUGIN_VIEW_CSP = [
   `font-src ${PLUGIN_SCHEME}: data:`,
   `media-src ${PLUGIN_SCHEME}: data: blob:`,
   "connect-src 'none'",
-  "frame-ancestors 'self'",
   "base-uri 'none'",
   "form-action 'none'",
 ].join('; ')

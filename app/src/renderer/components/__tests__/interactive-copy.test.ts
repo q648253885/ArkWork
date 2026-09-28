@@ -20,17 +20,24 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+// v0.37.0（纪律⑲）：注释剥离的唯一真源
+import { stripComments } from '@shared/utils/source-guard'
 
 const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf-8')
 
 // v0.31.0 B4 载体收敛：ThoughtStream.tsx 下线，交互区文本容器契约转写到
 // components/flow/blocks/*（SayBlock / AnswerBlock / ReasoningBlock / ToolBlock，
 // §4.1 登记表）。断言方向不变：文本可选、控件不可选。
-const SAY = read('../flow/blocks/SayBlock.tsx')
-const ANSWER = read('../flow/blocks/AnswerBlock.tsx')
-const REASON = read('../flow/blocks/ReasoningBlock.tsx')
-const TOOL = read('../flow/blocks/ToolBlock.tsx')
-const CSS = read('../../styles/globals.css')
+//
+// ★ v0.37.0：断言前统一 `stripComments`。理由：本用例的守卫形态是「整文件不得出现
+//   select-none」这种**否定性**断言，而源码注释里天然会写反面教材（AnswerBlock 新增
+//   的段标题注释就说明了「为何不再用 select-none」）—— 不剥注释 = 断言全对、功能没坏、
+//   门禁却红（D89 同型的假阳性，纪律⑫/⑲）。
+const SAY = stripComments(read('../flow/blocks/SayBlock.tsx'))
+const ANSWER = stripComments(read('../flow/blocks/AnswerBlock.tsx'))
+const REASON = stripComments(read('../flow/blocks/ReasoningBlock.tsx'))
+const TOOL = stripComments(read('../flow/blocks/ToolBlock.tsx'))
+const CSS = stripComments(read('../../styles/globals.css'))
 
 /** 取出以 selector 起始的 CSS 规则块（到首个 `}` 为止） */
 function cssBlock(css: string, selector: string): string {

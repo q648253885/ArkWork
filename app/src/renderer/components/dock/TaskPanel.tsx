@@ -25,7 +25,6 @@ import { Icon } from '../../icons'
 import { useStore } from '../../store'
 import type { GraphNotice, GraphRow, NodeStatus, ReplanPatch } from '@shared/types/ipc'
 import { tierLabel } from '@shared/types/graph'
-import type { Tier } from '@shared/types/ipc'
 import { TodoPanel } from './TodoPanel'
 import { useGraph } from '../graph/useGraph'
 import { GraphNotices } from '../graph/GraphNotices'
@@ -78,8 +77,6 @@ export function TaskPanel() {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [width, setWidth] = useState(NARROW_WIDTH)
   const rootRef = useRef<HTMLDivElement>(null)
-  /** Replan 卡的"接受"需二次确认（影响已完成任务 > 3 项时） */
-  const [tierMenuOpen, setTierMenuOpen] = useState(false)
   /** 筛选条当前档位（默认「全部」） */
   const [filter, setFilter] = useState<FilterKey>('all')
   /** 「定位▾」下拉是否展开 */
@@ -335,9 +332,6 @@ export function TaskPanel() {
           locateOpen={locateOpen}
           setLocateOpen={setLocateOpen}
           onLocate={locateTo}
-          tierMenuOpen={tierMenuOpen}
-          setTierMenuOpen={setTierMenuOpen}
-          onSetTier={(tier) => void g.setTier(tier)}
         />
         <div className="flex-1 overflow-y-auto p-3">
           <div className="rounded-md border border-danger bg-danger-soft p-3">
@@ -401,9 +395,6 @@ export function TaskPanel() {
         locateOpen={locateOpen}
         setLocateOpen={setLocateOpen}
         onLocate={locateTo}
-        tierMenuOpen={tierMenuOpen}
-        setTierMenuOpen={setTierMenuOpen}
-        onSetTier={(tier) => void g.setTier(tier)}
       />
 
       {/* 加载态：骨架行（保持行高，避免布局跳动） */}
@@ -679,9 +670,6 @@ function PanelHeader({
   locateOpen,
   setLocateOpen,
   onLocate,
-  tierMenuOpen,
-  setTierMenuOpen,
-  onSetTier,
 }: {
   view: 'tree' | 'dag'
   setView: (v: 'tree' | 'dag') => void
@@ -696,9 +684,6 @@ function PanelHeader({
   locateOpen: boolean
   setLocateOpen: (v: boolean) => void
   onLocate: (id: string) => void
-  tierMenuOpen: boolean
-  setTierMenuOpen: (v: boolean) => void
-  onSetTier: (tier: Tier) => void
 }) {
   const { t, i18n } = useTranslation()
   const progress = snapshot?.progress
@@ -819,46 +804,20 @@ function PanelHeader({
             )}
           </div>
 
-          {/* v0.30.1 问题④：tier 徽章从缩写升级为「T{n} · 释义」（窄态省略释义）；释义单一真源 = TIER_LABEL */}
+          {/* v0.30.1 问题④：tier 徽章从缩写升级为「T{n} · 释义」（窄态省略释义）；释义单一真源 = TIER_LABEL
+              v0.37.0（D137 / PRD F7）：徽章改为**只读**。
+              档位的判定权归模型与引擎（图生成时决定），UI 不再提供任何升降级入口 ——
+              用户手改档位会与模型的自主判断打架，也让简单任务被仪式化。 */}
           {snapshot && (
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setTierMenuOpen(!tierMenuOpen)}
-                title={snapshot.tierReason ?? tierLabel(snapshot.tier, i18n.language)}
-                aria-label={tierLabel(snapshot.tier, i18n.language)}
-                aria-expanded={tierMenuOpen}
-                className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-sm border border-border-default bg-info-soft px-2 py-0.5 text-2xs tabular-nums text-info hover:border-info"
-              >
-                <span>{narrow ? `T${snapshot.tier}` : tierLabel(snapshot.tier, i18n.language)}</span>
-                <span className="text-[9px] opacity-70" aria-hidden>
-                  ▾
-                </span>
-              </button>
-              {tierMenuOpen && (
-                <ul className="absolute right-0 top-full z-[40] mt-1 w-[180px] rounded-md border border-border-default bg-bg-overlay py-1 shadow-md">
-                  {([0, 1, 2, 3] as Tier[]).map((ti) => (
-                    <li key={ti}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onSetTier(ti)
-                          setTierMenuOpen(false)
-                        }}
-                        className={`block w-full px-3 py-1.5 text-left text-xs hover:bg-bg-surface-2 ${
-                          ti === snapshot.tier ? 'text-accent' : 'text-text-primary'
-                        }`}
-                      >
-                        {tierLabel(ti, i18n.language)}
-                      </button>
-                    </li>
-                  ))}
-                  <li className="border-t border-border-subtle px-3 py-1.5 text-2xs text-text-tertiary">
-                    {t('taskPanel.tierOverrideHint')}
-                  </li>
-                </ul>
-              )}
-            </div>
+            <span
+              data-testid="graph-tier-badge"
+              data-tier={snapshot.tier}
+              title={snapshot.tierReason ?? tierLabel(snapshot.tier, i18n.language)}
+              aria-label={tierLabel(snapshot.tier, i18n.language)}
+              className="inline-flex shrink-0 items-center whitespace-nowrap rounded-sm border border-border-default bg-info-soft px-2 py-0.5 text-2xs tabular-nums text-info"
+            >
+              <span>{narrow ? `T${snapshot.tier}` : tierLabel(snapshot.tier, i18n.language)}</span>
+            </span>
           )}
 
           {/* v0.30.1 问题④：一键折叠改为状态化文案（全展开→「全部折叠」；已折叠→「全部展开」），图标随态；窄态降级为纯图标 */}

@@ -113,7 +113,7 @@ function NodeRowImpl({
       {/* 状态图标 */}
       <span
         className={`w-4 shrink-0 text-center text-xs ${m.text} ${
-          m.animate === 'pulse' ? 'animate-pulse' : m.animate === 'spin' ? 'inline-block animate-spin' : ''
+          m.animate === 'pulse' ? 'animate-pulse' : m.animate === 'spin' ? 'inline-block breathe' : ''
         }`}
         aria-hidden
       >

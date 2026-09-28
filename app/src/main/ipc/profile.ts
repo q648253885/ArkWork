@@ -30,7 +30,7 @@ import {
   currentSlotStats,
 } from '../profile/activator.js'
 import { summarize, validateReferences } from '@shared/utils/profile-manifest'
-import { deleteUserProfile, getActiveProfileId, getLastSnapshot, getProfile, listProfiles, saveLastSnapshot, setActiveProfileId, upsertUserProfile } from '../profile/store.js'
+import { deleteUserProfile, getActiveProfileId, getLastSnapshot, getProfile, listProfiles, saveBuiltinOverride, saveLastSnapshot, setActiveProfileId, upsertUserProfile } from '../profile/store.js'
 import { resolveSlots, listSlotKinds } from '../profile/slots.js'
 import { logger } from '../system/logger.js'
 
@@ -160,13 +160,28 @@ export function registerProfileHandlers(): void {
     return runImport(raw, args?.activate !== false)
   })
 
-  /* ---------- 增量更新（内置台需先克隆） ---------- */
+  /* ---------- 增量更新（内置台整体只读，pluginRefs 走窄通道） ---------- */
   ipcMain.handle(ProfileChannel.Update, async (_e, args: { id: string; patch: Record<string, unknown> }) => {
     const id = String(args?.id ?? '')
     const existing = await getProfile(id)
     if (!existing) return { ok: false, issues: [] as ValidationIssue[], reason: 'not-found' as const }
-    if (existing.source === 'builtin') return { ok: false, issues: [] as ValidationIssue[], reason: 'builtin' as const }
     const patch = (args?.patch ?? {}) as Record<string, unknown>
+    if (existing.source === 'builtin') {
+      // v0.36.0（B11/P3-b）：内置台只放行 `pluginRefs` 单键窄通道（工作台级插件
+      // 白名单 —— 用户反馈「三个内置台都不能取消配置 git 插件」的修复）。
+      // 覆盖落在 profiles.json 的 builtinOverrides，不整份克隆，升级不丢。
+      const keys = Object.keys(patch)
+      if (keys.some((k) => k !== 'pluginRefs')) {
+        return { ok: false, issues: [] as ValidationIssue[], reason: 'builtin' as const }
+      }
+      const refs = patch.pluginRefs
+      if (refs !== undefined && (!Array.isArray(refs) || !refs.every((x) => typeof x === 'string'))) {
+        return { ok: false, issues: [] as ValidationIssue[], reason: 'invalid' as const }
+      }
+      await saveBuiltinOverride(id, { pluginRefs: refs })
+      logger.info('System', `builtin pluginRefs override: ${id} → ${JSON.stringify(refs ?? null)}`)
+      return { ok: true, issues: [] as ValidationIssue[] }
+    }
     // id 不允许被 patch 改走（要改 id 请用 clone）
     const raw = deepMerge(stripRuntime(existing), { ...patch, id })
     const res = await runImport(raw, true)

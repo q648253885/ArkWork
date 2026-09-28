@@ -6,12 +6,17 @@
  * 无法对纯 var() 施加透明度 → 双重空转）。提示强度改由左侧 2px 琥珀条承载，
  * 正文统一中性——通告不是错误，不该抢主内容的注意力。
  * ============================================================ */
+import { useTranslation } from 'react-i18next'
 import type { FlowBlock } from '@shared/types/flow'
 
 type NoticeBlockT = Extract<FlowBlock, { kind: 'notice' }>
 
 export function NoticeBlock({ block }: { block: NoticeBlockT }) {
+  const { t } = useTranslation()
   const warning = block.level === 'warning'
+  // v0.38.0（A9/D153）：完成门禁拦截是**引擎**说的话，不是模型说的话。
+  // 加一个系统徽标前缀，用户才知道"这条提示的来源不是 AI"（FR7.3）。
+  const isGateBlocked = block.noticeKind === 'gate-blocked'
   return (
     <div
       className="text-xs select-text bg-bg-surface rounded-md px-2.5 py-1 border border-border-default whitespace-pre-wrap"
@@ -21,6 +26,9 @@ export function NoticeBlock({ block }: { block: NoticeBlockT }) {
         borderLeftColor: warning ? 'var(--warning)' : 'var(--border-strong)',
       }}
     >
+      {isGateBlocked && (
+        <span className="mr-1.5 text-xs text-text-tertiary">{t('notice.gateBlocked')}</span>
+      )}
       {block.text}
     </div>
   )

@@ -53,6 +53,11 @@ export function spawnUtilityProcess(opts: { entryPath: string; pluginId: string 
   const child = utilityProcess.fork(opts.entryPath, [], {
     serviceName: `arkwork-plugin:${opts.pluginId}`,
     stdio: 'pipe',
+    // v0.36.0（D80 修复 as-built §14.1 P0-1）：必须显式透传 env 并打上宿主标记。
+    // utilityProcess.fork 不像 node child_process 那样默认继承全量 env —— 不传时
+    // 子进程拿到的是精简 env，`wire.ts` 里的 HOST_ENV_FLAG 检测永远不成立，
+    // 插件宿主进程会把自己误判成「非宿主环境」而拒绝握手（插件永远停在 preparing）。
+    env: { ...process.env, [HOST_ENV_FLAG]: '1' },
   })
   const tag = `[plugin:${opts.pluginId}]`
   child.stdout?.on('data', (b: Buffer) => logger.info('System', `${tag} ${String(b).trimEnd()}`))
@@ -323,6 +328,54 @@ export class PluginSupervisor {
       logger.warn('System', `[plugin:${id}] 事件 ${event} 投递失败：${String(err)}`)
       return 0
     }
+  }
+
+  /**
+   * ★ v0.36.0（F3.3）：命令触发 —— 复用 `host/emit` 通道（event=`command:<id>`），
+   * 但与 `emit()` 不同：**失败必须抛**。用户点了命令按钮就该有明确反馈，
+   * 「吞错返回 0」会把「插件根本没监听」伪装成「执行成功但没效果」。
+   * delivered=0 = 插件没注册 `ctx.on('command:<id>')` → E_NOT_FOUND。
+   */
+  async runCommand(id: string, commandId: string): Promise<void> {
+    const s = this.sessions.get(id)
+    if (!this.isCallable(s)) {
+      throw new RpcError(RPC_ERROR.E_HOST_DEAD, `插件 ${id} 未激活，命令「${commandId}」无法执行`)
+    }
+    s.lastUsedAt = this.now()
+    const r = (await this.request(
+      s,
+      'host/emit',
+      { event: `command:${commandId}`, payload: { commandId } },
+      this.timeouts.invokeMs,
+    )) as { delivered?: number } | undefined
+    if (!r || (r.delivered ?? 0) === 0) {
+      throw new RpcError(RPC_ERROR.E_NOT_FOUND, `插件 ${id} 未监听命令「${commandId}」`)
+    }
+    // 一次成功投递即证明插件活着（与 callTool 同款口径）
+    if (s.errorCount !== 0) {
+      s.errorCount = 0
+      this.setPhase(s, 'active')
+    }
+  }
+
+  /**
+   * ★ v0.36.0：视图桥 `host.call` —— 插件 Client 半的桥调用转发到 Host 半
+   * 的 `ctx.views.onCall(method, handler)` 注册表。与 runCommand 同款口径：
+   * 失败必须抛（插件没注册该方法 = E_NOT_FOUND，让 Client 半拿到明确报错）。
+   */
+  async callViewMethod(id: string, method: string, params: unknown): Promise<unknown> {
+    const s = this.sessions.get(id)
+    if (!this.isCallable(s)) {
+      throw new RpcError(RPC_ERROR.E_HOST_DEAD, `插件 ${id} 未激活，无法转发视图调用「${method}」`)
+    }
+    s.lastUsedAt = this.now()
+    const r = await this.request(s, 'host/view-call', { method, params }, this.timeouts.invokeMs)
+    // 一次成功投递即证明插件活着（与 callTool 同款口径）
+    if (s.errorCount !== 0) {
+      s.errorCount = 0
+      this.setPhase(s, 'active')
+    }
+    return r
   }
 
   /* ---------- 销毁 ---------- */

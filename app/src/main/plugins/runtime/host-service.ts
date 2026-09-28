@@ -18,7 +18,7 @@
  *   两者必须都齐：只有声明 = 用户看得到但调不动；只有注册 = 用户看不见却能被模型调。
  * ============================================================ */
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import { execFile } from 'node:child_process'
 
@@ -28,8 +28,14 @@ import { assertInWorkspace } from '../../fs/guard.js'
 import { pluginEffects } from '../effects.js'
 import { listInstalledPlugins, invalidatePlugins, refreshPluginSlots } from '../registry.js'
 import { scopeOfSource, setEnabled, pluginsDir, type PluginScope } from '../store.js'
+import { RpcError } from './wire.js'
 import { PluginGateway, type DirEntry, type PluginGatewayDeps, type RegisteredTool } from './gateway.js'
 import { PluginSupervisor, type HostProcessHandle, type SpawnHostFn } from './supervisor.js'
+import { createGitService, GitError, type GitService } from '../../git/service.js'
+import { logGitAudit } from '../../git/audit.js'
+// v0.36.0：git 写操作复用 agent 的会话模式与 renderer 确认浮层（与 shell 同源）
+import { resolveEffectiveMode } from '../../agent/session-mode.js'
+import { makeRendererConfirm } from '../../agent/registry.js'
 import type { PluginManifest, PluginPermission, PluginRuntimeStatus } from '@shared/types/plugin'
 import type { PluginViewMethod } from '@shared/types/ipc'
 import { globalPluginToolName, summarizePluginToolResult } from '@shared/utils/plugin-tool-name'
@@ -103,6 +109,8 @@ export class PluginHostService {
   private readonly sessions = new Map<string, ViewSession>()
   private readonly storageDocs = new Map<string, JsonDoc<Record<string, unknown>>>()
   private regSeq = 0
+  /** v0.36.0：git 服务（懒创建 —— 未用到 git 前不触发 dugite 加载） */
+  private git: GitService | null = null
   private readonly opts: PluginHostServiceOptions
 
   constructor(opts: PluginHostServiceOptions) {
@@ -410,6 +418,7 @@ export class PluginHostService {
       'data.request',
       'storage.get',
       'storage.set',
+      'host.call',
     ])
     if (!ALLOWED.has(method as PluginViewMethod)) {
       return { ok: false, error: { code: 'method-not-allowed', message: `桥方法「${method}」不在白名单内` } }
@@ -461,6 +470,25 @@ export class PluginHostService {
           await doc.write(next)
           return { ok: true }
         }
+        case 'host.call': {
+          // v0.36.0：转发到该插件 Host 半的 ctx.views.onCall 注册表（宿主只搬运）。
+          // 未注册 = E_NOT_FOUND 原样回给 Client 半；插件未激活 = E_HOST_DEAD。
+          const inner = String(p.method ?? '')
+          if (!inner) return { ok: false, error: { code: 'E_INTERNAL', message: 'host.call 需要 method' } }
+          try {
+            const result = await this.supervisor.callViewMethod(s.pluginId, inner, p.params)
+            return { ok: true, result }
+          } catch (err) {
+            const code = (err as { code?: unknown }).code
+            return {
+              ok: false,
+              error: {
+                code: typeof code === 'string' && code ? code : 'E_INTERNAL',
+                message: err instanceof Error ? err.message : String(err),
+              },
+            }
+          }
+        }
         default:
           return { ok: false, error: { code: 'method-not-allowed', message: `未实现 ${method}` } }
       }
@@ -498,11 +526,12 @@ export class PluginHostService {
    * 顺序很重要：**先撤会话**（否则正在用的 iframe 会在注册表被清空后继续调桥，
    * 撞上一连串「未知方法」）；再撤注册；最后停进程与账本。
    */
-  async disposePlugin(pluginId: string): Promise<void> {
+  async disposePlugin(pluginId: string, opts: { purgeData?: boolean } = {}): Promise<void> {
     const views = this.closeViewsOf(pluginId)
     this.tools.delete(pluginId)
     this.views.delete(pluginId)
     this.panels.delete(pluginId)
+    if (opts.purgeData) this.purgeStorage(pluginId)
     await this.supervisor.dispose(pluginId)
     const r = await pluginEffects.revokeAll(pluginId)
     if (views > 0 || r.revoked > 0) {
@@ -510,10 +539,43 @@ export class PluginHostService {
     }
   }
 
+  /**
+   * ★ v0.36.0（F3.2）：清除插件私有 KV（plugin-storage/<id>.json）。
+   * 卸载勾选「删除数据」时调用；内存缓存同步移除，避免半清理状态。
+   */
+  purgeStorage(pluginId: string): void {
+    this.storageDocs.delete(pluginId)
+    try {
+      rmSync(join(getArkworkDir(), 'plugin-storage', `${pluginId}.json`), { force: true })
+    } catch (err) {
+      logger.warn('System', `[plugin] 清除 ${pluginId} 私有数据失败：${String(err)}`)
+    }
+  }
+
+  /**
+   * ★ v0.36.0（F3.3）：触发一条插件命令。
+   * 命令是懒激活事件之一：先 ensureActivated（幂等），再直发 `host/emit`。
+   * 错误向上抛（supervisor.runCommand 的 E_HOST_DEAD / E_NOT_FOUND 语义），
+   * 由 IPC 层转成 `{ok:false, message}`。
+   */
+  async runCommand(pluginId: string, commandId: string): Promise<void> {
+    const e = this.index.get(pluginId)
+    if (!e) throw new Error(`插件 ${pluginId} 不在册（可能已被卸载）`)
+    if (!e.enabled) throw new Error(`插件 ${pluginId} 未启用，请先在插件面板启用`)
+    const declared = (e.manifest.provides.commands ?? []).some((c) => c.id === commandId)
+    if (!declared) throw new Error(`插件 ${pluginId} 未声明命令「${commandId}」`)
+    await this.ensureActivated(pluginId)
+    await this.supervisor.runCommand(pluginId, commandId)
+  }
+
   /** 应用退出（同步，不能 await） */
   shutdown(): void {
     this.sessions.clear()
     this.supervisor.killAll()
+    // v0.36.0（D82）：生产装配开始启动 watchdog/idle-sweeper（bootstrap ②.5），
+    // 退出/重装配路径必须同步停表 —— killAll 只杀会话不停定时器，否则泄漏的
+    // tick 会继续空转（重装配场景下旧实例的定时器还攥着已失效的会话表）。
+    this.supervisor.stopWatchdog()
   }
 
   /* ============================================================
@@ -549,6 +611,38 @@ export class PluginHostService {
         this.opts.fetch ??
         (async () => ({ status: 0, headers: {}, body: '' })),
     }
+  }
+
+  /**
+   * v0.36.0：git 服务装配（懒创建）。
+   *  · root    = 当前工作区（repo 唯一作用域，随工作区切换）；
+   *  · mode    = agent 会话权限模式（与 shell 同源：session override > defaultMode）；
+   *  · confirm = renderer 美观浮层（与 shell 工具确认同一条通道）；
+   *  · audit   = .arkwork/logs/git-audit.jsonl（写类 op 逐条落盘）。
+   */
+  private gitService(): GitService {
+    if (!this.git) {
+      this.git = createGitService({
+        root: () => getWorkspaceDir(),
+        mode: () => resolveEffectiveMode(getWorkspaceDir()),
+        confirm: async (req) => {
+          const confirm = makeRendererConfirm()
+          const outcome = await confirm({
+            requestId: randomUUID(),
+            skillName: `Git · ${req.op}（${req.pluginId}）`,
+            command: req.summary,
+            cwd: req.root,
+            impacts: req.impacts,
+            risk: 'medium',
+          })
+          return outcome.allowed
+            ? { allowed: true }
+            : { allowed: false, ...(outcome.reason ? { reason: outcome.reason } : {}) }
+        },
+        audit: (entry) => logGitAudit(entry),
+      })
+    }
+    return this.git
   }
 
   private buildGatewayDeps(): PluginGatewayDeps {
@@ -681,6 +775,22 @@ export class PluginHostService {
         return true
       },
 
+      /* ---------- git（v0.36.0：封闭白名单；GitError → RpcError 保码转换） ---------- */
+      gitRun: async (pluginId, op, args) => {
+        try {
+          return await this.gitService().run(pluginId, op, args)
+        } catch (err) {
+          if (err instanceof GitError) {
+            throw new RpcError(
+              err.code,
+              err.message,
+              err.detail && typeof err.detail === 'object' ? (err.detail as Record<string, unknown>) : undefined,
+            )
+          }
+          throw err
+        }
+      },
+
       /* ---------- 路径断言 ---------- */
       resolveInWorkspace: async (rel) => {
         const root = getWorkspaceDir()
@@ -764,8 +874,8 @@ export async function refreshPluginsAndIndex(): Promise<void> {
 }
 
 /** 某插件被停用 / 卸载 / 禁用时，把它从运行态里彻底摘掉 */
-export async function teardownPlugin(pluginId: string): Promise<void> {
-  await service?.disposePlugin(pluginId)
+export async function teardownPlugin(pluginId: string, opts?: { purgeData?: boolean }): Promise<void> {
+  await service?.disposePlugin(pluginId, opts)
 }
 
 export { pluginsDir, scopeOfSource, setEnabled, type PluginScope, type PluginManifest }

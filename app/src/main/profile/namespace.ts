@@ -96,11 +96,8 @@ export function listNamespaces(): string[] {
   }
 }
 
-/** 一次激活要落进快照的 data 层项（键名即快照 `SnapshotData.key`） */
-export function namespaceSnapshotEntries(ns: string, shareCore: boolean) {
-  return [
-    { key: 'memoryNamespace', value: safeSegment(ns), applied: true },
-    { key: 'sharedCoreNamespace', value: shareCore ? CORE_NAMESPACE : '', applied: shareCore },
-    { key: 'namespaceDir', value: resolveMemoryNamespaceDir(ns), applied: true },
-  ]
-}
+/* ★ v0.36.0（D5）：`namespaceSnapshotEntries()` 已删除 ——
+ * 它是装配快照 `data` 层（`SnapshotData[]`）的唯一生产者，而该层随插槽契约
+ * 一并消失。命名空间目录本身仍由 `ensureMemoryNamespace()` 真落地，
+ * 命名空间的**人话级出口**改由 `prompt-context.ts` 直读 profile 本体
+ * （`profile.data.memoryNamespace`），不再经快照中转。 */

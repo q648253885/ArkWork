@@ -21,6 +21,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { pickFetch, humanizeFetchError } from '../panel.js'
+/** 注释剥离器唯一真源（v0.36.0 · D101 收敛；本文件原有朴素正则副本已退役） */
+import { stripComments } from '@shared/utils/source-guard'
 
 const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf-8')
 const SRC = read('../panel.ts')
@@ -58,17 +60,25 @@ test('TC-PFCH-003 net.fetch 必须绑定到 net 对象调用（脱离上下文�
  * 2. 源码契约：panelFetch 不得直接调用裸 fetch
  * ============================================================ */
 
-test('TC-PFCH-004 ★ panel.ts 取数必须经 pickFetch（禁止裸 fetch 直连）', () => {
-  // 允许出现的只有 pickFetch 回落分支里的那一处 `fetch(`（无接收者）
-  const calls = SRC.match(/(?<![.\w])fetch\s*\(/g) ?? []
-  assert.equal(
-    calls.length,
-    1,
-    `panel.ts 只应有一处裸 fetch（pickFetch 的回落分支），实际 ${calls.length} 处 —— ` +
-      '新增调用点会让「选栈方向」绕过 pickFetch，重新引入「不认系统代理」缺陷',
-  )
-  assert.match(SRC, /pickFetch\s*\(/, 'panelFetch 必须通过 pickFetch 选栈')
-  assert.match(SRC, /const \{ impl, via \} = pickFetch\(\)/, '必须取到 impl 并真的用它取数')
+test('TC-PFCH-004 ★ 取数必须经 pickFetch（禁止裸 fetch 直连）', () => {
+  // v0.36.0：pickFetch 实体移至 net/fetch-stack.ts（插件网关共用），panel.ts 仅剩消费点。
+  // 契约：剥离注释后，两个文件都**不得有任何裸 fetch 调用**（唯一合法引用是
+  // fetch-stack.ts 回落分支里的 `fetch as unknown as FetchLike`，无调用括号）。
+  const stackSrc = stripComments(readFileSync(new URL('../../net/fetch-stack.ts', import.meta.url), 'utf8'))
+  const panelSrc = stripComments(SRC)
+  for (const [name, src] of [['net/fetch-stack.ts', stackSrc], ['ipc/panel.ts', panelSrc]] as const) {
+    const calls = src.match(/(?<![.\w])fetch\s*\(/g) ?? []
+    assert.equal(
+      calls.length,
+      0,
+      `${name} 出现 ${calls.length} 处裸 fetch 调用 —— ` +
+        '新增调用点会让「选栈方向」绕过 pickFetch，重新引入「不认系统代理」缺陷',
+    )
+  }
+  assert.match(stackSrc, /impl: fetch as unknown as FetchLike/, 'fetch-stack 回落分支必须存在（纯 Node 单测环境兜底）')
+  assert.match(panelSrc, /from '\.\.\/net\/fetch-stack\.js'/, 'panel.ts 必须从 fetch-stack 引入选栈')
+  assert.match(panelSrc, /pickFetch\s*\(/, 'panelFetch 必须通过 pickFetch 选栈')
+  assert.match(panelSrc, /const \{ impl, via \} = pickFetch\(\)/, '必须取到 impl 并真的用它取数')
 })
 
 test('TC-PFCH-005 只允许 http/https（不为插件开任意协议探测）', () => {

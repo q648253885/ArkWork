@@ -17,45 +17,16 @@
  *   ② 白名单是**契约**：列进去的才承诺向后兼容，没列的不承诺。
  * ============================================================ */
 
+import { PLUGIN_THEME_TOKENS } from '@shared/utils/plugin-theme-tokens'
+
 /**
  * 承诺给插件的令牌（**契约，只增不改名**）。
  *
- * 分组与 `globals.css` 的语义分层一致：背景 / 边框 / 文字 / 强调 / 状态。
- * 插件只应使用这些；想用别的颜色请自带（插件不该依赖未承诺的宿主内部实现）。
+ * ★ v0.36.0（D96）：本体已下沉到 `@shared/utils/plugin-theme-tokens`
+ * —— 契约两端共有（渲染层注入 + 插件 CSS 校验），住在渲染层会让 main 层的
+ * 守门用例被迫 import DOM 文件。此处只做**再导出**，保持渲染层调用点不变。
  */
-export const PLUGIN_THEME_TOKENS = [
-  // 背景阶梯
-  '--bg-base',
-  '--bg-surface',
-  '--bg-surface-2',
-  '--bg-surface-3',
-  '--bg-overlay',
-  '--bg-input',
-  // 边框
-  '--border-subtle',
-  '--border-default',
-  '--border-strong',
-  // 文字（四级 + 反色）
-  '--text-primary',
-  '--text-secondary',
-  '--text-tertiary',
-  '--text-faint',
-  '--text-inverse',
-  // 强调（AI 与选中）
-  '--accent',
-  '--accent-soft',
-  // 业务主色（主按钮与焦点环）
-  '--business-primary',
-  '--business-primary-soft',
-  // 状态（「颜色只留给异常」）
-  '--success',
-  '--warning',
-  '--danger',
-  // 圆角与字号（插件对齐宿主密度用）
-  '--radius-sm',
-  '--radius-md',
-  '--radius-lg',
-] as const
+export { PLUGIN_THEME_TOKENS }
 
 /** 主题令牌快照：`{ '--bg-base': '#FFFFFF', … }` */
 export type PluginThemeTokens = Record<string, string>

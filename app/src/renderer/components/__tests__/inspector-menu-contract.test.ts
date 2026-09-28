@@ -18,12 +18,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { stripComments } from '@shared/utils/source-guard'
 
 const R = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf-8')
 const CODE = (rel: string): string =>
-  R(rel)
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/.*$/gm, '')
+  stripComments(R(rel))
 
 const INSPECTOR = '../Inspector.tsx'
 const ANCHORED = '../../utils/anchored-menu.ts'

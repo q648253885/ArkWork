@@ -38,6 +38,7 @@ import type { AppState } from '../types'
 import { isArkworkInternal } from '@shared/utils/paths'
 import type { SaveOutcome } from '../../services/editorDoc'
 import type { ConflictInfo, EditorDocMeta } from '@shared/types/fs'
+import type { FsNode } from '@shared/types/ipc'
 
 /** 最近关闭列表长度上限（浮窗空态展示用） */
 const RECENTLY_CLOSED_LIMIT = 20
@@ -74,6 +75,14 @@ export const fsSlice: StateCreator<
     | 'recentlyClosed'
     | 'activeDocPath'
     | 'refreshTree'
+    | 'treeExpanded'
+    | 'dirChildren'
+    | 'dirLoading'
+    | 'toggleTreeNode'
+    | 'expandAllTreeNodes'
+    | 'collapseAllTreeNodes'
+    | 'loadTreeDir'
+    | 'invalidateDirCache'
     | 'openDoc'
     | 'closeDoc'
     | 'closeDocForce'
@@ -131,6 +140,71 @@ export const fsSlice: StateCreator<
     conflicts: {},
     recentlyClosed: [],
     activeDocPath: null,
+
+    /* ---- v0.36.0 B11/P1：文件树展开状态与懒加载 ---- */
+    // 展开状态收进 slice（此前是组件 useState，FilesPanel 双挂载会状态分叉 ——
+    // plugin-view-mount.test.ts:84 前科）。
+    treeExpanded: {},
+    dirChildren: {},
+    dirLoading: {},
+
+    toggleTreeNode: (path, defaultOpen) => {
+      set((s) => ({
+        // 语义修复（B11/P1）：按「当前生效态」取反 —— 此前 `!p[path]` 对
+        // 默认展开的顶层目录首点写入 true，视觉无变化，要点两次才收起。
+        treeExpanded: { ...s.treeExpanded, [path]: !(s.treeExpanded[path] ?? defaultOpen) },
+      }))
+    },
+
+    expandAllTreeNodes: () => {
+      // 只展开当前已加载的树（files 仍是 conversationSlice 的树真源）；
+      // 未加载的深层目录随用户逐层展开时经 loadTreeDir 懒加载。
+      const out: Record<string, boolean> = {}
+      const walk = (nodes: FsNode[]): void => {
+        for (const n of nodes) {
+          if (n.type === 'folder') {
+            out[n.path] = true
+            if (n.children) walk(n.children)
+          }
+        }
+      }
+      walk(get().files)
+      set({ treeExpanded: out })
+    },
+
+    collapseAllTreeNodes: () => {
+      // v0.36.2（D113）：显式写 false 而非清空表 —— 清空会让顶层目录回落
+      // defaultOpen=true（depth<1 默认展开），出现「全部收起后第一层还开着」。
+      const out: Record<string, boolean> = {}
+      const walk = (nodes: FsNode[]): void => {
+        for (const n of nodes) {
+          if (n.type === 'folder') {
+            out[n.path] = false
+            if (n.children) walk(n.children)
+          }
+        }
+      }
+      walk(get().files)
+      set({ treeExpanded: out })
+    },
+
+    loadTreeDir: async (path) => {
+      const s = get()
+      if (s.dirChildren[path] || s.dirLoading[path]) return
+      set((st) => ({ dirLoading: { ...st.dirLoading, [path]: true } }))
+      try {
+        const nodes = await ark.fs.listDir(path)
+        set((st) => ({
+          dirChildren: { ...st.dirChildren, [path]: nodes },
+          dirLoading: { ...st.dirLoading, [path]: false },
+        }))
+      } catch (err) {
+        set((st) => ({ dirLoading: { ...st.dirLoading, [path]: false } }))
+        get().pushToast({ type: 'danger', message: friendlyError(err), duration: 4000 })
+      }
+    },
+
+    invalidateDirCache: () => set({ dirChildren: {}, dirLoading: {} }),
 
     /* ---- 树 ---- */
     /**

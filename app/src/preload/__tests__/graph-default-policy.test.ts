@@ -65,6 +65,7 @@ test('TC-PRELOAD-002 既有 graph:* 白名单项逐项不变（纯新增）', ()
     ['metrics', 'graph:metrics'],
     ['pendingPlan', 'graph:pending-plan'],
     ['decidePlan', 'graph:decide-plan'],
+    ['dismissPlanDegraded', 'graph:dismiss-plan-degraded'],
   ]
   for (const [method, channel] of inherited) {
     assert.match(

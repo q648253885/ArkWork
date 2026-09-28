@@ -306,6 +306,19 @@ export const Icon = {
       <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
     </svg>
   ),
+  // v0.36.0 B11/P1：文件树「全部展开 / 全部收起」（feather chevrons-down / chevrons-up）
+  ChevronsDown: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base(p)}>
+      <path d="m7 6 5 5 5-5" />
+      <path d="m7 13 5 5 5-5" />
+    </svg>
+  ),
+  ChevronsUp: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base(p)}>
+      <path d="m17 11-5-5-5 5" />
+      <path d="m17 18-5-5-5 5" />
+    </svg>
+  ),
   // v0.8.0 F824：内置锁定标识
   Lock: (p: SVGProps<SVGSVGElement>) => (
     <svg {...base(p)}>

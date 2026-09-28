@@ -23,12 +23,18 @@ export async function plan(args: PlanArgs, ctx: SkillContext): Promise<PlanResul
     if (!taskName) return { status: 'failed', error: 'plan: taskName 不能为空' }
     const workspace = ctx.workspaceDir ?? getWorkspaceDir()
     const directory = join(workspace, '.arkwork', 'documents', taskName)
-    const result = await delegateAgent({
-      agentId: '@coder',
-      task: `${PROMPT_PLAN}\n\n任务名称：${taskName}\n范围：${args.scope?.trim() || '未指定'}\n目标目录：${directory}`,
+    const { results } = await delegateAgent({
+      targets: [{
+        agentId: '@coder',
+        objective: `${PROMPT_PLAN}\n\n任务名称：${taskName}\n范围：${args.scope?.trim() || '未指定'}\n目标目录：${directory}`,
+      }],
     }, ctx)
-    if (result.status !== 'done') return { status: 'failed', error: result.summary }
-    const planItems = parseSummaryToPlanItems(result.summary, taskName)
+    // v0.36.0 F4.1：delegate 改并行 —— 单目标取 results[0]
+    const child = results[0]
+    if (!child || child.status !== 'done') {
+      return { status: 'failed', error: child?.summary ?? 'plan: 子任务未返回结果' }
+    }
+    const planItems = parseSummaryToPlanItems(child.summary, taskName)
     logger.info('Tool', `plan: generated ${join(directory, 'plan.md')}`, ctx.taskId)
     return { planPath: join(directory, 'plan.md'), planItems }
   } catch (err) {

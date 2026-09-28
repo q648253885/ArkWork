@@ -46,6 +46,8 @@ export const CAP_PERMISSION: Record<string, PluginPermission | null> = {
   'storage.get': 'storage',
   'storage.set': 'storage',
   'storage.delete': 'storage',
+  // v0.36.0：git 封闭白名单（git/service.ts 的 20 个 op；写类走权限模式 + 审计）
+  git: 'git',
   'renderer.post': null, // 只往自己插件的 Client 半推消息，不触达宿主
 }
 
@@ -135,6 +137,11 @@ export interface PluginGatewayDeps {
   unregisterPanel(pluginId: string, regId: number | undefined, panelRef: string): Promise<void>
   /** 把消息推给该插件的 Client 半（无 Client 半时返回 false） */
   postToClient(pluginId: string, payload: unknown): boolean
+  /**
+   * v0.36.0：git 封闭白名单执行。op 合法性、参数校验、审批分层与审计
+   * 全部由 git/service.ts 终审 —— 网关只做权限闸门与分发，不做镜像白名单。
+   */
+  gitRun(pluginId: string, op: string, args: Record<string, unknown>): Promise<unknown>
   /** 路径断言钩子：把「插件给的工作区相对路径」变成可落盘的绝对路径 */
   resolveInWorkspace(rel: string): Promise<string>
 }
@@ -287,6 +294,13 @@ export class PluginGateway {
       /* ---------- 推给 Client 半 ---------- */
       case 'renderer.post':
         return { delivered: this.deps.postToClient(pluginId, p.payload) }
+
+      /* ---------- git（v0.36.0：封闭白名单，op 终审在 git/service.ts） ---------- */
+      case 'git': {
+        const op = asStr(p.op)
+        if (!op) throw new RpcError(RPC_ERROR.E_INTERNAL, 'git 能力需要 op 参数')
+        return await this.deps.gitRun(pluginId, op, asObj(p.args))
+      }
 
       default:
         throw new RpcError(RPC_ERROR.E_NOT_FOUND, `未知能力「${cap}」`)

@@ -17,12 +17,13 @@
  *  3. 镜像广播走 `store.ts` 的 `registerMirrorWrittenHook` **注册回调**注入（依赖倒置 §10.1），
  *     本模块不新增 ESM 求值期边（`agent/events.ts` 不 import `graph/store.js`）。
  */
-import type { GraphWriteError, NodeChange, NodeStatus } from '@shared/types/graph'
+import type { GraphWriteError, NodeChange, NodeStatus, TaskNode, Evidence } from '@shared/types/graph'
+import { defaultVerification } from '@shared/types/graph'
 import type { PlanItemSource, PlanItemStatus } from '@shared/types/task'
 import { applyStatusChange } from './gate.js'
 import { patchNode } from './write.js'
 import { getGraphById, persist, type SyncCtx } from './sync.js'
-import { sealGraphAtTurnEnd } from './migrate.js'
+import { sealGraphAtTurnEnd, mapPlanItemStatusToNodeStatus } from './migrate.js'
 import { registerMirrorWrittenHook } from './store.js'
 import { broadcastPlanListSnapshot, broadcastGraphStatusChanged } from '../events.js'
 import { logger } from '../../system/logger.js'
@@ -40,6 +41,27 @@ export interface PlanSyncResult {
   error?: GraphWriteError
 }
 
+/* ============================================================
+ * v0.36.6（缺陷 D129）：**每图写锁** —— 同一轮 Reason 的多个 todo_update 经
+ * Promise.all 并行执行（loop.ts Act 段），每个调用各自 `getGraphById` 拿到同一
+ * 快照 → 各自 persist → last-writer-wins，其余更新静默丢失（图 revision 审计
+ * 实锤：同一轮 3 个 todo_update 仅 1 个存活）。整个「读图 → 改状态 → 落盘」
+ * 事务按 graphId 串行化，锁内重新加载 base —— 后到者在最新图上追加，
+ * 先到写者的变更不丢。锁表条目空闲后自清理，防长进程 Map 膨胀。
+ * ============================================================ */
+const graphWriteLocks = new Map<string, Promise<unknown>>()
+
+function withGraphWriteLock<T>(graphId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = graphWriteLocks.get(graphId) ?? Promise.resolve()
+  const next = prev.then(fn, fn)
+  const tail = next.catch(() => {})
+  graphWriteLocks.set(graphId, tail)
+  void tail.then(() => {
+    if (graphWriteLocks.get(graphId) === tail) graphWriteLocks.delete(graphId)
+  })
+  return next
+}
+
 /**
  * 一次性写入多项状态变更。
  *
@@ -54,7 +76,18 @@ export interface PlanSyncResult {
  * @returns 全部成功 → `{ ok: true }`；任一项被门禁拒绝 → `{ ok: false, error }`（**已写入的前项不回滚**，
  *          与 IPC `graph:set-status` 的单步语义一致：拒绝即停在上一合法图）。
  */
-async function commitStatuses(
+function commitStatuses(
+  ctx: PlanSyncCtx,
+  updates: ReadonlyArray<{ nodeId: string; to: NodeStatus; source: string; reason?: string }>,
+  reason?: string,
+  force = false,
+): Promise<PlanSyncResult> {
+  // v0.36.6（缺陷 D129）：读图 → 改状态 → 落盘为同一临界区（见 withGraphWriteLock）；
+  // base 的加载发生在锁内，保证并行写事务互不覆盖。
+  return withGraphWriteLock(ctx.graphId, () => commitStatusesLocked(ctx, updates, reason, force))
+}
+
+async function commitStatusesLocked(
   ctx: PlanSyncCtx,
   updates: ReadonlyArray<{ nodeId: string; to: NodeStatus; source: string; reason?: string }>,
   reason?: string,
@@ -241,6 +274,268 @@ export async function applyPlanItemStatuses(
     reason,
     force,
   )
+}
+
+/**
+ * v0.36.4（缺陷 D123）：带 key 兜底定位的清单状态回写。
+ *
+ * 背景（用户 macOS 实测「模型重复执行已完成任务」）：`planItemId === nodeId` 是**隐式**
+ * 不变量（§4.7），任何历史断链（落盘失败丢镜像 / 重建图 / 外部编辑）都会让 planItem.id
+ * 在图里查不到 —— 此时 `applyPlanItemStatuses` 返回 NOT_FOUND，而调用方若不消费返回值，
+ * 就出现「UI 与模型看到 [x]，图节点停在 ready」的双通道漂移 → 完成守卫逼模型重做。
+ *
+ * 本原语按两级定位节点：
+ *   ① 直接命中 `nodes[planItemId]`（不变量成立时的快路径）；
+ *   ② 兜底按迁移 key `T-{index+1}`（migrateToGraph 按清单顺序合成 key，保序对位）。
+ * 两级都未命中才返回 NOT_FOUND —— 交由调用方决定回退策略（act.ts 回退直写清单镜像）。
+ */
+export async function applyPlanItemStatusesRobust(
+  ctx: PlanSyncCtx,
+  updates: ReadonlyArray<{ planItemId: string; index: number; to: PlanItemStatus }>,
+  source: PlanItemSource,
+  reason?: string,
+): Promise<PlanSyncResult> {
+  const base = await getGraphById(ctx.graphId)
+  if (!base) {
+    return {
+      ok: false,
+      error: {
+        code: 'NOT_FOUND',
+        message: `图不存在：${ctx.graphId}`,
+        hint: '任务图可能已被删除。',
+      },
+    }
+  }
+  const resolved: { planItemId: string; to: PlanItemStatus }[] = []
+  for (const u of updates) {
+    if (base.nodes[u.planItemId]) {
+      resolved.push({ planItemId: u.planItemId, to: u.to })
+      continue
+    }
+    const key = `T-${String(u.index + 1).padStart(2, '0')}`
+    const byKey = Object.values(base.nodes).find((n) => n.layer === 'task' && n.key === key)
+    if (byKey) {
+      resolved.push({ planItemId: byKey.id, to: u.to })
+      continue
+    }
+    return {
+      ok: false,
+      error: {
+        code: 'NOT_FOUND',
+        message: `节点不存在：${u.planItemId}（key 兜底 ${key} 也未命中）`,
+        hint: 'planItem 与图节点已断裂且无法按 key 对位，请回退直写清单镜像。',
+      },
+    }
+  }
+  return applyPlanItemStatuses(ctx, resolved, source, reason)
+}
+
+/** v0.38.1（缺陷 D174）：结构对账的来源标记（写进新建节点 derivedFrom，便于收敛检查识别） */
+export const RECONCILE_SOURCE = 'reconcile:v0.38.1'
+
+/** 结构对账的清单项输入（账本项的最小投影） */
+export interface ReconcileItem {
+  id: string
+  text: string
+  status: PlanItemStatus
+}
+
+/**
+ * v0.38.1（缺陷 D174）：**结构对账** —— 账本为准，把图的任务层节点对齐到清单全量形态。
+ *
+ * 背景（用户实测「重新制定计划，考察并开发优化这个项目」清单面板不更新）：
+ * 续聊时模型按 D128/D172 纪律提交**结构性不同**的新清单（task_plan 7 项），
+ * 账本通道 plan-commit 正常生效（items=7）；但图镜像下推走
+ * `applyPlanItemStatusesRobust` —— 它只能改**既有**节点的状态，新项在图里
+ * 没有对应节点（id 直查未命中 + `T-{index+1}` key 兜底未命中）→ 整批
+ * NOT_FOUND → 图写降级告警。后果是纪律⑱的完整复现：账本 7 项 / 图 1 节点
+ * 双通道漂移，`ledger-sync` 与 `engine-decide` 两路 plan-snapshot 来回翻飞，
+ * 任务面板（图投影）永远显示旧清单。
+ *
+ * 本原语把「图 = 清单的派生投影」做完整（§4.7 不变量在续聊场景的补全）：
+ *   ① 绑定：item.id 直查（恢复不变量快路径）→ 剩余 item 与剩余 task 节点按序对位；
+ *   ② 对位成功的节点：force 写状态（账本为准）；文本变化时同步 title/intent；
+ *      key 重排为 `T-{index+1}`（保持 key 兜底语义继续有效）；
+ *   ③ 多出来的 item：**新建节点** —— id 直接用 item.id（恢复 §4.7 不变量），
+ *      key = `T-{index+1}`，completed 带合成 human 证据（与 migrate 同口径）；
+ *   ④ 多出来的节点（清单已移除的项）：→ `cancelled` 留痕（不物理删除，审计可查）；
+ *   ⑤ goal.children 按最终清单顺序重排（被移除的残余节点排在末尾）。
+ *
+ * 全程 force（行政性对账写入，与 IPC `graph:set-status` 强制分支同语义）；
+ * 零变更时不落盘不广播（幂等）；锁内执行（D129 每图写锁）。
+ */
+export async function reconcilePlanItemsToGraph(
+  ctx: PlanSyncCtx,
+  items: ReadonlyArray<ReconcileItem>,
+  /**
+   * 变更来源。v0.39.0：放宽为 `string` —— 规划通道（`'planner'`）与文本解析回退
+   * （`'plan-regex'`）都要经这条共享管线记账，而 `PlanItemSource` 是 **UI 徽标**
+   * 枚举（用户/模型/引擎三值），拿它当"调用方标识"用是类型越界（D186 同族）。
+   * 真正要进徽标的仍是 `PlanItemSource`，由 ops 内部的 `source` 字段承担。
+   */
+  source: string,
+  reason?: string,
+): Promise<PlanSyncResult> {
+  if (items.length === 0) return { ok: true } // 空清单不触发结构清空（防御性；task_plan 入口已禁空）
+  return withGraphWriteLock(ctx.graphId, () => reconcileLocked(ctx, items, source, reason))
+}
+
+async function reconcileLocked(
+  ctx: PlanSyncCtx,
+  items: ReadonlyArray<ReconcileItem>,
+  /** v0.39.0：同 `reconcilePlanItemsToGraph` —— 记账用标识，不是 UI 徽标枚举 */
+  source: string,
+  reason?: string,
+): Promise<PlanSyncResult> {
+  const base = await getGraphById(ctx.graphId)
+  if (!base) {
+    return {
+      ok: false,
+      error: {
+        code: 'NOT_FOUND',
+        message: `图不存在：${ctx.graphId}`,
+        hint: '任务图可能已被删除。',
+      },
+    }
+  }
+  const goal = Object.values(base.nodes).find((n) => n.layer === 'goal')
+  if (!goal) {
+    return {
+      ok: false,
+      error: {
+        code: 'NOT_FOUND',
+        message: '图中不存在 goal 节点，无法对账清单结构。',
+        hint: '任务图可能不完整，请刷新后重试。',
+      },
+    }
+  }
+
+  const taskNodes = Object.values(base.nodes).filter((n) => n.layer === 'task')
+  // 按 key 保序（T-01…T-NN 零填充定宽，字典序即数值序）；key 缺失排最后
+  taskNodes.sort((a, b) => (a.key ?? 'Ｚ').localeCompare(b.key ?? 'Ｚ'))
+
+  // ---- ① 绑定：id 直查 → 剩余按序对位 ----
+  const consumed = new Set<string>()
+  const binding = new Map<number, string>()
+  for (let i = 0; i < items.length; i++) {
+    const cand = base.nodes[items[i]!.id]
+    if (cand && cand.layer === 'task' && !consumed.has(cand.id)) {
+      binding.set(i, cand.id)
+      consumed.add(cand.id)
+    }
+  }
+  const freeNodes = taskNodes.filter((n) => !consumed.has(n.id))
+  for (let i = 0; i < items.length && freeNodes.length > 0; i++) {
+    if (binding.has(i)) continue
+    const node = freeNodes.shift()
+    if (!node) break
+    binding.set(i, node.id)
+    consumed.add(node.id)
+  }
+
+  const now = Date.now()
+  let current = base
+  const changes: NodeChange[] = []
+  const orderedChildIds: string[] = []
+
+  // ---- ②③ 对位节点更新 / 缺失节点新建 ----
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!
+    const key = `T-${String(i + 1).padStart(2, '0')}`
+    const to = mapPlanItemStatusToNodeStatus(item.status)
+    const boundId = binding.get(i)
+    if (boundId) {
+      const node = current.nodes[boundId]
+      if (!node) continue // 理论不可达（binding 来自当前图）
+      const from = node.status
+      const metaDrifted = node.title !== item.text.slice(0, 80) || node.intent !== item.text || node.key !== key
+      if (from !== to || metaDrifted) {
+        current = patchNode(current, boundId, (n) => ({
+          ...n,
+          status: to,
+          title: item.text.slice(0, 80),
+          intent: item.text,
+          key,
+          revision: n.revision + 1,
+        }))
+        changes.push(
+          from !== to
+            ? { nodeId: boundId, from, to, source, reason }
+            : { nodeId: boundId, from: to, to, source, reason, field: 'meta' },
+        )
+      }
+      orderedChildIds.push(boundId)
+    } else {
+      const evidence: Evidence[] = []
+      if (to === 'completed') {
+        evidence.push({
+          kind: 'human',
+          summary: '对账新建：清单项已是完成态（账本为准）',
+          at: now,
+          by: { kind: 'system' },
+        })
+      }
+      const node: TaskNode = {
+        id: item.id,
+        key,
+        parentId: goal.id,
+        layer: 'task',
+        title: item.text.slice(0, 80),
+        intent: item.text,
+        status: to,
+        assignee: { kind: 'system' },
+        priority: 'p1',
+        children: [],
+        dependsOn: [],
+        derivedFrom: [RECONCILE_SOURCE],
+        acceptance: [],
+        evidence,
+        verification: defaultVerification({ required: false, allowSelfAttest: false }),
+        contextRefs: [],
+        tokensUsed: 0,
+        attempts: to === 'failed' ? 1 : 0,
+        sessionIds: [],
+        createdAt: now,
+        updatedAt: now,
+        revision: 1,
+      }
+      current = { ...current, nodes: { ...current.nodes, [node.id]: node }, updatedAt: now }
+      changes.push({ nodeId: node.id, to, source, reason: reason ?? '对账新增清单项' })
+      orderedChildIds.push(node.id)
+    }
+  }
+
+  // ---- ④ 残余节点（清单已移除的项）→ cancelled 留痕 ----
+  const leftovers = taskNodes.filter((n) => !consumed.has(n.id))
+  for (const n of leftovers) {
+    if (n.status !== 'cancelled') {
+      current = patchNode(current, n.id, (x) => ({ ...x, status: 'cancelled', revision: x.revision + 1 }))
+      changes.push({
+        nodeId: n.id,
+        from: n.status,
+        to: 'cancelled',
+        source,
+        reason: reason ?? '清单重评估移除该项',
+      })
+    }
+    orderedChildIds.push(n.id)
+  }
+
+  // ---- ⑤ goal.children 按最终清单顺序重排 ----
+  const childrenDrifted =
+    goal.children.length !== orderedChildIds.length || goal.children.some((c, i) => c !== orderedChildIds[i])
+  if (childrenDrifted) {
+    current = patchNode(current, goal.id, (g) => ({ ...g, children: orderedChildIds, revision: g.revision + 1 }))
+  }
+
+  if (changes.length === 0 && !childrenDrifted) return { ok: true }
+
+  await persist(
+    { taskId: ctx.taskId, graphId: ctx.graphId, iteration: ctx.iteration ?? 0 },
+    current,
+    { changes, reason: reason ?? '清单结构对账（账本为准）', source: 'plan-sync' },
+  )
+  return { ok: true }
 }
 
 /**

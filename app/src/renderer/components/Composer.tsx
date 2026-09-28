@@ -39,8 +39,9 @@ import { Tooltip } from './ui'
 import { RunConsole } from './RunConsole'
 // v0.27.1：ask_user 门禁组件（暂停且有提问时独占输入槽位，替代 RunConsole）
 import { AskUserGate } from './AskUserGate'
+// v0.39.0（D198）：暂停提问的唯一事实源（活体事件 ∪ 持久化 pendingAskUser）
+import { resolveAskUserQuestion } from './ask-user-question'
 import { ModelSwitcher } from './ModelSwitcher'
-import { AgentChip } from './AgentChip'
 import type { FsNode } from '../types'
 
 type MenuKind = 'at' | 'slash' | 'agent' | null
@@ -113,6 +114,8 @@ export function Composer() {
   const memory = useStore((s) => s.memory)
   const selectedAgentId = useStore((s) => s.selectedAgentId)
   const setSelectedAgent = useStore((s) => s.setSelectedAgent)
+  /** v0.36.0（F4.3）：agent 面板底部「管理 agent」入口 */
+  const openModulePage = useStore((s) => s.openModulePage)
   const selectedSkillIds = useStore((s) => s.selectedSkillIds)
   const toggleSkill = useStore((s) => s.toggleSkill)
   const selectedModelId = useStore((s) => s.selectedModelId)
@@ -133,7 +136,14 @@ export function Composer() {
   const isPaused = task?.status === 'paused'
   const isFailed = task?.status === 'failed'
   // v0.27.1：ask_user 门禁态——暂停且携带 Agent 提问时由 AskUserGate 接管输入槽位
-  const askUserQuestion = useStore((s) => s.askUserQuestion)
+  // v0.39.0（D198）：提问有两个来源，缺一不可 ——
+  //   · 活体 `ask_user` 事件（store.askUserQuestion）：本轮正在发生，最权威；
+  //   · 任务上持久化的 `pendingAskUser.question`：**重开 / 刷新 / 切走再回来**时
+  //     唯一还在的理由（引擎 9 处暂停点都写了它，此前渲染层无人读取 →
+  //     用户只看到无因由的「已暂停 · 等待你的指令…」）。
+  // 合并规则见 ask-user-question.ts 的 resolveAskUserQuestion（唯一事实源，真值表钉死）。
+  const liveAskUserQuestion = useStore((s) => s.askUserQuestion)
+  const askUserQuestion = resolveAskUserQuestion(liveAskUserQuestion, task)
   const askSuggestions = useStore((s) => s.suggestions)
   // v0.27.0 R1：生成中判定扩展——存在活跃 streamBuffer（流式增量在途，含 status
   // 尚未翻转的间隙 / chat 作用域）同样视为生成中，停止按钮与 Esc 保持可用
@@ -315,6 +325,8 @@ export function Composer() {
   }, [trigger, skills, files, memory, selectedSkillIds, fileChips, t])
 
   // ============ v0.24.x：智能体下拉菜单（独立于 @ 引用）============
+  // v0.36.0（F4.3 / P6）：数据源 = agents.json + 工作区 agents 目录（已在 store 合并）；
+  // 这里按 workspaceBuiltin 分区展示 + 支持输入过滤，并给「管理 agent」入口。
   const agentItems = useMemo(
     () =>
       agents.map((a) => ({
@@ -322,8 +334,27 @@ export function Composer() {
         name: a.name,
         description: a.description,
         color: a.avatarColor,
+        workspaceBuiltin: a.workspaceBuiltin === true,
       })),
     [agents],
+  )
+
+  /** v0.36.0（F4.3）：agent 列表过滤词（打开面板时重置） */
+  const [agentFilter, setAgentFilter] = useState('')
+  const filteredAgentItems = useMemo(() => {
+    const q = agentFilter.trim().toLowerCase()
+    if (!q) return agentItems
+    return agentItems.filter(
+      (a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q),
+    )
+  }, [agentItems, agentFilter])
+  const globalAgentItems = useMemo(
+    () => filteredAgentItems.filter((a) => !a.workspaceBuiltin),
+    [filteredAgentItems],
+  )
+  const workspaceAgentItems = useMemo(
+    () => filteredAgentItems.filter((a) => a.workspaceBuiltin),
+    [filteredAgentItems],
   )
 
   // ============ / 菜单数据 ============
@@ -722,7 +753,11 @@ export function Composer() {
         <Tooltip label={t('composer.switchAgent')} desc={t('composer.switchAgentDesc')} placement="top" delay={150}>
           <button
             type="button"
-            onClick={() => setMenu(menu === 'agent' ? null : 'agent')}
+            onClick={() => {
+              // v0.36.0（F4.3）：每次打开重置过滤词（上次的残留过滤会让面板看起来"空了"）
+              if (menu !== 'agent') setAgentFilter('')
+              setMenu(menu === 'agent' ? null : 'agent')
+            }}
             aria-haspopup="listbox"
             aria-expanded={menu === 'agent'}
             className={`inline-flex items-center gap-1.5 h-[26px] px-2 rounded-md border text-2xs font-mono transition-colors ${
@@ -805,40 +840,68 @@ export function Composer() {
 </Tooltip>
         )}
 
-        {/* v0.24.x：智能体下拉面板（宽度自适应内容，显示完整名称与标签） */}
+        {/* v0.24.x：智能体下拉面板（宽度自适应内容，显示完整名称与标签）
+            v0.36.0（F4.3 / P6）：输入过滤 + 内置区/工作区区 + 管理入口 */}
         {menu === 'agent' && (
           <PickerPopover
             title={t('composer.switchAgent')}
             onClose={() => setMenu(null)}
-            panelClass="w-max min-w-[220px] max-w-[360px]"
+            panelClass="w-max min-w-[240px] max-w-[380px]"
           >
             {agentItems.length === 0 ? (
               <div className="px-3 py-6 text-center text-xs text-text-tertiary">{t('composer.noAgents')}</div>
             ) : (
               <div className="flex flex-col">
-                {agentItems.map((a) => (
-                  <button
-                    key={a.id}
-                    onClick={() => {
-                      setSelectedAgent(a.id)
-                      setMenu(null)
-                    }}
-                    className={`flex items-center gap-2 h-8 px-2.5 text-left transition-colors whitespace-nowrap ${
-                      a.id === selectedAgentId ? 'bg-bg-active' : 'hover:bg-bg-hover'
-                    }`}
-                  >
-                    <span
-                      className="flex-shrink-0 h-5 w-5 flex items-center justify-center rounded-md text-xs font-medium"
-                      style={{ background: `${a.color}22`, color: a.color }}
-                    >
-                      <Icon.Bot width={13} height={13} />
-                    </span>
-                    <span className="flex-1 min-w-0 text-xs text-text-primary overflow-hidden text-ellipsis">{a.name}</span>
-                    {a.id === selectedAgentId && (
-                      <span className="text-2xs text-success flex-shrink-0">✓ {t('composer.current')}</span>
+                <input
+                  autoFocus
+                  value={agentFilter}
+                  onChange={(e) => setAgentFilter(e.target.value)}
+                  placeholder={t('composer.agentFilterPlaceholder')}
+                  className="mx-2 mb-1 h-7 px-2 text-xs rounded-md bg-bg-input border border-border-default text-text-primary outline-none focus:border-accent"
+                />
+                {filteredAgentItems.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-xs text-text-tertiary">
+                    {t('composer.agentFilterEmpty')}
+                  </div>
+                ) : (
+                  <>
+                    {globalAgentItems.length > 0 && (
+                      <AgentSection
+                        label={t('composer.agentSectionGlobal')}
+                        items={globalAgentItems}
+                        selectedAgentId={selectedAgentId}
+                        currentLabel={t('composer.current')}
+                        onPick={(id) => {
+                          setSelectedAgent(id)
+                          setMenu(null)
+                        }}
+                      />
                     )}
-                  </button>
-                ))}
+                    {workspaceAgentItems.length > 0 && (
+                      <AgentSection
+                        label={t('composer.agentSectionWorkspace')}
+                        items={workspaceAgentItems}
+                        selectedAgentId={selectedAgentId}
+                        currentLabel={t('composer.current')}
+                        onPick={(id) => {
+                          setSelectedAgent(id)
+                          setMenu(null)
+                        }}
+                      />
+                    )}
+                  </>
+                )}
+                <button
+                  type="button"
+                  data-testid="composer-manage-agents"
+                  onClick={() => {
+                    openModulePage('agents')
+                    setMenu(null)
+                  }}
+                  className="mt-1 h-8 px-2.5 text-left text-xs text-accent border-t border-border-subtle hover:bg-bg-hover transition-colors"
+                >
+                  {t('composer.manageAgents')}
+                </button>
               </div>
             )}
           </PickerPopover>
@@ -1306,6 +1369,53 @@ function CtxRing({
         )}
       </div>
     </Tooltip>
+  )
+}
+
+/* ============================================================
+ * AgentSection — v0.36.0（F4.3 / P6）agent 分区（内置区 / 工作区区）
+ * 为什么分区：工作区内置 agent 随工作区分发，与全局 agent 的生效范围不同；
+ * 混在一个平铺列表里，用户无法判断"换工作区它还在不在"。
+ * ============================================================ */
+function AgentSection({
+  label,
+  items,
+  selectedAgentId,
+  currentLabel,
+  onPick,
+}: {
+  label: string
+  items: Array<{ id: string; name: string; color: string }>
+  selectedAgentId: string | null
+  currentLabel: string
+  onPick: (id: string) => void
+}) {
+  return (
+    <>
+      <div className="px-3 pt-2 pb-1 text-2xs text-text-tertiary uppercase tracking-wider font-medium select-none">
+        {label}
+      </div>
+      {items.map((a) => (
+        <button
+          key={a.id}
+          onClick={() => onPick(a.id)}
+          className={`w-full flex items-center gap-2 h-8 px-2.5 text-left transition-colors whitespace-nowrap ${
+            a.id === selectedAgentId ? 'bg-bg-active' : 'hover:bg-bg-hover'
+          }`}
+        >
+          <span
+            className="flex-shrink-0 h-5 w-5 flex items-center justify-center rounded-md text-xs font-medium"
+            style={{ background: `${a.color}22`, color: a.color }}
+          >
+            <Icon.Bot width={13} height={13} />
+          </span>
+          <span className="flex-1 min-w-0 text-xs text-text-primary overflow-hidden text-ellipsis">{a.name}</span>
+          {a.id === selectedAgentId && (
+            <span className="text-2xs text-success flex-shrink-0">✓ {currentLabel}</span>
+          )}
+        </button>
+      ))}
+    </>
   )
 }
 

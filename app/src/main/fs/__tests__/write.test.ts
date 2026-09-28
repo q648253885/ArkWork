@@ -28,6 +28,7 @@ import {
 } from '../write.js'
 import { fastHash, probeText, readText } from '../text.js'
 import { FsError } from '@shared/utils/fs-error'
+import { stripComments } from '@shared/utils/source-guard'
 import type { ConflictInfo, WriteTextRequest } from '@shared/types/fs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -80,7 +81,7 @@ async function tmpResidue(dir: string): Promise<string[]> {
 
 test('TC-WRITE-001 原子性源码契约：tmp + 同目录 rename，无 writeFile(target) 直写', async () => {
   const src = await readFile(WRITE_SRC, 'utf-8')
-  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const code = stripComments(src)
 
   // ① 临时文件命名固定为 {dir}/.{name}.arkwork-tmp
   assert.match(code, /\.\$\{basename\(target\)\}\.arkwork-tmp/, '临时文件必须是「同目录 + 隐藏 + 固定后缀」')

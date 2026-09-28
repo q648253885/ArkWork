@@ -73,7 +73,7 @@ test('TC-PLM-002 非法输入（空串 / 大写 / 含空格 / 冒号后空）返
 
 test('TC-PLM-003 只挑 kind 为 ui.panel 的条目，其余 kind 全部忽略', () => {
   const others: SlotEntry[] = [
-    { id: 'renderer:kchart', kind: 'ui.renderer', label: 'x', payload: { rendererKind: 'table', extensions: ['kchart'], override: true, labelKey: 'x' } },
+    { id: 'theme:t', kind: 'ui.theme', label: 'x', payload: { light: { '--a': '#fff' }, dark: {} } },
     { id: 'action:mark', kind: 'ui.action', label: 'y', payload: { actionId: 'mark', label: '标记', origin: 'test' } },
   ]
   const tabs = panelTabsOf([...others, pluginPanelEntry()])
