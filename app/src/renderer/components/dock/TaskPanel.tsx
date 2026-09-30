@@ -27,6 +27,7 @@ import { useStore } from '../../store'
 import type { GraphNotice, GraphRow, NodeStatus, ReplanPatch } from '@shared/types/ipc'
 import { tierLabel } from '@shared/types/graph'
 import { sanitizeTierReason } from '../../utils/tier-reason'
+import { buildRoundIndex } from '../../utils/round-filter'
 import { TodoPanel } from './TodoPanel'
 import { useGraph } from '../graph/useGraph'
 import { GraphNotices } from '../graph/GraphNotices'
@@ -73,8 +74,8 @@ export function TaskPanel() {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [width, setWidth] = useState(NARROW_WIDTH)
   const rootRef = useRef<HTMLDivElement>(null)
-  /** 筛选条当前档位（默认「全部」） */
-  const [filter, setFilter] = useState<FilterKey>('all')
+  /** 筛选条当前档位：**默认「本轮任务」**（用户诉求：先看这一轮在做什么） */
+  const [filter, setFilter] = useState<FilterKey>('round')
   /** 「定位▾」下拉是否展开 */
   const [locateOpen, setLocateOpen] = useState(false)
 
@@ -105,17 +106,16 @@ export function TaskPanel() {
   /* ---------------- needs_human 置顶（最高视觉优先级） ---------------- */
   const waitingRows = useMemo(() => rows.filter((r) => r.status === 'needs_human'), [rows])
 
-  /* ---------------- v0.43.0（R4）：轮次 join（node.id ↔ planItem.id，D174 播种口径） ---------------- */
-  const roundById = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const p of task?.planItems ?? []) m.set(p.id, p.round ?? 1)
-    return m
-  }, [task?.planItems])
-  const currentRound = useMemo(
-    () => Math.max(1, ...Array.from(roundById.values(), (v) => v ?? 1)),
-    [roundById],
+  /* ---------------- v0.43.0（R4）：轮次判据（账本为准，见 utils/round-filter.ts） ---------------- */
+  // 账本快照 = 唯一真相源（`file.round` / `item.round`）；planItems 只是派生镜像兜底。
+  const ledger = useStore((s) => (s.selectedTaskId ? s.ledgerSnapshots[s.selectedTaskId] : undefined))
+  const roundIndex = useMemo(
+    () => buildRoundIndex({ ledger, planItems: task?.planItems }),
+    [ledger, task?.planItems],
   )
-  const rowRound = useCallback((r: GraphRow): number => roundById.get(r.id) ?? 1, [roundById])
+  const currentRound = roundIndex.current
+  /** 行的轮次；null = 无法归属（历史行）→ 只进「全部任务」 */
+  const rowRound = useCallback((r: GraphRow): number | null => roundIndex.roundOf(r), [roundIndex])
 
   /* ---------------- 两 Tab 计数 ---------------- */
   const filterCounts = useMemo<Record<FilterKey, number>>(

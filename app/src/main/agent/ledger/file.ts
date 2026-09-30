@@ -65,6 +65,11 @@ export function normalizeLedger(raw: unknown, taskId: string): LedgerFile {
       note: typeof o.note === 'string' ? o.note : undefined,
       attempts: typeof o.attempts === 'number' ? o.attempts : 0,
       nodeId: typeof o.nodeId === 'string' ? o.nodeId : undefined,
+      // v0.43.0（R4）：逐项轮次必须**原样保留**。此前本函数未收录该字段，
+      // 于是「读 → 规范化 → 写回」的每一轮 mutate 都会把 round 抹掉（实测 33 项全归 1），
+      // 「本轮任务」分区因此恒等于「全部任务」。旧数据无该字段 → 保持 undefined，
+      // 由消费端（toSnapshotView / toPlanItems / buildRoundIndex）统一 `?? 1` 归一。
+      round: typeof o.round === 'number' && Number.isInteger(o.round) && o.round >= 1 ? o.round : undefined,
     }
   })
   const modeRaw = r.mode
@@ -80,6 +85,9 @@ export function normalizeLedger(raw: unknown, taskId: string): LedgerFile {
     revision: typeof r.revision === 'number' && r.revision >= 0 ? r.revision : 0,
     updatedAt: typeof r.updatedAt === 'number' ? r.updatedAt : now,
     items,
+    // v0.43.0（R4）：当前轮次（旧账本无该字段 → 归一 1，升级容忍）。
+    // 与 item.round 同理，漏收会直接把「本轮」判据打回第 1 轮。
+    round: typeof r.round === 'number' && Number.isInteger(r.round) && r.round >= 1 ? r.round : 1,
     resume: (r.resume ?? {}) as LedgerFile['resume'],
     log,
   }

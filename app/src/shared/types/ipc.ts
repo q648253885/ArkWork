@@ -1105,11 +1105,19 @@ export interface LedgerItemView {
   note?: string
   attempts: number
   completedAt?: number
+  /** 所属任务轮次（v0.43.0 · R4）；旧账本无该字段 → 归一 1 */
+  round?: number
 }
 
 /** UI 只读的账本快照 */
 export interface LedgerSnapshotView {
   taskId: string
+  /**
+   * 当前任务轮次（v0.43.0 · R4）：plan-commit 含新建项时 +1。
+   * 「本轮任务」Tab 的唯一判据来源 —— 账本是唯一真相源，
+   * 面板不再依赖 `graph 行 ↔ planItems` 的 id 对位（该对位在结构对账后会断链）。
+   */
+  round?: number
   /** chat / plan / spec —— **由模型自选**，UI 只展示不提供选择 */
   mode: 'chat' | 'plan' | 'spec'
   modeReason: string

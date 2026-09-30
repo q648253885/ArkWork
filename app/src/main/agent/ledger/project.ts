@@ -59,6 +59,8 @@ export function toPlanItems(l: LedgerFile): PlanItem[] {
 export function toSnapshotView(l: LedgerFile): LedgerSnapshotView {
   return {
     taskId: l.taskId,
+    // v0.43.0（R4）：当前轮次随快照透出 —— 「本轮任务」Tab 的唯一判据（账本为准）
+    round: l.round ?? 1,
     mode: l.mode,
     modeReason: l.modeReason,
     modeBy: l.modeBy,
@@ -73,6 +75,8 @@ export function toSnapshotView(l: LedgerFile): LedgerSnapshotView {
       note: it.note,
       attempts: it.attempts,
       completedAt: it.completedAt,
+      // v0.43.0（R4）：逐项轮次（旧账本归一 1）—— 面板据此分区「本轮 / 全部」
+      round: it.round ?? 1,
     })),
     resumeHint: l.resume?.hint,
     hasResumePoint: Boolean(l.resume?.hint) || l.items.some((it) => it.status === 'paused'),

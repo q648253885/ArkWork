@@ -144,8 +144,16 @@ test('TC-PANEL-HDR-007 ★ v0.43.0 R4：筛选条改两 Tab（本轮任务 / 全
   )
   assert.match(PANEL, /FILTER_KEYS\.map\(/, '筛选条应遍历 FILTER_KEYS 渲染')
   assert.match(PANEL, /filterCounts\[k\]/, '每档展示计数')
-  assert.match(PANEL, /roundById/, '轮次 join（node.id ↔ planItem.id）必须存在')
+  assert.match(PANEL, /ledgerSnapshots\[s\.selectedTaskId\]/, '轮次判据取自账本快照（唯一真相源）')
   assert.doesNotMatch(PANEL, /'todo', 'active', 'ended'/, '旧四档键不得残留')
+})
+
+test('TC-PANEL-HDR-012 ★ v0.43.0 用户反馈①：筛选条**默认档位 = 本轮任务**', () => {
+  assert.match(
+    PANEL,
+    /const \[filter, setFilter\] = useState<FilterKey>\('round'\)/,
+    '默认 tab 必须是「本轮任务」（用户诉求：先看这一轮在做什么）',
+  )
 })
 
 test('TC-PANEL-HDR-008 五态（加载/空/错误/成功/损坏）在重设计后仍可达', () => {

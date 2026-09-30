@@ -419,3 +419,42 @@ test('TC-LED-024 D176 set-artifact 算子：声明与清除，NOT_FOUND 可诊�
   assert.equal(missing.ok, false)
   assert.equal(missing.error?.code, 'NOT_FOUND')
 })
+
+test('TC-LED-025 ★ v0.43.0 R4 回归：normalizeLedger 必须保留 round（读→写回不得抹掉轮次）', async () => {
+  // 用户实测症状：面板两 Tab 计数恒等（33/33）。根因是 normalizeLedger 未收录 round，
+  // 「读 → 规范化 → 写回」每一轮 mutate 都把轮次抹平为 1 → 所有项都算「本轮」。
+  const { normalizeLedger, writeLedgerFile, readLedgerFile, invalidateLedgerCache } = await import('../index.js')
+
+  // ① 纯函数：带轮次的账本原样保留；旧数据缺字段 → undefined（消费端 ?? 1 归一）
+  const norm = normalizeLedger(
+    {
+      taskId: 'T-x',
+      goal: 'g',
+      mode: 'plan',
+      revision: 3,
+      round: 2,
+      items: [
+        { id: 'a', text: 'A', status: 'done', round: 2 },
+        { id: 'b', text: 'B', status: 'done', round: 1 },
+        { id: 'c', text: 'C', status: 'pending' },
+      ],
+    },
+    'T-x',
+  )
+  assert.equal(norm.round, 2, 'file.round 必须保留（此前被抹掉 → 判据恒回第 1 轮）')
+  assert.deepEqual(norm.items.map((i) => i.round), [2, 1, undefined], '逐项 round 保留；旧数据留 undefined')
+  assert.equal(normalizeLedger({ items: [] }, 'T-y').round, 1, '旧账本（无 round）→ 文件级归一 1')
+
+  // ② 落盘往返：写回后读出的 round 不丢（缓存失效以强制走磁盘）
+  const id = await newTask('tc025', ['项一', '项二'])
+  const l0 = (await ensureLedger((await getTask(id))!))!
+  await writeLedgerFile({
+    ...l0,
+    round: 3,
+    items: l0.items.map((it, i) => ({ ...it, round: i === 0 ? 3 : 2 })),
+  })
+  invalidateLedgerCache(id)
+  const back = (await readLedgerFile(id))!
+  assert.equal(back.round, 3, '往返后 file.round 不丢')
+  assert.deepEqual(back.items.map((i) => i.round), [3, 2], '往返后逐项 round 不丢')
+})

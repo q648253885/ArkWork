@@ -57,12 +57,18 @@ test('TC-FIX2-003 ★ v0.43.0 R4 改写：筛选项恰为两 Tab 且顺序固定
   )
 })
 
-test('TC-FIX2-004 ★ v0.43.0 R4 改写：状态分组筛选退役，轮次 join 成为唯一过滤口径', () => {
+test('TC-FIX2-004 ★ v0.43.0 R4 改写：状态分组筛选退役，轮次判据以**账本快照**为唯一来源', () => {
   // 旧「待办/进行中/已结束」状态映射随四档筛选一起退役；
-  // 「本轮任务」= rowRound(row) === currentRound（join 自 planItem.round）
+  // 「本轮任务」= rowRound(row) === currentRound，而轮次取自 **账本快照**
+  // （`planItems` 自 v0.37.0 起是派生镜像、不带 round，不能再当判据来源）。
   assert.doesNotMatch(PANEL, /FILTER_STATUSES/, '旧状态映射表不得残留')
   assert.match(PANEL, /rowRound\(r\) === currentRound/, '本轮过滤判据必须存在')
-  assert.match(PANEL, /Math\.max\(1, \.\.\.Array\.from\(roundById\.values/, '当前轮次 = 各项轮次最大值')
+  assert.doesNotMatch(PANEL, /roundById/, '旧「planItems 建 map」的轮次 join 必须退役')
+  assert.match(
+    PANEL,
+    /buildRoundIndex\(\{ ledger, planItems: task\?\.planItems \}\)/,
+    '轮次索引须由账本快照构建（planItems 仅兜底）',
+  )
 })
 
 test('TC-FIX2-005 筛选条渲染每档的 i18n 标签与计数（tabular-nums）', () => {
