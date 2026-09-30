@@ -45,10 +45,23 @@ test('TC-UIMODE-001 TaskPanel 不再有档位升降级下拉（只读徽标保�
   // 只读展示必须还在（否则就是"把展示一起删掉了"）
   assert.match(TASK_PANEL, /data-testid="graph-tier-badge"/, '应保留只读档位徽标')
   assert.match(TASK_PANEL, /tierLabel\(snapshot\.tier, i18n\.language\)/, '徽标应继续显示档位释义')
+  // v0.43.0（R2）：档位升为标题下方独立行 —— 判定理由改为**可见文本**（title 挂其防截断），
+  // 不再内联在徽标 title 上（纪律㉔：合法改版打破旧断言 → 按新结构改写，语义不变）。
+  // v0.43.0（用户反馈②）：理由先经 sanitizeTierReason 剥离内部迁移语言，再渲染。
   assert.match(
     TASK_PANEL,
-    /title=\{snapshot\.tierReason \?\? tierLabel\(snapshot\.tier, i18n\.language\)\}/,
+    /const tierReason = sanitizeTierReason\(snapshot\?\.tierReason\)/,
+    '判定理由应先经展示层净化（内部迁移语言不外露）',
+  )
+  assert.match(
+    TASK_PANEL,
+    /title=\{tierReason\}/,
     'title 应继续给出判定理由（用户仍能知道"为什么是这个档位"）',
+  )
+  assert.match(
+    TASK_PANEL,
+    /\{tierReason\}[\s\S]{0,80}<\/span>/,
+    '判定理由应作为可见文本渲染（R2：档位独立行，理由全文可见）',
   )
 })
 

@@ -81,3 +81,25 @@ export function buildPlanCommitNote(diff: PlanDiffResult, nextDoingText?: string
     ? `已完成 ${names}，接下来 ${nextDoingText.slice(0, 40)}。`
     : `已完成 ${names}。`
 }
+
+/** replan 依据回执里依据文本的最大长度（超出截断，避免长粘贴淹没交互区）。 */
+export const REPLAN_NOTE_REASON_MAX = 120
+
+/**
+ * v0.43.0（R5）：**replan 依据回执** —— 提交含新建项、且账本**提交前已有项**
+ * （= 真 replan，而非首次建计划）时，把依据（reason）作为本轮目标简介展示在
+ * 交互区（NoteBlock）。用户据此判断「凭什么改计划」，也对应面板标题的更新。
+ *
+ * 纯函数：`creates`/`hadItems`/`reason` 由调用方从 diff 与账本读取后传入。
+ *
+ * @param creates  本次提交新增项数（≤0 = 无 replan）
+ * @param hadItems 提交前账本是否已有项（false = 首次建计划，不是 replan）
+ * @param reason   replan 依据（plan-commit 门禁已保证非空，这里再做一次防御）
+ */
+export function buildReplanNote(creates: number, hadItems: boolean, reason: string): string | null {
+  if (creates <= 0 || !hadItems) return null
+  const head = reason.trim()
+  if (head === '') return null
+  const clipped = head.length > REPLAN_NOTE_REASON_MAX ? `${head.slice(0, REPLAN_NOTE_REASON_MAX)}…` : head
+  return `本轮任务更新：${clipped}（新增 ${creates} 项）`
+}

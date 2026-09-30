@@ -49,6 +49,8 @@ export function toPlanItems(l: LedgerFile): PlanItem[] {
     completedAt: it.completedAt,
     source: (it.source || 'ledger-sync') as PlanItem['source'],
     parentId: it.parentId ?? null,
+    // v0.43.0（R4）：所属任务轮次（旧账本无该字段 → 归一 1，「本轮任务」判据）
+    round: it.round ?? 1,
   }))
 }
 

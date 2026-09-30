@@ -101,10 +101,11 @@ test('TC-ENDG-006 ★ seed §6 层级规划引导：三份 agent prompt 全部�
   }
 })
 
-test('TC-ENDG-007 ★ task_plan schema：parent 描述含两级结构建议；内置 agent version 同步 0.42.1', () => {
+test('TC-ENDG-007 ★ task_plan schema：parent 描述含两级结构建议；内置 agent version 同步 0.43.0', () => {
   assert.match(SEED, /多阶段任务建议建两级结构（主任务 → 子任务），简单任务平铺即可/, 'parent 字段描述必须引导层级')
+  // v0.43.0（R5，纪律㉔ 改写）：§6/§7 增「改状态 / 新增项必须填 reason」→ 版本升 0.43.0
   const versions = (SEED.match(/version: '([\d.]+)'/g) ?? []).map((s) => s.replace(/\D+/g, ''))
-  const target = '0422'
-  assert.ok(versions.includes(target), `内置 agent version 必须升到 0.42.2（D214b 技能清单变更触发存量同步）`)
-  assert.equal((SEED.match(/version: '0\.42\.2'/g) ?? []).length, 3, '三份内置 agent 全部同步')
+  const target = '0430'
+  assert.ok(versions.includes(target), `内置 agent version 必须升到 0.43.0（R5 reason 规则触发存量同步）`)
+  assert.equal((SEED.match(/version: '0\.43\.0'/g) ?? []).length, 3, '三份内置 agent 全部同步')
 })

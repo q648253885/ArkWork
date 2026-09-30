@@ -49,30 +49,20 @@ test('TC-FIX2-002 needs_human / failed 节点永不自动折叠', () => {
  * 二、四档筛选（全部 / 待办 / 进行中 / 已结束）
  * ============================================================ */
 
-test('TC-FIX2-003 筛选项恰为 4 档且顺序固定', () => {
+test('TC-FIX2-003 ★ v0.43.0 R4 改写：筛选项恰为两 Tab 且顺序固定（本轮任务 / 全部任务）', () => {
   assert.match(
     PANEL,
-    /const FILTER_KEYS: readonly FilterKey\[\] = \['all', 'todo', 'active', 'ended'\]/,
-    '筛选键应恰为 all/todo/active/ended',
+    /const FILTER_KEYS: readonly FilterKey\[\] = \['round', 'all'\]/,
+    '筛选键应恰为 round/all',
   )
 })
 
-test('TC-FIX2-004 四档状态映射口径正确（11 态 → 3 组，互斥且完备）', () => {
-  assert.match(
-    PANEL,
-    /todo:\s*\[[^\]]*'draft'[^\]]*'proposed'[^\]]*'approved'[^\]]*'ready'[^\]]*'blocked'[^\]]*\]/,
-    '待办 = draft/proposed/approved/ready/blocked',
-  )
-  assert.match(
-    PANEL,
-    /active:\s*\[[^\]]*'in_progress'[^\]]*'verifying'[^\]]*'needs_human'[^\]]*\]/,
-    '进行中 = in_progress/verifying/needs_human',
-  )
-  assert.match(
-    PANEL,
-    /ended:\s*\[[^\]]*'completed'[^\]]*'cancelled'[^\]]*'failed'[^\]]*\]/,
-    '已结束 = completed/cancelled/failed',
-  )
+test('TC-FIX2-004 ★ v0.43.0 R4 改写：状态分组筛选退役，轮次 join 成为唯一过滤口径', () => {
+  // 旧「待办/进行中/已结束」状态映射随四档筛选一起退役；
+  // 「本轮任务」= rowRound(row) === currentRound（join 自 planItem.round）
+  assert.doesNotMatch(PANEL, /FILTER_STATUSES/, '旧状态映射表不得残留')
+  assert.match(PANEL, /rowRound\(r\) === currentRound/, '本轮过滤判据必须存在')
+  assert.match(PANEL, /Math\.max\(1, \.\.\.Array\.from\(roundById\.values/, '当前轮次 = 各项轮次最大值')
 })
 
 test('TC-FIX2-005 筛选条渲染每档的 i18n 标签与计数（tabular-nums）', () => {
@@ -127,7 +117,7 @@ test('TC-FIX2-010 四语均具备筛选 / 定位 / 进度 / 折叠词条', () =>
     assert.ok(tp, `${loc}.json 缺 taskPanel 命名空间`)
     const filter = tp!.filter as Record<string, unknown> | undefined
     assert.ok(filter, `${loc}.json 缺 taskPanel.filter`)
-    for (const k of ['all', 'todo', 'active', 'ended']) {
+    for (const k of ['all', 'round']) {
       assert.ok(typeof filter![k] === 'string', `${loc}.json 缺 taskPanel.filter.${k}`)
     }
     for (const k of ['locate', 'locateTip', 'progressTip', 'foldAll']) {

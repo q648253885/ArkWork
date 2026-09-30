@@ -115,6 +115,8 @@ const BUILTIN_AGENTS: Agent[] = [
 - **分析、调研、评审、方案类请求属于实质工作**（如"分析这个项目需要什么技术"）：应提交清单（可为 1~3 项的轻量结构，如"分析→汇总结论"），答复后如实标注完成；不要因为"一次答复就能说完"而跳过清单。
 - status 只有 5 个：todo / doing / done / skipped / blocked。同一时刻最多一项 doing。
 - 每项可用 note 写一句依据（如"已跑 npm test 通过"）。跳过 / 失败也如实标注，禁止批量打标。
+- **改状态 / 新增项必须填 reason**（本次提交的顶层 reason 字段）：把某项改为 done/skipped/blocked，
+  或新增项（replan）时，写清依据（改了什么、凭什么；新增基于什么新信息）。缺理由引擎会拒绝这次提交。
 - **成果产物（artifact）**：把一项标为 done 时必须为它声明 artifact —— 产出了文件/目录的填
   {path: "相对工作区路径", kind: "file" 或 "dir"}；以命令结果为产物的填 {kind: "command", check: "如何校验"}。
   收尾前引擎会逐项核对产物，缺声明或产物不在盘上都会被拦下，届时补 artifact 后重新收尾即可。
@@ -144,7 +146,8 @@ const BUILTIN_AGENTS: Agent[] = [
     // 必须升版本，否则存量装机器的 systemPrompt 永远不会更新（syncBuiltinAgentsToLatest
     // 只在 version 落后时同步）。
     // v0.38.1（D176）：§6 增成果产物（artifact）规则；0.38.1 已被 BUILD7 消费 → 升 0.38.2 触发同步。
-    version: '0.42.2',
+    // v0.43.0（R5）：§6/§7 增「改状态 / 新增项必须填 reason」规则 → 升版本触发存量同步
+    version: '0.43.0',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
   },
@@ -237,6 +240,8 @@ const BUILTIN_AGENTS: Agent[] = [
 - **分析、调研、评审、方案类请求属于实质工作**（如"分析这个项目需要什么技术"）：应提交清单（可为 1~3 项的轻量结构），答复后如实标注完成；不要因为"一次答复就能说完"而跳过清单。
 - status 只有 5 个：todo / doing / done / skipped / blocked。同一时刻最多一项 doing。
 - 每项可用 note 写一句依据（如"已跑 npm test 通过"）。跳过 / 失败也如实标注，禁止批量打标。
+- **改状态 / 新增项必须填 reason**（本次提交的顶层 reason 字段）：把某项改为 done/skipped/blocked，
+  或新增项（replan）时，写清依据（改了什么、凭什么；新增基于什么新信息）。缺理由引擎会拒绝这次提交。
 - **成果产物（artifact）**：把一项标为 done 时必须为它声明 artifact —— 产出了文件/目录的填
   {path: "相对工作区路径", kind: "file" 或 "dir"}；以命令结果为产物的填 {kind: "command", check: "如何校验"}。
   收尾前引擎会逐项核对产物，缺声明或产物不在盘上都会被拦下，届时补 artifact 后重新收尾即可。
@@ -274,7 +279,8 @@ const BUILTIN_AGENTS: Agent[] = [
     // v0.34.4（D66）：提示词 §7 修正（"创建 TodoWrite 清单" → 清单由计划阶段生成），
     //                 再次升版本以触发已装机器的同步。
     // v0.38.0：清单控制面收敛为 task_plan/turn_note，§7/§8 重写 → 再升版本。
-    version: '0.42.2',
+    // v0.43.0（R5）：§6/§7 增「改状态 / 新增项必须填 reason」规则 → 升版本触发存量同步
+    version: '0.43.0',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
     // v0.15.0 Task 6：@coder 默认 acceptEdits —— 工作区内轻写（sed -i/tee/mkdir/cp/...）不再每次弹确认；
@@ -390,7 +396,8 @@ const BUILTIN_AGENTS: Agent[] = [
     defaultConfig: { temperature: 0.2, maxIterations: 80 },
     isBuiltin: true,
     // v0.38.0：清单控制面收敛为 task_plan/turn_note，§8/§9 重写 → 升版本触发存量同步
-    version: '0.42.2',
+    // v0.43.0（R5）：§6/§7 增「改状态 / 新增项必须填 reason」规则 → 升版本触发存量同步
+    version: '0.43.0',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
     defaultPermissionMode: 'acceptEdits',
@@ -776,7 +783,15 @@ const BUILTIN_SKILLS: Skill[] = [
             required: ['text', 'status'],
           },
         },
-        reason: { type: 'string', description: '本次调整的原因（改结构时建议填写）' },
+        // v0.43.0（R5）：状态修改 / 新增项（replan）**必须有理由** —— 引擎在落库前
+        // 拦下无理由的这两类变更，并把人话拒绝回给模型；描述必须与门禁口径一致
+        // （纪律⑧：模型可见文案 = 唯一事实源），否则模型不知道要填，合法提交被拒。
+        reason: {
+          type: 'string',
+          description:
+            '本次调整的理由：改状态（完成/跳过/受阻）时**必填** —— 写清依据（如「已跑 npm test 通过」「用户确认了方案」）；' +
+            '新增项（replan）时**必填** —— 写清本轮目标与新增依据（基于什么新信息）。仅顺序/文本微调可省略。',
+        },
       },
       required: ['items'],
     },

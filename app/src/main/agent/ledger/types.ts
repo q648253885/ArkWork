@@ -132,6 +132,8 @@ export interface LedgerItem {
   attempts: number
   /** 该节点对应的图节点 id（有图任务），用于 ledger → 图单向下推 */
   nodeId?: string
+  /** 所属任务轮次（v0.43.0 · R4）：新建时 = 当时账本轮次；沿用项保留原值；旧数据归一 1 */
+  round?: number
 }
 
 /**
@@ -178,6 +180,11 @@ export interface LedgerFile {
   items: LedgerItem[]
   resume: LedgerResume
   log: LedgerLogEntry[]
+  /**
+   * 当前任务轮次（v0.43.0 · R4）：plan-commit 含新建项时 +1。
+   * 「本轮任务」Tab 唯一判据 = item.round === file.round；旧账本缺省归一为 1。
+   */
+  round?: number
 }
 
 /** 日志环形缓冲上限（防止长任务文件无限膨胀） */

@@ -375,9 +375,11 @@ export async function reconcilePlanItemsToGraph(
    */
   source: string,
   reason?: string,
+  /** v0.43.0（R1）：本轮目标简介（轮次晋升时由 plan-commit 写入账本 goal）——下推 graph.goal */
+  goalText?: string,
 ): Promise<PlanSyncResult> {
   if (items.length === 0) return { ok: true } // 空清单不触发结构清空（防御性；task_plan 入口已禁空）
-  return withGraphWriteLock(ctx.graphId, () => reconcileLocked(ctx, items, source, reason))
+  return withGraphWriteLock(ctx.graphId, () => reconcileLocked(ctx, items, source, reason, goalText))
 }
 
 async function reconcileLocked(
@@ -386,6 +388,8 @@ async function reconcileLocked(
   /** v0.39.0：同 `reconcilePlanItemsToGraph` —— 记账用标识，不是 UI 徽标枚举 */
   source: string,
   reason?: string,
+  /** v0.43.0（R1）：本轮目标简介（轮次晋升时由 plan-commit 写入账本 goal）——下推 graph.goal */
+  goalText?: string,
 ): Promise<PlanSyncResult> {
   const base = await getGraphById(ctx.graphId)
   if (!base) {
@@ -528,7 +532,14 @@ async function reconcileLocked(
     current = patchNode(current, goal.id, (g) => ({ ...g, children: orderedChildIds, revision: g.revision + 1 }))
   }
 
-  if (changes.length === 0 && !childrenDrifted) return { ok: true }
+  // v0.43.0（R1）：本轮目标简介下推 graph.goal（轮次晋升时由 plan-commit 写入账本 goal）
+  let goalDrifted = false
+  if (goalText && goalText.trim() && current.goal !== goalText.trim()) {
+    current = { ...current, goal: goalText.trim(), updatedAt: Date.now() }
+    goalDrifted = true
+  }
+
+  if (changes.length === 0 && !childrenDrifted && !goalDrifted) return { ok: true }
 
   await persist(
     { taskId: ctx.taskId, graphId: ctx.graphId, iteration: ctx.iteration ?? 0 },

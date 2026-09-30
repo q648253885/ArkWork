@@ -123,6 +123,13 @@ function setStatus(
   note: string | undefined,
   force: boolean,
   changed: OpResult['changed'],
+  /**
+   * v0.43.0（R5）：**完成必须有产物证据（全模式）**。
+   * plan-commit 通道传 true —— 任何模式下 done 无 artifact 都降级 verifying；
+   * 其余通道（set-status 等）默认 false —— 沿用 spec 模式「缺验收且无产物」降级
+   *（手动标记完成的行为不变）。
+   */
+  artifactRequiredForDone = false,
 ): LedgerError | null {
   const idx = findIndex(l, itemId)
   if (idx < 0) {
@@ -150,17 +157,23 @@ function setStatus(
   if (!force && !canLedgerTransition(from, to)) {
     return { code: 'INVARIANT', message: `非法状态转换：${from} → ${to}（清单项 ${itemId}）` }
   }
-  // I2：spec 模式缺验收契约 → 降级 verifying（不拒绝，避免模型卡死）。
+  // I2：完成必须有证据 → 降级 verifying（不拒绝，避免模型卡死）。
   // v0.42.2（D214a）：task_plan 的 schema **没有 acceptance 字段** —— 唯一清单入口
   // 建出的项 acceptance 恒空，本判据原先使 spec 模式下 done **经清单路径永不可达**
   //（真机死循环：DeepSeek / qwen3.8 反复重交同一项 8+ 次）。可达出路 = D176 的
   // artifact 声明（完成门禁 ARTIFACT 判据收尾时会核对产物存在性，验收口径一致）：
   // 带声明的 done 不再降级。注意 plan-commit 已把 artifact 先于本判定落盘（D214a
   // 写入顺序修复），同一次提交里「标 done + 声明产物」一步到位。
+  //
+  // v0.43.0（R5）：把该降级从「spec 缺 acceptance」推广为**全模式完成必须有产物证据**。
+  // 由 plan-commit 通道传 artifactRequiredForDone=true 触发（模型经清单标记完成的路径）；
+  // set-status 手动路径保持原 spec 语义，行为不变。
   let target = to
-  if (to === 'done' && !force && l.mode === 'spec' && item.acceptance.length === 0 && !item.artifact) {
+  const artifactMissing = !force && to === 'done' && !item.artifact
+  const specLegacy = l.mode === 'spec' && item.acceptance.length === 0
+  if (artifactMissing && (artifactRequiredForDone || specLegacy)) {
     target = 'verifying'
-    note = `${note ? `${note}｜` : ''}spec 模式任务缺验收契约且未声明成果产物，引擎降级为 verifying —— 带 artifact 声明重新提交即为 done`
+    note = `${note ? `${note}｜` : ''}完成未声明成果产物，引擎降级为 verifying —— 带 artifact 声明重新提交即为 done`
   }
   // I6：blocked 必须带 note
   if (target === 'blocked' && !note) {
@@ -454,6 +467,21 @@ export async function applyOp(l: LedgerFile, op: LedgerOp): Promise<OpResult> {
       // v0.42.2（D214c）：引擎自动纠正的人话回执（I2 降级等），随 OpResult 透传
       const warnings: string[] = []
 
+      // v0.43.0（R4/R1）：**轮次晋升** —— 提交含新建项且**提交前账本已有项**
+      // = replan（清单结构性变化）。轮次 +1；新建项 stamp 新轮次，沿用项保留原轮次
+      //（「之前的任务只保留在全部中」）；提交 reason 即本轮目标简介（落 l.goal，
+      // 经图同步下推 snapshot.goal）。
+      // 判据两点，缺一不可：
+      //  · 首次建计划（账本原为空）**不**晋升 —— 那不是 replan，第一轮就是 1；
+      //  · 纯状态更新（无新建项）不晋升 —— 已完成项的重确认不会把任务踢出新轮次。
+      const creates = op.layout.filter((e) => e.kind === 'new').length
+      if (creates > 0) {
+        // reason 即本轮目标简介 —— 首次建计划与 replan 都更新（面板标题随之刷新）。
+        if (op.reason && op.reason.trim()) l.goal = op.reason.trim()
+        // 仅「真 replan」（账本原有项）晋升轮次；首次建计划保持第 1 轮。
+        if (l.items.length > 0) l.round = (l.round ?? 1) + 1
+      }
+
       // ① 先落状态 —— 复用 setStatus 的全部不变量检查（I1/I2/I5/I6/I8）。
       //    v0.42.2（D214a）：**artifact 先于 setStatus 落盘** —— I2 的可达出路是
       //    「带 artifact 的 done 不降级」，若 artifact 在状态转换之后才写，同一次
@@ -470,14 +498,20 @@ export async function applyOp(l: LedgerFile, op: LedgerOp): Promise<OpResult> {
           it.artifact = entry.artifact
           it.updatedAt = now
         }
+        // v0.43.0（R5）：**完成必须有产物证据（全模式）**——done 项在本提交与既有
+        // 声明中都没有 artifact → setStatus 内部降级 verifying（D176 完成门禁口径
+        // 前移到提交时；spec 模式的验收规则并入同一条）。
+        // ⚠️ 降级必须发生在 setStatus **内部**（转换合法性检查通过之后）：
+        // 此前把 'verifying' 当目标态直接送进状态机 → pending→verifying 非法转换 → 整单失败。
         if (entry.status !== it.status) {
-          const err = setStatus(l, entry.id, entry.status, op.source, entry.note, false, changed)
+          const wasVerifyingNeeded = entry.status === 'done' && !(entry.artifact ?? it.artifact)
+          const err = setStatus(l, entry.id, entry.status, op.source, entry.note, false, changed, true)
           if (err) return fail(err.code, err.message, err.hint)
           // v0.42.2（D214c）：I2 降级发生后，实际落盘（verifying）与模型意图（done）
           // 不一致 —— 必须把「事实 + 出路」回给模型，否则回执说「完成」、快照却是
           // [?]，模型只能反复重交（真机死循环的直接驱动器）。
-          if (entry.status === 'done' && it.status === 'verifying') {
-            warnings.push(`项「${it.text.slice(0, 24)}」spec 模式缺验收契约且未声明成果产物，done 已降级 verifying（带 artifact 重提即为 done）`)
+          if (wasVerifyingNeeded && it.status === 'verifying') {
+            warnings.push(`项「${it.text.slice(0, 24)}」完成但未声明成果产物，done 已降级 verifying —— 带 artifact 声明重新提交即为 done`)
           }
         } else if (entry.note !== undefined && entry.note !== it.note) {
           it.note = entry.note
@@ -501,13 +535,13 @@ export async function applyOp(l: LedgerFile, op: LedgerOp): Promise<OpResult> {
           next.push(byId.get(entry.id)!)
           continue
         }
-        // v0.42.2（D214a）：新建项走与 existing 同一条 I2 判据 —— 否则
-        // 「删了重建」就能绕过 spec 模式的验收降级（旁路 = 不变量失效）。
+        // v0.42.2（D214a）→ v0.43.0（R5）：新建项走与 existing 同一条判据
+        //（done 必须有产物证据，全模式），否则「删了重建」就是旁路。
         let newStatus = entry.status
         let newNote = entry.note
-        if (newStatus === 'done' && l.mode === 'spec' && !entry.artifact) {
+        if (newStatus === 'done' && !entry.artifact) {
           newStatus = 'verifying'
-          newNote = `${newNote ? `${newNote}｜` : ''}spec 模式任务缺验收契约且未声明成果产物，引擎降级为 verifying —— 带 artifact 声明重新提交即为 done`
+          newNote = `${newNote ? `${newNote}｜` : ''}完成未声明成果产物，引擎降级为 verifying —— 带 artifact 声明重新提交即为 done`
           warnings.push(`新建项「${entry.text.slice(0, 24)}」缺成果产物声明，done 已降级 verifying（带 artifact 重提即为 done）`)
         }
         const item: LedgerItem = {
@@ -524,10 +558,13 @@ export async function applyOp(l: LedgerFile, op: LedgerOp): Promise<OpResult> {
           note: newNote,
           attempts: newStatus === 'running' ? 1 : 0,
           startedAt: newStatus === 'running' ? now : undefined,
+          round: l.round ?? 1,
         }
         if (entry.key) keyToId.set(entry.key, item.id)
         next.push(item)
-        changed.push({ itemId: item.id, from: 'pending', to: entry.status, note: entry.note })
+        // 回执用**实际落盘**状态（newStatus），而非模型草案（entry.status）——
+        // I2 降级后两者不一致，回执必须说事实（D214c）。
+        changed.push({ itemId: item.id, from: 'pending', to: newStatus, note: newNote })
       }
 
       // ②b v0.39.0（D185）：父项引用落地 —— parentKey 解析为真实 parentId。

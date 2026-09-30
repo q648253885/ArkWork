@@ -71,7 +71,7 @@ async function firstItemId(taskId: string): Promise<string> {
   return l.items[0]!.id
 }
 
-test('TC-SDR-001 ★ I2 真值表：spec+无验收+无 artifact → verifying（note 含出路）；带 artifact → done；plan 模式不变', async () => {
+test('TC-SDR-001 ★ I2 真值表（v0.43.0 R5 全模式）：无 artifact 的 done → verifying（note 含出路）；带 artifact → done（spec/plan 一致）', async () => {
   // ① spec + 无验收 + 无 artifact → verifying（降级，但 note 必须写可达出路）
   const t1 = await newTaskWithLedger('spec', ['实现功能 A'])
   const id1 = await firstItemId(t1)
@@ -95,13 +95,25 @@ test('TC-SDR-001 ★ I2 真值表：spec+无验收+无 artifact → verifying（
   const l2 = await loadLedger(t2)
   assert.equal(l2!.items[0]!.status, 'done', '★ 带 artifact 的 done 必须直接生效（一次提交，不再降级）')
 
-  // ③ plan 模式 + 无验收 → done（行为不变）
+  // ③ v0.43.0（R5）：**全模式推广** —— plan 模式同样要求产物证据，无 artifact 的 done 降级 verifying
   const t3 = await newTaskWithLedger('plan', ['实现功能 C'])
   const id3 = await firstItemId(t3)
   const r3 = await mutate(t3, { kind: 'plan-commit', layout: [{ kind: 'existing', id: id3, status: 'done' }], reason: 'test', source: 'task-plan' })
   assert.ok(r3.ok)
   const l3 = await loadLedger(t3)
-  assert.equal(l3!.items[0]!.status, 'done', '非 spec 模式不受 I2 影响（既有行为）')
+  assert.equal(l3!.items[0]!.status, 'verifying', '★ R5：完成门禁改为全模式，plan 模式无产物的 done 同样降级 verifying')
+
+  // ④ plan 模式 + 带 artifact → done（出路可达）
+  const t4 = await newTaskWithLedger('plan', ['实现功能 D'])
+  const id4 = await firstItemId(t4)
+  const r4 = await mutate(t4, {
+    kind: 'plan-commit',
+    layout: [{ kind: 'existing', id: id4, status: 'done', artifact: { path: 'out/c.md', kind: 'file' } }],
+    reason: 'test',
+    source: 'task-plan',
+  })
+  assert.ok(r4.ok)
+  assert.equal((await loadLedger(t4))!.items[0]!.status, 'done', '带产物证据的 done 直接生效（全模式）')
 })
 
 test('TC-SDR-002 ★ plan-commit 写入顺序：同一次提交「标 done + 带 artifact」一步到位（D214a 顺序修复）', async () => {

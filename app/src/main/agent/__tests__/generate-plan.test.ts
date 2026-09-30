@@ -612,8 +612,8 @@ test('v0.38.1（D172）: seed §6 收窄「不建清单」边界 —— 分析/�
   assert.ok(hits.length >= 2, `@default 与 @coder 都要带该纪律（实测 ${hits.length} 处）`)
   assert.match(src, /纯问候 \/ 闲聊 \/ 对已答复内容的简短确认/, '「不调用」边界必须收窄到纯问候/闲聊/简短确认')
   // 版本钉子：改提示词必须升 version 触发 syncBuiltinAgentsToLatest 同步存量 Agent
-  // v0.42.2（D214，纪律㉔ 改写）：§6 增层级规划/收尾引导 + defaultSkillIds 补
-  // task-complete → 0.42.2（本钉子随每次 seed 提示词/技能清单变更同步上移）
-  const versions = src.match(/version: '0\.42\.2'/g) ?? []
-  assert.ok(versions.length >= 3, `内置 Agent version 必须升至 0.42.2（实测 ${versions.length} 处）`)
+  // v0.43.0（R1–R5，纪律㉔ 改写）：本版未改 §6 提示词，version 仍随版本号整体上移
+  // → 0.43.0（本钉子随每次 seed 提示词/技能清单变更同步上移）
+  const versions = src.match(/version: '0\.43\.0'/g) ?? []
+  assert.ok(versions.length >= 3, `内置 Agent version 必须升至 0.43.0（实测 ${versions.length} 处）`)
 })

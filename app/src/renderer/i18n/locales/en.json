@@ -2554,10 +2554,11 @@
     "viewTree": "Tree view",
     "viewDag": "Dependency graph",
     "filter": {
-      "all": "All",
+      "all": "All tasks",
       "todo": "To do",
       "active": "Active",
-      "ended": "Ended"
+      "ended": "Ended",
+      "round": "This round"
     },
     "locate": "Locate",
     "locateTip": "Lists nodes that are waiting for you, in progress, or verifying; picking one scrolls to its row",
@@ -2762,6 +2763,16 @@
       "degradedEntryNote": "These entries ship in v0.30.1; the task already continues with the flat checklist",
       "dismissDegraded": "Dismiss this card",
       "failed": "Action failed, please retry"
+    },
+    "roundFallback": "Current round",
+    "tierInfo": {
+      "title": "Task complexity tiers",
+      "helpLabel": "Tier guide",
+      "reasonLabel": "Reason",
+      "d0": "One tool call or a direct answer completes it; no multi-step work.",
+      "d1": "2–3 sequential steps (read a few files, tweak config); no trade-offs.",
+      "d2": "Spans several files/modules; needs trade-offs and often a plan/subtask breakdown.",
+      "d3": "Refactors, deletions/migrations, behavior changes; plan first and verify each item."
     }
   },
   "editor": {

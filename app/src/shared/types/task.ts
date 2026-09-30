@@ -97,6 +97,8 @@ export interface PlanItem {
   updatedAt: number
   /** 完成时间（仅当 status === 'done' / 'failed' / 'cancelled' / 'skipped' 时存在） */
   completedAt?: number
+  /** 所属任务轮次（v0.43.0 · R4）：plan-commit 含新建项时账本轮次 +1；旧数据归一 1 */
+  round?: number
   /** v0.18.0 新增：该项状态来源（用于三视图与"引擎"/"推断"徽标） */
   source?: PlanItemSource
   /**

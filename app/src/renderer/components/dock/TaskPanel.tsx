@@ -20,17 +20,18 @@
  *   错误 = 图损坏（拒绝加载 + 错误字段 + 快照恢复入口）｜ 成功 = 全部 terminal
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { Icon } from '../../icons'
 import { useStore } from '../../store'
 import type { GraphNotice, GraphRow, NodeStatus, ReplanPatch } from '@shared/types/ipc'
 import { tierLabel } from '@shared/types/graph'
+import { sanitizeTierReason } from '../../utils/tier-reason'
 import { TodoPanel } from './TodoPanel'
 import { useGraph } from '../graph/useGraph'
 import { GraphNotices } from '../graph/GraphNotices'
 import { NodeRow } from '../graph/NodeRow'
 import { EvidenceDrawer } from '../graph/EvidenceDrawer'
-import { DagView } from '../graph/DagView'
 import { ConvergeCard, NeedsHumanCard, ReplanCard, CardButton, noticeToCard, type OpenedCard } from '../graph/ActionCards'
 import { AC_META, formatTokens, statusMeta } from '../graph/graphMeta'
 import { EmptyState } from '../ui'
@@ -42,13 +43,9 @@ const NARROW_WIDTH = 360
  * 筛选条 4 档（03-interaction.md §P1「筛选条 4 档映射」）。
  * 计数与过滤都基于 `snapshot.rows`（已剔除 goal），保证与进度分母同源。
  */
-type FilterKey = 'all' | 'todo' | 'active' | 'ended'
-const FILTER_KEYS: readonly FilterKey[] = ['all', 'todo', 'active', 'ended']
-const FILTER_STATUSES: Record<Exclude<FilterKey, 'all'>, readonly NodeStatus[]> = {
-  todo: ['draft', 'proposed', 'approved', 'ready', 'blocked'],
-  active: ['in_progress', 'verifying', 'needs_human'],
-  ended: ['completed', 'cancelled', 'failed'],
-}
+// v0.43.0（R4）：两 Tab —— 本轮任务（round === 当前轮次）/ 全部任务
+type FilterKey = 'round' | 'all'
+const FILTER_KEYS: readonly FilterKey[] = ['round', 'all']
 
 /**
  * 不受折叠开关影响的状态（03-interaction.md §P1「边界交互」）。
@@ -66,7 +63,6 @@ export function TaskPanel() {
 
   const g = useGraph(selectedTaskId)
 
-  const [view, setView] = useState<'tree' | 'dag'>('tree')
   /** 显式折叠的节点集合：默认为空 = 初始全展开（03-interaction.md §P1「默认全展开」） */
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set())
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -109,12 +105,23 @@ export function TaskPanel() {
   /* ---------------- needs_human 置顶（最高视觉优先级） ---------------- */
   const waitingRows = useMemo(() => rows.filter((r) => r.status === 'needs_human'), [rows])
 
-  /* ---------------- 筛选条：4 档计数（均基于非 goal 行） ---------------- */
-  const filterCounts = useMemo<Record<FilterKey, number>>(() => {
-    const inSet = (k: Exclude<FilterKey, 'all'>): number =>
-      rows.reduce((n, r) => (FILTER_STATUSES[k].includes(r.status) ? n + 1 : n), 0)
-    return { all: rows.length, todo: inSet('todo'), active: inSet('active'), ended: inSet('ended') }
-  }, [rows])
+  /* ---------------- v0.43.0（R4）：轮次 join（node.id ↔ planItem.id，D174 播种口径） ---------------- */
+  const roundById = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const p of task?.planItems ?? []) m.set(p.id, p.round ?? 1)
+    return m
+  }, [task?.planItems])
+  const currentRound = useMemo(
+    () => Math.max(1, ...Array.from(roundById.values(), (v) => v ?? 1)),
+    [roundById],
+  )
+  const rowRound = useCallback((r: GraphRow): number => roundById.get(r.id) ?? 1, [roundById])
+
+  /* ---------------- 两 Tab 计数 ---------------- */
+  const filterCounts = useMemo<Record<FilterKey, number>>(
+    () => ({ round: rows.filter((r) => rowRound(r) === currentRound).length, all: rows.length }),
+    [rows, rowRound, currentRound],
+  )
 
   /* ---------------- 「定位」候选：needs_human / in_progress / verifying ---------------- */
   const locateRows = useMemo(
@@ -122,15 +129,13 @@ export function TaskPanel() {
     [rows],
   )
 
-  // 树体：始终剔除 needs_human（已在置顶区渲染），再按当前档位过滤
+  // 树体：始终剔除 needs_human（已在置顶区渲染）；「本轮任务」= 当前轮次的行
   const visibleRows = useMemo(
     () =>
       rows.filter(
-        (r) =>
-          r.status !== 'needs_human' &&
-          (filter === 'all' || FILTER_STATUSES[filter].includes(r.status)),
+        (r) => r.status !== 'needs_human' && (filter === 'all' || rowRound(r) === currentRound),
       ),
-    [rows, filter],
+    [rows, filter, rowRound, currentRound],
   )
 
   /** 单行是否处于折叠态：有子节点、非 neverFold、且（全局折叠 或 手动折叠） */
@@ -319,8 +324,6 @@ export function TaskPanel() {
     return (
       <div className="flex h-full flex-col overflow-hidden" ref={rootRef}>
         <PanelHeader
-          view={view}
-          setView={setView}
           snapshot={null}
           narrow={narrow}
           foldAll={foldAll}
@@ -382,8 +385,6 @@ export function TaskPanel() {
   return (
     <div className="relative flex h-full flex-col overflow-hidden" ref={rootRef} onKeyDown={onKeyDown} tabIndex={-1}>
       <PanelHeader
-        view={view}
-        setView={setView}
         snapshot={snap}
         narrow={narrow}
         foldAll={foldAll}
@@ -436,19 +437,8 @@ export function TaskPanel() {
         />
       )}
 
-      {/* 视图切换：树 / DAG */}
-      {snap && !snap.lightweight && view === 'dag' && g.graph ? (
-        <DagView graph={g.graph} onLocate={(id) => {
-          setView('tree')
-          setSelectedId(id)
-          setFoldAll(false)
-          setCollapsedIds((s) => {
-            const n = new Set(s)
-            n.delete(id)
-            return n
-          })
-        }} onSwitchToTree={() => setView('tree')} />
-      ) : (
+      {/* v0.43.0（R3）：依赖图退役，只保留树视图 */}
+      {(
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden" role="tree" aria-label={t('taskPanel.treeAria')}>
           {/* needs_human 置顶区 */}
           {waitingRows.length > 0 && (
@@ -657,8 +647,6 @@ export function TaskPanel() {
  * ============================================================ */
 
 function PanelHeader({
-  view,
-  setView,
   snapshot,
   narrow,
   foldAll,
@@ -671,8 +659,6 @@ function PanelHeader({
   setLocateOpen,
   onLocate,
 }: {
-  view: 'tree' | 'dag'
-  setView: (v: 'tree' | 'dag') => void
   snapshot: import('@shared/types/ipc').GraphSnapshot | null
   narrow: boolean
   foldAll: boolean
@@ -686,10 +672,16 @@ function PanelHeader({
   onLocate: (id: string) => void
 }) {
   const { t, i18n } = useTranslation()
+  const [tierInfoOpen, setTierInfoOpen] = useState(false)
   const progress = snapshot?.progress
   const done = progress?.done ?? 0
   const total = progress?.total ?? 0
-  const title = snapshot?.title || snapshot?.goal || ''
+  // v0.43.0（R1）：标题 = **本轮目标简介**（graph.goal，轮次晋升时由引擎更新）；
+  // goal 缺失或仍是「未命名任务」占位 → 一律兜底「本轮任务」，占位词不外露。
+  const rawTitle = snapshot?.goal || snapshot?.title || ''
+  const title = rawTitle && !/^未命名任务/.test(rawTitle) ? rawTitle : t('taskPanel.roundFallback')
+  // v0.43.0（用户反馈②）：内部迁移语言（「迁移自 v0.x…」）属实现细节，展示层剥离后不渲染。
+  const tierReason = sanitizeTierReason(snapshot?.tierReason)
   const progressTip = snapshot
     ? t('taskPanel.progressTip', {
         done,
@@ -700,7 +692,16 @@ function PanelHeader({
     : undefined
 
   return (
-    <header className="shrink-0 border-b border-border-default px-3.5 pb-2.5 pt-3">
+    <>
+      {/* v0.43.0（R2）：档位说明弹层 —— Portal 逃逸裁切容器（纪律⑤），点遮罩/Esc 关闭 */}
+      {tierInfoOpen && (
+        <TierInfoPopover
+          tier={snapshot?.tier ?? 2}
+          reason={tierReason}
+          onClose={() => setTierInfoOpen(false)}
+        />
+      )}
+      <header className="shrink-0 border-b border-border-default px-3.5 pb-2.5 pt-3">
       {/* 标题行：task.title(=graph.goal) + 进度 + 定位（与列表留出呼吸空间） */}
       <div className="flex min-w-0 items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-lg font-semibold leading-6 tracking-tight" title={title}>
@@ -757,7 +758,37 @@ function PanelHeader({
         </span>
       </div>
 
-      {/* 控制行：4 档筛选条 + 视图切换 / 全局折叠 */}
+      {/* v0.43.0（R2）：档位独立行 —— T{n} · 释义 全文可见（窄态不截断）+ info 弹层入口 */}
+      {snapshot && (
+        <div className="mt-1.5 flex min-w-0 items-center gap-1.5">
+          <span
+            data-testid="graph-tier-badge"
+            data-tier={snapshot.tier}
+            className="inline-flex shrink-0 items-center whitespace-nowrap rounded-sm border border-border-default bg-info-soft px-2 py-0.5 text-2xs tabular-nums text-info"
+          >
+            {tierLabel(snapshot.tier, i18n.language)}
+          </span>
+          <button
+            type="button"
+            data-testid="tier-info-btn"
+            aria-haspopup="dialog"
+            aria-expanded={tierInfoOpen}
+            title={t('taskPanel.tierInfo.title')}
+            onClick={() => setTierInfoOpen(true)}
+            className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-sm border border-border-default px-1.5 py-0.5 text-2xs text-text-secondary hover:border-border-strong hover:bg-bg-surface-3 hover:text-text-primary"
+          >
+            <Icon.Info width={12} height={12} aria-hidden />
+            {t('taskPanel.tierInfo.helpLabel')}
+          </button>
+          {tierReason && (
+            <span className="min-w-0 flex-1 truncate text-2xs text-text-tertiary" title={tierReason}>
+              {tierReason}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* 控制行：两 Tab（本轮任务 / 全部任务）+ 全局折叠 */}
       <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-2">
         <span className="inline-flex min-w-0 overflow-x-auto rounded-md border border-border-default bg-bg-surface-2 p-0.5">
           {FILTER_KEYS.map((k) => {
@@ -782,43 +813,7 @@ function PanelHeader({
         </span>
 
         <span className="ml-auto flex shrink-0 items-center gap-1">
-          {/* v0.30.1 问题④：视图切换改为「图标 + 文字」，窄态（<360px）降级为纯图标（保留 title/aria-label） */}
-          <div className="flex gap-0.5 rounded-md border border-border-default bg-bg-surface-2 p-0.5">
-            <SegBtn
-              active={view === 'tree'}
-              onClick={() => setView('tree')}
-              label={t('taskPanel.viewTree')}
-              showText={!narrow}
-            >
-              <Icon.List width={12} height={12} />
-            </SegBtn>
-            {!snapshot?.lightweight && (
-              <SegBtn
-                active={view === 'dag'}
-                onClick={() => setView('dag')}
-                label={t('taskPanel.viewDag')}
-                showText={!narrow}
-              >
-                <Icon.Graph width={12} height={12} />
-              </SegBtn>
-            )}
-          </div>
-
-          {/* v0.30.1 问题④：tier 徽章从缩写升级为「T{n} · 释义」（窄态省略释义）；释义单一真源 = TIER_LABEL
-              v0.37.0（D137 / PRD F7）：徽章改为**只读**。
-              档位的判定权归模型与引擎（图生成时决定），UI 不再提供任何升降级入口 ——
-              用户手改档位会与模型的自主判断打架，也让简单任务被仪式化。 */}
-          {snapshot && (
-            <span
-              data-testid="graph-tier-badge"
-              data-tier={snapshot.tier}
-              title={snapshot.tierReason ?? tierLabel(snapshot.tier, i18n.language)}
-              aria-label={tierLabel(snapshot.tier, i18n.language)}
-              className="inline-flex shrink-0 items-center whitespace-nowrap rounded-sm border border-border-default bg-info-soft px-2 py-0.5 text-2xs tabular-nums text-info"
-            >
-              <span>{narrow ? `T${snapshot.tier}` : tierLabel(snapshot.tier, i18n.language)}</span>
-            </span>
-          )}
+          {/* v0.43.0（R3）：树/DAG 视图切换退役，只保留树视图；档位徽章移至标题下方独立行（R2） */}
 
           {/* v0.30.1 问题④：一键折叠改为状态化文案（全展开→「全部折叠」；已折叠→「全部展开」），图标随态；窄态降级为纯图标 */}
           <button
@@ -836,7 +831,73 @@ function PanelHeader({
           </button>
         </span>
       </div>
-    </header>
+      </header>
+    </>
+  )
+}
+
+/* ============================================================
+ * v0.43.0（R2）：档位说明弹层 —— Portal 到 body（纪律⑤：逃逸裁切容器）。
+ * 内容 = T0–T3 四档全量释义（i18n 唯一真源）+ 当前任务判定理由。
+ * ============================================================ */
+function TierInfoPopover({ tier, reason, onClose }: { tier: number; reason?: string; onClose: () => void }) {
+  const { t, i18n } = useTranslation()
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  const tiers = [0, 1, 2, 3] as const
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[70]"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('taskPanel.tierInfo.title')}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <div className="absolute right-4 top-14 w-[320px] max-w-[90vw] rounded-lg border border-border-default bg-bg-overlay p-3 shadow-panel">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-xs font-semibold text-text-primary">{t('taskPanel.tierInfo.title')}</span>
+          <button
+            type="button"
+            aria-label={t('taskPanel.foldAllShort')}
+            onClick={onClose}
+            className="rounded p-0.5 text-text-tertiary hover:bg-bg-hover hover:text-text-primary"
+          >
+            <Icon.X width={14} height={14} />
+          </button>
+        </div>
+        <div className="space-y-1.5">
+          {tiers.map((tv) => (
+            <div
+              key={tv}
+              data-testid={`tier-info-${tv}`}
+              className={`rounded-md border px-2 py-1.5 text-2xs leading-relaxed ${
+                tv === tier ? 'border-info bg-info-soft text-text-primary' : 'border-border-subtle text-text-secondary'
+              }`}
+            >
+              <span className="font-medium">{tierLabel(tv, i18n.language)}</span>
+              <div className="mt-0.5">{t(`taskPanel.tierInfo.d${tv}`)}</div>
+            </div>
+          ))}
+        </div>
+        {reason && (
+          <div className="mt-2 rounded-md bg-bg-surface-2 px-2 py-1.5 text-2xs leading-relaxed text-text-secondary">
+            <span className="font-medium text-text-primary">{t('taskPanel.tierInfo.reasonLabel')}：</span>
+            {reason}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
   )
 }
 

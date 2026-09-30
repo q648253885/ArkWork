@@ -142,11 +142,10 @@ test('TC-MIGR-002b ★ 内置 agent 版本必须升到本版，否则存量装�
   const versions = [...SEED.matchAll(/^\s*version: '([\d.]+)',\s*$/gm)].map((m) => m[1])
   assert.ok(versions.length >= 3, `应至少 3 个内置 agent 带 version（实际 ${versions.length}）`)
   for (const v of versions) {
-    // v0.42.2（D214b，纪律㉔ 改写）：本版 defaultSkillIds 补 S-core.task-complete
-    //（D214b：默认 agent 工具表缺 task_complete，模型原话 "not in the function list"）
-    // + §6 层级/收尾引导 → 版本升 0.42.2 触发存量同步（D172 先例）。
+    // v0.43.0（R5，纪律㉔ 改写）：§6/§7 增「改状态 / 新增项必须填 reason」规则
+    // + task_plan 的 reason 描述与门禁口径对齐 → 版本升 0.43.0 触发存量同步（D172 先例）。
     // 下一版改 seed 提示词/技能清单时，此处断言须随版本号同步上移。
-    assert.equal(v, '0.42.2', `内置 agent 版本须为 0.42.2（实际 ${v}）—— 提示词/技能清单变更必须触发同步`)
+    assert.equal(v, '0.43.0', `内置 agent 版本须为 0.43.0（实际 ${v}）—— 提示词/技能清单变更必须触发同步`)
   }
   assert.match(SEED, /task_plan/, '提示词必须提到唯一控制入口')
   assert.match(SEED, /turn_note/, '提示词必须提到阶段结论出口')

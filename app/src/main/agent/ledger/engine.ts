@@ -120,9 +120,11 @@ export async function ensureLedger(
       note: p.source ? undefined : '自 v0.36 扁平清单迁移',
       attempts: p.status === 'running' ? 1 : 0,
       nodeId: p.id,
+      round: 1,
     })),
     resume: {},
     log: [{ at: now, op: 'create', by: 'ensureLedger', note: `自 tasks.json 迁移（${sources.length} 项）` }],
+    round: 1,
   }
   await writeLedgerFile(draft)
   await syncProjections(task.id, draft, 'ensureLedger')
@@ -257,6 +259,7 @@ function emptyLedger(taskId: string, goal: string): LedgerFile {
     items: [],
     resume: {},
     log: [],
+    round: 1,
   }
 }
 

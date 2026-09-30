@@ -19,7 +19,7 @@ import { TO_PLAN_STATUS } from '../ledger/project.js'
 import type { Task } from '../../../shared/types/task'
 import { reconcilePlanItemsToGraph } from '../graph/plan-sync.js'
 import { emitTurnNote } from './gate-channel.js'
-import { buildPlanCommitNote } from './turn-note-policy.js'
+import { buildPlanCommitNote, buildReplanNote } from './turn-note-policy.js'
 
 export interface CommitPlanDraftResult {
   ok: boolean
@@ -81,6 +81,25 @@ export async function commitPlanDraft(args: CommitPlanDraftArgs): Promise<Commit
   // ② 差异比对（纯函数；I8 终态保护 / I1 单 doing 在函数内强制）
   const diff = diffPlan({ current: current?.items ?? [], draft })
 
+  // ②b v0.43.0（R5）：**证据门禁** —— 落库前拦截（此处的 reason 是调用方原始
+  // 传入，尚未经兜底合成；引擎/规划通道的 reason 由调用方负责组装）。
+  //  · 状态修改必须有理由（改了什么状态、依据是什么）；
+  //  · replan（新建项）必须有依据（基于什么新信息/证据），且轮次晋升后引擎会
+  //    自动把它作为「本轮目标简介」发 turn_note 展示在交互区。
+  const trimReason = reason.trim()
+  if (diff.ops.some((o) => o.kind === 'status') && !trimReason) {
+    const errMsg =
+      '清单状态变更必须说明理由：请在 task_plan 的 reason 字段写明依据（如「已跑 npm test 通过」「用户确认了方案」），再重新提交完整清单。'
+    logger.warn('Agent', `${source} 状态变更缺理由，已拒绝`, taskId)
+    return { ok: false, errorMessage: errMsg, changed: 0, total: current?.items.length ?? 0, summary: '', graphSyncDegraded: false }
+  }
+  if (diff.ops.some((o) => o.kind === 'create') && !trimReason) {
+    const errMsg =
+      'replan / 新增任务必须说明依据：请在 task_plan 的 reason 字段写明本轮目标与新增理由（基于什么新信息或证据），再重新提交完整清单。'
+    logger.warn('Agent', `${source} replan 缺依据，已拒绝`, taskId)
+    return { ok: false, errorMessage: errMsg, changed: 0, total: current?.items.length ?? 0, summary: '', graphSyncDegraded: false }
+  }
+
   // ③ 落库（plan-commit 唯一写入口）
   const res = await mutate(
     taskId,
@@ -119,6 +138,8 @@ export async function commitPlanDraft(args: CommitPlanDraftArgs): Promise<Commit
         freshItems.map((it) => ({ id: it.id, text: it.text, status: TO_PLAN_STATUS[it.status] })),
         source,
         reason || diff.summary || undefined,
+        // v0.43.0（R1）：本轮目标简介下推 graph.goal（轮次晋升时账本 goal 已更新）
+        fresh?.goal || undefined,
       )
       if (!syncRes.ok) {
         graphSyncDegraded = true
@@ -132,6 +153,13 @@ export async function commitPlanDraft(args: CommitPlanDraftArgs): Promise<Commit
 
   // ⑥ 自动阶段结论（P7 触发点①：不依赖模型自觉汇报）
   if (diff.changed > 0) {
+    // v0.43.0（R5）：replan 依据回执 —— 含新建项且**提交前已有项**（真 replan）
+    // 时，把依据展示在交互区，用户据此判断「凭什么改计划」。
+    const creates = diff.ops.filter((o) => o.kind === 'create').length
+    const replanNote = buildReplanNote(creates, (current?.items.length ?? 0) > 0, reason)
+    if (replanNote) {
+      await emitTurnNote({ taskId, iteration, text: replanNote, via: 'plan-commit' })
+    }
     const nextDoing = freshItems.find((it) => it.status === 'running')?.text
     const noteText = buildPlanCommitNote(diff, nextDoing)
     if (noteText) {
