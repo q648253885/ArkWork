@@ -37,6 +37,12 @@ export interface CommitPlanDraftResult {
   revision?: number
   /** 提交后的差异（供调用方组装 observation / 日志） */
   diff?: PlanDiffResult
+  /**
+   * 引擎自动纠正的人话回执（v0.42.2 · D214c）：I2 等不变量改写发生后，
+   * 调用方（act.ts）必须拼进 observation —— 否则回执说「完成」、快照却是
+   * [?]，模型收到自相矛盾的反馈只能反复重交（真机死循环直接驱动器）。
+   */
+  warnings?: string[]
 }
 
 export interface CommitPlanDraftArgs {
@@ -142,5 +148,6 @@ export async function commitPlanDraft(args: CommitPlanDraftArgs): Promise<Commit
     graphSyncDegraded,
     revision: res.revision,
     diff,
+    warnings: res.warnings,
   }
 }

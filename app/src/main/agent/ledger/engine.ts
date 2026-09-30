@@ -145,6 +145,8 @@ export interface MutateResult {
   error?: LedgerError
   /** 实际生效的项（可能已被 I2 降级） */
   effective?: Array<{ itemId: string; status: LedgerItemStatus }>
+  /** 引擎自动纠正的人话回执（v0.42.2 · D214c，I2 降级等）；调用方必须拼进模型 observation */
+  warnings?: string[]
 }
 
 /**
@@ -189,6 +191,8 @@ async function mutateInternal(
    */
   const knownLogEntries = new Set<unknown>(draft.log)
   const effective: Array<{ itemId: string; status: LedgerItemStatus }> = []
+  // v0.42.2（D214c）：算子级自动纠正回执向上透传（mutate 此前重建返回对象时丢失）
+  const opWarnings: string[] = []
 
   for (const op of list) {
     let res: OpResult
@@ -206,6 +210,7 @@ async function mutateInternal(
       logger.warn('Agent', `ledger mutate 被拒（${op.kind}）：${res.error?.message}`, taskId)
       return { ok: false, revision: base.revision, ledger: base, error: res.error }
     }
+    if (res.warnings && res.warnings.length > 0) opWarnings.push(...res.warnings)
     for (const c of res.changed) effective.push({ itemId: c.itemId, status: c.to })
   }
 
@@ -233,7 +238,9 @@ async function mutateInternal(
   })
 
   await syncProjections(taskId, draft, actor)
-  return { ok: true, revision: draft.revision, ledger: draft, effective }
+  return opWarnings.length > 0
+    ? { ok: true, revision: draft.revision, ledger: draft, effective, warnings: opWarnings }
+    : { ok: true, revision: draft.revision, ledger: draft, effective }
 }
 
 function emptyLedger(taskId: string, goal: string): LedgerFile {

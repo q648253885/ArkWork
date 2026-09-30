@@ -134,7 +134,7 @@ const BUILTIN_AGENTS: Agent[] = [
 - 任务完成调用 task_complete，参数包含：改了什么 / 验证结果 / 遗留风险。
 - 需要用户输入或门禁确认时调用 ask_user。
 - 最多 60 次迭代；单次工具超时 30 秒。工具调用预算按签名/类别动态管控（写入类 40、只读类 16），避免重复调用。`,
-    defaultSkillIds: ['S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.web-search', 'S-core.fetch-url', 'S-core.shell', 'S-core.browser', 'S-core.task-plan', 'S-core.turn-note'],
+    defaultSkillIds: ['S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.web-search', 'S-core.fetch-url', 'S-core.shell', 'S-core.browser', 'S-core.task-complete', 'S-core.task-plan', 'S-core.turn-note'],
     defaultMcpIds: [],
     defaultModelId: '',
     defaultKbIds: [],
@@ -144,7 +144,7 @@ const BUILTIN_AGENTS: Agent[] = [
     // 必须升版本，否则存量装机器的 systemPrompt 永远不会更新（syncBuiltinAgentsToLatest
     // 只在 version 落后时同步）。
     // v0.38.1（D176）：§6 增成果产物（artifact）规则；0.38.1 已被 BUILD7 消费 → 升 0.38.2 触发同步。
-    version: '0.42.1',
+    version: '0.42.2',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
   },
@@ -255,7 +255,7 @@ const BUILTIN_AGENTS: Agent[] = [
 - 任务完成调用 task_complete，参数包含：改了什么 / 验证结果 / 文档同步情况 / 遗留风险。
 - 需要用户输入或门禁确认时调用 ask_user。
 - 最多 80 次迭代；单次工具超时 30 秒。工具调用预算按签名/类别动态管控（写入类 40、只读类 16），避免重复调用。`,
-    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.browser', 'S-core.task-plan', 'S-core.turn-note',
+    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.browser', 'S-core.task-complete', 'S-core.task-plan', 'S-core.turn-note',
       // v0.38.0（D154）：清单控制面收敛后，图工具对模型只剩 task_evidence（V 层能力）。
       // 其余 8 个（task-create / task-update / task-get / task-list / task-block /
       // request-plan / submit-plan / replan）的规格已不再下发，此处同步删掉引用 ——
@@ -274,7 +274,7 @@ const BUILTIN_AGENTS: Agent[] = [
     // v0.34.4（D66）：提示词 §7 修正（"创建 TodoWrite 清单" → 清单由计划阶段生成），
     //                 再次升版本以触发已装机器的同步。
     // v0.38.0：清单控制面收敛为 task_plan/turn_note，§7/§8 重写 → 再升版本。
-    version: '0.42.1',
+    version: '0.42.2',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
     // v0.15.0 Task 6：@coder 默认 acceptEdits —— 工作区内轻写（sed -i/tee/mkdir/cp/...）不再每次弹确认；
@@ -379,7 +379,7 @@ const BUILTIN_AGENTS: Agent[] = [
 - 任务完成调 task_complete，参数包含：改了哪些文件 / 构建与测试结果（真实命令输出摘要）/ 文档同步情况 / 遗留风险与后续建议。
 - 需要用户输入或门禁确认时调 ask_user。
 - 最多 80 次迭代；单次工具超时 30 秒。工具调用预算按签名/类别动态管控（写入类 40、只读类 16）。`,
-    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.browser', 'S-core.task-plan', 'S-core.turn-note',
+    defaultSkillIds: ['S-core.react-core-skills', 'S-core.file-reader', 'S-core.file-writer', 'S-core.file-editor', 'S-core.glob-search', 'S-core.grep-search', 'S-core.shell', 'S-core.web-search', 'S-core.fetch-url', 'S-core.spec', 'S-core.plan', 'S-core.bugfix', 'S-core.browser', 'S-core.task-complete', 'S-core.task-plan', 'S-core.turn-note',
       // v0.38.0（D154）：图工具对模型只剩 task_evidence（理由同 @coder）
       'S-core.task-evidence'],
     defaultMcpIds: [],
@@ -390,7 +390,7 @@ const BUILTIN_AGENTS: Agent[] = [
     defaultConfig: { temperature: 0.2, maxIterations: 80 },
     isBuiltin: true,
     // v0.38.0：清单控制面收敛为 task_plan/turn_note，§8/§9 重写 → 升版本触发存量同步
-    version: '0.42.1',
+    version: '0.42.2',
     source: 'core',
     memoryScope: { useProfile: true, skillMemory: true },
     defaultPermissionMode: 'acceptEdits',

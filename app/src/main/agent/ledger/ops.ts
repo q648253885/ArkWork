@@ -36,6 +36,15 @@ export interface OpResult {
   ok: boolean
   changed: Array<{ itemId: string; from: LedgerItemStatus; to: LedgerItemStatus; note?: string }>
   error?: LedgerError
+  /**
+   * 引擎自动纠正的人话回执（v0.42.2 · D214c）。
+   *
+   * 为什么必须有：不变量改写（如 I2 把 done 降级 verifying）发生后，若只按
+   * **预执行草案**回执（「完成：…」），模型看到的回执与实际落盘状态自相矛盾，
+   * 只能反复重交（真机死循环实锤）。这里收集的是「事实 + 出路」，调用方
+   * （plan-commit-pipeline → act.ts）必须拼进 observation。
+   */
+  warnings?: string[]
 }
 
 const OK_EMPTY: OpResult = { ok: true, changed: [] }
@@ -141,11 +150,17 @@ function setStatus(
   if (!force && !canLedgerTransition(from, to)) {
     return { code: 'INVARIANT', message: `非法状态转换：${from} → ${to}（清单项 ${itemId}）` }
   }
-  // I2：spec 模式缺验收契约 → 降级 verifying（不拒绝，避免模型卡死）
+  // I2：spec 模式缺验收契约 → 降级 verifying（不拒绝，避免模型卡死）。
+  // v0.42.2（D214a）：task_plan 的 schema **没有 acceptance 字段** —— 唯一清单入口
+  // 建出的项 acceptance 恒空，本判据原先使 spec 模式下 done **经清单路径永不可达**
+  //（真机死循环：DeepSeek / qwen3.8 反复重交同一项 8+ 次）。可达出路 = D176 的
+  // artifact 声明（完成门禁 ARTIFACT 判据收尾时会核对产物存在性，验收口径一致）：
+  // 带声明的 done 不再降级。注意 plan-commit 已把 artifact 先于本判定落盘（D214a
+  // 写入顺序修复），同一次提交里「标 done + 声明产物」一步到位。
   let target = to
-  if (to === 'done' && !force && l.mode === 'spec' && item.acceptance.length === 0) {
+  if (to === 'done' && !force && l.mode === 'spec' && item.acceptance.length === 0 && !item.artifact) {
     target = 'verifying'
-    note = `${note ? `${note}｜` : ''}规模式任务缺验收契约，引擎降级为 verifying（补 acceptance 或附证据后才能 done）`
+    note = `${note ? `${note}｜` : ''}spec 模式任务缺验收契约且未声明成果产物，引擎降级为 verifying —— 带 artifact 声明重新提交即为 done`
   }
   // I6：blocked 必须带 note
   if (target === 'blocked' && !note) {
@@ -436,17 +451,34 @@ export async function applyOp(l: LedgerFile, op: LedgerOp): Promise<OpResult> {
       const now = Date.now()
       const byId = new Map(l.items.map((it) => [it.id, it]))
       const changed: OpResult['changed'] = []
+      // v0.42.2（D214c）：引擎自动纠正的人话回执（I2 降级等），随 OpResult 透传
+      const warnings: string[] = []
 
-      // ① 先落状态 —— 复用 setStatus 的全部不变量检查（I1/I2/I5/I6/I8）
+      // ① 先落状态 —— 复用 setStatus 的全部不变量检查（I1/I2/I5/I6/I8）。
+      //    v0.42.2（D214a）：**artifact 先于 setStatus 落盘** —— I2 的可达出路是
+      //    「带 artifact 的 done 不降级」，若 artifact 在状态转换之后才写，同一次
+      //    提交里「标 done + 声明产物」仍会被降级（多烧一轮 + 回执矛盾）。
       for (const entry of op.layout) {
         if (entry.kind !== 'existing') continue
         const it = byId.get(entry.id)
         if (!it) {
           return fail('NOT_FOUND', `清单项不存在：${entry.id}`, '清单可能已被重构，请重新读取后再提交。')
         }
+        // v0.38.1（D176）：本条提交给出了 artifact 才覆盖（不给 = 保留既有声明）。
+        // v0.42.2（D214a）：**先写**，供 setStatus 的 I2 判定使用。
+        if (entry.artifact !== undefined) {
+          it.artifact = entry.artifact
+          it.updatedAt = now
+        }
         if (entry.status !== it.status) {
           const err = setStatus(l, entry.id, entry.status, op.source, entry.note, false, changed)
           if (err) return fail(err.code, err.message, err.hint)
+          // v0.42.2（D214c）：I2 降级发生后，实际落盘（verifying）与模型意图（done）
+          // 不一致 —— 必须把「事实 + 出路」回给模型，否则回执说「完成」、快照却是
+          // [?]，模型只能反复重交（真机死循环的直接驱动器）。
+          if (entry.status === 'done' && it.status === 'verifying') {
+            warnings.push(`项「${it.text.slice(0, 24)}」spec 模式缺验收契约且未声明成果产物，done 已降级 verifying（带 artifact 重提即为 done）`)
+          }
         } else if (entry.note !== undefined && entry.note !== it.note) {
           it.note = entry.note
           it.updatedAt = now
@@ -455,11 +487,6 @@ export async function applyOp(l: LedgerFile, op: LedgerOp): Promise<OpResult> {
         // 此前这里不写 text —— 「整体重制计划」时新文本被静默丢弃，账本与模型意图漂移。
         if (entry.text !== undefined && entry.text !== it.text) {
           it.text = entry.text
-          it.updatedAt = now
-        }
-        // v0.38.1（D176）：本条提交给出了 artifact 才覆盖（不给 = 保留既有声明）。
-        if (entry.artifact !== undefined) {
-          it.artifact = entry.artifact
           it.updatedAt = now
         }
       }
@@ -474,10 +501,19 @@ export async function applyOp(l: LedgerFile, op: LedgerOp): Promise<OpResult> {
           next.push(byId.get(entry.id)!)
           continue
         }
+        // v0.42.2（D214a）：新建项走与 existing 同一条 I2 判据 —— 否则
+        // 「删了重建」就能绕过 spec 模式的验收降级（旁路 = 不变量失效）。
+        let newStatus = entry.status
+        let newNote = entry.note
+        if (newStatus === 'done' && l.mode === 'spec' && !entry.artifact) {
+          newStatus = 'verifying'
+          newNote = `${newNote ? `${newNote}｜` : ''}spec 模式任务缺验收契约且未声明成果产物，引擎降级为 verifying —— 带 artifact 声明重新提交即为 done`
+          warnings.push(`新建项「${entry.text.slice(0, 24)}」缺成果产物声明，done 已降级 verifying（带 artifact 重提即为 done）`)
+        }
         const item: LedgerItem = {
           id: newId('li'),
           text: entry.text,
-          status: entry.status,
+          status: newStatus,
           parentId: null,
           dependsOn: [],
           acceptance: [],
@@ -485,9 +521,9 @@ export async function applyOp(l: LedgerFile, op: LedgerOp): Promise<OpResult> {
           createdAt: now,
           updatedAt: now,
           source: op.source,
-          note: entry.note,
-          attempts: entry.status === 'running' ? 1 : 0,
-          startedAt: entry.status === 'running' ? now : undefined,
+          note: newNote,
+          attempts: newStatus === 'running' ? 1 : 0,
+          startedAt: newStatus === 'running' ? now : undefined,
         }
         if (entry.key) keyToId.set(entry.key, item.id)
         next.push(item)
@@ -572,7 +608,8 @@ export async function applyOp(l: LedgerFile, op: LedgerOp): Promise<OpResult> {
 
       l.items = next
       appendLog(l, { at: now, op: 'plan-commit', by: op.source, note: `${op.reason}（${next.length} 项）` })
-      return { ok: true, changed }
+      // v0.42.2（D214c）：引擎自动纠正随 OpResult 透传（调用方必须拼进 observation）
+      return warnings.length > 0 ? { ok: true, changed, warnings } : { ok: true, changed }
     }
 
     case 'set-artifact': {

@@ -696,6 +696,12 @@ export async function executeAct(
       const protectedText =
         diff.protectedIds.length > 0 ? `\n（已保留 ${diff.protectedIds.length} 项已完成 / 终态清单项，不会回退）` : ''
       const warnText = diff.warnings.length > 0 ? `\n\n⚠️ 引擎自动纠正：${diff.warnings.join('；')}` : ''
+      // v0.42.2（D214c）：引擎侧不变量纠正（I2 降级等）必须与预执行 diff 一起回给
+      // 模型 —— 只回 diff 会「回执说完成、快照却是 [?]」（真机死循环直接驱动器）。
+      const engineWarnText =
+        committed.warnings && committed.warnings.length > 0
+          ? `\n\n⚠️ 引擎调整：${committed.warnings.join('；')}`
+          : ''
       const degradeText = graphSyncDegraded
         ? `\n\n⚠️ 注意：任务图通道本次未同步（清单账本已记录，以账本为准）。已完成项不要重做。`
         : ''
@@ -704,7 +710,7 @@ export async function executeAct(
           ? `清单已检视，无需变化（共 ${freshItems.length} 项）。${
               openCount > 0 ? `\n${endgameSuffixOf(openCount, freshItems.length)}` : ''
             }\n当前清单：\n${overview}`
-          : `清单已更新（${diff.summary}）${protectedText}。\n当前清单：\n${overview}${warnText}${degradeText}${endgame}`
+          : `清单已更新（${diff.summary}）${protectedText}。\n当前清单：\n${overview}${warnText}${engineWarnText}${degradeText}${endgame}`
       // 落库日志已由共享管线输出（`${source}(ledger): changed=…`），此处不再重复
       return {
         completedStep: { ...placeholder, result: { changed: diff.changed, items: freshItems.length }, resultSummary: summary, durationMs, status: 'success' },

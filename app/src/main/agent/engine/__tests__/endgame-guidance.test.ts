@@ -70,7 +70,9 @@ test('TC-ENDG-003 ★ act.ts 消费接线：零变化分支 + 更新分支都接
   )
   // 更新分支（模型刚把最后一项标 done 的那一刻最需要指引）：open=0 → endgame
   assert.match(ACT, /const endgame =\n?\s*openCount === 0 && freshItems\.length > 0/, '更新分支的收口 endgame 存在')
-  assert.match(ACT, /\$\{warnText\}\$\{degradeText\}\$\{endgame\}/, '更新分支 observation 必须拼接 endgame')
+  // v0.42.2（D214c，纪律㉔ 改写）：更新分支 observation 拼接顺序
+  // warnText + engineWarnText（I2 等引擎纠正）+ degradeText + endgame —— 四段都必须在
+  assert.match(ACT, /\$\{warnText\}\$\{engineWarnText\}\$\{degradeText\}\$\{endgame\}/, '更新分支 observation 必须拼接引擎纠正与 endgame')
 })
 
 test('TC-ENDG-004 ★ loop.ts 消费接线：清单族被拦（回执 + 两个 system hint）都带 endgame', () => {
@@ -102,7 +104,7 @@ test('TC-ENDG-006 ★ seed §6 层级规划引导：三份 agent prompt 全部�
 test('TC-ENDG-007 ★ task_plan schema：parent 描述含两级结构建议；内置 agent version 同步 0.42.1', () => {
   assert.match(SEED, /多阶段任务建议建两级结构（主任务 → 子任务），简单任务平铺即可/, 'parent 字段描述必须引导层级')
   const versions = (SEED.match(/version: '([\d.]+)'/g) ?? []).map((s) => s.replace(/\D+/g, ''))
-  const target = '0421'
-  assert.ok(versions.includes(target), `内置 agent version 必须升到 0.42.1（触发存量 prompt 同步，D172 先例）`)
-  assert.equal((SEED.match(/version: '0\.42\.1'/g) ?? []).length, 3, '三份内置 agent 全部同步')
+  const target = '0422'
+  assert.ok(versions.includes(target), `内置 agent version 必须升到 0.42.2（D214b 技能清单变更触发存量同步）`)
+  assert.equal((SEED.match(/version: '0\.42\.2'/g) ?? []).length, 3, '三份内置 agent 全部同步')
 })

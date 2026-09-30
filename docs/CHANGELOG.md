@@ -58,6 +58,8 @@
 
 | **v0.42.1** | **2026-09-30** | **补丁版：弱模型收尾死循环根治（D212 终局引导）+ 清单层次规划引导（D213）**。用户实机 qwen3.8 27b「无法结束任务」，澄清「是因为一直无法结束，才导致到达上限的」——根因：task_plan 零变化 observation 与同参数拦截都无终局指引，完成门禁只在模型尝试收尾时运行 → 模型反复提交同一清单到 stall。修复：`PLAN_TOOL_HINT.endgame` 唯一文案源三处消费（act.ts 收口/零变化 observation 按 `openItems` 分场防误导提前收尾 + loop.ts 预算拦截清单族特化三注入点，指引指向 task_complete/最终答复=换层次，纪律⑩）；seed 三份 agent prompt §6 增「层级规划两级结构（主任务+parent 挂子步骤，≤2 层）」与「完成后立即收尾」，内置 agent 0.38.2→0.42.1 触发存量同步；纯函数 `endgameSuffixOf` 真值表 + 接线契约 TC-ENDG-001…007，反向核验 1/1 报红 | **已实现（继承 2470 + 7 − 改写 TC-MIGR-002b（版本钉 0.42.1，纪律㉔）= 合计 **2477**；全量 fail=1 文件 = 存量 WIP；双 tsc 零错；门禁全绿；重打包 mac `.app` + Windows zip 0.42.1；⚠️ 引导实效待用户 qwen3.8 复测（纪律㊶）；提交/打 tag 待用户确认）** |
 
+| **v0.42.2** | **2026-09-30** | **补丁版：spec 模式 done 不可达三联死锁根治（D214）**。用户实机 DeepSeek Flash v4.1：同一清单项被反复「完成」8+ 次（非弱模型专属，D212 同族不同根因）。三联：① I2 不变量使 spec 缺验收项 done 经清单路径永不可达（task_plan 无 acceptance 字段；artifact 不参与判定；写入顺序 artifact 后于 setStatus）；② 默认 agent defaultSkillIds 缺 S-core.task-complete（模型原话 "not in the function list"）；③ mutate 重建返回丢弃算子 warnings → 回执「完成」vs 快照 `[?]` 自相矛盾。修复：I2 补 artifact 出路（与 D176 门禁口径一致）+ plan-commit artifact 先落 + 新建项同判据；三份 defaultSkillIds 补 task-complete + agent 0.42.2 同步；OpResult/MutateResult/CommitPlanDraftResult 三层透传 warnings 进 observation | **已实现（继承 2477 + 5（TC-SDR-001…005 账本真执行）+ 改写 2（版本钉 → 0.42.2）= 合计 **2482**；全量 fail=1 文件 = 存量 WIP；双 tsc 零错；门禁全绿；反向核验 1/1；重打包 mac + win；⚠️ 实效待用户真模型复测；提交/打 tag 待用户确认）** |
+
 > 说明：`v0.29.0` 仅有设计调研文档（`docs/versions/v0.29.0/02-plugin-extension-research.md`），无代码发布与 tag，故不列入发布索引；v0.30.0 文档线基于 v0.29.0、代码线基于 v0.28.1。> 说明：v0.30.0 与 v0.30.1 同日交付，git 侧**只打 tag `v0.30.1`**（指向已包含两版全部代码与文档的提交），v0.30.0 不单独留 tag；四语言 README 已同步新增「最新版本」亮点板块。
 
 ---
