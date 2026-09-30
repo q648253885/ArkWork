@@ -1,9 +1,10 @@
 /* ============================================================
- * ArkWork — ToolBlock（v0.31.0 B4 · v0.36.2 D112 一行化）
+ * ArkWork — ToolBlock（v0.31.0 B4 · v0.36.2 D112 一行化 · v0.42.0 P5 去卡片化）
  * 工具块。契约：
  *  - 六态状态机（05 §二 T1）：pending/running/success/failed/guarded/cancelled，
  *    guarded（琥珀，Agent 拦截·非错误）与 failed（红）**视觉与语义可区分**（C-16）；
- *  - 视觉层级三重编码（C-13）：形状（卡边框）+ 图标（KindIcon 按呈现类别）+ 色（状态点）；
+ *  - 视觉层级（v0.42.0 P5 对标 ZCode）：**行式无边框**呈现融入背景，
+ *    状态点 + 异常语义色双编码（C-13 的「形状」维度随卡片退役）；
  *  - v0.36.2（D112）一行化：动作文本 + 可点击文件 + 结果摘要合并进头行，
  *    路径只出现一次（stripPaths 去重）；完整结果默认折叠（resultOpen 初始
  *    false），截断显示上限提示（C-18）；
@@ -28,7 +29,9 @@ type ToolBlockT = Extract<FlowBlock, { kind: 'tool' }>
  *   落定的成功步骤占交互区绝大多数，若 success 也上绿，满屏绿点即用户所说的
  *   「五彩斑斓」。故 success / pending / cancelled 一律中性，只有
  *   running（在跑）/ failed（失败）/ guarded（拦截）三态上语义色。
- * 状态并未丢失：左状态条 + 状态点 + 说明文字三重编码仍在（C-13 / C-16）。
+ * 状态并未丢失：状态点 + 异常行语义色文字双编码仍在（C-16）。
+ * v0.42.0 P5：左侧 2px 状态条随卡片化退役（ZCode 过程行无竖条）——
+ * 三态可区分性由状态点承担。
  */
 function dotColor(status: ToolStatus): string {
   switch (status) {
@@ -40,23 +43,6 @@ function dotColor(status: ToolStatus): string {
       return 'var(--warning)'
     default:
       return 'var(--text-faint)'
-  }
-}
-
-/**
- * 左侧 2px 状态条（D21）：卡片底色恒定中性，状态色只出现在这一条上。
- * 与状态点同口径 —— 落定态中性，异常态语义色。
- */
-function railColor(status: ToolStatus): string {
-  switch (status) {
-    case 'running':
-      return 'var(--business-primary)'
-    case 'failed':
-      return 'var(--danger)'
-    case 'guarded':
-      return 'var(--warning)'
-    default:
-      return 'var(--border-strong)'
   }
 }
 
@@ -167,10 +153,12 @@ export function ToolBlock({ block }: { block: ToolBlockT }) {
   const truncated = block.result && 'truncated' in block.result && block.result.truncated === true
 
   return (
+    // v0.42.0 P5（对标 ZCode 过程行）：去卡片化 —— 无边框无底色的**行式**呈现，
+    // 视觉融入背景（ZCode 语言：正文强、过程弱）；hover 才浮出轻底。
+    // 三态可区分性（C-16）由状态点 + 语义色文字双编码保留（形状维度随卡片退役）。
     <div
       id={`tool-${block.id}`}
-      className="rounded-lg border border-border-default bg-bg-surface px-3 py-2 select-text"
-      style={{ borderLeftWidth: 2, borderLeftColor: railColor(block.status) }}
+      className="rounded-md px-1 py-0.5 select-text transition-colors hover:bg-bg-hover"
     >
       {/* 头行（D112 一行化）：状态点 + 类别图标 + 动作文 + 行内文件 + 行内摘要 + 时长 + 结果开关 */}
       <div className="flex items-center gap-2 select-none min-w-0">
@@ -240,9 +228,10 @@ export function ToolBlock({ block }: { block: ToolBlockT }) {
         <div className="mt-1 text-xs text-danger whitespace-pre-wrap select-text">{block.errorMessage}</div>
       )}
 
-      {/* 结果：完整内容默认折叠（resultOpen 初始 false），展开后整块渲染 */}
+      {/* 结果：完整内容默认折叠（resultOpen 初始 false），展开后整块渲染。
+          v0.42.0：展开区加左侧树线，与侧栏清单展开区同一视觉语言。 */}
       {block.result && resultOpen && (
-        <div className="mt-1">
+        <div className="mt-1 ml-1 border-l-2 border-border-subtle pl-2.5">
           <ToolResultBody result={block.result} />
         </div>
       )}

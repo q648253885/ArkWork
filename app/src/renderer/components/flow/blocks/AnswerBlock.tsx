@@ -52,10 +52,12 @@ export function AnswerBlock({ block }: { block: AnswerBlockT }) {
   const { t } = useTranslation()
   const [verificationOpen, setVerificationOpen] = useState(false)
 
-  // v0.41.0（D210 P4-4 · 对齐 ZCode）：最终答复**轻量强调容器** —— 左侧 2px
-  // 主色边 + 极浅底色，让长轮次里「最终答复」有唯一的强终点。流式/未分层/
-  // 分层三种形态统一包裹；不改内部 Markdown / 分层逻辑，不新增文案。
-  const shell = 'rounded-r-md border-l-2 border-l-accent bg-accent-soft pl-2.5 py-0.5'
+  // v0.41.0（D210 P4-4 · 对齐 ZCode）：最终答复**轻量强调容器** —— 让长轮次里
+  // 「最终答复」有唯一的强终点。v0.42.0（用户反馈「蓝色背景有点奇怪」）：去掉
+  // 浅蓝铺底，强调信号降调为**左侧 2px 主色边线**（线 ≠ 面，配色纪律：浅色
+  // 铺底不进交互区正文）。流式/未分层/分层三种形态统一包裹；不改内部
+  // Markdown / 分层逻辑，不新增文案。
+  const shell = 'rounded-r-md border-l-2 border-l-accent pl-2.5 py-0.5'
 
   // 流式期不解析（防残帧）
   if (block.streaming) {

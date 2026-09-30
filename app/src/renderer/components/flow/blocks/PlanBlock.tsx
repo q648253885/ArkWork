@@ -30,7 +30,9 @@ export function PlanBlock({ block }: { block: PlanBlockT }) {
     ? planItemNumbering(block.items.map((_, i) => ({ id: `i${i}`, parentId: block.parentIds![i] ?? null } as PlanItemHierarchy)))
     : null
   return (
-    <div className="rounded-lg border border-border-default px-3 py-2 select-text">
+    // v0.42.0（对标 WorkBuddy 卡片处理）：中性底卡 + header 迷你进度条 + 行 hover。
+    // 层级缩进（16px×depth）与复合编号（v0.41.0 D209）不回退。
+    <div className="rounded-lg border border-border-default bg-bg-surface px-3 py-2 select-text transition-colors hover:border-border-strong">
       <div className="flex items-center gap-2">
         <div className="text-xs font-medium text-text-primary truncate">{block.goal}</div>
         <span className="flex-1" />
@@ -39,12 +41,20 @@ export function PlanBlock({ block }: { block: PlanBlockT }) {
             {STATE_MARK[block.aggregate].text}
           </span>
         )}
-        <span className="text-2xs text-text-tertiary shrink-0 select-none">
+        <span className="text-2xs text-text-tertiary shrink-0 select-none tabular">
           {block.items.length > 0 ? `${done}/${block.items.length}` : ''}
         </span>
       </div>
       {block.items.length > 0 && (
-        <div className="mt-1.5 space-y-1">
+        <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-bg-elevated select-none">
+          <div
+            className="h-full rounded-full bg-success transition-all duration-500"
+            style={{ width: `${block.items.length > 0 ? Math.round((done / block.items.length) * 100) : 0}%` }}
+          />
+        </div>
+      )}
+      {block.items.length > 0 && (
+        <div className="mt-1.5 space-y-0.5">
           {block.items.map((item, i) => {
             const st = block.states[i] ?? 'pending'
             const depth = hasHierarchy
@@ -54,8 +64,8 @@ export function PlanBlock({ block }: { block: PlanBlockT }) {
               <div
                 key={`${i}:${item}`}
                 id={`plan-step-${i + 1}`}
-                className="flex items-start gap-1.5 text-xs"
-                style={depth > 0 ? { paddingLeft: 16 * depth } : undefined}
+                className="flex items-start gap-1.5 rounded px-1 py-0.5 text-xs transition-colors hover:bg-bg-hover"
+                style={depth > 0 ? { paddingLeft: 16 * depth + 4 } : undefined}
               >
                 <span className={`shrink-0 ${STATE_MARK[st].cls} select-none`}>{STATE_MARK[st].text}</span>
                 <span className="text-text-secondary leading-5 select-text">

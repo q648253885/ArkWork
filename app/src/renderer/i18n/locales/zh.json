@@ -1428,7 +1428,8 @@
         "tablet": "平板",
         "mobile": "手机",
         "readonly": "只读渲染",
-        "edit": "编辑"
+        "edit": "编辑",
+        "preview": "预览"
       },
       "editor": "编辑器"
     },

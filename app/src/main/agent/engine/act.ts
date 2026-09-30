@@ -132,6 +132,9 @@ import { emitTurnNote } from './gate-channel.js'
 import { isPlanTool, isRetiredPlanTool } from './work-class.js'
 // v0.38.1（D177）：清单落库共享管线（task_plan 与正则清单回退共用）
 import { commitPlanDraft } from './plan-commit-pipeline.js'
+// v0.42.1（D212）：终局指引 —— 清单收口/零变化时告诉弱模型「该结束了」
+import { PLAN_TOOL_HINT, endgameSuffixOf } from '../ledger/hint.js'
+import { openItems } from '../ledger/project.js'
 import type { LedgerItemStatus } from '../ledger/types.js'
 
 /* ============================================================
@@ -680,6 +683,15 @@ export async function executeAct(
       const graphSyncDegraded = committed.graphSyncDegraded
 
       // ---------- ⑧ observation：把引擎算出的差异回给模型，便于它确认自己的改动 ----------
+      // v0.42.1（D212）：终局指引 —— 「清单已收口/无需变化」对弱模型是死循环入口
+      //（反复提交同一清单当"确认完成"直到撞同参数上限）。全部终态时必须显式告诉
+      // 模型「该调用 task_complete / 直接给最终答复了」；有在途项时只提示继续推进
+      //（防误导提前收尾）。
+      const openCount = fresh ? openItems(fresh).length : 0
+      const endgame =
+        openCount === 0 && freshItems.length > 0
+          ? `\n${endgameSuffixOf(0, freshItems.length)}`
+          : ''
       const overview = renderOverview(freshItems.map((it) => ({ status: it.status, text: it.text })))
       const protectedText =
         diff.protectedIds.length > 0 ? `\n（已保留 ${diff.protectedIds.length} 项已完成 / 终态清单项，不会回退）` : ''
@@ -689,8 +701,10 @@ export async function executeAct(
         : ''
       const summary =
         diff.changed === 0
-          ? `清单已检视，无需变化（共 ${freshItems.length} 项）。\n当前清单：\n${overview}`
-          : `清单已更新（${diff.summary}）${protectedText}。\n当前清单：\n${overview}${warnText}${degradeText}`
+          ? `清单已检视，无需变化（共 ${freshItems.length} 项）。${
+              openCount > 0 ? `\n${endgameSuffixOf(openCount, freshItems.length)}` : ''
+            }\n当前清单：\n${overview}`
+          : `清单已更新（${diff.summary}）${protectedText}。\n当前清单：\n${overview}${warnText}${degradeText}${endgame}`
       // 落库日志已由共享管线输出（`${source}(ledger): changed=…`），此处不再重复
       return {
         completedStep: { ...placeholder, result: { changed: diff.changed, items: freshItems.length }, resultSummary: summary, durationMs, status: 'success' },

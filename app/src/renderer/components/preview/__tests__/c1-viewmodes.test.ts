@@ -23,19 +23,26 @@ const EDITOR_HOST = read('../../editor/CodeEditorHost.tsx')
 const MARKDOWN_RENDERER = read('../renderers/MarkdownRenderer.tsx')
 
 describe('c1-viewmodes · TC-C1', () => {
-  it('TC-C1-001 编辑器视图收敛：EditorViewMode 只剩 edit/render，VIEW_MODES.editor 无 split，EditorPanel 无分屏布局', () => {
+  it('TC-C1-001 编辑器视图收敛：EditorViewMode 只剩 edit/render；v0.42.0 起 VIEW_MODES.editor 条目退役（编辑/只读由浮窗分段控件承担），EditorPanel 无分屏布局', () => {
     assert.doesNotMatch(
       stripComments(FS_TYPES),
       /'edit'\s*\|\s*'render'\s*\|\s*'split'/,
       'EditorViewMode 不得再含 split',
     )
     const registryCode = stripComments(REGISTRY)
-    assert.match(registryCode, /editor:\s*\[/, 'VIEW_MODES.editor 必须存在')
+    // v0.42.0 语义变更（纪律㉔，两条腿钉）：
+    // ① 否定腿 —— VIEW_MODES.editor 条目不得回来（编辑器视图态唯一真源 = fsSlice docs[].viewMode）
     assert.doesNotMatch(
-      registryCode.match(/editor:\s*\[[\s\S]*?\]/)?.[0] ?? '',
-      /'split'/,
-      '编辑器视图选项不得含 split（分屏归 markdown 等渲染器）',
+      registryCode.match(/VIEW_MODES[^=]*=\s*\{[\s\S]*?\n\}/)?.[0] ?? '',
+      /editor:\s*\[/,
+      'VIEW_MODES.editor 条目已退役（编辑/只读由浮窗「编辑|预览」分段控件承担），不得回归',
     )
+    // ② 肯定腿 —— 编辑器的工具栏动作不再含 mode-switch（防同一功能两个入口），
+    //    但 save 必须还在（保存链路不回退）
+    const editorEntry = registryCode.match(/editor:\s*\{[\s\S]*?\n  \}/)?.[0] ?? ''
+    assert.ok(editorEntry, 'RENDERER_REGISTRY.editor 条目必须存在（唯一 CM6 入口）')
+    assert.doesNotMatch(editorEntry, /'mode-switch'/, '编辑器工具栏不得再有 mode-switch（分段控件已替代）')
+    assert.match(editorEntry, /'save'/, '编辑器工具栏必须保留 save（保存链路不回退）')
     const panelCode = stripComments(EDITOR_PANEL)
     assert.doesNotMatch(panelCode, /heightRatio/, 'EditorPanel 不得再消费 heightRatio（分屏布局已删）')
   })

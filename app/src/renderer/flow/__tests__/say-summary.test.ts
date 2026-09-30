@@ -55,9 +55,12 @@ test('TC-FLW-003 lastResultSummaryOf：取最后一个有结果摘要的块；�
   assert.ok(out.endsWith('…'))
 })
 
-test('TC-FLW-004 AnswerBlock 强调容器：三种形态统一左主色边 + 浅底（轻量、不改内部分层）', () => {
+test('TC-FLW-004 AnswerBlock 强调容器：三种形态统一左主色边、无底色（v0.42.0 降调：线 ≠ 面）', () => {
   const code = codeOf('components/flow/blocks/AnswerBlock.tsx')
-  assert.match(code, /border-l-2 border-l-accent bg-accent-soft/, '强调容器 class 存在')
+  // v0.42.0 语义变更（用户反馈「蓝色背景有点奇怪」+ 配色纪律）：bg-accent-soft 铺底退役，
+  // 强调信号收窄为左 2px 主色边线。纪律㉔ 两条腿钉：
+  assert.doesNotMatch(code, /bg-accent-soft/, '浅蓝铺底不得回归（TC-UI42-001 同源，双重把守）')
+  assert.match(code, /border-l-2 border-l-accent/, '左主色边线必须保留（「最终答复 = 唯一强终点」不推翻）')
   assert.equal((code.match(/shell}/g) ?? []).length >= 3, true, '流式 / 未分层 / 分层三种形态都包裹')
   assert.match(code, /data-testid="answer-layered"/, '分层渲染标识不回退')
 })

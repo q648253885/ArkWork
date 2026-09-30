@@ -10,6 +10,7 @@
  * 分隔符。v0.31.0 的「按 step 分组 + StepView」退役（相关联的思考与工具
  * 调用不再被迭代边界与 kind 边界切成一长串折叠行）。
  * 折叠态 = turn.collapsed（投影层已并入 flow.turnUiState）。
+ * v0.42.0 P5（对标 ZCode）：StateRail 竖条退役 —— 过程行平铺无边框。
  * ============================================================ */
 import { useMemo } from 'react'
 import { turnRenderSequence } from '../../flow/project'
@@ -17,7 +18,6 @@ import { runHasFailure, runHasRunning, segmentFlow } from '@shared/utils/flow-fo
 import type { FlowTurn } from '@shared/types/flow'
 import { TurnHeader } from './TurnHeader'
 import { TurnFooter } from './TurnFooter'
-import { StateRail } from './StateRail'
 import { BlockRenderer } from './BlockRenderer'
 import { ProcessFold } from './ProcessFold'
 
@@ -41,14 +41,9 @@ export function TurnView({ turn, isLast, showActivity }: TurnViewProps) {
       <TurnHeader turn={turn} />
       {segments.map((seg) =>
         seg.type === 'fold' ? (
-          <div key={seg.key} className="flex gap-2.5">
-            <StateRail
-              status={seg.run.hasRunning ? 'running' : seg.run.hasFailure ? 'failed' : 'settled'}
-            />
-            <div className="flex-1 min-w-0">
-              <ProcessFold run={seg.run} />
-            </div>
-          </div>
+          // v0.42.0 P5（对标 ZCode）：StateRail 竖条退役 —— ZCode 过程行无左侧
+          // 轨道装饰，折叠条本身就是行；过程组直接平铺。
+          <ProcessFold key={seg.key} run={seg.run} />
         ) : (
           <BlockRenderer key={seg.key} block={seg.block} />
         ),

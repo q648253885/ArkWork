@@ -1428,7 +1428,8 @@
         "tablet": "태블릿",
         "mobile": "모바일",
         "readonly": "읽기 전용",
-        "edit": "편집"
+        "edit": "편집",
+        "preview": "미리보기"
       },
       "editor": "에디터"
     },

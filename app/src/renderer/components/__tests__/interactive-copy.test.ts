@@ -61,8 +61,11 @@ test('TC-COPY-001 交互区各文本块容器可选中（select-text；Say/Answe
   assert.doesNotMatch(ANSWER, /select-none/, 'AnswerBlock 不应含 select-none')
   // ReasoningBlock：思考正文 select-text（头部行/来源徽标控件允许 select-none，F1-4）
   assert.match(REASON, /react-reason__body[^"]*select-text/, '思考正文应为 select-text')
-  // ToolBlock：外层容器 select-text（「读取文件:{value}」意图行随容器可选中）
-  assert.match(TOOL, /px-3 py-2 select-text/, 'ToolBlock 外层容器应为 select-text')
+  // ToolBlock：外层容器 select-text（「读取文件:{value}」意图行随容器可选中）。
+  // v0.42.0 P5 去卡片化：padding 由 px-3 py-2 改为 px-1 py-0.5 —— 断言改钉语义
+  // （select-text 在场），不再钉具体 padding 类名（纪律㉔：形状变更不得让
+  // 「可选中」这一语义契约失效或误绿）。
+  assert.match(TOOL, /select-text/, 'ToolBlock 外层容器应为 select-text')
 })
 
 /* ============================================================

@@ -132,6 +132,8 @@ import { PLANNER_FAILURE_THRESHOLD } from '../planning/types.js'
 import type { PlannerFailureDigest, PlannerRequestItem } from '../planning/types.js'
 import { loadLedger } from '../ledger/engine.js'
 import { forceCloseOpenItems } from './ledger-guard.js'
+// v0.42.1（D212）：终局指引唯一文案源（清单族被拦时回执/system hint 复用）
+import { PLAN_TOOL_HINT } from '../ledger/hint.js'
 import { commitPlanDraft } from './plan-commit-pipeline.js'
 import { getUiLocale, tFor } from '../../i18n/messages.js'
 import { safeSlice, emitEvent, emitProgress } from './broadcast.js'
@@ -1320,8 +1322,13 @@ export async function runReActLoop(
           await pauseForBudgetExhausted(task, iteration, consecutiveSkippedIterations)
           return
         }
-        // 全部达上限 → 注入强提示（换**类别**，而不是原样重试）
-        pendingSystemHint = `本次请求的工具（${actions.map((a) => a.tool).join(', ')}）均已达到调用上限。请改用**其他类别**的可用工具，或基于已有信息推理完成任务。`
+        // 全部达上限 → 注入强提示（换**类别**，而不是原样重试）。
+        // v0.42.1（D212）：被拦集合含清单族时追加终局指引 —— 真机（qwen3.8 27b）
+        // 「无法结束任务」的死循环入口：模型反复 task_plan 撞上限后没有任何出路。
+        // 指引指向 task_complete / 最终答复（换层次），符合纪律⑩。
+        pendingSystemHint = `本次请求的工具（${actions.map((a) => a.tool).join(', ')}）均已达到调用上限。请改用**其他类别**的可用工具，或基于已有信息推理完成任务。${
+          actions.some((a) => isPlanWriteTool(a.tool)) ? PLAN_TOOL_HINT.endgame : ''
+        }`
       } else {
         consecutiveSkippedIterations = 0
         // v0.34.4（D65）：修正**注释与分支相反**的历史错位。
@@ -1329,7 +1336,9 @@ export async function runReActLoop(
         // 在它真正该出现的场景（部分耗尽、还有别的工具可用）**永远不会触发**。
         if (exhaustedIndices.size > 0) {
           const blocked = actions.filter((_, i) => exhaustedIndices.has(i)).map((a) => a.tool)
-          pendingSystemHint = `工具（${blocked.join(', ')}）已达调用上限，本轮未执行。请换用其它工具或**其它参数**继续，不要原样重试。`
+          pendingSystemHint = `工具（${blocked.join(', ')}）已达调用上限，本轮未执行。请换用其它工具或**其它参数**继续，不要原样重试。${
+            blocked.some((t) => isPlanWriteTool(t)) ? PLAN_TOOL_HINT.endgame : ''
+          }`
         }
       }
       const actSteps: ReActStep[] = actions.map((a) => {
@@ -1380,7 +1389,10 @@ export async function runReActLoop(
             const reason = signaturePrev >= maxPerSignature
               ? `同参数调用已达上限（${signaturePrev}/${maxPerSignature}）`
               : `工具类别调用已达上限（${categoryPrev}/${categoryLimit}）`
-            const msg = `${toolName} ${reason}，请改用替代方法`
+            // v0.42.1（D212）：清单族被拦 → 回执必须带终局指引（真机死循环根治）。
+            // 指向 task_complete / 最终答复 = 换层次动作，不是被拦的那条调用（纪律⑩）。
+            const planEndgame = isPlanWriteTool(toolName) ? `。${PLAN_TOOL_HINT.endgame}` : ''
+            const msg = `${toolName} ${reason}，请改用替代方法${planEndgame}`
             return Promise.resolve<ActExecutionResult>({
               completedStep: {
                 ...actSteps[i],

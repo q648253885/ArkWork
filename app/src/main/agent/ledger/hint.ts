@@ -29,4 +29,39 @@ export const PLAN_TOOL_HINT = {
   order: `把先后顺序体现在 ${PLAN_TOOL_NAME} 的清单顺序里（按执行顺序排列）`,
   /** 收尾 */
   finish: `全部完成后调用 task_complete 收尾`,
+  /**
+   * 终局引导（v0.42.1 · D212）。
+   *
+   * 真机根因（qwen3.8 27b，用户澄清「是因为一直无法结束，才导致到达上限的」）：
+   * 弱模型干完活后反复用 task_plan 提交同一份清单当「确认完成」——引擎对零变化
+   * 提交只回「清单已检视，无需变化」，同参数预算 5/5 拦截也只说「请改用替代方法」，
+   * **两处都没有告诉模型「接下来该结束任务」**。完成门禁只在模型尝试收尾时运行，
+   * 模型一直调工具就永远不触发 → 死循环到 stall。
+   *
+   * 本常量是终局指引的**唯一文案源**，两处消费：① task_plan 成功 observation
+   * （act.ts，清单收口/零变化时）；② 同参数/类别预算拦截回执（loop.ts，仅清单族）。
+   * 指引指向的是**换层次**的动作（task_complete / 最终答复），不是被拦的那条调用
+   * —— 符合纪律⑩。
+   */
+  endgame:
+    '若你判断任务已完成：请调用 task_complete 工具结束任务，或本轮不再调用任何工具、直接输出最终答复 —— 不要重复提交相同的清单',
 } as const
+
+/**
+ * 终局后缀纯函数（v0.42.1 · D212，真值表用例 TC-ENDG-001）。
+ *
+ * @param openCount 在途项数（`openItems(ledger).length`）
+ * @param total 清单总项数（0 = 无清单，不引导）
+ * @returns 拼进 task_plan observation 的终局句；无清单时返回 ''
+ *
+ * 两种分场（防误导提前收尾）：
+ *  - 全部终态 → 「清单已全部收口 + endgame 指引」（该收尾了）
+ *  - 有在途项 → 「无需变化，继续推进在途项」（**不得**此时引导收尾）
+ */
+export function endgameSuffixOf(openCount: number, total: number): string {
+  if (total <= 0) return ''
+  if (openCount === 0) {
+    return `清单已全部收口（${total} 项全部完成）。${PLAN_TOOL_HINT.endgame}。`
+  }
+  return `清单无需变化，仍有 ${openCount} 项在途 —— 请继续推进在途项；全部完成后调用 task_complete 收尾。`
+}

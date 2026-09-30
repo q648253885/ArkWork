@@ -142,7 +142,6 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
   const [rendererOverrides, setRendererOverrides] = useState<Record<string, RendererKind>>({})
   const [viewModes, setViewModes] = useState<Record<string, string>>({})
   const [pinnedTabs, setPinnedTabs] = useState<Set<string>>(new Set())
-  const [selectorOpen, setSelectorOpen] = useState(false)
 
   /* ---- 内容缓存（ref + state 双写，避免闭包失效） ---- */
   const contentsRef = useRef<Record<string, TabContent>>({})
@@ -161,10 +160,13 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
   // 旧实现让 `activeTab.renderer === 'editor'` 无条件短路 —— 结果 css/code 这类
   // 默认进编辑器的 Tab 从右上角下拉选了其他格式后毫无反应（activeRenderer 仍被
   // 锁死在 'editor'），这正是「css 文件不能切换格式」的直接原因。
-  // 统一口径（用户裁决）：**首次打开按 detectRenderer 匹配类型，之后任何格式均可互切**；
-  // 切回 'editor' 也走同一个下拉（RENDERER_REGISTRY 已含 editor 项），编辑器永远一键可达，
-  // 不会出现旧注释担心的「切走后回不来」。文档状态（docs/dirty/viewMode）在切换期间
-  // 全程保留 —— 切格式只是换视图，不关文档。
+  // 统一口径（用户裁决）：**首次打开按 detectRenderer 匹配类型，之后任何格式均可互切**。
+  // v0.42.0（用户裁决「放在单独下拉选择不合适」）：标题栏渲染器**下拉退役**，
+  // 换成 Tab 栏右侧「编辑 | 预览」分段控件（对标 WorkBuddy / TraeWork）——
+  // `rendererOverrides` 机制原样保留（数据流零变化），只是入口收窄为两值：
+  // 编辑 = 'editor'（CM6 可改），预览 = detectRenderer(path)（该文件的自然只读渲染）。
+  // 编辑器原有的「只读渲染」视图态（doc viewMode 'render'）继续由分段控件的预览段
+  // 承担 —— 走 renderEditorPreview 实时缓冲，切走再切回不丢未保存内容。
   const activeRenderer: RendererKind = activeTab
     ? (rendererOverrides[activeTab.id] ?? activeTab.renderer)
     : 'fallback'
@@ -334,13 +336,12 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
     }
   }
 
-  /* ---- 渲染器切换 ---- */
+  /* ---- 渲染器切换（v0.42.0：唯一入口 = Tab 栏右侧「编辑|预览」分段控件） ---- */
   const setRenderer = (kind: RendererKind) => {
     if (!activeTab) return
     setRendererOverrides((prev) => ({ ...prev, [activeTab.id]: kind }))
     const dm = defaultViewMode(kind)
     if (dm) setViewModes((prev) => ({ ...prev, [activeTab.id]: dm }))
-    setSelectorOpen(false)
     if (activeTab.target.kind === 'file') loadContent({ ...activeTab, renderer: kind }, false)
   }
 
@@ -708,7 +709,28 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
         : activeTab.target.url
 
   const entry = RENDERER_REGISTRY[activeRenderer]
-  const showTabBar = tabs.length >= 2
+
+  /* ---- v0.42.0：「编辑 | 预览」分段控件（对标 WorkBuddy / TraeWork） ----
+   * 显示条件：file Tab 且路径非空（URL / 面板 / 空 Tab 没有编辑语义）。
+   * 编辑态：renderer 'editor' + doc viewMode 'edit'（CM6 可改）；
+   * 预览态分两路 —— 已打开的文档走 doc viewMode 'render'（renderEditorPreview
+   * 实时缓冲，未保存内容不丢，v0.31.0 B2 口径）；非文档走 detectRenderer
+   * 的自然只读渲染（markdown 渲染 / code 高亮 / image…）。
+   * 旧标题栏「渲染器下拉」退役：跨类型互切（把 css 当 markdown 渲染）不可达。 */
+  const showSegmented = !!activeTab && activeTab.target.kind === 'file' && !!activeTab.target.path
+  const segMode: 'edit' | 'preview' = isEditorTab
+    ? (viewMode === 'render' ? 'preview' : 'edit')
+    : 'preview'
+  const onSegEdit = () => {
+    if (!activeFilePath) return
+    if (isEditorTab) setViewMode('edit')
+    else setRenderer('editor')
+  }
+  const onSegPreview = () => {
+    if (!activeFilePath) return
+    if (isEditorTab) setViewMode('render')
+    else setRenderer(detectRenderer(activeFilePath))
+  }
 
   return (
     <div
@@ -728,39 +750,6 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
           {title}
         </span>
 
-        {/* 渲染器选择器 */}
-        <div className="relative flex-shrink-0">
-          <button
-            type="button"
-            onClick={() => setSelectorOpen((o) => !o)}
-            className="flex items-center gap-1 px-1.5 py-0.5 text-2xs text-text-secondary hover:bg-bg-hover hover:text-text-primary rounded-md transition-colors"
-          >
-            {t(entry.labelKey)}
-            <Icon.ChevronDown width={16} height={16} />
-          </button>
-          {selectorOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setSelectorOpen(false)} />
-              <div className="absolute right-0 top-full mt-0.5 z-20 bg-bg-overlay border border-border-default rounded-md shadow-panel py-1 min-w-[120px] scale-in">
-                {(Object.keys(RENDERER_REGISTRY) as RendererKind[]).map((k) => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => setRenderer(k)}
-                    className={`w-full flex items-center px-2.5 py-1 text-xs transition-colors ${
-                      k === activeRenderer
-                        ? 'text-accent bg-accent-soft'
-                        : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
-                    }`}
-                  >
-                    {t(RENDERER_REGISTRY[k].labelKey)}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-
         {/* 窗口控制 */}
         <div className="flex items-center gap-0.5 flex-shrink-0">
           <TitleBtn label={t('preview.window.titleBtn.newTab')} onClick={handleNewTab}>
@@ -778,9 +767,9 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
         </div>
       </div>
 
-      {/* ===== 标签栏 ===== */}
-      {showTabBar && (
-        <div className="flex items-center gap-0.5 px-2 h-8 flex-shrink-0 bg-bg-surface border-b border-border-subtle overflow-x-auto">
+      {/* ===== 标签栏（v0.42.0 常驻：单 Tab 也要给「编辑|预览」分段控件一个家） ===== */}
+      <div className="flex items-center gap-1 px-2 h-8 flex-shrink-0 bg-bg-surface border-b border-border-subtle">
+        <div className="flex items-center gap-0.5 flex-1 min-w-0 h-full overflow-x-auto">
           {tabs.map((tab) => {
             const isActive = tab.id === activeTabId
             const isPinned = tab.mode === 'pinned' || pinnedTabs.has(tab.id)
@@ -836,9 +825,43 @@ function FloatingWindow({ pw }: { pw: NonNullable<ReturnType<typeof useStore.get
               </Tooltip>
             )
           })}
-
         </div>
-      )}
+
+        {/* v0.42.0：「编辑 | 预览」分段控件（替代旧标题栏渲染器下拉） */}
+        {showSegmented && (
+          <div
+            data-testid="preview-view-segmented"
+            className="flex-shrink-0 flex items-center rounded-md bg-bg-surface-2 p-0.5"
+          >
+            <button
+              type="button"
+              data-seg="edit"
+              aria-pressed={segMode === 'edit'}
+              onClick={onSegEdit}
+              className={`px-2 py-0.5 text-2xs rounded transition-colors ${
+                segMode === 'edit'
+                  ? 'bg-bg-active text-text-primary'
+                  : 'text-text-tertiary hover:text-text-primary'
+              }`}
+            >
+              {t('preview.registry.mode.edit')}
+            </button>
+            <button
+              type="button"
+              data-seg="preview"
+              aria-pressed={segMode === 'preview'}
+              onClick={onSegPreview}
+              className={`px-2 py-0.5 text-2xs rounded transition-colors ${
+                segMode === 'preview'
+                  ? 'bg-bg-active text-text-primary'
+                  : 'text-text-tertiary hover:text-text-primary'
+              }`}
+            >
+              {t('preview.registry.mode.preview')}
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* ===== 工具栏 ===== */}
       <Toolbar

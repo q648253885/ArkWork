@@ -1428,7 +1428,8 @@
         "tablet": "Tablet",
         "mobile": "Mobile",
         "readonly": "Read-only",
-        "edit": "Edit"
+        "edit": "Edit",
+        "preview": "Preview"
       },
       "editor": "Editor"
     },

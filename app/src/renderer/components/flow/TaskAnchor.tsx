@@ -1,5 +1,5 @@
 /**
- * ArkWork — TaskAnchor（v0.36.4 D121 · 任务锚点卡）
+ * ArkWork — TaskAnchor（v0.36.4 D121 · 任务锚点 / v0.42.0 P5 胶囊化）
  *
  * 交互区顶部恒在锚点（对照 Claude Code subject/activeForm · ZCode Goal Mode）：
  *  - 核心任务 = graph.goal（规划阶段 LLM 产物）
@@ -8,7 +8,10 @@
  *  - 用户意图 = 会话标题（D120 LLM 生成）+ 首条用户消息
  *
  * 所有锚点文本都是模型给出的结构化字段，本组件只渲染不造词（设计硬约束）。
- * 可折叠，默认展开；不进过程组（它是锚点，不是过程）。
+ *
+ * v0.42.0 P5（对标 ZCode）：整宽卡片 → **一行式胶囊** —— 胶囊文本优先显示
+ * 「正在做」（ZCode 顶部胶囊即当前活动项），运行中带呼吸点；点击展开后仍呈现
+ * 三行 LLM 产物（核心任务 / 正在做 / 用户意图），信息零丢失。不进过程组。
  */
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -19,7 +22,7 @@ import { Icon } from '../../icons'
 
 export function TaskAnchor({ taskId }: { taskId: string }) {
   const { t } = useTranslation()
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
   const task = useStore((s) => s.tasks.find((tl) => tl.id === taskId))
   const isRunning = task?.status === 'running'
   // 图数据：goal + 焦点节点（useGraph 组件内订阅，与任务面板同源）
@@ -37,29 +40,37 @@ export function TaskAnchor({ taskId }: { taskId: string }) {
   if (doing && isRunning) rows.push({ key: 'doing', label: t('taskAnchor.doing'), text: doing, live: true })
   if (intent) rows.push({ key: 'intent', label: t('taskAnchor.intent'), text: intent })
 
+  // 胶囊文本：优先「正在做」（ZCode 顶部胶囊 = 当前活动项），回落任务标题
+  const capsuleText = (isRunning && doing) || task?.title || t('taskAnchor.title')
+
   return (
-    <div className="rounded-lg border border-border-default bg-bg-surface px-3.5 py-2.5" data-testid="task-anchor">
+    <div data-testid="task-anchor">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        className="flex w-full items-center gap-1.5 text-left text-xs font-medium text-text-secondary hover:text-text-primary"
+        className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-fill-secondary py-1 pl-2.5 pr-2 text-left text-xs transition-colors hover:bg-bg-hover"
       >
-        {expanded ? <Icon.ChevronDown width={12} height={12} /> : <Icon.ChevronRight width={12} height={12} />}
-        <span className="truncate">{task?.title ?? t('taskAnchor.title')}</span>
+        {isRunning && <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent breathe" />}
+        <span className="min-w-0 truncate text-text-secondary">{capsuleText}</span>
+        {expanded ? <Icon.ChevronDown width={12} height={12} className="shrink-0 text-text-tertiary" /> : <Icon.ChevronRight width={12} height={12} className="shrink-0 text-text-tertiary" />}
       </button>
       {expanded && (
         <div className="mt-1.5 space-y-1">
           {rows.map((row) => (
             <div key={row.key} className="flex min-w-0 items-baseline gap-2 text-xs leading-5">
-              <span
-                className={
-                  row.live
-                  ? 'shrink-0 text-accent'
-                  : 'shrink-0 text-text-tertiary'
-                }
-              >
-                {row.label}
+              {/* v0.42.0：标签 chip 化 + live 行呼吸点（WorkBuddy 卡片处理） */}
+              <span className="flex shrink-0 items-center gap-1">
+                {row.live && <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent breathe" />}
+                <span
+                  className={
+                    row.live
+                      ? 'rounded bg-accent-soft px-1 py-px text-2xs leading-none text-accent'
+                      : 'rounded bg-fill-secondary px-1 py-px text-2xs leading-none text-text-tertiary'
+                  }
+                >
+                  {row.label}
+                </span>
               </span>
               <span className="min-w-0 flex-1 break-words text-text-primary">{row.text}</span>
             </div>

@@ -22,7 +22,7 @@
 
 > ⚠️ `overview.md`（仓库根）是 **v0.17.0 的历史 UI 设计说明**，不是项目总览 —— 项目总览见 `docs/PROJECT-OVERVIEW.md`。
 
-## 二、`app/` 分层（实测 684 个源文件 · 2026-09-28）
+## 二、`app/` 分层（实测 689 个源文件 · 2026-09-29）
 
 > 计数口径：`app/src` 下 `*.ts` / `*.tsx` / `*.mjs` / `*.cjs`，排除 `node_modules`。
 
@@ -67,11 +67,11 @@
 
 | 目录 | 职责 |
 |---|---|
-| `renderer/components/` | 全部 React 组件（`flow/` 交互区块、`dock/` 侧栏、`graph/` 任务面板与计划卡、`right/`、`preview/`…）。**v0.38.0 新增块**：`flow/blocks/NoteBlock.tsx`（阶段结论 —— `via` 只做 `title` 悬停提示，**不参与折叠**） |
+| `renderer/components/` | 全部 React 组件（`flow/` 交互区块、`dock/` 侧栏、`graph/` 任务面板与计划卡、`right/`、`preview/`…）。**v0.38.0 新增块**：`flow/blocks/NoteBlock.tsx`（阶段结论）。**v0.42.0**：`flow/FileLink` chip 化（图标+中性底）、`preview/PreviewWindow` 渲染器下拉退役 → Tab 栏「编辑\|预览」分段控件、`dock/TodoPanel` 产物摘要路径链接化（消费 `renderer/utils/path-links`） |
 | `renderer/flow/` | 交互区**投影**（turn/step/block 派生，SAY 剥离）。`project.ts` **必须是纯函数**（无 `window` / `Date.now()`）；v0.38.0 新增两条投影：`turn_note → note`（按 ts 保序插入 `FlowStep.blocks`）、`gate_blocked → notice(noticeKind='gate-blocked')` |
 | `renderer/store/` | 渲染层状态（slice 化）。**v0.38.0 新增通道**：`flowEvents`（`taskId → 待投影事件`）+ 唯一写入口 `appendFlowEvent` —— 此前 `TurnList` / `tasksSlice` 硬传 `events: []`，渲染层**从来没有** session 事件通道（接线缺失 + 静默退化的典型） |
 | `renderer/styles/` | `globals.css` —— **设计 token 唯一源**（`:root` / `.dark`） |
-| `renderer/utils/` | 渲染层纯工具（`label-guard` / `anchored-menu` / `profile-view`…） |
+| `renderer/utils/` | 渲染层纯工具（`label-guard` / `anchored-menu` / `profile-view`…）。**v0.42.0 新增**：`path-links.ts`（自由文本 → 路径分段，清单产物链接化判据层） |
 | `renderer/i18n/` | 四语言资源（zh / en / ja / ko）。**v0.39.0**：新增 `const.tool.taskPlan` / `const.tool.turnNote`（当前清单入口的展示文案） |
 | `renderer/constants.ts` | 渲染层常量：**`TOOL_DISPLAY`**（工具名 → 中文动词 + 图标 + 参数摘要）。**v0.39.0（D190）**：补当前唯一入口 `task_plan` / `turn_note` 的条目；历史名 `todo-update` / `todo_update` 保留但注明「只为渲染旧会话」 |
 | `renderer/keymap/` | 快捷键（逻辑和弦，唯一真源） |

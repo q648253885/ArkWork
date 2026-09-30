@@ -69,13 +69,14 @@ export const RENDERER_REGISTRY: Record<RendererKind, RendererEntry> = {
    * v0.31.0 B2（§3.5）：
    *  - `component` **必须**是懒加载的 EditorPanel（唯一 CM6 入口）
    *  - `toolbarActions` 增 `'save'`（保存按钮由 PreviewWindow 分发到 fsSlice.saveDoc）
-   *  - `mode-switch` = 编辑 / 只读渲染 两视图切换
-   *    （v0.31.0 C1：split 已删 —— 分屏是 markdown 等渲染器的能力）
+   * v0.42.0：`'mode-switch'`（edit/readonly 二态）**退役** —— 由浮窗 Tab 栏右侧
+   * 「编辑 | 预览」分段控件替代（PreviewWindow 的 onSegEdit / onSegPreview），
+   * 防同一功能两个入口（单一事实源）；VIEW_MODES.editor 条目随之移除。
    */
   editor: {
     component: LazyEditorPanel as unknown as ComponentType<Record<string, unknown>>,
     labelKey: 'preview.registry.editor',
-    toolbarActions: ['save', 'mode-switch', 'reveal', 'refresh'],
+    toolbarActions: ['save', 'reveal', 'refresh'],
   },
 }
 
@@ -95,11 +96,9 @@ export const VIEW_MODES: Partial<Record<RendererKind, { value: string; labelKey:
     { value: 'tablet', labelKey: 'preview.registry.mode.tablet' },
     { value: 'mobile', labelKey: 'preview.registry.mode.mobile' },
   ],
-  // v0.31.0 C1：编辑器两视图（split 已删，分屏归 markdown 渲染器）
-  editor: [
-    { value: 'edit', labelKey: 'preview.registry.mode.edit' },
-    { value: 'render', labelKey: 'preview.registry.mode.readonly' },
-  ],
+  // v0.42.0：editor 条目移除 —— 编辑/只读二态由浮窗分段控件承担，不再走工具栏
+  // mode-switch（defaultViewMode('editor') 返回 undefined，编辑器视图态
+  // 以 fsSlice docs[path].viewMode 为唯一真源，默认 'edit'）。
 }
 
 /** 渲染器默认视图模式 */

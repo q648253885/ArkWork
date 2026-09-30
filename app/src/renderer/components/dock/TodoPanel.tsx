@@ -25,6 +25,9 @@ import {
   isTerminalPlanStatus,
   type PlanFilter,
 } from '../../utils/plan-status'
+// v0.42.0：产物摘要中的工作区路径 → 可点击分段（纯函数层，TC-PLINK）
+import { linkifyWorkspacePaths } from '../../utils/path-links'
+import { FileLink } from '../flow/FileLink'
 import { ark } from '../../ipc/client'
 
 /** v0.17.0 F8 + v0.18.0：状态筛选顺序（全部 + 六态）v0.37.0：+ paused 共七态 */
@@ -383,6 +386,14 @@ export function TodoPanel() {
 
             return (
               <li key={pItem?.id ?? `row-${i}`} className="relative">
+                {/* v0.42.0：子任务树线 —— 与父行状态图标中线对齐（父 depth=d 行图标起点 8px+16*(d-1)） */}
+                {depth > 0 && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-0 bottom-0 w-px bg-border-subtle"
+                    style={{ left: 16 * depth }}
+                  />
+                )}
                 <div
                   className={`flex items-start gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
                     st === 'running' ? 'bg-bg-active' : 'hover:bg-bg-hover'
@@ -526,7 +537,7 @@ export function TodoPanel() {
                 )}
 
                 {expanded && (
-                  <div className="ml-6 pl-2.5 pr-2 py-1.5 space-y-1 border-l-2 border-border-subtle">
+                  <div className="relative ml-6 pl-2.5 pr-2 py-1.5 space-y-1 border-l-2 border-border-subtle">
                     {toolSteps.length === 0 ? (
                       <div className="text-2xs text-text-tertiary px-1">{t('dock.todo.no_artifact')}</div>
                     ) : (
@@ -537,8 +548,23 @@ export function TodoPanel() {
                             key={step.id}
                             className="px-2 py-1.5 rounded-md bg-bg-surface border border-border-subtle"
                           >
+                            {/* v0.42.0：产物摘要中的工作区路径链接化（linkifyWorkspacePaths
+                                唯一消费点）—— 点击经 FileLink → openDoc 打开，与交互区同门面 */}
                             <div className="text-2xs text-text-secondary leading-relaxed break-all">
-                              {step.resultSummary}
+                              {linkifyWorkspacePaths(step.resultSummary ?? '').map((seg, si) =>
+                                seg.kind === 'path' ? (
+                                  <FileLink
+                                    key={`${step.id}:${si}`}
+                                    path={seg.value}
+                                    line={seg.line}
+                                    className="text-2xs mr-1"
+                                  />
+                                ) : (
+                                  <span key={`${step.id}:${si}`} className="whitespace-pre-wrap">
+                                    {seg.value}
+                                  </span>
+                                ),
+                              )}
                             </div>
                           </div>
                         ))
