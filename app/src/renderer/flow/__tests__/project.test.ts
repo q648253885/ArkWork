@@ -402,3 +402,48 @@ test('TC-FLW-002 D210 P4-1：isSummarySource 仅标本轮最后一个 say（SayB
     '只有本轮最后一个 say 保持主内容层级，其余降调',
   )
 })
+
+/* ============================================================
+ * TC-PLANCARD-004（v0.43.1 · D216）：重排计划卡的两卡投影
+ * 修复前形态：交互区唯一计划卡是开局计划；重排（条数变化）后旧卡因
+ * planStatesOf 的数量相等守卫永不同源 → 冻结在 0/9，与右侧面板矛盾。
+ * 修复后：引擎对含新建项的落库补发 plan 步骤（replan-plan-card.test.ts
+ * 主进程侧钉死），投影层零改动 —— 新卡条数 == 实时 planItems → 数量守卫
+ * 天然成立，新卡实时同源刷新；旧卡保留为提交时刻快照（v0.30.2 历史语义）。
+ * ============================================================ */
+test('TC-PLANCARD-004 两条 plan 步骤 → 两张计划卡；新卡实时同源刷新，旧卡保持快照', () => {
+  const livePlanItems: PlanItem[] = [
+    { id: 'a', text: '任务 A', status: 'done', createdAt: 1, updatedAt: 9 },
+    { id: 'b', text: '新增 B', status: 'running', createdAt: 9, updatedAt: 9 },
+    { id: 'c', text: '新增 C', status: 'pending', createdAt: 9, updatedAt: 9 },
+  ]
+  const items: ConversationItem[] = [
+    {
+      id: 'p-old', type: 'plan',
+      plan: { goal: '首轮目标', items: ['任务 A', '任务 B'], useResources: [], skipResources: [] },
+      planStates: ['pending', 'pending'],
+      ts: 100,
+    },
+    {
+      id: 'p-new', type: 'plan',
+      plan: { goal: '重排后目标', items: ['任务 A', '新增 B', '新增 C'], useResources: [], skipResources: [] },
+      ts: 200,
+    },
+  ]
+  const turns = projectConversation(baseInput({ items, planItems: livePlanItems }))
+  const planBlocks = turns.flatMap((t) => t.outerBlocks.filter((b) => b.kind === 'plan'))
+  assert.equal(planBlocks.length, 2, '两条 plan 步骤各成一卡（v0.30.2 语义）')
+
+  const oldCard = planBlocks[0]
+  const newCard = planBlocks[1]
+  assert.ok(oldCard && oldCard.kind === 'plan' && newCard && newCard.kind === 'plan')
+
+  // 旧卡：条数 2 ≠ 实时 3 → 数量守卫回落 planStates 冻结快照（历史卡，0/9 在提交当时为真）
+  assert.equal(oldCard.goal, '首轮目标')
+  assert.deepEqual(oldCard.states, ['pending', 'pending'])
+
+  // 新卡：条数 3 == 实时 3 → 实时同源刷新（10/12 完成形态在本卡的等价小样：done/running/pending）
+  assert.equal(newCard.goal, '重排后目标')
+  assert.deepEqual(newCard.states, ['done', 'running', 'pending'], '新卡状态必须跟随实时 planItems（D216 的核心用户价值）')
+  assert.equal(newCard.aggregate, 'running')
+})

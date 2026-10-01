@@ -136,7 +136,10 @@ test('TC-STALLG-008 终局必须落到 paused + pendingAskUser + 广播，且两
   const helper = pauseHelperSrc()
   assert.match(helper, /status:\s*'paused'/, '任务必须置 paused（不是 failed —— 模型能力不足不是系统错误）')
   assert.match(helper, /pendingAskUser:\s*\{\s*question/, '必须写 pendingAskUser，否则重开任务时问题丢失')
-  assert.match(helper, /broadcastTaskStatus\(/, '必须广播 —— 实测教训：只改记录不广播，UI 会停在上一帧')
+  // v0.43.1（D215）契约改写：广播必须经 store 权威对象出口（直接广播内存副本
+  // 会把运行期落库的 LLM 标题冲回旧值）。「必须广播」的实测教训保持不变。
+  assert.match(helper, /broadcastTaskStatusStored\(updatedTask,/, '必须广播 —— 实测教训：只改记录不广播，UI 会停在上一帧；且必须经 store 权威对象出口（D215）')
+  assert.doesNotMatch(helper, /broadcastTaskStatus\(\{ \.\.\.task/, '禁止回潮：不得直传内存副本 `{ ...task }`（D215）')
   assert.doesNotMatch(helper, /status:\s*'failed'/, '绝不置 failed：这是「需要用户决策」，不是失败')
   assert.doesNotMatch(helper, /status:\s*'done'/, '绝不置 done：零产出 ≠ 任务完成')
   // 接线：两条终局路径（Act 路径 + 无工具分支）都必须调用并 return

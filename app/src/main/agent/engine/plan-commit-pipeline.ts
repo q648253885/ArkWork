@@ -13,11 +13,13 @@
  *   · 落库唯一写入口仍是账本 `plan-commit` 算子（TC-WIRE-008）。
  * ============================================================ */
 import { logger } from '../../system/logger.js'
+import { genId } from '@shared/utils/id'
 import { diffPlan, type PlanDiffResult, type PlanDraftItem } from '../ledger/plan-diff.js'
 import { loadLedger, ensureLedger, mutate } from '../ledger/engine.js'
 import { TO_PLAN_STATUS } from '../ledger/project.js'
 import type { Task } from '../../../shared/types/task'
 import { reconcilePlanItemsToGraph } from '../graph/plan-sync.js'
+import { broadcastStep } from '../events.js'
 import { emitTurnNote } from './gate-channel.js'
 import { buildPlanCommitNote, buildReplanNote } from './turn-note-policy.js'
 
@@ -164,6 +166,41 @@ export async function commitPlanDraft(args: CommitPlanDraftArgs): Promise<Commit
     const noteText = buildPlanCommitNote(diff, nextDoing)
     if (noteText) {
       await emitTurnNote({ taskId, iteration, text: noteText, via: 'plan-commit' })
+    }
+  }
+
+  // ⑦ v0.43.1（D216）：**重排计划卡** —— 含新建项的落库成功后，向交互区补发一条
+  // `type:'plan'` 步骤（broadcastStep 自带 persistStep 持久化 + task:step 实时推送）。
+  //
+  // 为什么必须有这一步：交互区的计划卡来自 plan 步骤，而全仓唯一发射点此前只有
+  // 开局计划（run-setup.ts）。规划通道重排 / 用户新指令 / plan-ops / 模型换计划
+  // 都只改账本不发声 —— 旧卡因投影层数量相等守卫（planStatesOf：实时条数 ==
+  // 卡片条数才同源刷新状态）永冻结在提交时刻（实机：重排 9→12 后旧卡停在 0/9，
+  // 与右侧面板 12/12 完成直接矛盾）。
+  // 发新卡后，新卡条数 == 实时 planItems → 数量守卫天然成立，新卡实时同源刷新；
+  // 旧卡保留为历史（v0.30.2 既定语义）。纯状态提交（无新建项）不发卡（负腿
+  // TC-PLANCARD-002）；plan.goal 取账本轮次目标（与面板标题同源，R1）。
+  if (freshItems.length > 0 && diff.ops.some((o) => o.kind === 'create')) {
+    try {
+      await broadcastStep({
+        id: genId('step'),
+        taskId,
+        iteration,
+        type: 'plan',
+        startedAt: Date.now(),
+        durationMs: 0,
+        status: 'success',
+        plan: {
+          goal: fresh?.goal || reason || diff.summary,
+          items: freshItems.map((it) => it.text),
+          parentIds: freshItems.map((it) => it.parentId),
+          useResources: [],
+          skipResources: [],
+        },
+      })
+    } catch (err) {
+      // 降级留痕（纪律⑨）：账本已生效，仅交互区少一张卡，不阻断管线结果。
+      logger.warn('Agent', `重排计划卡广播失败（账本已生效，仅交互区少一张卡）：${(err as Error).message}`, taskId)
     }
   }
 

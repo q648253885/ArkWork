@@ -8,7 +8,7 @@
 import type { Task } from '@shared/types/task'
 import { appendL1 } from '../../memory/l1-working.js'
 import { updateTask, getTask } from '../../store/tasks.js'
-import { broadcastStep, broadcastTaskStatus } from '../events.js'
+import { broadcastStep, broadcastTaskStatus, broadcastTaskStatusStored } from '../events.js'
 import { logger } from '../../system/logger.js'
 import { genId } from '@shared/utils/id'
 import { drainContinuations } from '../inbox.js'
@@ -107,13 +107,15 @@ export async function handleAbort(
     return
   }
   await emitEvent(task.id, { type: 'task_paused', iteration })
-  await updateTask(task.id, { status: 'paused' })
+  // v0.43.1（D215）：广播必须用 store 权威对象 —— 此前这里广播引擎内存副本，
+  // 会把运行期旁路落库的 LLM 标题（task-title.ts）冲回「未命名任务」。
+  const updatedTask = await updateTask(task.id, { status: 'paused' })
   // v0.37.0（缺陷 D131）：**暂停 ≠ 作废**。此前这里调 discardIncompletePlanItems，
   // 把「可恢复的暂停」当成「不可恢复的取消」处理 —— 未完成项一律 cancelled，
   // 续聊时"当前生效计划"消失，模型只能重新规划 → 重复执行第一个任务（诊断 §2 L1）。
   // 现在走 park：running → paused 保留，pending 原样不动，并写入人话恢复点。
   await parkIncompletePlanItems(current ?? task, '任务已暂停，未完成项保留待续')
-  broadcastTaskStatus({ ...task, status: 'paused' })
+  broadcastTaskStatusStored(updatedTask, { ...task, status: 'paused' })
 }
 
 /**

@@ -51,6 +51,27 @@ export function broadcastTaskStatus(task: Task): void {
 }
 
 /**
+ * v0.43.1（D215）：任务状态广播的**唯一出口** —— 渲染层任务对象唯一来源 = store。
+ *
+ * 为什么存在：引擎长持 run 开始时的内存 `task` 副本（每轮只回同步 `planItems`，
+ * 不同步 `title` 等旁路字段），直接广播 `{ ...task, status }` 会把运行期落库的
+ * LLM 标题（task-title.ts）冲回旧值 —— 实机复现：完成瞬间顶栏 / 侧栏 / 锚点
+ * 全部回退「未命名任务」，而磁盘 `tasks.json` 里的标题是对的。
+ *
+ * 用法：`const updatedTask = await updateTask(...)` 后以返回值调用本函数；
+ * 仅当 `updateTask` 失败（store 写路径异常）时才降级广播内存副本，并留 warn 人话
+ * （纪律⑨：容错路径必须在诊断通道留痕）。
+ */
+export function broadcastTaskStatusStored(updated: Task | null | undefined, fallback: Task): void {
+  if (updated) {
+    broadcastTaskStatus(updated)
+    return
+  }
+  logger.warn('Agent', `任务状态写入失败（store 异常），已降级广播内存副本：${fallback.id}`)
+  broadcastTaskStatus(fallback)
+}
+
+/**
  * v0.32.1（缺陷 D36）：**图级 status 变更**的专用广播。
  *
  * 为什么必须单独开一条：`persist()` 的 `graph:update` 扇出条件是

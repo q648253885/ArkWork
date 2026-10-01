@@ -28,6 +28,7 @@ import type { GraphNotice, GraphRow, NodeStatus, ReplanPatch } from '@shared/typ
 import { tierLabel } from '@shared/types/graph'
 import { sanitizeTierReason } from '../../utils/tier-reason'
 import { buildRoundIndex } from '../../utils/round-filter'
+import { skippedCountOf, tokensLabelOf } from '../../utils/all-done'
 import { TodoPanel } from './TodoPanel'
 import { useGraph } from '../graph/useGraph'
 import { GraphNotices } from '../graph/GraphNotices'
@@ -380,6 +381,26 @@ export function TaskPanel() {
   const pendingPatch: ReplanPatch | undefined = card?.kind === 'replan'
     ? g.pendingPatches.find((p) => p.id === card.patchId)
     : undefined
+  // v0.43.1（D217）：完成横幅文案 —— tokens 无数据整段不渲染（此前渲染出无数字的
+  // 「· tokens」，根因 = 图快照 tokensUsed 结构性为 0，L-43-04）；账本已跳过项显式补
+  // 「含跳过 N」（progressCounts 口径把 skipped 计入「完成」，文案与账本实况对齐）。
+  // 统计语义（progressCounts / 头部 12/12）不动，本段只管展示层诚实。
+  // ⚠️ 此处**不得**用 useMemo（D218）：本组件在上方有早退 return（轻量图回退
+  // `<TodoPanel />` / 图 schema 损坏），早退路径 hook 数更少 → 快照到达后全量
+  // 渲染即 React #310「Rendered more hooks than during the previous render」
+  // （实机白屏）。纯字符串拼装开销可忽略，用普通派生值。
+  const skippedTotal = skippedCountOf(ledger?.items)
+  let allDoneNoticeText: string | undefined
+  if (snap && allTerminal) {
+    const tokensLabel = tokensLabelOf(snap.budget.tokensUsed, formatTokens)
+    allDoneNoticeText = [
+      t('taskPanel.allDone', { done: snap.progress.done, total: snap.progress.total }),
+      tokensLabel ? `${tokensLabel} tokens` : undefined,
+      skippedTotal > 0 ? t('taskPanel.allDoneSkipped', { count: skippedTotal }) : undefined,
+    ]
+      .filter((seg): seg is string => Boolean(seg))
+      .join(' · ')
+  }
   const waitingNode = card?.kind === 'needs-human' ? g.graph?.nodes[card.nodeId] : undefined
 
   return (
@@ -424,11 +445,7 @@ export function TaskPanel() {
             {
               kind: 'auto-applied',
               severity: 'success',
-              text: t('taskPanel.allDone', {
-                done: snap.progress.done,
-                total: snap.progress.total,
-                tokens: formatTokens(snap.budget.tokensUsed),
-              }),
+              text: allDoneNoticeText ?? '',
               dismissible: false,
             },
           ]}
@@ -686,7 +703,7 @@ function PanelHeader({
     ? t('taskPanel.progressTip', {
         done,
         total,
-        used: formatTokens(snapshot.budget.tokensUsed),
+        used: tokensLabelOf(snapshot.budget.tokensUsed, formatTokens) ?? '—',
         budget: snapshot.budget.tokenBudget ? formatTokens(snapshot.budget.tokenBudget) : '—',
       })
     : undefined

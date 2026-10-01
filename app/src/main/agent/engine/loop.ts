@@ -65,6 +65,7 @@ import {
   getAgent,
   broadcastStep,
   broadcastTaskStatus,
+  broadcastTaskStatusStored,
   broadcastToolProgress,
   clearToolProgress,
   broadcastPlanItemStatus,
@@ -264,11 +265,11 @@ async function pauseForStalledRounds(task: Task, iteration: number, rounds: numb
       { label: tFor(getUiLocale(), 'suggest.finishHere.label'), description: tFor(getUiLocale(), 'suggest.finishHere.desc'), action: 'finish' },
     ],
   })
-  await updateTask(task.id, {
+  const updatedTask = await updateTask(task.id, {
     status: 'paused',
     pendingAskUser: { question, askedAt: Date.now() },
   })
-  broadcastTaskStatus({ ...task, status: 'paused' })
+  broadcastTaskStatusStored(updatedTask, { ...task, status: 'paused' })
 }
 
 /**
@@ -306,11 +307,11 @@ async function pauseForPseudoToolCalls(task: Task, iteration: number, tool: stri
       { label: '就此结束', description: '保留当前进度，不再自动执行', action: 'finish' },
     ],
   })
-  await updateTask(task.id, {
+  const updatedTask = await updateTask(task.id, {
     status: 'paused',
     pendingAskUser: { question, askedAt: Date.now() },
   })
-  broadcastTaskStatus({ ...task, status: 'paused' })
+  broadcastTaskStatusStored(updatedTask, { ...task, status: 'paused' })
 }
 
 /**
@@ -351,11 +352,11 @@ async function pauseForEmptyResponses(task: Task, iteration: number, attempts: n
       { label: tFor(getUiLocale(), 'suggest.finishHere.label'), description: tFor(getUiLocale(), 'suggest.finishHere.desc'), action: 'finish' },
     ],
   })
-  await updateTask(task.id, {
+  const updatedTask = await updateTask(task.id, {
     status: 'paused',
     pendingAskUser: { question, askedAt: Date.now() },
   })
-  broadcastTaskStatus({ ...task, status: 'paused' })
+  broadcastTaskStatusStored(updatedTask, { ...task, status: 'paused' })
 }
 
 /**
@@ -394,11 +395,11 @@ async function pauseForNoToolAnswerStall(
       { label: '就此结束', description: '保留当前进度与答复，不再自动执行', action: 'finish' },
     ],
   })
-  await updateTask(task.id, {
+  const updatedTask = await updateTask(task.id, {
     status: 'paused',
     pendingAskUser: { question, askedAt: Date.now() },
   })
-  broadcastTaskStatus({ ...task, status: 'paused' })
+  broadcastTaskStatusStored(updatedTask, { ...task, status: 'paused' })
 }
 
 /**
@@ -430,11 +431,11 @@ async function pauseForBudgetExhausted(task: Task, iteration: number, rounds: nu
       { label: tFor(getUiLocale(), 'suggest.finishHere.label'), description: tFor(getUiLocale(), 'suggest.finishHere.desc'), action: 'finish' },
     ],
   })
-  await updateTask(task.id, {
+  const updatedTask = await updateTask(task.id, {
     status: 'paused',
     pendingAskUser: { question, askedAt: Date.now() },
   })
-  broadcastTaskStatus({ ...task, status: 'paused' })
+  broadcastTaskStatusStored(updatedTask, { ...task, status: 'paused' })
 }
 
 export async function runReActLoop(
@@ -513,8 +514,8 @@ export async function runReActLoop(
   const MAX_REFUSAL_WRITE_FAILURES = 2
 
   // 标记任务为 running
-  await updateTask(task.id, { status: 'running', startedAt: Date.now() })
-  broadcastTaskStatus({ ...task, status: 'running' })
+  const updatedTask = await updateTask(task.id, { status: 'running', startedAt: Date.now() })
+  broadcastTaskStatusStored(updatedTask, { ...task, status: 'running' })
 
   // v0.32.1（缺陷 D36 配套）：**新一轮执行开始时重开图**。
   // 收口（sealGraphForTaskOutcome）是单向的，而任务是可继续的：`done` 后续聊、
@@ -1064,8 +1065,8 @@ export async function runReActLoop(
               })
               await sealLedger(task.id, 'completed', '任务完成（门禁计数异常，有界放行）')
               await sealGraphForTaskOutcome(task, 'completed', '任务完成')
-              await updateTask(task.id, { status: 'done', completedAt: Date.now() })
-              broadcastTaskStatus({ ...task, status: 'done', completedAt: Date.now() })
+              const updatedTask = await updateTask(task.id, { status: 'done', completedAt: Date.now() })
+              broadcastTaskStatusStored(updatedTask, { ...task, status: 'done', completedAt: Date.now() })
               return
             }
           }
@@ -1153,8 +1154,8 @@ export async function runReActLoop(
         // 但 graph.status 在此之前从没有任何生产代码写过 —— 不封口就会出现
         // 「任务 done 而图仍 in_progress」，任务面板一直显示「进行中」。
         await sealGraphForTaskOutcome(task, 'completed', '任务完成')
-        await updateTask(task.id, { status: 'done', completedAt: Date.now() })
-        broadcastTaskStatus({ ...task, status: 'done', completedAt: Date.now() })
+        const updatedTask = await updateTask(task.id, { status: 'done', completedAt: Date.now() })
+        broadcastTaskStatusStored(updatedTask, { ...task, status: 'done', completedAt: Date.now() })
         // Task 9：任务完成 → 推进进度到 100% + 标记「编码完成」里程碑
         await emitProgress({
           type: 'task_progress',
@@ -1276,11 +1277,11 @@ export async function runReActLoop(
             ],
           })
           // v0.30.2 D12：预算中断也属 ask_user 暂停 → 打答复型续聊标记（同 turn-end）
-          await updateTask(task.id, {
+          const updatedTask = await updateTask(task.id, {
             status: 'paused',
             pendingAskUser: { question, askedAt: Date.now() },
           })
-          broadcastTaskStatus({ ...task, status: 'paused' })
+          broadcastTaskStatusStored(updatedTask, { ...task, status: 'paused' })
           return
         }
         if (signatureExhausted || categoryExhausted) {
@@ -1725,11 +1726,11 @@ export async function runReActLoop(
         // v0.19.0 M3：停止候选——先给监听器注入 continuation 的机会，注入则同轮继续
         if (await continueTurnIfInjected(task, iteration)) continue
         // v0.30.2 D12：阶段门禁直推 ask_user → 打答复型续聊标记（同 turn-end）
-        await updateTask(task.id, {
+        const updatedTask = await updateTask(task.id, {
           status: 'paused',
           pendingAskUser: { question: gate.question, askedAt: Date.now() },
         })
-        broadcastTaskStatus({ ...task, status: 'paused' })
+        broadcastTaskStatusStored(updatedTask, { ...task, status: 'paused' })
         return
       }
 
@@ -1972,14 +1973,14 @@ export async function runReActLoop(
       ],
     })
     // v0.30.2 D12：迭代上限暂停属 ask_user 交互（继续/结束选项卡）→ 打答复型续聊标记
-    await updateTask(task.id, {
+    const updatedTask = await updateTask(task.id, {
       status: 'paused',
       pendingAskUser: {
         question: tFor(getUiLocale(), 'askUser.maxIterQuestion', { max: maxIter }),
         askedAt: Date.now(),
       },
     })
-    broadcastTaskStatus({ ...task, status: 'paused' })
+    broadcastTaskStatusStored(updatedTask, { ...task, status: 'paused' })
     logger.warn('Agent', `max iterations reached for ${task.id} — paused for user decision`, task.id)
   } catch (err) {
     // v0.8.1：AbortError 属于用户主动中断（Esc/停止/暂停/取消），
@@ -2000,8 +2001,8 @@ export async function runReActLoop(
     // 任务记录。实测（黑洞端点模型）：任务 `failed`、图 `failed`、清单 `failed`，
     // 唯独 `errorMessage` 为空 → 重启后 / 任务列表 / 诊断里只剩「失败」没有「为什么」。
     // 注意此处**只补原因，不改状态语义**（AbortError 早已在上方分流，不会被写 failed）。
-    await updateTask(task.id, { status: 'failed', errorMessage: message })
-    broadcastTaskStatus({ ...task, status: 'failed', errorMessage: message })
+    const updatedTask = await updateTask(task.id, { status: 'failed', errorMessage: message })
+    broadcastTaskStatusStored(updatedTask, { ...task, status: 'failed', errorMessage: message })
     // v0.39.0（D184）：**失败路径也要封账本**。
     //
     // 此前 `sealLedger` 只有两条成功路径在调（loop 最终答复 / turn-end 的

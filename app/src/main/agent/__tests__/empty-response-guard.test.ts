@@ -158,7 +158,10 @@ test('TC-EMPTYG-005 ★ D197：补试用尽 → 就地优雅暂停；拦截点�
   assert.match(fn, /status: 'paused'/, '必须是 paused（进度保留、可继续）')
   assert.match(fn, /type: 'ask_user'/, '必须给出 ask_user 让用户决策')
   assert.match(fn, /emitTurnNote\(/, '人话正文必须额外走 turn_note（ask_user 卡片只渲染按钮，同 D160）')
-  assert.match(fn, /broadcastTaskStatus\(/, '状态必须广播给渲染层')
+  // v0.43.1（D215）契约改写：广播必须经 store 权威对象出口（直接广播内存副本
+  // 会把运行期落库的 LLM 标题冲回旧值 —— 实机「完成瞬间标题回退未命名任务」）。
+  assert.match(fn, /broadcastTaskStatusStored\(updatedTask,/, '状态必须广播给渲染层，且经 store 权威对象出口（D215）')
+  assert.doesNotMatch(fn, /broadcastTaskStatus\(\{ \.\.\.task/, '禁止回潮：不得直传内存副本 `{ ...task }`（D215）')
   assert.doesNotMatch(
     fn,
     /sealLedger|sealGraphForTaskOutcome|status: 'done'|status: 'failed'/,

@@ -12,6 +12,7 @@ import {
   logger,
   updateTask,
   broadcastTaskStatus,
+  broadcastTaskStatusStored,
   appendL1,
 } from './engine-context.js'
 import { emitEvent, emitProgress, safeSlice } from './broadcast.js'
@@ -286,8 +287,8 @@ export async function finishViaTaskComplete(
   // 收口本身失败不抛（只告警），因此不会连带阻塞任务完成。
   await sealGraphForTaskOutcome(task, 'completed', '任务完成（task_complete）')
   await sealLedger(task.id, 'completed', '任务完成（task_complete）')
-  await updateTask(task.id, { status: 'done', completedAt: Date.now() })
-  broadcastTaskStatus({ ...task, status: 'done', completedAt: Date.now() })
+  const updatedTask = await updateTask(task.id, { status: 'done', completedAt: Date.now() })
+  broadcastTaskStatusStored(updatedTask, { ...task, status: 'done', completedAt: Date.now() })
   // Task 9：task_complete 工具分支同样推进到完成态
   await emitProgress({
     type: 'task_progress',
@@ -401,10 +402,10 @@ export async function pauseViaAskUser(
   if (await continueTurnIfInjected(task, iteration)) return true
   // v0.30.2 D12：打 ask_user 暂停标记 —— 用户答复后下一轮 run 据此识别为
   // 「答复型续聊」（清单保持不变，不触发重评/重建）；此处仅在确认暂停时写。
-  await updateTask(task.id, {
+  const updatedTask = await updateTask(task.id, {
     status: 'paused',
     pendingAskUser: { question, askedAt: Date.now() },
   })
-  broadcastTaskStatus({ ...task, status: 'paused' })
+  broadcastTaskStatusStored(updatedTask, { ...task, status: 'paused' })
   return false
 }
