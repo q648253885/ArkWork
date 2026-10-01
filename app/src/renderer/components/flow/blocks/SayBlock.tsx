@@ -9,18 +9,20 @@
  * 主内容层级，作为该轮的阶段结论行。
  * ============================================================ */
 import type { FlowBlock } from '@shared/types/flow'
+import { LinkifiedText } from '../LinkifiedText'
 
 export function SayBlock({ block }: { block: Extract<FlowBlock, { kind: 'say' }> }) {
   if (block.isSummarySource) {
     return (
       <div className="text-base text-text-primary leading-relaxed select-text whitespace-pre-wrap">
-        {block.text}
+        {/* v0.44.0（R-C）：路径链接化（分段渲染无损，无路径时等同直出） */}
+        <LinkifiedText text={block.text} />
       </div>
     )
   }
   return (
     <div className="text-sm text-text-secondary leading-relaxed select-text whitespace-pre-wrap">
-      {block.text}
+      <LinkifiedText text={block.text} />
     </div>
   )
 }

@@ -445,8 +445,8 @@ test('TC-CMD-010 ★ 结构对等：渲染器的 case 集合 ≡ FlowBlock 判�
     [...rendererSrc.matchAll(/\bcase\s*'([a-z-]+)'\s*:/g)].map((m) => m[1]),
   )
 
-  // 先自证：判别联合确实有 11 种（若 flow.ts 改了形态本用例要显式失败而非静默空集）
-  assert.equal(unionKinds.size, 11, `FlowBlock 判别联合应有 11 种 kind，实得 ${unionKinds.size}：${[...unionKinds].join(',')}`)
+  // 先自证：判别联合确实有 12 种（v0.44.0 R-B 新增 artifact；若 flow.ts 改了形态本用例要显式失败而非静默空集）
+  assert.equal(unionKinds.size, 12, `FlowBlock 判别联合应有 12 种 kind，实得 ${unionKinds.size}：${[...unionKinds].join(',')}`)
 
   const missing = [...unionKinds].filter((k) => !renderedKinds.has(k)).sort()
   assert.deepEqual(

@@ -82,6 +82,18 @@ export type PlanItemSource =
    */
   | 'plan-regex'
 
+/**
+ * v0.44.0（R-A）：成果产物声明（与主进程 `LedgerArtifact` 结构对齐；
+ * shared 层不 import main 类型，两处由用例钉住形状一致）。
+ */
+export interface PlanArtifact {
+  /** 路径（相对 workspace） */
+  path: string
+  kind: 'file' | 'dir' | 'command'
+  /** 完整性校验命令；为空表示只判存在 */
+  check?: string
+}
+
 export interface PlanItem {
   /** 计划项 ID（v0.14.0 新增；旧数据缺失时由迁移层补齐） */
   id: string
@@ -99,6 +111,12 @@ export interface PlanItem {
   completedAt?: number
   /** 所属任务轮次（v0.43.0 · R4）：plan-commit 含新建项时账本轮次 +1；旧数据归一 1 */
   round?: number
+  /**
+   * v0.44.0（R-A）：该项的成果产物声明（D176 证据门禁落库的 `LedgerItem.artifact`
+   * 经 `toPlanItems` 透传）。渲染层产物卡（ArtifactBlock）的数据源；
+   * 旧数据 / 未声明产物时缺省。
+   */
+  artifact?: PlanArtifact
   /** v0.18.0 新增：该项状态来源（用于三视图与"引擎"/"推断"徽标） */
   source?: PlanItemSource
   /**

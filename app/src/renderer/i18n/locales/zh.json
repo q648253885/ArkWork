@@ -50,6 +50,9 @@
       "toolsCount": "{{n}} 次工具",
       "collapse": "收起本轮",
       "expand": "展开本轮"
+    },
+    "artifactCard": {
+      "title": "产物"
     }
   },
   "common": {

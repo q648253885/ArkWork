@@ -50,6 +50,9 @@
       "toolsCount": "{{n}} tool calls",
       "collapse": "Collapse turn",
       "expand": "Expand turn"
+    },
+    "artifactCard": {
+      "title": "Artifacts"
     }
   },
   "common": {

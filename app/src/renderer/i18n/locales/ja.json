@@ -50,6 +50,9 @@
       "toolsCount": "ツール {{n}} 回",
       "collapse": "このターンを折りたたむ",
       "expand": "このターンを展開"
+    },
+    "artifactCard": {
+      "title": "成果物"
     }
   },
   "common": {

@@ -5,7 +5,7 @@
  * 工具卡内部的 card 分发在 tools/ 注册表（唯一 card switch）。
  * ============================================================ */
 import type { FlowBlock } from '@shared/types/flow'
-import { UserBlock, SayBlock, ReasoningBlock, AnswerBlock, ToolBlock, PlanBlock, ApprovalBlock, NoticeBlock, ErrorBlock, SubagentGroupCard, NoteBlock } from './blocks'
+import { UserBlock, SayBlock, ReasoningBlock, AnswerBlock, ToolBlock, PlanBlock, ApprovalBlock, NoticeBlock, ErrorBlock, SubagentGroupCard, NoteBlock, TaskArtifactCard } from './blocks'
 
 export function BlockRenderer({ block }: { block: FlowBlock }) {
   switch (block.kind) {
@@ -34,5 +34,9 @@ export function BlockRenderer({ block }: { block: FlowBlock }) {
     // 在交互区可见，而不是等最终答复一次性出现。
     case 'note':
       return <NoteBlock block={block} />
+    // v0.44.0（R-B）：产物卡（第十二个块）—— 成果产物一等公民，
+    // 点击打开预览，不再是答复正文里的一段纯文本。
+    case 'artifact':
+      return <TaskArtifactCard block={block} />
   }
 }

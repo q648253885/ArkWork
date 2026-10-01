@@ -50,6 +50,9 @@
       "toolsCount": "도구 {{n}}회",
       "collapse": "이 턴 접기",
       "expand": "이 턴 펼치기"
+    },
+    "artifactCard": {
+      "title": "산출물"
     }
   },
   "common": {

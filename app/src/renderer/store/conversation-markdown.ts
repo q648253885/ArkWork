@@ -43,6 +43,8 @@ export interface MarkdownLabels {
   subagent: string
   /** v0.38.0（A5/D156）：阶段结论块标题 */
   note: string
+  /** v0.44.0（R-B）：产物卡标题 */
+  artifact: string
   args: string
   result: string
   errorMsg: string
@@ -66,6 +68,7 @@ export const DEFAULT_LABELS: MarkdownLabels = {
   error: '错误',
   subagent: '并行子 agent',
   note: '阶段结论',
+  artifact: '产物',
   args: '参数',
   result: '结果',
   errorMsg: '错误',
@@ -314,6 +317,13 @@ function renderBlock(block: FlowBlock, L: MarkdownLabels, out: string[]): void {
     case 'note':
       out.push(`#### ${L.note} · ${block.via}`, '')
       pushBlocked(out, block.text)
+      break
+    // v0.44.0（R-B）：产物卡 —— 屏幕上是独立卡片，导出侧同等对待
+    // （D69 纪律：屏幕加一种块，导出同步可获得）
+    case 'artifact':
+      out.push(`#### ${L.artifact}`, '')
+      for (const e of block.entries) out.push(`- ${e.path}`)
+      out.push('')
       break
   }
 }

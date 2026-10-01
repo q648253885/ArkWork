@@ -458,3 +458,28 @@ test('TC-LED-025 ★ v0.43.0 R4 回归：normalizeLedger 必须保留 round（�
   assert.equal(back.round, 3, '往返后 file.round 不丢')
   assert.deepEqual(back.items.map((i) => i.round), [3, 2], '往返后逐项 round 不丢')
 })
+
+test('TC-LED-026 ★ v0.44.0 R-A：toPlanItems 必须透传 artifact（渲染层产物卡的数据源）', async () => {
+  // D198「有写无读」同型的预防性闭环：LedgerItem.artifact 自 D176 起落库，
+  // 但 toPlanItems 一直丢弃 → 渲染层（planItems 通道）永远不可达。
+  const { toPlanItems } = await import('../project.js')
+  const id = await newTask('tc-led026', ['产出报告', '其他事项'])
+  await ensureLedger((await getTask(id))!)
+  const before = (await loadLedger(id))!
+  const r = await mutate(id, {
+    kind: 'plan-commit',
+    layout: [
+      { kind: 'existing', id: before.items[0]!.id, status: 'done', artifact: { path: 'docs/r.md', kind: 'file' } },
+      { kind: 'existing', id: before.items[1]!.id, status: before.items[1]!.status },
+    ],
+    reason: '报告已产出并通过完整性校验',
+    source: 'task-plan',
+  })
+  assert.ok(r.ok, r.error?.message)
+  const items = toPlanItems((await loadLedger(id))!)
+  const withArtifact = items.find((it) => it.id === before.items[0]!.id)!
+  assert.ok(withArtifact.artifact, 'artifact 必须透传（此前被丢弃 → 渲染层产物卡不可达）')
+  assert.equal(withArtifact.artifact!.path, 'docs/r.md')
+  assert.equal(withArtifact.artifact!.kind, 'file')
+  assert.equal(items.find((it) => it.id === before.items[1]!.id)?.artifact, undefined, '未声明产物的项不添油加醋')
+})

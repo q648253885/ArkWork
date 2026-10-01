@@ -24,6 +24,7 @@
  *   · `data-via` 属性供契约用例断言来源映射，不影响视觉。
  * ============================================================ */
 import type { FlowBlock } from '@shared/types/flow'
+import { LinkifiedText } from '../LinkifiedText'
 
 type NoteBlockT = Extract<FlowBlock, { kind: 'note' }>
 
@@ -51,7 +52,8 @@ export function NoteBlock({ block }: { block: NoteBlockT }) {
       title={VIA_TITLE[block.via]}
       data-via={block.via}
     >
-      {block.text}
+      {/* v0.44.0（R-C）：正文经唯一判据分段链接化（无路径时逐字等同直出） */}
+      <LinkifiedText text={block.text} />
     </div>
   )
 }

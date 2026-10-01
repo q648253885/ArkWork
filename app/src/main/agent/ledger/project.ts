@@ -51,6 +51,9 @@ export function toPlanItems(l: LedgerFile): PlanItem[] {
     parentId: it.parentId ?? null,
     // v0.43.0（R4）：所属任务轮次（旧账本无该字段 → 归一 1，「本轮任务」判据）
     round: it.round ?? 1,
+    // v0.44.0（R-A）：产物声明透传 —— 此前在这里被丢弃，渲染层永远不可达
+    // （D198「有写无读」同型）。浅拷贝脱离账本对象，投影保持只读。
+    ...(it.artifact ? { artifact: { ...it.artifact } } : {}),
   }))
 }
 

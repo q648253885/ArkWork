@@ -397,6 +397,24 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
     return (item.planStates ?? []) as PlanItemStatus[]
   }
 
+  /* ---------- v0.44.0（R-B）：产物收集（纯函数） ----------
+   * 数据源 = 实时 planItems 的 artifact 声明（R-A 透传）。
+   * `command` 是校验命令不是文件，不进卡；按 path 去重（多项声明同一产物
+   * —— 如各阶段指向同一份报告 —— 只出一条）。空数组 = 无产物 → 不出卡。 */
+  const collectArtifacts = (items: PlanItem[]): Array<{ path: string; kind: 'file' | 'dir' }> => {
+    const seen = new Set<string>()
+    const out: Array<{ path: string; kind: 'file' | 'dir' }> = []
+    for (const it of items) {
+      const a = it.artifact
+      if (!a || a.kind === 'command') continue
+      if (seen.has(a.path)) continue
+      seen.add(a.path)
+      out.push({ path: a.path, kind: a.kind })
+    }
+    return out
+  }
+  let lastTaskComplete: { turn: MutableTurn; ts: number } | null = null
+
   /* ---------- 主时间线：items 顺序即真实发生顺序 ---------- */
   for (const item of items) {
     if (item.type === 'user') {
@@ -458,7 +476,27 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
         ts: item.ts ?? 0,
         tsLabel: item.tsLabel ?? fmtTime(item.ts ?? 0),
       })
+      if (lastReasonTool === 'task_complete') {
+        lastTaskComplete = { turn: t, ts: item.ts ?? 0 }
+      }
       lastReasonTool = undefined
+    }
+  }
+
+  // v0.44.0（R-B）：产物卡只挂在**最后一次** task-complete 答复轮
+  // （历史完成轮不回填当前集合 —— 见设计 §二）；无产物不出块（诚实 UI）。
+  if (lastTaskComplete) {
+    const entries = collectArtifacts(input.planItems)
+    if (entries.length > 0) {
+      const { turn, ts } = lastTaskComplete
+      turn.outerBlocks.push({
+        kind: 'artifact',
+        id: `${turn.id}:artifact`,
+        turn: turn.index,
+        step: 0,
+        entries,
+        ts,
+      })
     }
   }
 

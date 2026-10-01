@@ -5,6 +5,8 @@
  * 本文件是渲染层与主进程共用的展示层契约；不改变落盘真源
  * （steps.jsonl / session.jsonl / tasks.json）。
  * ============================================================ */
+
+import type { PlanArtifact } from './task'
 import type { PlanContent, SubagentRunStatus } from './react.js'
 import type { PlanItemStatus } from './task.js'
 import type { ToolCallView, ToolResultView, ToolCallKind } from './tool-present.js'
@@ -268,7 +270,23 @@ export interface NoteBlock {
 export type FlowBlock =
   | UserBlock | SayBlock | ReasoningBlock | ToolBlock
   | PlanBlock | ApprovalBlock | NoticeBlock | AnswerBlock | ErrorBlock
-  | SubagentGroupBlock | NoteBlock
+  | SubagentGroupBlock | NoteBlock | ArtifactBlock
+
+/**
+ * v0.44.0（R-B）：产物卡（第十二个块）—— 任务的成果产物以独立卡片呈现，
+ * 每条可点击打开预览（经 FileLink → openDoc 门面）。只挂在最后一次
+ * task_complete 答复轮；`command` 型是校验命令不是文件，不进卡。
+ */
+export interface ArtifactBlock {
+  kind: 'artifact'
+  id: string
+  turn: number
+  /** outerBlock 恒 0 */
+  step: number
+  /** 产物条目（按 path 去重；仅 file / dir —— command 是校验命令不是文件） */
+  entries: Array<{ path: string; kind: PlanArtifact['kind'] }>
+  ts: number
+}
 
 /* ---------- Step / Turn ---------- */
 
