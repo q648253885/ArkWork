@@ -146,7 +146,34 @@ const GIT_MANAGER_PANEL_HTML = `<!doctype html>
          border: 1px solid var(--border-default, #d0d7de); background: var(--bg-input, var(--bg-surface-2, #fff)); color: inherit; }
   #new-branch { flex: 1; min-width: 0; margin: 0; padding: 5px 8px; font: inherit; border-radius: 6px;
          border: 1px solid var(--border-default, #d0d7de); background: var(--bg-input, var(--bg-surface-2, #fff)); color: inherit; }
-  #err { color: var(--danger, #cf222e); margin-top: 8px; word-break: break-all; display: none; }
+  #err { margin-top: 8px; word-break: break-all; display: none; }
+  /* v0.45.0（R-G）：错误从裸红字改为警告条 —— 短人话 + 原始 stderr 折叠进「详情」，
+     长串 stderr 不再糊满面板（实机反馈样式不美观）。 */
+  #err .err-bar {
+    display: flex; align-items: baseline; gap: 6px;
+    color: var(--danger, #cf222e);
+    /* 契约外颜色用自带字面量（TC-SMPL-029：var() 引用的令牌名必须在宿主契约内） */
+    background: rgba(207, 34, 46, .07);
+    border: 1px solid var(--border-default, #d0d7de);
+    border-radius: 8px; padding: 6px 9px; font-size: 12px;
+  }
+  #err details { margin-top: 4px; font-size: 11px; }
+  #err summary { color: var(--text-secondary, #6e7781); cursor: pointer; user-select: none; width: fit-content; }
+  #err pre {
+    margin: 4px 0 0; padding: 6px 8px; white-space: pre-wrap; word-break: break-all;
+    font: 11px/1.5 ui-monospace, monospace; color: var(--text-secondary, #6e7781);
+    background: var(--bg-surface-2, #f6f8fa); border: 1px solid var(--border-subtle, #eaeef2);
+    border-radius: 6px; max-height: 120px; overflow: auto;
+  }
+  /* v0.45.0（R-G）：非 git 仓库空态 —— 隐藏全部操作面，给「初始化仓库」出口。
+     判定来自 errSpeak/isNotRepoError（纯函数区，契约用例真跑）。 */
+  body.norepo .bar button, body.norepo .tabs, body.norepo #tab-changes,
+  body.norepo #tab-history, body.norepo #tab-branches, body.norepo #err { display: none !important; }
+  #norepo { display: none; margin: 28px auto 0; max-width: 300px; text-align: center; }
+  body.norepo #norepo { display: block; }
+  #norepo .nicon { font-size: 30px; line-height: 1; margin-bottom: 10px; }
+  #norepo .ntitle { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  #norepo .ndesc { color: var(--text-secondary, #6e7781); font-size: 12px; margin-bottom: 14px; }
   /* 差异 / 提交详情盒（v0.42.0 新增：点击文件行内联展开） */
   .diff-box { border: 1px solid var(--border-default, #d0d7de); border-radius: 8px;
               margin-top: 8px; background: var(--bg-surface, #fff); overflow: hidden; }
@@ -239,7 +266,19 @@ const GIT_MANAGER_PANEL_HTML = `<!doctype html>
     <ul id="branches"></ul>
   </div>
 
-  <div id="err"></div>
+  <!-- v0.45.0（R-G）：非 git 仓库空态（body.norepo 时显示，操作面全部隐藏） -->
+  <div id="norepo">
+    <div class="nicon">📁</div>
+    <div class="ntitle">当前工作区不是 Git 仓库</div>
+    <div class="ndesc">初始化后即可在这里查看更改、提交与分支。也可以在终端自行执行 git init 或克隆已有仓库。</div>
+    <button id="btn-norepo-init" class="primary" title="在工作区根初始化新仓库（等同 git init）">初始化仓库</button>
+  </div>
+
+  <!-- v0.45.0（R-G）：错误条 = 一句人话 + 原始 stderr 折叠（替代裸红字直出） -->
+  <div id="err">
+    <div class="err-bar"><span id="err-text"></span></div>
+    <details><summary>详情</summary><pre id="err-raw"></pre></details>
+  </div>
 
 <script>
 /* ---------- 桥客户端（与宿主脚手架同一报文契约；经典脚本，无 import/export） ---------- */
@@ -266,10 +305,20 @@ function applyTheme(tokens) {
   for (const k in tokens) root.style.setProperty(k, tokens[k])
 }
 
+/* v0.45.0（R-G）：showErr 重构 —— 短人话 + 原文折叠；"不是 git 仓库"切空态。
+   空态判定用纯函数 isNotRepoError（契约用例真跑），此处只做 DOM 编排。 */
 function showErr(e) {
-  const el = document.getElementById('err')
-  el.textContent = e && e.message ? e.message : String(e)
-  el.style.display = 'block'
+  const wrap = document.getElementById('err')
+  const raw = e && e.message ? e.message : String(e)
+  if (isNotRepoError(raw)) {
+    document.body.classList.add('norepo')
+    wrap.style.display = 'none'
+    return
+  }
+  document.body.classList.remove('norepo')
+  document.getElementById('err-text').textContent = errSpeak(raw)
+  document.getElementById('err-raw').textContent = raw
+  wrap.style.display = 'block'
 }
 function clearErr() {
   const el = document.getElementById('err')
@@ -372,6 +421,28 @@ function branchLabel(entries) {
   }
   return ''
 }
+
+/* v0.45.0（R-G）：git stderr → 一句人话（错误条短文案；原文折叠进「详情」）。
+   实机反馈：非 git 仓库时面板直出红字「git status 失败：fatal: not a git
+   repository (or any of the parent directories): .git」，用户看不懂。
+   常见错误先映射，未命中兜底透传原 message（诚实优先，不编造）。
+   注意：本函数位于外层 TS 模板串内，注释/正则里不得出现反引号。 */
+function errSpeak(message) {
+  const m = String(message == null ? '' : message)
+  if (/not a git repository/i.test(m)) return '当前工作区不是 Git 仓库'
+  if (/nothing to commit/i.test(m)) return '没有可提交的内容'
+  if (/no tracking information|no upstream/i.test(m)) return '当前分支还没有关联远程分支，无法拉取 / 推送'
+  if (/failed to push some refs|\\[remote rejected\\]|\\[rejected\\]|fetch first/i.test(m)) return '推送被拒绝：远程有新提交，请先拉取再推送'
+  if (/non-fast-forward/i.test(m)) return '推送被拒绝：本地与远程历史不一致，请先拉取'
+  if (/Permission denied|authentication/i.test(m)) return '认证失败：请检查远程仓库的访问权限 / 凭据'
+  if (/Could not resolve host|Connection timed out|Network is unreachable/i.test(m)) return '网络不通：无法连接远程仓库'
+  return m
+}
+
+/* v0.45.0（R-G）：是否"不是 git 仓库"错误（驱动面板空态切换）。 */
+function isNotRepoError(message) {
+  return /not a git repository/i.test(String(message == null ? '' : message))
+}
 /* @@ARKWORK-PURE:END@@ */
 
 function esc(s) {
@@ -469,7 +540,7 @@ function updateCommitButton() {
 
 function busy(on) {
   busyFlag = on
-  const ids = ['btn-commit', 'btn-refresh', 'btn-push', 'btn-pull', 'btn-branch-create']
+  const ids = ['btn-commit', 'btn-refresh', 'btn-push', 'btn-pull', 'btn-branch-create', 'btn-norepo-init']
   for (let i = 0; i < ids.length; i++) {
     const el = document.getElementById(ids[i])
     if (el) el.disabled = on
@@ -482,11 +553,26 @@ function refresh() {
   busy(true)
   return Promise.all([git('status'), git('branch-list')])
     .then(function (rs) {
+      /* v0.45.0（R-G）：成功读取 = 是 git 仓库，退出空态（防止残留误判） */
+      document.body.classList.remove('norepo')
       renderStatus(rs && rs[0])
       applyBranch((rs && rs[1] && rs[1].output && rs[1].output.entries) || [])
       busy(false)
       if (currentTab === 'history') return loadTab('history')
       if (currentTab === 'branches') return loadTab('branches')
+    })
+    .catch(function (e) { busy(false); showErr(e) })
+}
+
+/* v0.45.0（R-G）：空态「初始化仓库」—— 走既有写类白名单 op（宿主确认浮层 + 审计
+   由宿主把关，与面板其它写操作同一通道），成功后退出空态并重读。 */
+function initRepo() {
+  busy(true)
+  return git('init', {})
+    .then(function () {
+      busy(false)
+      document.body.classList.remove('norepo')
+      refresh()
     })
     .catch(function (e) { busy(false); showErr(e) })
 }
@@ -618,6 +704,8 @@ document.getElementById('tab-branches').addEventListener('click', function (ev) 
 })
 
 document.getElementById('btn-refresh').addEventListener('click', refresh)
+/* v0.45.0（R-G）：空态初始化按钮 */
+document.getElementById('btn-norepo-init').addEventListener('click', initRepo)
 document.getElementById('btn-push').addEventListener('click', function () {
   runWrite('push', {})
 })

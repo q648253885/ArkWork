@@ -283,6 +283,8 @@ const ark: ArkApi = {
     cleanArkworkTemp: (maxAgeDays) => ipcRenderer.invoke('fs:clean-arkwork-temp', maxAgeDays),
     getArkworkSize: () => ipcRenderer.invoke('fs:get-arkwork-size'),
     /* ---- v0.31.0 B2：编辑器文件能力（§5.3） ---- */
+    /* v0.45.0（D220）：路径种类轻探测（文件夹不可点击判定源） */
+    pathKind: (path) => invokeFs('fs:path-kind', path),
     statPath: (path) => invokeFs('fs:stat-path', path),
     probeText: (path) => invokeFs('fs:probe-text', path),
     readText: (path) => invokeFs('fs:read-text', path),

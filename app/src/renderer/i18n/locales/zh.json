@@ -17,6 +17,7 @@
     "approvalReplan": "重新规划待批准",
     "approvalConverge": "收敛确认",
     "openFile": "点击打开文件",
+    "pathIsDir": "文件夹（不支持预览）",
     "fold": {
       "thinking": "思考过程",
       "thinkingCount": "思考 {{n}} 次",
@@ -1175,6 +1176,7 @@
       }
     },
     "threadRow": {
+      "runningBadge": "任务正在运行",
       "failedBadge": "清单中存在失败步骤"
     },
     "menu": {

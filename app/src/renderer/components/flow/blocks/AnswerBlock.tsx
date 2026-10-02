@@ -28,6 +28,8 @@ import {
 } from '@shared/utils/answer-layers'
 import { Markdown } from '../../Markdown'
 import { Icon } from '../../../icons'
+// v0.45.0（R-F）：每段复制按钮（hover 浮出；对齐 ZCode，替代手动框选）
+import { CopyButton } from '../CopyButton'
 
 type AnswerBlockT = Extract<FlowBlock, { kind: 'answer' }>
 
@@ -73,7 +75,9 @@ export function AnswerBlock({ block }: { block: AnswerBlockT }) {
   // 未成形（识别 < 2 段）→ 保持原样渲染，不做任何切分
   if (!shouldRenderLayered(parsed)) {
     return (
-      <div className={`text-base text-text-primary leading-relaxed select-text ${shell}`}>
+      <div className={`relative group text-base text-text-primary leading-relaxed select-text ${shell}`}>
+        {/* v0.45.0（R-F）：整块复制（未分层形态 = 单一段落） */}
+        <CopyButton text={block.text} className="absolute right-1 -top-5" />
         <Markdown content={block.text} />
       </div>
     )
@@ -106,7 +110,7 @@ export function AnswerBlock({ block }: { block: AnswerBlockT }) {
               key={spec.id}
               data-testid={`answer-layer-${spec.id}`}
               data-present={layer ? '1' : '0'}
-              className="rounded-md border border-border-subtle bg-bg-surface-2 px-2.5 py-1.5"
+              className="relative group rounded-md border border-border-subtle bg-bg-surface-2 px-2.5 py-1.5"
             >
               <div className="mb-1 flex items-center gap-1.5">
                 {/* F1-4 反向约束（TC-COPY-001）：AnswerBlock 整文件不得出现 `select-none`
@@ -132,6 +136,8 @@ export function AnswerBlock({ block }: { block: AnswerBlockT }) {
               </div>
               {layer ? (
                 <div className="text-sm text-text-primary">
+                  {/* v0.45.0（R-F）：每段复制 —— 只在有正文的段挂（缺段占位无内容可复制） */}
+                  <CopyButton text={body} className="absolute right-1 top-1" />
                   <Markdown content={shown} />
                 </div>
               ) : (

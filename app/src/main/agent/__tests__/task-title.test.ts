@@ -150,9 +150,11 @@ test('store/tasks: appendUserMessage 空壳任务回填 input.text（仅当原 t
 
 /* ---------- 6. 各创建点锁定契约 ---------- */
 
-test('automations: 创建任务置 titleSource=user（用户配置名，锁定）', () => {
+test('automations: 创建任务置 titleSource=user（用户配置名 + 触发时间戳，锁定）', () => {
+  // v0.45.0（R-H）：title = automation.name + 机械触发时间（MM-DD HH:mm）——
+  // 同名定时任务多轮触发在侧栏可区分；titleSource='user' 锁定语义不变。
   const s = src('../../store/automations.ts')
-  assert.match(s, /title:\s*automation\.name[\s\S]*?titleSource:\s*'user'/)
+  assert.match(s, /title:\s*`\$\{automation\.name\} \$\{stamp\}`[\s\S]*?titleSource:\s*'user'/)
 })
 
 test('delegate: 子任务置 titleSource=llm（标题已是模型产物，不再重生成）', () => {

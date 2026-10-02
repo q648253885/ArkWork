@@ -25,6 +25,8 @@
  * ============================================================ */
 import type { FlowBlock } from '@shared/types/flow'
 import { LinkifiedText } from '../LinkifiedText'
+// v0.45.0（R-F）：段落复制按钮（hover 浮出）
+import { CopyButton } from '../CopyButton'
 
 type NoteBlockT = Extract<FlowBlock, { kind: 'note' }>
 
@@ -43,7 +45,7 @@ const VIA_TITLE: Readonly<Record<NoteBlockT['via'], string>> = {
 export function NoteBlock({ block }: { block: NoteBlockT }) {
   return (
     <div
-      className="flow-note text-sm whitespace-pre-wrap select-text rounded-md pl-2.5 py-1"
+      className="flow-note relative group text-sm whitespace-pre-wrap select-text rounded-md pl-2.5 py-1"
       style={{
         color: 'var(--text-secondary)',
         borderLeftWidth: 2,
@@ -52,6 +54,8 @@ export function NoteBlock({ block }: { block: NoteBlockT }) {
       title={VIA_TITLE[block.via]}
       data-via={block.via}
     >
+      {/* v0.45.0（R-F）：整段复制（阶段结论是最高频的"想复制带走"内容） */}
+      <CopyButton text={block.text} className="absolute right-0 -top-4" />
       {/* v0.44.0（R-C）：正文经唯一判据分段链接化（无路径时逐字等同直出） */}
       <LinkifiedText text={block.text} />
     </div>

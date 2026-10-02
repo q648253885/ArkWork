@@ -67,7 +67,7 @@
 
 | 目录 | 职责 |
 |---|---|
-| `renderer/components/` | 全部 React 组件（`flow/` 交互区块、`dock/` 侧栏、`graph/` 任务面板与计划卡、`right/`、`preview/`…）。**v0.38.0 新增块**：`flow/blocks/NoteBlock.tsx`（阶段结论）。**v0.42.0**：`flow/FileLink` chip 化（图标+中性底）、`preview/PreviewWindow` 渲染器下拉退役 → Tab 栏「编辑\|预览」分段控件、`dock/TodoPanel` 产物摘要路径链接化（消费 `renderer/utils/path-links`）。**v0.43.0**：`dock/TaskPanel.tsx` 两 Tab（本轮任务/全部任务，**默认本轮**）+ 标题取 `snapshot.goal` 优先 + 档位独立行 + `TierInfoPopover`（Portal 到 body）+ DagView 退役挂载（文件本体保留）；新增纯函数 `renderer/utils/round-filter.ts`（`buildRoundIndex`：账本 `item.round` 直查 → `T-NN` 序号兜底 → 无命中归历史，供面板分区） |
+| `renderer/components/` | 全部 React 组件（`flow/` 交互区块、`dock/` 侧栏、`graph/` 任务面板与计划卡、`right/`、`preview/`…）。**v0.45.0 新增**：`flow/CopyButton.tsx`（段落复制共用件，hover 浮出，五类正文块挂点，R-F）。**v0.38.0 新增块**：`flow/blocks/NoteBlock.tsx`（阶段结论）。**v0.42.0**：`flow/FileLink` chip 化（图标+中性底）、`preview/PreviewWindow` 渲染器下拉退役 → Tab 栏「编辑\|预览」分段控件、`dock/TodoPanel` 产物摘要路径链接化（消费 `renderer/utils/path-links`）。**v0.43.0**：`dock/TaskPanel.tsx` 两 Tab（本轮任务/全部任务，**默认本轮**）+ 标题取 `snapshot.goal` 优先 + 档位独立行 + `TierInfoPopover`（Portal 到 body）+ DagView 退役挂载（文件本体保留）；新增纯函数 `renderer/utils/round-filter.ts`（`buildRoundIndex`：账本 `item.round` 直查 → `T-NN` 序号兜底 → 无命中归历史，供面板分区） |
 | `renderer/flow/` | 交互区**投影**（turn/step/block 派生，SAY 剥离）。`project.ts` **必须是纯函数**（无 `window` / `Date.now()`）；v0.38.0 新增两条投影：`turn_note → note`（按 ts 保序插入 `FlowStep.blocks`）、`gate_blocked → notice(noticeKind='gate-blocked')` |
 | `renderer/store/` | 渲染层状态（slice 化）。**v0.38.0 新增通道**：`flowEvents`（`taskId → 待投影事件`）+ 唯一写入口 `appendFlowEvent` —— 此前 `TurnList` / `tasksSlice` 硬传 `events: []`，渲染层**从来没有** session 事件通道（接线缺失 + 静默退化的典型） |
 | `renderer/styles/` | `globals.css` —— **设计 token 唯一源**（`:root` / `.dark`） |

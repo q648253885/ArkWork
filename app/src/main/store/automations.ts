@@ -219,14 +219,21 @@ export async function runAutomation(id: string): Promise<{ taskId: string }> {
     throw new Error(tFor(getUiLocale(), 'auto.noModelUnavailable', { modelId }))
   }
 
+  // v0.45.0（R-H）：任务名 = 标题 + 触发时间 —— 同名定时任务多次触发在侧栏
+  // 可区分（此前全部同名，列表里无法分辨哪次运行对应哪一轮）。
+  // titleSource='user' 保持：名称来自用户配置（automation.name + 机械时间戳），
+  // 锁定不被 LLM 标题覆盖（v0.31.0 C2 语义不变）。
+  const startedAt = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const stamp = `${pad(startedAt.getMonth() + 1)}-${pad(startedAt.getDate())} ${pad(startedAt.getHours())}:${pad(startedAt.getMinutes())}`
   const task = await createTask({
-    title: automation.name,
+    title: `${automation.name} ${stamp}`,
     text: automation.prompt,
     agentId: automation.agentId,
     skillIds: agentSkillIds,
     modelId,
     automationId: automation.id,
-    // v0.31.0 C2：automation.name 是用户在自动化配置中填写的名称，锁定不被 LLM 标题覆盖
+    // automation.name 是用户在自动化配置中填写的名称，锁定不被 LLM 标题覆盖
     titleSource: 'user',
   })
 

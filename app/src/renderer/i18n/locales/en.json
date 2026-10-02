@@ -17,6 +17,7 @@
     "approvalReplan": "Replan pending approval",
     "approvalConverge": "Converge confirmation",
     "openFile": "Click to open this file",
+    "pathIsDir": "Folder (preview not supported)",
     "fold": {
       "thinking": "Thinking process",
       "thinkingCount": "Thought {{n}} time(s)",
@@ -1175,6 +1176,7 @@
       }
     },
     "threadRow": {
+      "runningBadge": "Task is running",
       "failedBadge": "Plan contains failed steps"
     },
     "menu": {

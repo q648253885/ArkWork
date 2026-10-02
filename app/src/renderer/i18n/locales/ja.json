@@ -17,6 +17,7 @@
     "approvalReplan": "再計画の承認待ち",
     "approvalConverge": "収束の確認",
     "openFile": "クリックしてファイルを開く",
+    "pathIsDir": "フォルダ（プレビュー非対応）",
     "fold": {
       "thinking": "思考プロセス",
       "thinkingCount": "思考 {{n}} 回",
@@ -1175,6 +1176,7 @@
       }
     },
     "threadRow": {
+      "runningBadge": "タスク実行中",
       "failedBadge": "プランに失敗したステップがあります"
     },
     "menu": {

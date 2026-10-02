@@ -4,7 +4,7 @@
 
 > 本地优先的 AI Agent 工作台 — 让 ReAct 推理循环**可见、可控、可复用**。
 
-![Version](https://img.shields.io/badge/version-v0.41.0-blueviolet) ![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
+![Version](https://img.shields.io/badge/version-v0.45.0-blueviolet) ![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
 ![ArkWork 工作台 — 实时 ReAct 步骤流、ask_user 阶段门禁与计划清单](docs/screenshots/workbench-react-task.png)
 
@@ -12,29 +12,26 @@
 
 **[下载](https://github.com/q648253885/ArkWork/releases)** 预编译安装包（macOS Apple Silicon / Intel、Windows、Linux），或按下方指南从源码构建。
 
-## 最新版本 — v0.41.0
+## 最新版本 — v0.45.0
 
-> **说结束就结束，弱模型也能用正文调用工具** — 「就此结束」现在是真正的终局指令，不再被发回模型重新规划；Ollama qwen3.5 这类发不出原生工具调用的模型，获得一条「开思考 + 标准格式 + 引擎解析后代为执行」的正文降级通道。
+> **产物成为一等公民、每一段都能一键复制、运行中的任务会呼吸** — Agent 实际写出的文件以可点击的产物卡列在最终答复处；交互区每个块都有悬停复制按钮；Git 面板终于有了体面的非仓库空态；自动化任务启动的瞬间就出现在侧栏。
 
-### v0.41.0 · 「就此结束」真正的硬终局
+### v0.45.0 · 交互区打磨（对齐 ZCode）
 
-- **终局短语不再被当新指令** — 点击建议项或在输入框输入「就此结束」（四语言精确匹配）立即停止任务：完整取消语义 + 人话回执，不重排清单、不多跑一轮。此前手输的这句话会被当成新指令发回模型，任务继续空转。
+- **每一段都能复制** — 最终答复（分层后的每一段）、阶段结论、过程叙述、用户消息、展开的思考，全部有悬停复制按钮 + 1.5 秒「已复制」反馈，不再需要手动框选。
 
-### v0.41.0 · 正文工具调用降级通道（Ollama qwen3.5）
+- **文件夹不再可点** — 路径链接现在能识别目录（产物卡本就知道产物种类）：文件夹渲染为不可交互的 chip（文件夹图标 + 「不支持预览」提示），因为点目录从来就打不开任何东西。
 
-- **模型把工具调用写成正文时** — 部分 qwen3.5 端点从不返回原生 tool_calls，而是把 `{"tool": "file-reader", "path": "."}` 这样写在回复里。引擎现在能识别这类模型：**开启思考**（Ollama 把推理放进独立字段，正文保持可解析）+ 注入标准 JSON 契约 + 解析答复并**真实执行工具** —— 结果走与原生调用完全相同的执行/预算/观察回传链路。
+### v0.45.0 · 产物卡、Git 面板、侧栏
 
-- **严格门控** — 仅对 Ollama 形态端点 + qwen3.5 模型激活，其余模型逐字节零变化。幻觉出的工具名被白名单拒绝；损坏 JSON 走共享修补解析器；重复块自动去重。
+- **产物卡写盘兜底** — Agent 实际写出/编辑过的文件（file-writer / file-editor），即使清单从未声明也会被收集；产物卡挂在最终答复处，全路径可点击、按 path 去重、声明优先。
 
-### v0.41.0 · 任务清单与交互区打磨（对齐 ZCode）
+- **Git 面板非仓库空态** — 非 git 工作区不再红字直出：显示「当前工作区不是 Git 仓库」空态卡 + 一键**初始化仓库**（与所有写操作一样走宿主确认浮层 + 审计）；错误改为一句人话的警告条，原始 stderr 折叠进可展开的详情。
 
-- **已完成项归档出主视线** — 「全部」筛选只显示未完成项，完成项收进新的**「已结束」**分组（计数与列表口径一致）；子任务带缩进与复合编号（`3.1`），清单面板与对话流计划卡同步。
+- **侧栏：运行中任务会呼吸** — 运行中的任务显示脉冲点；自动化触发与委派创建的任务实时入列（此前要重启应用才可见）；自动化任务名带触发时间（`10-02 11:45`），同名多轮一眼可分。多任务并行运行一直是引擎既有能力（每任务独立控制器）。
 
-- **交互区层次** — 过程叙述降调为小字（每轮最后一条阶段结论保持高亮）、过程组折叠行直接显示工具**实际做成了什么**（失败优先）、最终答复以主色边突出 —— 长轮次的视线次序变成：结论 > 阶段结论 > 过程。
+> 实测：`typecheck` exit 0 · **2555 条累计用例，0 代码失败** · 版本文档门禁全绿 · dev+CDP 实机验证（复制按钮 / 产物卡 / Git 空态 / path-kind 通道）。
 
-> 另在打包实机验收中修复：重启后子任务层级被迁移层静默抹平的缺陷。
->
-> 实测：`typecheck` exit 0 · **2445 条累计用例，0 代码失败** · 版本文档门禁全绿 · 打包 `.app` 实机 UI 验收（归档 / 层级 / 深浅色 / 零失败资源）。
 ## 官方网站
 
 **[→ www.hellowl.com](https://www.hellowl.com/)** 是 ArkWork 的产品官网。它以真实应用截图展示工作台的视觉设计（ReAct 任务视图、帮助中心、设置与多语言），介绍四层记忆与「无云端 · 零遥测 · 纯文件」的设计理念，并提供 macOS / Windows / Linux 三平台的下载入口。点击上方链接即可从 GitHub 直接跳转到官网。

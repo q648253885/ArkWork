@@ -399,11 +399,19 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
     return (item.planStates ?? []) as PlanItemStatus[]
   }
 
-  /* ---------- v0.44.0（R-B）：产物收集（纯函数） ----------
-   * 数据源 = 实时 planItems 的 artifact 声明（R-A 透传）。
-   * `command` 是校验命令不是文件，不进卡；按 path 去重（多项声明同一产物
-   * —— 如各阶段指向同一份报告 —— 只出一条）。空数组 = 无产物 → 不出卡。 */
-  const collectArtifacts = (items: PlanItem[]): Array<{ path: string; kind: 'file' | 'dir' }> => {
+  /* ---------- v0.44.0（R-B）+ v0.45.0（R-E）：产物收集（纯函数） ----------
+   * 数据源两路：
+   *   ① 实时 planItems 的 artifact 声明（R-A 透传）—— 模型有意识声明的"最终产物"；
+   *   ② v0.45.0（R-E）写盘兜底 —— steps 里 file-writer / file-editor 成功执行过的
+   *      路径。此前产物卡只认声明（chat 模式 / 兜底单步清单从不声明 → 实机大量
+   *      任务无卡，写出的报告文件只能从答复正文里找纯文本），R-E 让"实际写出 /
+   *      改过的文件"也一等公民化。
+   * `command` 是校验命令不是文件，不进卡；按 path 去重（声明优先，兜底按时间序
+   * 追加其后）。空数组 = 无产物 → 不出卡。 */
+  const collectArtifacts = (
+    items: PlanItem[],
+    steps: ReActStep[],
+  ): Array<{ path: string; kind: 'file' | 'dir' }> => {
     const seen = new Set<string>()
     const out: Array<{ path: string; kind: 'file' | 'dir' }> = []
     for (const it of items) {
@@ -412,6 +420,28 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
       if (seen.has(a.path)) continue
       seen.add(a.path)
       out.push({ path: a.path, kind: a.kind })
+    }
+    // R-E 兜底：写盘成功（非软失败）的 file-writer / file-editor 路径，按时间序
+    const written: Array<{ path: string; kind: 'file' | 'dir'; ts: number }> = []
+    for (const s of steps) {
+      if (s.type !== 'act') continue
+      if (s.toolName !== 'file-writer' && s.toolName !== 'file-editor') continue
+      if (s.status !== 'success' || s.softFail) continue
+      let path = ''
+      try {
+        const args = JSON.parse(s.toolArgs ?? '{}') as { path?: unknown }
+        if (typeof args.path === 'string' && args.path.trim()) path = args.path.trim()
+      } catch {
+        continue // toolArgs 非法（历史数据）→ 跳过该步
+      }
+      if (!path || seen.has(path)) continue
+      written.push({ path, kind: 'file', ts: s.startedAt })
+    }
+    written.sort((a, b) => a.ts - b.ts)
+    for (const w of written) {
+      if (seen.has(w.path)) continue
+      seen.add(w.path)
+      out.push({ path: w.path, kind: w.kind })
     }
     return out
   }
@@ -488,7 +518,7 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
   // v0.44.0（R-B）：产物卡只挂在**最后一次** task-complete 答复轮
   // （历史完成轮不回填当前集合 —— 见设计 §二）；无产物不出块（诚实 UI）。
   if (lastTaskComplete) {
-    const entries = collectArtifacts(input.planItems)
+    const entries = collectArtifacts(input.planItems, input.steps)
     if (entries.length > 0) {
       const { turn, ts } = lastTaskComplete
       turn.outerBlocks.push({

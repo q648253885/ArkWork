@@ -13,7 +13,7 @@
  *  - symlink 逃逸必须 `realpath` 后再比对（TC-GUARD-003）；因此
  *    `assertInWorkspace` 是 **async**（旧实现是 sync，调用点是 async handler，无损）。
  * ============================================================ */
-import { realpath } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 import { getWorkspaceDir } from '../store/db.js'
 import { getUiLocale, tFor } from '../i18n/messages.js'
@@ -126,6 +126,27 @@ export function resolveUserPath(absOrRel: string, root: string = getWorkspaceDir
  * 口径（用户裁决）：交互区点击的文件「存在即可读」，越界只约束 LLM 工具面。
  * 工作区外**不是拒绝**，而是「只读原因 = outside-workspace」（编辑器标只读、写盘被拒）。
  */
+/**
+ * v0.45.0（D220）：路径种类轻探测 —— 交互区文件链接的「文件夹不可点击」判定源。
+ *
+ * 与 `fs:stat-path`（probeText）的区别：**不读内容、不探编码**，目录返回
+ * `isDir: true` 而不是对目录抛 EISDIR。消费方：FileLink 渲染层（isDir →
+ * 非交互 chip）。工作区约束不在此判（用户面只读口径，见 probeReadablePath
+ * 的用户裁决），越界路径按「存在即可读」同口径照常 stat。
+ */
+export async function probePathKind(
+  absOrRel: string,
+  root: string = getWorkspaceDir(),
+): Promise<{ exists: boolean; isDir: boolean }> {
+  const target = resolveUserPath(absOrRel, root)
+  try {
+    const st = await stat(target)
+    return { exists: true, isDir: st.isDirectory() }
+  } catch {
+    return { exists: false, isDir: false }
+  }
+}
+
 export async function probeReadablePath(
   absOrRel: string,
   root: string = getWorkspaceDir(),

@@ -1493,6 +1493,8 @@ export interface ArkApi {
     /** v0.15.x Task 3：获取 .arkwork 目录总大小（字节） */
     getArkworkSize: () => Promise<number>
     /* ---- v0.31.0 B2：编辑器文件能力（04-system-design §5.3） ---- */
+    /** v0.45.0（D220）：路径种类轻探测（不读内容；目录 isDir=true，stat-path 对目录会抛错） */
+    pathKind: (path: string) => Promise<{ exists: boolean; isDir: boolean }>
     /** 单路径探测（= probeText 的语义化别名） */
     statPath: (path: string) => Promise<TextProbe>
     /** 编码 / EOL / BOM / 只读原因 / 快速哈希探测 */

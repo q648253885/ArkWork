@@ -4,7 +4,7 @@
 
 > A local-first AI Agent workbench — making the ReAct reasoning loop **visible, controllable, and reusable**.
 
-![Version](https://img.shields.io/badge/version-v0.41.0-blueviolet) ![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
+![Version](https://img.shields.io/badge/version-v0.45.0-blueviolet) ![License](https://img.shields.io/badge/license-Apache%202.0-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
 ![ArkWork workbench — live ReAct step stream, ask\_user stage gate, and plan checklist](docs/screenshots/workbench-react-task.png)
 
@@ -12,29 +12,26 @@ In most AI products the agent is a black box: you can't debug it, can't interven
 
 **[Download](https://github.com/q648253885/ArkWork/releases)** pre-built installers (macOS Apple Silicon / Intel, Windows, Linux) — or build from source below.
 
-## What's New — v0.41.0
+## What's New — v0.45.0
 
-> **Finish when you say finish — and let weak models call tools through prose** — the end-here phrase now hard-ends the task instead of being sent back to the model, and Ollama qwen3.5 models that can't emit native tool calls get a thinking-enabled text protocol the engine parses and executes for real.
+> **Artifacts become first-class, every paragraph is copyable, and running tasks pulse** — files the agent actually wrote are listed on a clickable artifact card; every block in the chat stream gets a hover copy button; the Git panel finally has a friendly no-repo state; automation tasks show up in the sidebar the moment they start.
 
-### v0.41.0 · "Finish here" now really finishes
+### v0.45.0 · Chat stream polish (ZCode-aligned)
 
-- **The end-here phrase is terminal** — clicking the suggestion or typing "Finish here" (exact match, 4 languages) stops the task immediately: full cancel semantics, a plain-language receipt, no re-planning, no extra rounds. Previously the typed phrase was sent back to the model as a new instruction and the task kept running.
+- **Every paragraph is copyable** — the final answer (each layered section), stage notes, process narration, user messages, and expanded reasoning all get a hover copy button with a 1.5s "Copied" feedback. No more manual text selection.
 
-### v0.41.0 · Prose tool-calling fallback (Ollama qwen3.5)
+- **Folders are not clickable** — path links now detect directories (artifact cards already know their kind): a folder renders as a non-interactive chip with a folder glyph and a "preview not supported" hint, because clicking a directory could never open anything.
 
-- **When the model writes tool calls as text** — some qwen3.5 endpoints never return native `tool_calls`; they print JSON like `{"tool": "file-reader", "path": "."}` in the reply. The engine now detects this class of model, **enables thinking** (Ollama returns reasoning in a separate field, keeping the reply parseable), instructs the model with a standard JSON contract, parses the answer and **executes the tools for real** — results flow back through the same Act/budget/observation pipeline as native calls.
+### v0.45.0 · Artifacts, Git panel, sidebar
 
-- **Strictly gated** — activates only for Ollama-style endpoints + qwen3.5 models; every other model is byte-for-byte unchanged. Hallucinated tool names are rejected by a whitelist; malformed JSON goes through the shared repair parser; duplicate blocks are de-duplicated.
+- **Artifact card with write fallback** — files the agent actually wrote or edited (`file-writer` / `file-editor`) are collected even when the plan never declared them; the card hangs on the final answer with full-path clickable links (D112), deduped, declarations first.
 
-### v0.41.0 · Task list & chat stream polish (ZCode-aligned)
+- **Git panel, no-repo edition** — a non-git workspace now shows a friendly empty state ("This workspace is not a Git repository") with a one-click **Initialize repository** action (host confirm dialog + audit, same as every write op); errors become a one-line plain-language bar with the raw stderr folded into expandable details.
 
-- **Done items archived out of sight** — the "All" filter now shows only open items; finished ones collect under a new **Ended** tab (counts always match the list). Subtasks render with indentation and composite numbering (`3.1`), in the checklist and the in-chat plan card.
+- **Sidebar: running tasks pulse** — a running task gets a pulsing dot; automation-triggered and delegated tasks now appear in the sidebar in real time (previously visible only after an app restart); automation task names carry the trigger time (`10-02 11:45`) so repeated runs are distinguishable. Running several tasks in parallel has always been supported (per-task controllers).
 
-- **Chat stream hierarchy** — process narration is demoted to small dim text (the last stage note keeps prominence), the process-fold line now shows **what the tools actually achieved** (failure first), and the final answer gets a distinct accent edge — the on-screen order becomes: conclusion > stage notes > process.
+> Verified: `typecheck` exit 0 · **2555 cumulative tests, 0 code-fail** · version-doc gate all green · real-machine UI verification via dev+CDP (copy buttons, artifact card, Git empty state, path-kind channel).
 
-> Also fixed in real-machine acceptance: a migration bug that silently flattened subtask hierarchy after an app restart.
->
-> Verified: `typecheck` exit 0 · **2445 cumulative tests, 0 code-fail** · version-doc gate all green · packaged `.app` real-machine UI acceptance (archiving, hierarchy, dark/light, zero failed resources).
 ## Official Website
 
 **[→ www.hellowl.com](https://www.hellowl.com/)** is the official product website for ArkWork. It showcases the workbench with real in-app screenshots (ReAct task view, help center, settings & i18n), walks through the four-layer memory and the **no cloud · no telemetry · pure files** design, and hosts the download links for all three platforms (macOS / Windows / Linux). Click the link above to jump from GitHub straight to the site.

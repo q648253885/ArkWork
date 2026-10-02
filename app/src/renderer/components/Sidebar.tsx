@@ -331,6 +331,9 @@ function ThreadRow({
       : task.status === 'failed'
         ? 'var(--danger)'
         : 'var(--text-tertiary)'
+  // v0.45.0（R-H）：运行中标识 —— 静态色点升级为脉冲点（呼吸动画），一眼区分
+  // 「跑着的任务」与「历史任务」。判定以任务级 status 为权威（清单聚合只是配色）。
+  const isRunning = task.status === 'running'
 
   const submitRename = async () => {
     const trimmed = draftTitle.trim()
@@ -397,12 +400,32 @@ function ThreadRow({
             />
           )}
           {/* v0.14.0 Task 8：与清单六态联动 — planItems 存在时颜色取六态映射，
-              否则回退任务级状态（保持旧行为） */}
-          <span
-            aria-hidden="true"
-            className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${selected ? 'ring-2 ring-business-ring' : ''}`}
-            style={{ background: statusColor }}
-          />
+              否则回退任务级状态（保持旧行为）。
+              v0.45.0（R-H）：running → 脉冲点（外圈 ping + 实心点），其余保持静态色点 */}
+          {isRunning ? (
+            <span
+              aria-label={t('sidebar.threadRow.runningBadge')}
+              title={t('sidebar.threadRow.runningBadge')}
+              className="relative inline-flex w-1.5 h-1.5 flex-shrink-0"
+            >
+              <span
+                aria-hidden="true"
+                className="animate-pulse absolute inline-flex h-full w-full rounded-full opacity-60"
+                style={{ background: statusColor }}
+              />
+              <span
+                aria-hidden="true"
+                className={`relative inline-flex rounded-full w-1.5 h-1.5 ${selected ? 'ring-2 ring-business-ring' : ''}`}
+                style={{ background: statusColor }}
+              />
+            </span>
+          ) : (
+            <span
+              aria-hidden="true"
+              className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${selected ? 'ring-2 ring-business-ring' : ''}`}
+              style={{ background: statusColor }}
+            />
+          )}
           {task.automationId ? (
             <span className="flex items-center gap-1 flex-1 min-w-0">
               <Icon.Clock width={12} height={12} className="text-text-tertiary flex-shrink-0" aria-hidden="true" />

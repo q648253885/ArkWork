@@ -10,18 +10,23 @@
  * ============================================================ */
 import type { FlowBlock } from '@shared/types/flow'
 import { LinkifiedText } from '../LinkifiedText'
+// v0.45.0（R-F）：段落复制按钮（hover 浮出）
+import { CopyButton } from '../CopyButton'
 
 export function SayBlock({ block }: { block: Extract<FlowBlock, { kind: 'say' }> }) {
   if (block.isSummarySource) {
     return (
-      <div className="text-base text-text-primary leading-relaxed select-text whitespace-pre-wrap">
+      <div className="relative group text-base text-text-primary leading-relaxed select-text whitespace-pre-wrap">
+        {/* v0.45.0（R-F）：整段复制 */}
+        <CopyButton text={block.text} className="absolute right-0 -top-5" />
         {/* v0.44.0（R-C）：路径链接化（分段渲染无损，无路径时等同直出） */}
         <LinkifiedText text={block.text} />
       </div>
     )
   }
   return (
-    <div className="text-sm text-text-secondary leading-relaxed select-text whitespace-pre-wrap">
+    <div className="relative group text-sm text-text-secondary leading-relaxed select-text whitespace-pre-wrap">
+      <CopyButton text={block.text} className="absolute right-0 -top-5" />
       <LinkifiedText text={block.text} />
     </div>
   )

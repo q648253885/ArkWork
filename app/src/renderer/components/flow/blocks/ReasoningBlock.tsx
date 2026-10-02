@@ -21,6 +21,8 @@ import { useTranslation } from 'react-i18next'
 import { useStore } from '../../../store'
 import { EMPTY_REASON_KEY, reasoningSourceKey, resolveReasoningOpen } from '@shared/utils/reasoning'
 import type { FlowBlock } from '@shared/types/flow'
+// v0.45.0（R-F）：思考正文复制按钮（hover 浮出）
+import { CopyButton } from '../CopyButton'
 
 interface ReasoningBlockProps {
   block: Extract<FlowBlock, { kind: 'reasoning' }>
@@ -52,7 +54,7 @@ export function ReasoningBlock({ block, forceOpen = false }: ReasoningBlockProps
   const emptyKind = block.text.trim() ? null : block.status === 'failed' ? 'failed' : 'noChannel'
 
   return (
-    <div className="react-reason" data-state={isRunning ? 'running' : 'settled'}>
+    <div className="react-reason relative group" data-state={isRunning ? 'running' : 'settled'}>
       {!forceOpen && (
         <button
           type="button"
@@ -76,6 +78,12 @@ export function ReasoningBlock({ block, forceOpen = false }: ReasoningBlockProps
             <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
+      )}
+      {/* v0.45.0（R-F）：思考正文复制 —— 挂容器右上（头行是 <button>，按钮不可内嵌，
+          放容器层 absolute 定位到头行行尾、chevron 左侧；复制头行右侧空隙不遮 meta）。
+          仅展开/有正文时浮出（折叠态复制无对象）。 */}
+      {!emptyKind && bodyVisible && (
+        <CopyButton text={block.text} className="absolute right-4 top-0" />
       )}
       {emptyKind ? (
         <span className="react-reason__placeholder text-2xs text-text-faint" data-empty-kind={emptyKind}>

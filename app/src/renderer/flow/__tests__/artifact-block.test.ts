@@ -170,6 +170,57 @@ test('TC-ART-011 负腿：无路径文本不产生 path 段', () => {
   }
 })
 
+/* ---------- v0.45.0（R-E）：写盘兜底第二数据源 ---------- */
+
+test('TC-ART-012 R-E 写盘兜底：planItems 无声明时，file-writer / file-editor 成功路径进产物卡（时间序）', () => {
+  const writeSteps = [
+    step({ id: 'w2', type: 'act', iteration: 2, startedAt: 2_000, toolName: 'file-writer', toolArgs: JSON.stringify({ path: 'docs/late.md' }) }),
+    step({ id: 'w1', type: 'act', iteration: 1, startedAt: 1_500, toolName: 'file-editor', toolArgs: JSON.stringify({ path: 'src/a.ts' }) }),
+    step({ id: 'w0', type: 'act', iteration: 1, startedAt: 1_000, toolName: 'file-writer', toolArgs: JSON.stringify({ path: 'docs/first.md' }) }),
+  ]
+  const items: ConversationItem[] = [
+    userItem('u1', 'q', 100),
+    reactItem('r1', [
+      step({ id: 's1', type: 'reason', iteration: 3, thought: '收尾', action: { tool: 'task_complete', args: { summary: '完成' } } }),
+      ...writeSteps,
+    ]),
+    { id: 'a1', type: 'assistant', text: '完成', ts: 3_000 },
+  ]
+  const turns = projectConversation(baseInput({ items, steps: writeSteps }))
+  const cards = artifactBlocksOf(turns)
+  assert.equal(cards.length, 1, '无声明也有卡（R-E 写盘兜底）')
+  assert.deepEqual(
+    cards[0]!.entries.map((e) => e.path),
+    ['docs/first.md', 'src/a.ts', 'docs/late.md'],
+    '写盘路径按执行时间序排列',
+  )
+})
+
+test('TC-ART-013 R-E 负腿与去重：失败/软失败/非法 args 不进卡；声明优先、path 去重', () => {
+  const writeSteps = [
+    step({ id: 'w1', type: 'act', iteration: 1, toolName: 'file-writer', toolArgs: JSON.stringify({ path: 'docs/r.md' }), status: 'failed', errorMessage: 'x' }),
+    step({ id: 'w2', type: 'act', iteration: 1, toolName: 'file-writer', toolArgs: JSON.stringify({ path: 'docs/blocked.md' }), softFail: true }),
+    step({ id: 'w3', type: 'act', iteration: 1, toolName: 'file-writer', toolArgs: 'not-json' }),
+    step({ id: 'w4', type: 'act', iteration: 1, toolName: 'file-writer', toolArgs: JSON.stringify({ path: 'docs/dupe.md' }) }),
+    step({ id: 'w5', type: 'act', iteration: 1, toolName: 'shell', toolArgs: JSON.stringify({ command: 'echo hi > docs/x.md' }) }),
+  ]
+  const planItems: PlanItem[] = [
+    { id: 'p1', text: '出报告', status: 'done', createdAt: 1, updatedAt: 2, artifact: { path: 'docs/dupe.md', kind: 'file' } },
+  ]
+  const items: ConversationItem[] = [
+    userItem('u1', 'q', 100),
+    reactItem('r1', [
+      step({ id: 's1', type: 'reason', iteration: 2, thought: '收尾', action: { tool: 'task_complete', args: { summary: '完成' } } }),
+      ...writeSteps,
+    ]),
+    { id: 'a1', type: 'assistant', text: '完成', ts: 300 },
+  ]
+  const turns = projectConversation(baseInput({ items, steps: writeSteps, planItems }))
+  const cards = artifactBlocksOf(turns)
+  assert.equal(cards.length, 1)
+  assert.deepEqual(cards[0]!.entries, [{ path: 'docs/dupe.md', kind: 'file' }], '声明优先占位；失败/软失败/非法 args/shell 不进卡；path 去重')
+})
+
 /* ============================================================
  * 三、呈现契约（源码守卫，stripComments 剥注释）
  * ============================================================ */

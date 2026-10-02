@@ -23,6 +23,7 @@ import {
   isInArkworkArea,
   isInsideRoot,
   pickReadonlyReason,
+  probePathKind,
   reasonFromErrorCode,
   relativeToRoot,
 } from '../guard.js'
@@ -236,5 +237,30 @@ test('TC-GUARD-007 文件不存在 → deleted + 「另存恢复」出口', asyn
       assert.ok(err instanceof FsError)
       assert.equal((err as FsError).code, 'E_PATH_OUTSIDE_WORKSPACE')
     }
+  })
+})
+
+/* ---------- v0.45.0（D220）：probePathKind —— 文件夹不可点击判定源 ---------- */
+
+test('TC-GUARD-008 ★ probePathKind 真值表：文件 / 目录 / 不存在 三态（真 fs）', async () => {
+  await withTmpDir(async (dir) => {
+    const file = join(dir, 'a.md')
+    const sub = join(dir, 'sub')
+    await writeFile(file, 'x')
+    await mkdir(sub)
+    // 文件：exists 且非目录
+    assert.deepEqual(await probePathKind(file, dir), { exists: true, isDir: false })
+    // 目录：exists + isDir=true（这是与 fs:stat-path 的关键差异 —— probeText 对目录抛 EISDIR）
+    assert.deepEqual(await probePathKind(sub, dir), { exists: true, isDir: true })
+    // 不存在：两false（不抛错）
+    assert.deepEqual(await probePathKind(join(dir, 'gone.txt'), dir), { exists: false, isDir: false })
+  })
+})
+
+test('TC-GUARD-009 probePathKind 接受工作区相对路径（resolveUserPath 同口径）', async () => {
+  await withTmpDir(async (dir) => {
+    await mkdir(join(dir, 'docs'))
+    const rel = await probePathKind('docs', dir)
+    assert.deepEqual(rel, { exists: true, isDir: true }, '相对路径以 root 为基准解析（D115 同口径）')
   })
 })

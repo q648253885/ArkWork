@@ -16,7 +16,7 @@ import { getSettings, saveSettings } from './settings.js'
 // v0.29.0 F6：用户可见校验错误四语言化
 import { getUiLocale, tFor } from '../i18n/messages.js'
 // v0.31.0 B2：编辑器文件能力（路径边界已提升为共享实现，见 fs/guard.ts）
-import { assertInWorkspace, assertWritableTarget, isInsideRoot, probeReadablePath, resolveUserPath } from '../fs/guard.js'
+import { assertInWorkspace, assertWritableTarget, isInsideRoot, probePathKind, probeReadablePath, resolveUserPath } from '../fs/guard.js'
 import { probeText, readText } from '../fs/text.js'
 import { hashFile, writeText } from '../fs/write.js'
 // v0.31.0 B5：文件能力 P1（扁平清单 + chokidar 监听）
@@ -173,6 +173,11 @@ export function registerFsHandlers(): void {
    *  —— 边界只约束 LLM 工具面（file-editor / file-writer / grep / glob / permissions），
    *     那几处仍走 `isInsideWorkspace`，本版一行未动。
    */
+  /** v0.45.0（D220）：路径种类轻探测 —— 交互区文件链接「文件夹不可点击」判定源 */
+  ipcMain.handle('fs:path-kind', async (_e, path: string): Promise<{ exists: boolean; isDir: boolean }> => {
+    return probePathKind(path)
+  })
+
   ipcMain.handle('fs:stat-path', async (_e, path: string): Promise<TextProbe> => {
     try {
       const { absPath, insideWorkspace } = await probeReadablePath(path)

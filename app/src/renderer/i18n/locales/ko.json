@@ -17,6 +17,7 @@
     "approvalReplan": "재계획 승인 대기",
     "approvalConverge": "수렴 확인",
     "openFile": "클릭하여 파일 열기",
+    "pathIsDir": "폴더(미리보기 지원 안 함)",
     "fold": {
       "thinking": "사고 과정",
       "thinkingCount": "생각 {{n}} 회",
@@ -1175,6 +1176,7 @@
       }
     },
     "threadRow": {
+      "runningBadge": "작업 실행 중",
       "failedBadge": "플랜에 실패한 단계가 있습니다"
     },
     "menu": {

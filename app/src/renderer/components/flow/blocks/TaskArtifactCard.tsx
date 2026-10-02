@@ -10,7 +10,8 @@
  * 呈现契约：
  *  - 每条经 FileLink（完整路径展示，D112；点击 useOpenPath → openDoc
  *    既有门面，不直连 openPreview）；
- *  - dir 型产物同样可打开（openDoc 对目录有既有语义）；
+ *  - v0.45.0（D220）：dir 型产物**不可点击**（用户反馈：文件夹点了也无法预览）
+ *    —— 调用方已知 kind 直传 `dirKind`，FileLink 跳过探测直接渲染非交互 chip；
  *  - 空产物不出卡（投影层保证，诚实 UI）；
  *  - 视觉延续 v0.42.0 卡片语言：中性圆角底 + 标题行，与 PlanBlock 同族。
  * ============================================================ */
@@ -39,7 +40,7 @@ export function TaskArtifactCard({ block }: { block: ArtifactBlockT }) {
       </div>
       <div className="flex flex-col items-start gap-1">
         {block.entries.map((e, i) => (
-          <FileLink key={`${e.path}:${i}`} path={e.path} className="text-[13px]" />
+          <FileLink key={`${e.path}:${i}`} path={e.path} dirKind={e.kind === 'dir'} className="text-[13px]" />
         ))}
       </div>
     </div>

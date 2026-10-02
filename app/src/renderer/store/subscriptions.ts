@@ -67,7 +67,12 @@ export function subscribeAll(
           task.status === 'failed' || task.status === 'cancelled' || task.status === 'done' || task.status === 'paused'
         if (terminal) get().clearStreamBuffer(task.id)
         set((s) => ({
-          tasks: s.tasks.map((t) => (t.id === task.id ? task : t)),
+          // v0.45.0（R-H）：main 侧新建的任务（自动化触发 / delegate 子任务）实时入列 ——
+          // 此前 task:list-changed 广播无订阅者，automation 建的任务要重启才可见。
+          // running 状态事件是该任务存活的第一信号（createTask 后必跟 runTask → running）。
+          tasks: s.tasks.some((t) => t.id === task.id)
+            ? s.tasks.map((t) => (t.id === task.id ? task : t))
+            : [task, ...s.tasks],
           selectedTask:
             s.selectedTaskId === task.id ? task : s.selectedTask,
           // v0.14.0 Task 4：任务失败/取消时清空飞行中的进度，避免 UI 残留
