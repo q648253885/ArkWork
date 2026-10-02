@@ -107,3 +107,23 @@ test('TC-NORM-006: work-class 保持叶子模块 —— 不得新增运行时 im
     assert.match(line, /import type/, 'work-class.ts 只允许 type import（叶子模块硬规则）')
   }
 })
+
+test('TC-NORM-007: 接线契约 —— reason-phase 必须在 step 落盘之前归一（D219 回归）', () => {
+  const RP = read('../reason-phase.ts')
+  // 调用与 import 必须存在
+  const ingestIdx = RP.indexOf('normalizeResponseToolNames(response)')
+  assert.notEqual(ingestIdx, -1, 'reason-phase.ts 必须调用 normalizeResponseToolNames（D219 唯一摄取点）')
+  assert.match(RP, /import \{[^}]*normalizeResponseToolNames[^}]*\} from '\.\/work-class\.js'/)
+  // 顺序：归一化必须先于 L1 meta 构造与 reason step 构造 —— 否则孪生拼写
+  // 会原样进 steps.jsonl / meta / reason_end 事件（实机缺陷 T-20261002-2k584x：
+  // 模型调 task-complete，落盘原样，渲染层最终答复整条丢失）
+  const metaIdx = RP.indexOf('const reasoningMeta')
+  const stepIdx = RP.indexOf('const reasonStep')
+  assert.notEqual(metaIdx, -1)
+  assert.notEqual(stepIdx, -1)
+  assert.ok(ingestIdx < metaIdx, `归一化（char ${ingestIdx}）必须先于 L1 meta 构造（char ${metaIdx}）`)
+  assert.ok(ingestIdx < stepIdx, `归一化（char ${ingestIdx}）必须先于 reason step 构造（char ${stepIdx}）`)
+  // loop.ts 防线保留（幂等），且仍在首次消费 response 之前（TC-NORM-005 已钉）
+  const LOOP = read('../../engine/loop.ts')
+  assert.notEqual(LOOP.indexOf('normalizeResponseToolNames(response)'), -1, 'loop.ts 幂等防线不得移除')
+})

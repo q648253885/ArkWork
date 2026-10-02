@@ -152,7 +152,8 @@ export function isRetiredPlanTool(name: string): boolean {
  *     容错，不会重演"内联 if 链漏名字"（D154 前车之鉴）。
  *   · 只对"未知名的已知孪生"归一：MCP / 市场技能等未登记名一律原样透传。
  *   · 双向同形名（如 `todo_update` / `todo-update` 双双在册）不需要别名。
- *   · 归一化必须发生在**唯一摄取点**（loop.ts 的 Reason 响应返回处），
+ *   · 归一化必须发生在**唯一摄取点**（v0.44.1 D219 起为 reason-phase.ts 的
+ *     响应落定处 —— step 落盘/广播之前；loop.ts 保留幂等防线），
  *     任何分支 / 预算统计 / toolsThisRun 收集之前 —— 否则会出现 D157 的
  *     镜像缺陷（账本实际写了、判据认为没写）。
  * ============================================================ */
@@ -184,11 +185,13 @@ export function normalizeToolName(name: string): string {
 }
 
 /**
- * 就地归一化一次 Reason 响应里的全部工具名（loop.ts 唯一摄取点专用）。
+ * 就地归一化一次 Reason 响应里的全部工具名。
  *
- * ⚠️ 必须在任何消费（控制分支 / collectActionsForIteration / toolsThisRun
- * 收集 / 预算统计）之前调用 —— `response.action` 与 `response.actions` 被
- * 就地改写，后续读取自然拿到正名。
+ * v0.44.1（D219）：主调用点在 **reason-phase.ts**（响应落定后、reason step
+ * 落盘/广播/L1 meta 之前）—— 否则孪生拼写会原样进 steps.jsonl / 事件，
+ * 渲染层用正名精确匹配落空，最终答复整条不渲染。loop.ts 的调用保留为
+ * 幂等防线。任何消费（控制分支 / collectActionsForIteration / toolsThisRun
+ * 收集 / 预算统计）都必须发生在本调用之后。
  */
 export function normalizeResponseToolNames(response: {
   action?: { tool: string } | null

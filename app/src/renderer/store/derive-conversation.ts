@@ -12,6 +12,9 @@ import type { MemoryItem } from '@shared/types/memory'
 import type { ConversationItem } from '@shared/types/conversation'
 // v0.36.0（B11/P4-c）：渲染层 SAY 兜底剥离（纯函数，node:test 可密闭单测）
 import { stripSayMarkers } from '../utils/say-strip'
+// v0.44.1（D219）：工具名孪生拼写容错 —— 历史任务的 steps.jsonl 可能存有
+// 模型原始拼写（`task-complete`），正名精确匹配会漏判最终答复（实机缺陷）
+import { sameToolName } from '@shared/utils/tool-name'
 
 export function deriveConversation(
   task: Task | null,
@@ -81,10 +84,11 @@ export function deriveConversation(
   for (const iter of iters) {
     const group = byIter.get(iter)!.sort((a, b) => a.startedAt - b.startedAt)
     const reasonStep = group.find((s) => s.type === 'reason')
-    const isComplete = reasonStep?.action?.tool === 'task_complete'
+    // v0.44.1（D219）：孪生拼写容错 —— 旧数据可能落盘 `task-complete` / `ask-user`
+    const isComplete = sameToolName(reasonStep?.action?.tool, 'task_complete')
     // v0.23.1：ask_user 的问题也是面向用户的最终输出 — 生成 assistant 消息
     // 永久保留在交互区（此前问题只存在于暂停态卡片，作答后即消失）。
-    const isAskUser = reasonStep?.action?.tool === 'ask_user'
+    const isAskUser = sameToolName(reasonStep?.action?.tool, 'ask_user')
     // 最终回复：task_complete / ask_user / 无 action（模型直接回复未调用工具）
     const isFinalAnswer = isComplete || isAskUser || !reasonStep?.action
     const ts = reasonStep?.startedAt ?? group[0]?.startedAt ?? 0

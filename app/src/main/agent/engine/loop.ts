@@ -747,6 +747,8 @@ export async function runReActLoop(
       // 同时把 `planOpsJustSucceeded` 复位：本轮的成败由下方 Act 分支重新置位。
       planOpsHadProse = Boolean((response.content ?? '').trim() || (response.thought ?? '').trim())
       planOpsJustSucceeded = false
+      // v0.44.1（D219）：主归一化已前移到 reason-phase（step 落盘之前，见该文件）；
+      // 此处保留为幂等防线 —— 挡住未来任何绕过 reason-phase 组装 response 的路径。
       normalizeResponseToolNames(response)
       // ============================================================
       // v0.41.0（D208）：正文工具降级通道 —— 合成动作**回灌点**。

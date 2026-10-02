@@ -34,6 +34,8 @@ import {
 } from '@shared/utils/reasoning'
 // v0.36.0（B11/P4-c）：渲染层 SAY 标记兜底剥离（纯函数）
 import { stripSayMarkers } from '../utils/say-strip'
+// v0.44.1（D219）：工具名孪生拼写容错（历史 steps 落盘 `task-complete` 等）
+import { sameToolName } from '@shared/utils/tool-name'
 // v0.31.0 B4：工具呈现协议（main 侧纯模块，渲染层直接消费 —— added/removed
 // 计数全仓库唯一实现，§5.4.5 / U2）
 import { presentCallOrDefault, presentResultOrDefault } from '../../main/agent/tools/present'
@@ -467,16 +469,16 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
         // 的未闭合/变体标记不再以满亮度 markdown 直出）
         text: stripSayMarkers(item.text ?? ''),
         origin:
-          lastReasonTool === 'task_complete'
+          sameToolName(lastReasonTool, 'task_complete')
             ? 'task-complete'
-            : lastReasonTool === 'ask_user'
+            : sameToolName(lastReasonTool, 'ask_user')
               ? 'ask-user'
               : 'plain',
         streaming: false,
         ts: item.ts ?? 0,
         tsLabel: item.tsLabel ?? fmtTime(item.ts ?? 0),
       })
-      if (lastReasonTool === 'task_complete') {
+      if (sameToolName(lastReasonTool, 'task_complete')) {
         lastTaskComplete = { turn: t, ts: item.ts ?? 0 }
       }
       lastReasonTool = undefined

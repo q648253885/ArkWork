@@ -28,6 +28,8 @@ import { emitEvent } from '../engine/broadcast.js'
 import { logger } from '../../system/logger.js'
 import type { SkillContext } from '../registry.js'
 import type { SubagentRunStatus } from '@shared/types/react.js'
+// v0.44.1（D219）：工具名孪生拼写比较（读侧容错，见 shared/utils/tool-name.ts）
+import { sameToolName } from '@shared/utils/tool-name'
 
 /** 委派目标（新形态） */
 export interface DelegateTarget {
@@ -428,10 +430,12 @@ async function extractFinalSummary(taskId: string): Promise<string> {
   if (reasonings.length === 0) return ''
   const last = reasonings[0]
   // 若 meta 中是 task_complete action，提取 summary
+  // v0.44.1（D219）：孪生拼写容错 —— 旧 L1 meta 可能存有模型原始拼写（`task-complete`），
+  // 正名精确匹配会漏掉子任务已写好的 summary
   if (last.meta) {
     try {
       const action = JSON.parse(last.meta) as { tool?: string; args?: { summary?: string } }
-      if (action.tool === 'task_complete' && action.args?.summary) {
+      if (sameToolName(action.tool, 'task_complete') && action.args?.summary) {
         return action.args.summary
       }
     } catch {

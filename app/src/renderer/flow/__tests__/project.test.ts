@@ -239,6 +239,23 @@ test('TC-FLOW-003b 纯函数等幂与输入不可变', () => {
   assert.equal(answers[0].text, '任务完成总结')
 })
 
+// v0.44.1（D219）：孪生拼写容错 —— 历史 steps 可能落盘 `task-complete`（模型原始
+// 拼写），origin 推导与产物卡挂载必须与正名同判（实机缺陷 T-20261002-2k584x）
+test('TC-FLOW-003b 连字符孪生 task-complete 的 answer origin 同判 task-complete', () => {
+  const items4: ConversationItem[] = [
+    userItem('u1', 'q', 100),
+    reactItem('r3', [step({
+      id: 's10', type: 'reason', iteration: 2, thought: '内部推理',
+      action: { tool: 'task-complete', args: { summary: '任务完成总结' } },
+    })]),
+    { id: 'a2', type: 'assistant', text: '任务完成总结', ts: 300 },
+  ]
+  const out4 = projectConversation(baseInput({ items: items4 }))
+  const answers4 = turnRenderSequence(out4[0]).filter((b) => b.kind === 'answer') as AnswerBlock[]
+  assert.equal(answers4.length, 1)
+  assert.equal(answers4[0].origin, 'task-complete', '孪生拼写不得退化为 plain')
+})
+
 /* ---------- planItems 状态注入（PlanBlock 六态以任务持久化为真源） ---------- */
 test('TC-FLOW-004 计划卡状态取 task.planItems', () => {
   const planItems: PlanItem[] = [

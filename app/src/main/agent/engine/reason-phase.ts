@@ -43,6 +43,8 @@ import { emitContextSizeReport } from './context.js'
 import { persistAbortedReason } from './abort.js'
 // v0.31.0 D22：瞬时提示通道标签（产出方自带，此处兜底）
 import { labelEngineHint } from './hints.js'
+// v0.44.1（D219）：工具名归一化前移到 step 落盘之前（唯一摄取点）
+import { normalizeResponseToolNames } from './work-class.js'
 import type { AlwaysOnContracts } from './run-setup.js'
 
 /**
@@ -410,6 +412,21 @@ export async function runReasonPhase(
   }
 
   const durationMs = Date.now() - startedAt
+
+  // ============================================================
+  // v0.44.1（D219）：工具名归一化**前移到本函数** —— step 落盘/广播之前。
+  //
+  // D159 的摄取点原在 loop.ts（Reason 响应返回处），但 reason step 的
+  // 落盘 + 广播 + reason_end 事件都发生在本函数内部 —— 归一化比落盘晚一步，
+  // 模型偶发的孪生拼写会原样进 steps.jsonl / L1 meta / reason_end 事件。
+  // 实机证据（T-20261002-2k584x）：模型调 `task-complete` 且 args.summary
+  // 携带完整四段式总结，但 step 落盘仍是 `task-complete`；渲染层
+  // deriveConversation 用正名 `task_complete` 精确匹配落空 → isFinalAnswer
+  // 为 false → 最终答复整条不渲染，用户只看到最后一轮过程旁白。
+  // 归一化幂等：loop.ts 保留调用作防线；这里才是字面意义上的"唯一摄取点"
+  // （所有 step / meta / 事件的首次产出都在其后）。
+  // ============================================================
+  normalizeResponseToolNames(response)
 
   // 写入 L1：assistant reasoning — content 只存纯文本，action 放 meta
   // polish4 §A2.1：assistant meta 含完整多 tool actions（含 toolCallIds）

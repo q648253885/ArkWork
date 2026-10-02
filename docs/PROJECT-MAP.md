@@ -30,7 +30,7 @@
 |---|---|---|
 | `app/src/main/` | 383 | **主进程**：agent 引擎、存储、IPC、插件、记忆、LLM、文件系统 |
 | `app/src/renderer/` | 225 | **渲染进程**：React 界面（交互区、面板、工作台、设置） |
-| `app/src/shared/` | 67 | **主/渲染共享**：类型定义 `types/` + 纯函数工具 `utils/`（含 v0.41.0 `finish-phrase.ts` 终局短语谓词；无 Electron 依赖） |
+| `app/src/shared/` | 67 | **主/渲染共享**：类型定义 `types/` + 纯函数工具 `utils/`（含 v0.41.0 `finish-phrase.ts` 终局短语谓词；v0.44.1 `tool-name.ts` 工具名孪生拼写比较 `sameToolName` —— 读侧对落盘工具名一律经它比较，不得直接 `===` 正名，D219；无 Electron 依赖） |
 | `app/src/preload/` | 3 | 预加载脚本（`window.ark.*` 能力面） |
 | `app/src/test/` | 6 | 测试基础设施：`electron-mock-loader.mjs`（统一 ESM loader）+ `electron-stub.mjs` + `logger.stub.mjs` + `repo-scan` 快照 + `tmp-cleanup.{mjs,cjs}`（v0.37.0 新增，由 runner 用 `NODE_OPTIONS --import` 注入，**进程退出时清扫临时工作区**，见 D148/D191） |
 | `app/scripts/` | — | 工程脚本：`run-tests.mjs`（统一测试 runner，v0.39.0 起临时目录/日志名带 **PID 命名空间**，见 D191）等 |
