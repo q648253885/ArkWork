@@ -107,6 +107,7 @@ L2 以上按周期与任务终态触发，巩固结果经**暂存区**在下次�
 - **版本克制**：仅 UI 或功能**大规模升级**才升大版本；小修走 `x.y.z` 补丁版。
 - **文档先行**：架构级变更先出 `docs/versions/<ver>/`（`01-research` / `00-release-goal` / `02-prd` / `04-system-design`），门禁 `bin/validate_version_docs.py <ver>` 未过**禁写代码**。
 - **测透再交**：用例库**累积继承** —— 最新版本的测试必须包含上一版本的全部用例；**冒烟全绿才展开详测**。
+- **低配适配（v0.46.0 PERF-2）**：perf-lite 三态（auto/on/off）热生效；软渲染判定粘滞化（perf-cache.json）→ 次轮启动关硬件加速 + V8 堆上限；存储读缓存/流式投影结构共享/IPC 瘦身构成性能基线 —— 改动热路径（l1.jsonl / tasks.json / act_end 广播 / TurnList 投影）前先读 `docs/versions/v0.46.0/04-system-design.md`。
 - **交付即用**：必须产出打包好的成品（`.app` / dmg / zip）。
 - **环节闭环**：文档 → 开发 → 测试 → 交付，缺一不可。
 - **收尾必落 git**（**先请用户确认**）：确认 → commit → tag → push。

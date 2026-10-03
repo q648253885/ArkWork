@@ -132,16 +132,27 @@ export function useGraph(taskId: string | null | undefined): UseGraphResult {
   }, [load])
 
   // 订阅增量刷新：只在属于本任务时刷（避免多任务串台）
+  // v0.46.0（PERF-2 W7）：500ms trailing 合并 —— patch/status 每轮 act 都可能来，
+  // 逐事件全量重拉在弱机上把任务面板变成隐性重渲染源；合并后面板数据最多延迟
+  // 500ms（面板是进度概览，无实时性契约），高频段 IPC/重拉次数骤降。
   useEffect(() => {
     if (!taskId) return
+    let timer: number | null = null
     const off = window.ark.graph.onUpdate((payload) => {
       if (payload.taskId !== taskId) return
       // refresh 标记 = 大变更（图创建 / Replan / 收敛 / needs_human），必须重新拉快照；
       // 其余（patch / status）也拉一次 —— 面板是"轻量投影"，本地做增量合并的收益
       // 抵不上维护合并逻辑的成本与出错风险（快照本身已做折叠与裁剪）
-      void load(true)
+      if (timer !== null) window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        timer = null
+        void load(true)
+      }, 500)
     })
-    return off
+    return () => {
+      if (timer !== null) window.clearTimeout(timer)
+      off()
+    }
   }, [taskId, load])
 
   /** 统一处理动作响应：ok → 落快照；错误 → 落 error */

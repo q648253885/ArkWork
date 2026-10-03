@@ -8,7 +8,7 @@
 import type { Task } from '@shared/types/task'
 import { appendL1 } from '../../memory/l1-working.js'
 import { updateTask, getTask } from '../../store/tasks.js'
-import { broadcastStep, broadcastTaskStatus, broadcastTaskStatusStored } from '../events.js'
+import { broadcastStep, broadcastTaskStatus, broadcastTaskStatusStored, clearToolProgress } from '../events.js'
 import { logger } from '../../system/logger.js'
 import { genId } from '@shared/utils/id'
 import { drainContinuations } from '../inbox.js'
@@ -83,6 +83,9 @@ export async function handleAbort(
   stale?: () => boolean,
 ): Promise<void> {
   if (stale?.()) return
+  // v0.46.0（PERF-2 W13）：中断/取消时清掉本任务的工具进度聚合（此前只在正常
+  // 走完每轮时按 groupId 清理，暂停/异常早退路径会让 running 进度驻留内存与 UI）
+  clearToolProgress(task.id)
   const current = await getTask(task.id)
   if (current?.status === 'cancelled') {
     await emitEvent(task.id, { type: 'task_paused', iteration })

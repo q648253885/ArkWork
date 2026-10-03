@@ -16,6 +16,15 @@ import type { LlmMessage } from '../llm/adapter.js'
 const sessionCollections = new Map<string, JsonlCollection<SessionEvent>>()
 const seqByTask = new Map<string, number>()
 
+/**
+ * v0.46.0（PERF-2 W13）：任务删除时驱逐 per-task 会话缓存（集合实例 + seq 游标），
+ * 防长生命周期进程内存缓涨。
+ */
+export function evictSessionLogCaches(taskId: string): void {
+  sessionCollections.delete(taskId)
+  seqByTask.delete(taskId)
+}
+
 function sessions(taskId: string): JsonlCollection<SessionEvent> {
   let col = sessionCollections.get(taskId)
   if (!col) {

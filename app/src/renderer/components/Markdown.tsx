@@ -18,9 +18,8 @@
  *   - 流式光标（streaming=true 时在末尾加 ▍）
  * 渲染为受控 React 节点（避免 XSS）；图表仅引入 echarts，其余零依赖。
  * ============================================================ */
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import * as echarts from 'echarts'
 import { Icon } from '../icons'
 
 interface MarkdownProps {
@@ -29,7 +28,11 @@ interface MarkdownProps {
   streaming?: boolean
 }
 
-export function Markdown({ content, streaming = false }: MarkdownProps) {
+/**
+ * v0.46.0（PERF-2 W1）：memo —— props 为原始值（content 字符串 + streaming 布尔），
+ * 流式期间已落定正文块不再每 token 全量 re-parse（此前是渲染层最大的隐性 CPU 税）。
+ */
+export const Markdown = memo(function Markdown({ content, streaming = false }: MarkdownProps) {
   const blocks = parseBlocks(content)
 
   return (
@@ -49,7 +52,7 @@ export function Markdown({ content, streaming = false }: MarkdownProps) {
       )}
     </div>
   )
-}
+})
 
 /* ============================================================
  * 块级解析
@@ -356,6 +359,18 @@ function CodeBlock({
  * ECharts 图表块：```echarts {option JSON}``` → 交互图表
  * JSON 非法时回退为等宽代码展示，保证内容不丢失
  * ============================================================ */
+/**
+ * v0.46.0（PERF-2 W6）：echarts 动态导入 —— 此前 `import * as echarts` 把
+ * echarts 全量打进主 chunk（弱 VM 冷启动解析大头之一），而图表块极少出现。
+ * 改为首次挂到 EChartBlock 时 dynamic import（Vite 自动拆异步 chunk），
+ * 无图表会话零加载；类型侧仅 import type（零运行时成本）。
+ */
+let echartsPromise: Promise<typeof import('echarts')> | null = null
+function loadEcharts(): Promise<typeof import('echarts')> {
+  echartsPromise ??= import('echarts')
+  return echartsPromise
+}
+
 function EChartBlock({ option }: { option: string }) {
   const { t } = useTranslation()
   const ref = useRef<HTMLDivElement>(null)
@@ -364,20 +379,24 @@ function EChartBlock({ option }: { option: string }) {
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    let chart: echarts.ECharts | null = null
-    try {
-      const opt = JSON.parse(option)
-      if (!opt || typeof opt !== 'object' || Array.isArray(opt)) throw new Error('invalid option')
-      chart = echarts.init(el)
-      chart.setOption(opt)
-      setInvalid(null)
-    } catch (e) {
-      setInvalid(option)
-      return
-    }
+    let chart: import('echarts').ECharts | null = null
+    let disposed = false
+    void loadEcharts().then((echarts) => {
+      if (disposed) return
+      try {
+        const opt = JSON.parse(option)
+        if (!opt || typeof opt !== 'object' || Array.isArray(opt)) throw new Error('invalid option')
+        chart = echarts.init(el)
+        chart.setOption(opt)
+        setInvalid(null)
+      } catch {
+        setInvalid(option)
+      }
+    })
     const onResize = () => chart?.resize()
     window.addEventListener('resize', onResize)
     return () => {
+      disposed = true
       window.removeEventListener('resize', onResize)
       chart?.dispose()
     }

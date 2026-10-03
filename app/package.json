@@ -1,6 +1,6 @@
 {
   "name": "arkwork",
-  "version": "0.45.0",
+  "version": "0.46.0",
   "description": "Local-first AI Agent workbench — ReAct loop visible, controllable, reusable.",
   "main": "out/main/index.js",
   "author": {
@@ -40,18 +40,14 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",
     "adm-zip": "^0.5.18",
-    "echarts": "^6.1.0",
-    "i18next": "^26.4.0",
+    "chokidar": "^3.6.0",
     "mammoth": "^1.12.0",
     "minisearch": "^7.2.0",
     "openai": "^4.77.0",
     "pdf-parse": "^2.4.5",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-i18next": "^17.0.12",
-    "tsx": "^4.23.12",
-    "ws": "^8.21.3",
-    "zustand": "^5.0.2",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.11.0",
     "@codemirror/lang-css": "^6.3.1",
@@ -66,9 +62,6 @@
     "@codemirror/state": "^6.7.4",
     "@codemirror/view": "^6.43.11",
     "@lezer/highlight": "^1.2.3",
-    "chokidar": "^3.6.0"
-  },
-  "devDependencies": {
     "@types/adm-zip": "^0.5.8",
     "@types/node": "^22.10.5",
     "@types/pdf-parse": "^1.1.5",
@@ -77,14 +70,21 @@
     "@vitejs/plugin-react": "^4.3.4",
     "app-builder-lib": "^26.15.3",
     "autoprefixer": "^10.4.20",
+    "echarts": "^6.1.0",
     "electron": "^33.2.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
+    "i18next": "^26.4.0",
     "pngjs": "^7.0.0",
     "postcss": "^8.4.49",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^17.0.12",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.23.12",
     "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "vite": "^5.4.11",
+    "zustand": "^5.0.2"
   },
   "overrides": {
     "app-builder-lib": {

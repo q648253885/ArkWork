@@ -5,7 +5,7 @@
  * Task 8：功能日志错误第二行展示 — 两行布局，错误独立成行、
  * text-danger 高亮、超长默认折叠、一键复制完整错误。
  * ============================================================ */
-import { useMemo, useState } from 'react'
+import { useMemo, useState , memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Icon } from '../../icons'
 import { useStore } from '../../store'
@@ -69,8 +69,10 @@ async function copyToClipboard(text: string): Promise<boolean> {
 
 type LogLike = { ts: number; level: string; source: string; message: string }
 
-/** Task 8：单条日志行 — 两行布局，错误独立成行、可折叠、可复制完整内容 */
-function LogEntryRow({
+/** Task 8：单条日志行 — 两行布局，错误独立成行、可折叠、可复制完整内容
+ * v0.46.0（PERF-2 W5）：memo —— 运行期每条日志都会 append 新数组，
+ * memo 后未变更行不再参与 500 行 diff 重渲染（entry 引用 append 时不变）。 */
+const LogEntryRow = memo(function LogEntryRow({
   entry,
   index,
   onCopyLine,
@@ -195,7 +197,7 @@ function LogEntryRow({
       )}
     </div>
   )
-}
+})
 
 export function LogsView() {
   const { t } = useTranslation()

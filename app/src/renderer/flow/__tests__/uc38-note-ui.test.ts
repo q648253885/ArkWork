@@ -333,7 +333,10 @@ test('TC-UI-WIRE-001 ★ TurnList 真的把 store.flowEvents 喂进投影（含 
     readFileSync(new URL('../../components/flow/TurnList.tsx', import.meta.url), 'utf-8'),
   )
   assert.match(src, /s\.flowEvents\[s\.selectedTaskId\]/, '必须从 store 取当前任务的投影事件')
-  assert.match(src, /events:\s*flowEvents \?\? \[\]/, '必须传给 projectConversation')
+  // v0.46.0（PERF-2 W2）改写（纪律㉔）：`?? []` 每次渲染新引用会让投影 turn 级
+  // 结构共享的 deps 恒失配 → 空态改用模块级稳定常量 EMPTY_EVENTS（喂入语义不变）。
+  assert.match(src, /events:\s*flowEvents,/, '必须传给 projectConversation')
+  assert.match(src, /EMPTY_EVENTS/, '空态必须用稳定常量（不得每次渲染新 []）')
   assert.match(src, /flowEvents\]/, '依赖数组必须含 flowEvents —— 漏了就不会重渲染（改了等于没改）')
 })
 

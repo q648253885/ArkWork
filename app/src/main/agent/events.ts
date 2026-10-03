@@ -15,6 +15,19 @@ import type { PlanItemStatusChanged, PlanItemListSnapshotPayload, TaskTextDeltaP
 
 const stepCollections = new Map<string, JsonlCollection<ReActStep>>()
 
+/**
+ * v0.46.0（PERF-2 W13）：任务删除时驱逐 per-task 运行期缓存。
+ * 长生命周期主进程里这些 Map 只增不减（含 planListVersion / progressByRequest），
+ * 统一在 deleteTask 调用；不广播（任务已删，无渲染意义）。
+ */
+export function evictTaskEventCaches(taskId: string): void {
+  stepCollections.delete(taskId)
+  planListVersionByTask.delete(taskId)
+  for (const [k, v] of progressByRequest) {
+    if (v.taskId === taskId) progressByRequest.delete(k)
+  }
+}
+
 function steps(taskId: string): JsonlCollection<ReActStep> {
   let col = stepCollections.get(taskId)
   if (!col) {

@@ -4,7 +4,7 @@
  * ============================================================ */
 import { ipcMain } from 'electron'
 import { join } from 'node:path'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { getArkworkDir } from '../store/db.js'
 // v0.29.0 F6：语言字段变更时同步主进程 i18n 缓存
@@ -20,7 +20,25 @@ import type { AppSettings, SecretKeys } from '@shared/types/ipc'
 const SETTINGS_FILE = () => join(getArkworkDir(), 'settings.json')
 const SECRETS_FILE = () => join(getArkworkDir(), 'secrets.json')
 
-async function readSettings(): Promise<AppSettings> {
+/* ============================================================
+ * v0.46.0（PERF-2 W9）：settings.json 读缓存（mtime 指纹）
+ *
+ * maybeAutoCompress 每轮迭代都经 getMemoryConfig 读一次 settings.json，
+ * 此前每次都全量读盘 + parse。以 stat 的 mtimeMs+size 为指纹：命中返回
+ * 缓存的浅拷贝；写后刷新；外部改写自动穿透。
+ * ============================================================ */
+let settingsCache: { mtimeMs: number; size: number; settings: AppSettings } | null = null
+
+async function settingsFingerprint(): Promise<{ mtimeMs: number; size: number } | null> {
+  try {
+    const st = await stat(SETTINGS_FILE())
+    return { mtimeMs: st.mtimeMs, size: st.size }
+  } catch {
+    return null
+  }
+}
+
+async function readSettingsDirect(): Promise<AppSettings> {
   const path = SETTINGS_FILE()
   const fallback: AppSettings = {
     workspaceDir: '',
@@ -43,6 +61,20 @@ async function readSettings(): Promise<AppSettings> {
   } catch {
     return fallback
   }
+}
+
+async function readSettings(): Promise<AppSettings> {
+  const fp = await settingsFingerprint()
+  if (!fp) {
+    settingsCache = null
+    return readSettingsDirect()
+  }
+  if (settingsCache && settingsCache.mtimeMs === fp.mtimeMs && settingsCache.size === fp.size) {
+    return { ...settingsCache.settings }
+  }
+  const settings = await readSettingsDirect()
+  settingsCache = { ...fp, settings }
+  return { ...settings }
 }
 
 /**
@@ -76,6 +108,13 @@ export async function getSettings(): Promise<AppSettings> {
 async function writeSettings(settings: AppSettings): Promise<void> {
   await mkdir(getArkworkDir(), { recursive: true })
   await writeFile(SETTINGS_FILE(), JSON.stringify(settings, null, 2), 'utf-8')
+  // v0.46.0 W9：写后刷新缓存指纹（外部直读 stat 对齐）
+  try {
+    const st = await stat(SETTINGS_FILE())
+    settingsCache = { mtimeMs: st.mtimeMs, size: st.size, settings }
+  } catch {
+    settingsCache = null
+  }
 }
 
 /**
@@ -111,6 +150,17 @@ export function registerSettingsHandlers(): void {
     await writeSettings(next)
     // v0.29.0 F6：语言字段变更时同步主进程 i18n 缓存（非法值由 setCachedUiLocale 内部忽略）
     if (patch.language !== undefined) setCachedUiLocale(patch.language)
+    // v0.46.0（PERF-2 W15）：性能模式热生效 —— 改三态后无需重启。
+    // CSS class 与流式攒批开关即时切换；GPU 合成 / V8 堆上限两项天然只能在
+    // 下次启动生效（在 reapplyPerformanceMode 内记录日志，设置文案注明）。
+    if (patch.perfMode !== undefined && patch.perfMode !== current.perfMode) {
+      try {
+        const { reapplyPerformanceMode } = await import('../window.js')
+        reapplyPerformanceMode()
+      } catch (err) {
+        logger.warn('System', `perfMode 热生效失败（不阻断设置写入）：${String(err)}`)
+      }
+    }
   })
 
   ipcMain.handle('settings:get-secret', async (_e, key: keyof SecretKeys) => {

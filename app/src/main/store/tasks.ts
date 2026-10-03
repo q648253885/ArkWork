@@ -14,7 +14,7 @@ import { getTasksJsonPath, getWorkspaceDir, JsonCollection, removeTaskDir } from
 import type { Task, TaskStatus } from '@shared/types/task'
 import { generateTaskId } from '@shared/types/task'
 import { broadcast } from '../window.js'
-import { broadcastTaskStatus } from '../agent/events.js'
+import { broadcastTaskStatus, evictTaskEventCaches } from '../agent/events.js'
 import { logger } from '../system/logger.js'
 import { getUiLocale, tFor } from '../i18n/messages.js'
 import { migrateTasks } from './tasks.migrate.js'
@@ -23,7 +23,8 @@ import { migrateTasks } from './tasks.migrate.js'
 import { resolveFinishHereAction } from '@shared/utils/finish-phrase'
 // turn_note 事件的会话落盘（与 engine/broadcast.emitEvent 同款双轨：推送 + session.jsonl）；
 // 不直接 import engine/broadcast —— 它是 engine-context 的重导出枢纽，store 引它会成环。
-import { appendSessionEvent } from '../agent/session-log.js'
+import { appendSessionEvent, evictSessionLogCaches } from '../agent/session-log.js'
+import { clearCheckpoints } from '../checkpoint/store.js'
 // v0.30.1 问题②·修复点 C：任务终态/删除时清理待决补丁与计划闸门。
 // `agent/graph/pending.ts` 是**零运行时依赖**的纯内存表（仅 import type），
 // 静态引入不会形成 tasks ↔ graph 的 ESM 求值期循环（风险 R4 已核）。
@@ -378,6 +379,11 @@ export async function deleteTask(id: string): Promise<void> {
   // 防止长生命周期进程里内存表残留。
   if (existing?.graphId) dropGraphPending(existing.graphId)
   dropTaskPlanApproval(id)
+  // v0.46.0（PERF-2 W13）：驱逐引擎侧 per-task 运行期缓存
+  // （steps 集合 / session 集合与 seq 游标 / planListVersion / progress / checkpoint fileCache）
+  evictTaskEventCaches(id)
+  evictSessionLogCaches(id)
+  void clearCheckpoints(id).catch(() => {})
   broadcast('task:list-changed', null)
   logger.info('System', `task deleted: ${id}`)
 }

@@ -84,6 +84,8 @@ export function createTab(opts?: { url?: string }): BrowserTab {
       sandbox: true,
       nodeIntegration: false,
       contextIsolation: true,
+      // v0.46.0（PERF-2 W16）：浏览器 Tab 不加载 hunspell 字典（低配 VM 内存面）
+      spellcheck: false,
     },
   })
   view.setVisible(false)
@@ -399,6 +401,8 @@ function createFloatingWindow(bounds?: { x: number; y: number; width: number; he
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
+      // v0.46.0（PERF-2 W16）：与主窗口对齐 —— hunspell 拼写字典不再进内存（低配 VM 内存面）
+      spellcheck: false,
       preload: preloadPath,
     },
   })

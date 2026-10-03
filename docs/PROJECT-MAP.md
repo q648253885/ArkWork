@@ -41,7 +41,7 @@
 | 模块 | 职责 | 备注 |
 |---|---|---|
 | `main/agent/` | **ReAct 引擎**（reason / act / turn-end / loop / gates / dispatch / messages / prompt） | 核心；子目录见下 |
-| ├ `agent/engine/` | 引擎阶段实现（`loop.ts` / `act.ts` / `reason-phase.ts` / `turn-end.ts` / `gates.ts` / `abort.ts` / `run-setup.ts` / `messages.ts`）。**v0.38.0 新增**：`work-class.ts`（本 run 工作性质分类 —— **三份集合 + 三个守卫**：`PLAN_WRITE_TOOLS`「真正落账本」/ `RETIRED_PLAN_TOOLS`「已下架旧名」/ `PLAN_TOOLS`「清单族」；**不可合并**，见 D157）、`gate-channel.ts`（门禁双出口 `refuseViaGate` / `emitTurnNote` / `injectInputJudgement`）、`ledger-guard.ts`（`guardFinish` 纯判定）、`turn-note-policy.ts`（阶段结论节流）、`plan-tree-sync.ts`（陈旧提醒，改调 `isPlanWriteTool` 守卫）。**v0.39.0**：`loop.ts` 无工具分支重排为「伪调用 → 纯答复停滞 → 文本解析」（D179/D182）。**v0.41.0**：`prose-tool-call.ts`（Ollama qwen3.5 正文工具降级通道 —— 提取器/谓词/契约提示，D208）、失败摘要与阈值重排（W2）、`sealLedger` 覆盖五条终态路径（D184）；`stall.ts` / `pseudo-call.ts` 为对应守卫常量 | 引擎已从单文件拆分为目录 |
+| ├ `agent/engine/` | 引擎阶段实现（`loop.ts` / `act.ts` / `reason-phase.ts` / `turn-end.ts` / `gates.ts` / `abort.ts` / `run-setup.ts` / `messages.ts`；**v0.46.0 增 `event-payload.ts`** —— act_end 广播剥 result 纯函数，session.jsonl 落盘不变）。**v0.38.0 新增**：`work-class.ts`（本 run 工作性质分类 —— **三份集合 + 三个守卫**：`PLAN_WRITE_TOOLS`「真正落账本」/ `RETIRED_PLAN_TOOLS`「已下架旧名」/ `PLAN_TOOLS`「清单族」；**不可合并**，见 D157）、`gate-channel.ts`（门禁双出口 `refuseViaGate` / `emitTurnNote` / `injectInputJudgement`）、`ledger-guard.ts`（`guardFinish` 纯判定）、`turn-note-policy.ts`（阶段结论节流）、`plan-tree-sync.ts`（陈旧提醒，改调 `isPlanWriteTool` 守卫）。**v0.39.0**：`loop.ts` 无工具分支重排为「伪调用 → 纯答复停滞 → 文本解析」（D179/D182）。**v0.41.0**：`prose-tool-call.ts`（Ollama qwen3.5 正文工具降级通道 —— 提取器/谓词/契约提示，D208）、失败摘要与阈值重排（W2）、`sealLedger` 覆盖五条终态路径（D184）；`stall.ts` / `pseudo-call.ts` 为对应守卫常量 | 引擎已从单文件拆分为目录 |
 | ├ `agent/planning/` | **规划通道（v0.39.0 新增）**—— 一条**不带工具、短上下文、独立于 ReAct 轮次**的 LLM 调用，专做「现在该做什么、按什么顺序做」。`types.ts`（`PlannerTrigger` 由 `PLANNER_TRIGGERS` 推导 + 预算/上限常量）/ `policy.ts`（纯函数：预算 / 冷却 / 幂等 / `shouldCommitRegexDraft`）/ `prompt.ts`（契约与模板，**避开 ReAct 模板**）/ `parse.ts`（★核心：5 层降级 JSON→fence→repair→checklist→outline + S1–S5 安全不变量）/ `digest.ts`（失败摘要 + 下一步建议）/ `runner.ts`（`runPlannerPass`，`completeFn` 为测试接缝） | `docs/versions/v0.39.0/04-system-design.md` §3 |
 | ├ `agent/planning/ops/` | **清单操作通道 PlanOps（v0.40.0 新增）**—— 规划通道只管「生成」，本模块把清单的 `create` / `update` / `complete` / `cancel` / `replan` **各自做成一次独立的窄 LLM 请求**（无工具 / 低温 / 有界超时 / 2 次尝试），输出复用 `../parse.ts` 五层降级解析，**不依赖 function calling**。`types.ts`（`PLAN_OPS_KINDS` 由数组推导类型 + 预算常量）/ `policy.ts`（`pickPlanOpsKind` 选操作 + `shouldRunPlanOps` 节流三件套，**预算优先于一切豁免**）/ `prompt.ts`（五套窄 prompt **共享同一份输出契约** I-O7）/ `runner.ts`（`runPlanOps`，`completeFn` 测试接缝）。主循环接线在 `agent/engine/plan-ops-tick.ts`（v0.40.0 新增：轮首 tick + 空回合兜底） | `docs/versions/v0.40.0/04-system-design.md` §三–§七 |
 | ├ `agent/graph/` | **TaskGraph**（16 文件，富语义任务图）+ `plan-sync.ts` 图↔清单桥 | v0.37.0 起图是**派生镜像层** |
@@ -56,11 +56,12 @@
 | `main/memory/` | **L1–L4 记忆**（L1 工作记忆 / L2 会话 / L3 巩固 / L4 合成）+ skill-forge | |
 | `main/llm/` | 模型调用、流式、协议归一化、缓存 | |
 | `main/fs/` | 文件系统：`workspace.ts` / `guard.ts` / `text.ts` / `write.ts`（自写登记）/ `agent-writes.ts`（agent 写盘登记）/ `watch.ts`（chokidar 监听 + 批次聚合） | |
+| `main/store/db.ts` | 持久层原子写 + **v0.46.0 mtime 读缓存**（`JsonCollection`/`JsonlCollection` 的 list 走 stat 指纹，浅拷贝防污染；外部改写自动穿透；缺失分支返回 seed 副本 —— D221） | |
 | `main/ipc/` | 主↔渲染 IPC 入口（`index.ts` 启动链、`task.ts`、`graph.ts`、`plan-items.ts`、`panel.ts`…） | |
 | `main/git/` | git 服务与引擎（三级解析链） | |
 | `main/pause/` | 暂停/恢复（`manager.ts`）与检查点 | |
 | `main/router/` | 请求分类路由 | |
-| `main/system/` | 日志、性能模式（`perf-lite`）等系统能力 | |
+| `main/system/` | 日志、性能模式（`perf-lite` + **v0.46.0 低配档**：`perf-mode.ts` 含 ready 前决策纯函数 `decidePreReadyLowSpec` / `perf-cache.json` 粘滞缓存 / `LOW_SPEC_MAX_OLD_SPACE_MB`）等系统能力 | |
 | `main/kb/` · `main/mcp/` · `main/net/` · `main/browser/` · `main/automation/` · `main/audit/` · `main/checkpoint/` · `main/dev/` · `main/fault-tolerance/` · `main/i18n/` | 知识库 / MCP / 网络 / 内嵌浏览器 / 自动化 / 审计 / 检查点 / 开发辅助 / 容错重试 / 主进程 i18n | |
 
 ## 四、`app/src/renderer/` 关键目录

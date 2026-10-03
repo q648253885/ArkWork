@@ -11,7 +11,8 @@ import { reconcileOrphanRunning } from './agent/runner.js'
 import { getUiLocale, tFor } from './i18n/messages.js'
 import { logger } from './system/logger.js'
 // v0.36.4（PERF-1）：进程级性能降级开关（流式攒批等消费）
-import { setPerfLiteActive } from './system/perf-mode.js'
+// v0.46.0（PERF-2 W14/W15）：低配档粘滞缓存 + ready 前决策 + perfMode 热生效
+import { setPerfLiteActive, readPerfCache, writePerfCache } from './system/perf-mode.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -46,6 +47,14 @@ async function applyPerformanceMode(win: BrowserWindow): Promise<void> {
     const perfLite =
       perfMode === 'on' || (perfMode !== 'off' && (softwareRendering || envLite))
     setPerfLiteActive(perfLite)
+    // v0.46.0（PERF-2 W14）：判定结果粘滞化 —— 写 perf-cache.json，供下一次启动
+    // 在 ready 前决策 disableHardwareAcceleration / js-flags 堆上限（见 index.ts）。
+    try {
+      const { getArkworkDir } = await import('./store/db.js')
+      writePerfCache(getArkworkDir(), { gpuSoftwareLastRun: softwareRendering })
+    } catch {
+      /* 缓存写失败只影响下一轮判定来源，不构成功能问题 */
+    }
     logger.info(
       'System',
       `gpu status ${JSON.stringify({
@@ -59,14 +68,37 @@ async function applyPerformanceMode(win: BrowserWindow): Promise<void> {
         source: perfMode !== 'auto' ? 'settings' : envLite ? 'env' : softwareRendering ? 'auto' : 'none',
       })}`,
     )
-    if (perfLite) {
-      await win.webContents.executeJavaScript(
-        "document.documentElement.classList.add('perf-lite')",
-      )
-    }
+    // v0.46.0（W15）：幂等注入/移除 —— once→on 后每次加载都跑；非 perfLite 时
+    // 必须移除 class（热切换 off / 换机器后残留 class 会让降级判定失真）。
+    await win.webContents.executeJavaScript(
+      `document.documentElement.classList.${perfLite ? 'add' : 'remove'}('perf-lite')`,
+    )
   } catch (err) {
     // 性能降级是「尽力而为」，任何异常都不得影响启动
     logger.warn('System', `performance mode detection failed: ${String(err)}`)
+  }
+}
+
+/**
+ * v0.46.0（PERF-2 W15）：perfMode 三态热生效 —— settings:set 检测到 perfMode
+ * 变更时调用。CSS class 与流式攒批开关即时切换；GPU 合成 / V8 堆上限两项
+ * 只能在下次启动生效（Chromium 开关的注册窗口在 ready 前），这里留日志说明。
+ * 任何异常只 warn，绝不影响设置写入主流程。
+ */
+export function reapplyPerformanceMode(): void {
+  try {
+    const win = mainWindow
+    if (!win || win.isDestroyed()) {
+      logger.warn('System', 'perfMode 热生效时主窗口不存在，仅记录（下次启动按新设置判定）')
+      return
+    }
+    void applyPerformanceMode(win)
+    logger.info(
+      'System',
+      'perfMode 已热生效（CSS/流式攒批）；GPU 合成与 V8 堆上限在下次启动按新设置生效',
+    )
+  } catch (err) {
+    logger.warn('System', `perfMode 热生效失败（不阻断）：${String(err)}`)
   }
 }
 
@@ -223,11 +255,14 @@ export function createMainWindow(): BrowserWindow {
   }
 
   // v0.31.1：DOM 就绪后判定 GPU 后端并（必要时）注入性能降级模式。
-  // 放在 did-finish-load 而非 ready-to-show：前者保证 documentElement 已存在，
-  // 注入 class 不会被后续导航/重载丢弃。
-  mainWindow.webContents.once('did-finish-load', () => {
+  // 放在 did-finish-load 而非 ready-to-show：前者保证 documentElement 已存在。
+  // v0.46.0（PERF-2 W15）：once → on + 幂等注入/移除 —— 用户手动 reload 或
+  // 热切换设置后 class 不再丢失/残留。
+  mainWindow.webContents.on('did-finish-load', () => {
     const win = mainWindow
-    if (win) void applyPerformanceMode(win)
+    if (win && !win.isDestroyed() && win.webContents.isLoading() === false) {
+      void applyPerformanceMode(win)
+    }
   })
 
   mainWindow.on('closed', () => {

@@ -13,6 +13,38 @@ import { logger } from '../system/logger.js'
 
 const collections = new Map<string, JsonlCollection<MemoryItem>>()
 
+/* ============================================================
+ * v0.46.0（PERF-2 W12）：append 路径的 memory:changed 广播节流
+ *
+ * 背景：引擎每轮迭代经 appendL1 写 reason / observation / user 等多条 L1，
+ * 每条都无条件广播 memory:changed —— 若记忆面板开着，渲染层每条都触发
+ * memory:list 全量重拉（与高频 list 读相乘）。这里做 leading 节流：
+ * 首条立即广播（面板响应不掉），窗口期内的后续 append 合并省略。
+ * 用户操作路径（toggle/edit/archive/remove/clear）保持即时广播不变。
+ * ============================================================ */
+export const MEMORY_CHANGED_THROTTLE_MS = 300
+
+const memoryBroadcastPending = new Map<string, ReturnType<typeof setTimeout>>()
+
+function broadcastMemoryChangedThrottled(taskId: string): void {
+  if (memoryBroadcastPending.has(taskId)) return
+  broadcast('memory:changed', taskId)
+  memoryBroadcastPending.set(
+    taskId,
+    setTimeout(() => memoryBroadcastPending.delete(taskId), MEMORY_CHANGED_THROTTLE_MS),
+  )
+}
+
+function broadcastMemoryChangedNow(taskId: string): void {
+  // 即时广播前清掉挂起的节流窗口，避免重复
+  const pending = memoryBroadcastPending.get(taskId)
+  if (pending) {
+    clearTimeout(pending)
+    memoryBroadcastPending.delete(taskId)
+  }
+  broadcast('memory:changed', taskId)
+}
+
 function collection(taskId: string): JsonlCollection<MemoryItem> {
   let col = collections.get(taskId)
   if (!col) {
@@ -66,7 +98,8 @@ export async function appendL1(input: AppendMemoryInput): Promise<MemoryItem> {
   const col = collection(input.taskId)
   await col.append(item)
   logger.debug('Memory', `L1 +1 ${item.kind} (${item.tokens} tokens)`, input.taskId)
-  broadcast('memory:changed', input.taskId)
+  // v0.46.0（PERF-2 W12）：append 高频路径走 leading 节流（首条立即、窗口内合并）
+  broadcastMemoryChangedThrottled(input.taskId)
   return item
 }
 
@@ -86,7 +119,7 @@ export async function toggleL1(taskId: string, id: string, enabled: boolean): Pr
     next[idx] = { ...next[idx], enabled }
     return next
   })
-  broadcast('memory:changed', taskId)
+  broadcastMemoryChangedNow(taskId)
 }
 
 export async function editL1(taskId: string, id: string, content: string): Promise<void> {
@@ -98,7 +131,7 @@ export async function editL1(taskId: string, id: string, content: string): Promi
     next[idx] = { ...next[idx], content, tokens: estimateTokens(content) }
     return next
   })
-  broadcast('memory:changed', taskId)
+  broadcastMemoryChangedNow(taskId)
 }
 
 export async function archiveL1(taskId: string, id: string): Promise<void> {
@@ -110,7 +143,7 @@ export async function archiveL1(taskId: string, id: string): Promise<void> {
     next[idx] = { ...next[idx], enabled: false, archivedAt: Date.now() }
     return next
   })
-  broadcast('memory:changed', taskId)
+  broadcastMemoryChangedNow(taskId)
 }
 
 export async function archiveMany(taskId: string, ids: string[]): Promise<void> {
@@ -126,7 +159,7 @@ export async function archiveMany(taskId: string, ids: string[]): Promise<void> 
         : m,
     ),
   )
-  broadcast('memory:changed', taskId)
+  broadcastMemoryChangedNow(taskId)
 }
 
 /**
@@ -151,7 +184,7 @@ export async function markL1Distilled(
     next[idx] = { ...next[idx], distilled: { target, targetId } }
     return next
   })
-  broadcast('memory:changed', taskId)
+  broadcastMemoryChangedNow(taskId)
 }
 
 /**
@@ -174,7 +207,7 @@ export async function archiveL1AfterIteration(
       return { ...m, enabled: false, archivedAt: Date.now() }
     }),
   )
-  broadcast('memory:changed', taskId)
+  broadcastMemoryChangedNow(taskId)
 }
 
 /** 用于上下文组装：按规则筛出 enabled 且未归档的 L1 条目 */
@@ -188,14 +221,14 @@ export async function removeL1Items(taskId: string, ids: string[]): Promise<void
   const col = collection(taskId)
   const idSet = new Set(ids)
   await col.mutate((items) => items.filter((m) => !idSet.has(m.id)))
-  broadcast('memory:changed', taskId)
+  broadcastMemoryChangedNow(taskId)
 }
 
 export async function clearL1(taskId: string): Promise<void> {
   const col = collection(taskId)
   await col.mutate(() => [])
   collections.delete(taskId)
-  broadcast('memory:changed', taskId)
+  broadcastMemoryChangedNow(taskId)
 }
 
 export function totalTokens(items: MemoryItem[]): number {

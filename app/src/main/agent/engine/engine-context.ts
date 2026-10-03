@@ -8,7 +8,7 @@
  * 纯再导出（barrel）——不新增任何逻辑，模块图拓扑不变（barrel 不反向依赖
  * engine 内部文件，无环）。
  * ============================================================ */
-export { checkpointId, saveCheckpoint } from '../../checkpoint/store.js'
+export { checkpointId, saveCheckpoint, shouldSaveIterationCheckpoint } from '../../checkpoint/store.js'
 export { compressMemory } from '../../ipc/memory.js'
 export { getMemoryConfig, getSettings } from '../../ipc/settings.js'
 export { initKbIndex, searchKb } from '../../kb/index.js'

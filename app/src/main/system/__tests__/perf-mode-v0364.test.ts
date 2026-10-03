@@ -95,7 +95,9 @@ test('TC-PERF2-004 window.ts：设置三态读入 + off 逃生门 + VM 漏判修
     'VM 漏判修补：gpu_compositing 的 overridden 与 gl 的 disabled 都计入软件渲染',
   )
   assert.match(WINDOW_TS, /setPerfLiteActive\(perfLite\)/, '判定结果必须写入进程级开关（供流式攒批消费）')
-  assert.match(WINDOW_TS, /classList\.add\('perf-lite'\)/, '渲染端 CSS 降级类保留（v0.31.1 语义）')
+  // v0.46.0（PERF-2 W15）改写（纪律㉔）：单边 add → 幂等 add/remove（热生效 +
+  // reload 重注入不残留）；粘滞缓存与 reapply 由 perf2-lowspec 套件钉（两条腿）。
+  assert.match(WINDOW_TS, /classList\.\$\{perfLite \? 'add' : 'remove'\}\('perf-lite'\)/, '渲染端 CSS 降级类保留且幂等增删（v0.46.0 语义）')
 })
 
 test('TC-PERF2-005 设置页：性能模式三态 radio + i18n key + 写回 ark.settings', () => {

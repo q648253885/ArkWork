@@ -16,12 +16,33 @@ import { stripSayMarkers } from '../utils/say-strip'
 // 模型原始拼写（`task-complete`），正名精确匹配会漏判最终答复（实机缺陷）
 import { sameToolName } from '@shared/utils/tool-name'
 
+/* v0.46.0（PERF-2 W3）：引用级短路缓存 —— steps/memory/task 引用全等时返回
+ * 同一结果数组。作用：流式期间（token 只进 streamBuffers，steps 不变）让
+ * `s.conversation` 的 items 引用保持稳定，下游 projectConversation 的 turn 级
+ * 引用缓存（W2）才能命中。校验逐元素 `===`（O(n) 引用比较），中间 step 被
+ * store 替换时必然失配重算，无静默旧值。上限 64 任务整表清空。 */
+const deriveCache = new Map<
+  string,
+  { task: Task; memory: MemoryItem[]; steps: ReActStep[]; result: ConversationItem[] }
+>()
+
 export function deriveConversation(
   task: Task | null,
   steps: ReActStep[],
   memory: MemoryItem[] = [],
 ): ConversationItem[] {
   if (!task) return []
+  if (deriveCache.size > 64) deriveCache.clear()
+  const cached = deriveCache.get(task.id)
+  if (
+    cached &&
+    cached.task === task &&
+    cached.memory === memory &&
+    cached.steps.length === steps.length &&
+    cached.steps.every((s, i) => s === steps[i])
+  ) {
+    return cached.result
+  }
 
   // v0.4.0-rev6：按时间戳合并 user_message 和 react 步骤组，避免多轮对话顺序错乱。
   // rev5 把所有 user_message 堆在开头、react 堆在后面，导致 [u1,u2,r1,r2] 而非 [u1,r1,u2,r2]。
@@ -123,6 +144,7 @@ export function deriveConversation(
 
   // 4. 空任务（无用户消息 + 无 react + 无计划卡）返回空，由 ConversationGreeting 接管
   if (userEvents.length === 0 && reactEvents.length === 0 && planEvents.length === 0) {
+    deriveCache.set(task.id, { task, memory, steps, result: [] })
     return []
   }
 
@@ -142,6 +164,7 @@ export function deriveConversation(
       result.push(ev.item)
     }
   }
+  deriveCache.set(task.id, { task, memory, steps, result })
   return result
 }
 

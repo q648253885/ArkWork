@@ -23,6 +23,13 @@ import { registerPluginSchemePrivileges } from './plugins/protocol.js'
 import { bootstrapPluginRuntime, shutdownPluginRuntime } from './plugins/bootstrap.js'
 import { setHostVersion } from './plugins/registry.js'
 import { logger } from './system/logger.js'
+// v0.46.0（PERF-2 W14）：低配档 ready 前决策（纯模块，无 electron 依赖）
+import {
+  readPerfCache,
+  readPerfModeFileSync,
+  decidePreReadyLowSpec,
+  LOW_SPEC_MAX_OLD_SPACE_MB,
+} from './system/perf-mode.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -79,6 +86,36 @@ if (!app.isPackaged) {
   } catch {
     // ignore
   }
+}
+
+// v0.46.0（PERF-2 W14）：低配档 ready 前决策 —— `app.disableHardwareAcceleration()`
+// 与 js-flags 堆上限**只能在 app ready 之前**生效，而 GPU 判定在 ready 后才可用，
+// 因此用上一轮启动的判定结果（perf-cache.json 粘滞）在本轮决策：
+//   perfMode=on ／ ARK_PERF_LITE=1 ／ auto 且上轮判中软件渲染 → 关硬件加速 +
+//   全进程 V8 old-space 上限（低配 VM 上防单 renderer 堆无界膨胀）。
+// 首轮无缓存：本轮仅 perf-lite（既有行为），判定后写缓存 → 次轮拿全量收益。
+// ARK_FORCE_GPU=1 时跳过（用户显式要 GPU）。任何异常静默跳过，不影响启动。
+try {
+  if (process.env.ARK_FORCE_GPU !== '1') {
+    const arkworkDir = join(app.getPath('userData'), 'arkwork-data')
+    const perfMode = readPerfModeFileSync(join(arkworkDir, 'settings.json'))
+    const cache = readPerfCache(arkworkDir)
+    const verdict = decidePreReadyLowSpec(
+      perfMode,
+      cache.gpuSoftwareLastRun,
+      process.env.ARK_PERF_LITE === '1',
+    )
+    if (verdict.lowSpec) {
+      app.disableHardwareAcceleration()
+      app.commandLine.appendSwitch('js-flags', `--max-old-space-size=${LOW_SPEC_MAX_OLD_SPACE_MB}`)
+      logger.info(
+        'System',
+        `low-spec pre-ready mode ON (source=${verdict.source}): hardware acceleration disabled, V8 old-space <= ${LOW_SPEC_MAX_OLD_SPACE_MB}MB`,
+      )
+    }
+  }
+} catch (err) {
+  logger.warn('System', `pre-ready low-spec decision failed (ignored): ${String(err)}`)
 }
 
 // 单实例锁（开发环境非致命：拿不到锁也继续，避免 TCC 误杀）

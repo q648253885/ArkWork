@@ -4,10 +4,15 @@
  * B4：各分支替换为 blocks/*.tsx 独立组件（9 个）；
  * 工具卡内部的 card 分发在 tools/ 注册表（唯一 card switch）。
  * ============================================================ */
+import { memo } from 'react'
 import type { FlowBlock } from '@shared/types/flow'
 import { UserBlock, SayBlock, ReasoningBlock, AnswerBlock, ToolBlock, PlanBlock, ApprovalBlock, NoticeBlock, ErrorBlock, SubagentGroupCard, NoteBlock, TaskArtifactCard } from './blocks'
 
-export function BlockRenderer({ block }: { block: FlowBlock }) {
+/**
+ * v0.46.0（PERF-2 W2）：memo —— 投影层结构共享（project.ts turnCache）保证
+ * 未变更块的 block 引用稳定，流式 flush 时已落定块不再重渲染。
+ */
+export const BlockRenderer = memo(function BlockRenderer({ block }: { block: FlowBlock }) {
   switch (block.kind) {
     case 'user':
       return <UserBlock block={block} />
@@ -39,4 +44,4 @@ export function BlockRenderer({ block }: { block: FlowBlock }) {
     case 'artifact':
       return <TaskArtifactCard block={block} />
   }
-}
+})

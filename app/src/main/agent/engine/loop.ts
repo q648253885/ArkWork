@@ -78,6 +78,7 @@ import {
   getWorkspaceDir,
   saveCheckpoint,
   checkpointId,
+  shouldSaveIterationCheckpoint,
   applyPending,
   getCuratedSnapshot,
   archiveTaskL1,
@@ -497,6 +498,9 @@ export async function runReActLoop(
   let consecutivePseudoNoTool = 0
   /** v0.39.0（D182）：本 run 已由「文本解析回退」代为落库的次数（上限 MAX_REGEX_COMMITS_PER_RUN） */
   let regexCommits = 0
+  // v0.46.0（PERF-2 W11）：本 run 上次迭代快照落盘时刻（0 = 尚未落过；节流判据见
+  // shouldSaveIterationCheckpoint —— 每 3 轮或 ≥30s 才写一次全量 checkpoint 文件）
+  let lastCheckpointSaveAt = 0
   /**
    * v0.39.0（F1）：本 run 的规划通道预算与冷却状态（纯数据结构，policy.ts 管判定）。
    * 每 run 归零 —— 预算是「这一次 run 最多烧几次额外调用」，不是跨 run 配额。
@@ -1436,6 +1440,9 @@ export async function runReActLoop(
         const r = actResults[i]
         broadcastStep(r.completedStep)
         broadcastToolProgress(toFinishedProgress(r.completedStep, groupId))
+        // v0.46.0（PERF-2 W10）：act_end 广播剥掉完整 result（渲染层只消费
+        // resultSummary，完整结果已由 task:step 携带）—— 大结果工具每次 act
+        // 少跨一次 MB 级 IPC 结构化克隆；session.jsonl 落盘保留全量（日志真源不变）。
         await emitEvent(task.id, {
           type: 'act_end',
           iteration,
@@ -1446,7 +1453,7 @@ export async function runReActLoop(
           errorMessage: r.errorMessage,
           // v0.19.x：透传软失败标记（门禁/预算拦截），前端日志按 WARN（橙）而非 ERROR（红）
           softFail: (r.completedStep as ReActStep).softFail === true,
-        })
+        }, { broadcastWithoutResult: true })
         // Task 9：每个 act 完成 → 同步回流到进度摘要（按工具名推断阶段）
         // 编码类工具：shell / file-reader / delegate-agent → 'code'
         // 调研类工具：web-search / fetch-url → 'research'
@@ -1939,16 +1946,22 @@ export async function runReActLoop(
       }
 
       // v0.6.0（F12）：异步写 checkpoint（fire-and-forget，不阻塞主循环）
-      saveCheckpoint({
-        id: checkpointId(task.id, iteration),
-        taskId: task.id,
-        iteration,
-        agentId: agent.id,
-        memorySnapshot: '',  // L1 已落盘，恢复时从 listEnabledL1 重建，无需冗余快照
-        taskStatus: 'running',
-        timestamp: Date.now(),
-        parentCheckpointId: task.parentTaskId ?? undefined,
-      })
+      // v0.46.0（PERF-2 W11）：迭代快照节流 —— checkpoint 是全文件重写（含历史
+      // 快照），每轮写一次在低配盘上是持续负担；恢复粒度放宽到 3 轮 / 30s 可接受
+      // （用户主动暂停走 pause 快照，粒度不变）。
+      if (shouldSaveIterationCheckpoint(iteration, lastCheckpointSaveAt, Date.now())) {
+        lastCheckpointSaveAt = Date.now()
+        saveCheckpoint({
+          id: checkpointId(task.id, iteration),
+          taskId: task.id,
+          iteration,
+          agentId: agent.id,
+          memorySnapshot: '',  // L1 已落盘，恢复时从 listEnabledL1 重建，无需冗余快照
+          taskStatus: 'running',
+          timestamp: Date.now(),
+          parentCheckpointId: task.parentTaskId ?? undefined,
+        })
+      }
 
       // v0.8.0 F801：token 阈值自动压缩（本轮完成后，不打断运行）
       await maybeAutoCompress(task.id, iteration)

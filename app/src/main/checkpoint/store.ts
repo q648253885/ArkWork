@@ -185,3 +185,32 @@ export async function clearCheckpoints(taskId: string): Promise<void> {
 export function checkpointId(taskId: string, iteration: number): string {
   return `${taskId}_step_${iteration}`
 }
+
+/* ============================================================
+ * v0.46.0（PERF-2 W11）：迭代快照节流
+ *
+ * 背景：引擎每轮迭代 fire-and-forget 写一次 checkpoint，而 writeCheckpoint 是
+ * **全文件重写**（含历史快照），pause 型 checkpoint 内嵌完整 toolHistory 后，
+ * 之后每一轮迭代都在连带重写这些大对象（低配盘上每轮一次全量 JSON 序列化+写）。
+ * 迭代快照只服务「崩溃后恢复」，丢最近 2 轮的恢复点可接受（用户主动暂停走
+ * pause 快照，粒度不变）；节流后每 3 轮或 ≥30s 才落一次盘。
+ *
+ * 纯函数 + 导出常量（纪律：阈值不许散落字面量），真值表用例直接引用。
+ */
+export const CHECKPOINT_EVERY_N_ITERATIONS = 3
+export const CHECKPOINT_MIN_INTERVAL_MS = 30_000
+
+/**
+ * 本轮是否落迭代快照。
+ * @param iteration   当前 ReAct 迭代序号（从 1 起）
+ * @param lastSavedAt 上次迭代快照落盘时刻（0 = 本 run 尚未落过，首轮必落）
+ */
+export function shouldSaveIterationCheckpoint(
+  iteration: number,
+  lastSavedAt: number,
+  now: number,
+): boolean {
+  if (lastSavedAt <= 0) return true
+  if (iteration % CHECKPOINT_EVERY_N_ITERATIONS === 0) return true
+  return now - lastSavedAt >= CHECKPOINT_MIN_INTERVAL_MS
+}

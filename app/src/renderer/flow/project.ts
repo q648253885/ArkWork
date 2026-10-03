@@ -41,6 +41,9 @@ import { sameToolName } from '@shared/utils/tool-name'
 import { presentCallOrDefault, presentResultOrDefault } from '../../main/agent/tools/present'
 import type { BlockUiState, FlowUiState } from '../store/types'
 
+/* v0.46.0（PERF-2 W2）：turn 级投影缓存（key = t.id 含 taskId；value = deps + 产出） */
+const turnCache = new Map<string, { deps: unknown[]; turn: FlowTurn }>()
+
 /* ============================================================
  * 输入 / 输出签名（§5.4.2）
  * ============================================================ */
@@ -75,7 +78,7 @@ export interface ProjectInput {
 
 /** 纯函数：无 window / document / Date.now 依赖 */
 export function projectConversation(input: ProjectInput): FlowTurn[] {
-  const { taskId, items, viewMode, ui, now, agent } = input
+  const { taskId, items, viewMode, showThinking, ui, now, agent } = input
   const stepCollapsedDefault = viewMode === 'compact'
 
   /* ---------- 中间态（可变，构建期专用；出口全部冻结为普通对象） ---------- */
@@ -101,6 +104,13 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
     status: TurnStatus
     errorMessage?: string
     lastSayId?: string
+    /**
+     * v0.46.0（PERF-2 W2）：产出本 turn 所用的输入引用（item / step / event）。
+     * 出口组装时据此做 turn 级结构共享：deps 全 `===` 则复用上一轮投影的
+     * FlowTurn 对象 —— 流式期间（只有 buffer 在变）已落定轮的引用保持稳定，
+     * 下游 React.memo 才能真正跳过重渲染。
+     */
+    sources: unknown[]
   }
 
   const turns: MutableTurn[] = []
@@ -130,6 +140,7 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
       minIter: Number.MAX_SAFE_INTEGER,
       maxIter: -1,
       status: 'done',
+      sources: [],
     }
     turns.push(t)
     return t
@@ -451,6 +462,7 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
   for (const item of items) {
     if (item.type === 'user') {
       cur = newTurn('user', item.ts ?? 0)
+      cur.sources.push(item)
       cur.outerBlocks.push({
         kind: 'user',
         id: `${cur.id}:user:0`,
@@ -462,6 +474,7 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
       })
     } else if (item.type === 'plan') {
       const t = ensureTurn('automation', item.ts ?? 0)
+      t.sources.push(item, input.planItems)
       const states = planStatesOf(item)
       t.outerBlocks.push({
         kind: 'plan',
@@ -481,6 +494,11 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
       const group = item.steps ?? []
       const ts = group.length > 0 ? Math.min(...group.map((s) => s.startedAt)) : (item.ts ?? 0)
       const t = ensureTurn('automation', ts)
+      // v0.46.0（PERF-2 W2）：deps 采集 step 引用而非 item 包装引用 ——
+      // deriveConversation 每次重建 item 对象，item ref 变化不代表内容变化；
+      // step 对象引用在未变更时跨 derive 稳定（store 按 id 替换，其余保留引用）。
+      if (group.length > 0) for (const g of group) t.sources.push(g)
+      else t.sources.push(item)
       t.steps.push(buildStep(group, t))
       // 记录该组首个 reason 步的 action 工具 —— 供后续 assistant 项推导 origin
       // （deriveConversation 的 isFinalAnswer 三分支：task_complete / ask_user / 无 action）
@@ -490,6 +508,7 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
         .find((s) => s.type === 'reason')?.action?.tool
     } else if (item.type === 'assistant') {
       const t = ensureTurn('automation', item.ts ?? 0)
+      t.sources.push(item)
       t.outerBlocks.push({
         kind: 'answer',
         id: item.id,
@@ -521,6 +540,8 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
     const entries = collectArtifacts(input.planItems, input.steps)
     if (entries.length > 0) {
       const { turn, ts } = lastTaskComplete
+      // v0.46.0（PERF-2 W2）：产物卡宿主轮的 deps 补上两路数据源引用
+      turn.sources.push(input.planItems, input.steps)
       turn.outerBlocks.push({
         kind: 'artifact',
         id: `${turn.id}:artifact`,
@@ -595,6 +616,7 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
   for (const ev of input.events) {
     if (ev.type === 'memory_compressed' || ev.type === 'context_compacted') {
       const t = turnForIteration('iteration' in ev ? ev.iteration : undefined)
+      t.sources.push(ev)
       t.outerBlocks.push({
         kind: 'notice',
         id: `${t.id}:notice:${ev.type}:${(ev as { seq?: number }).seq ?? ''}`,
@@ -607,6 +629,7 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
       })
     } else if (ev.type === 'task_failed') {
       const t = turnForIteration(ev.iteration)
+      t.sources.push(ev)
       t.status = 'failed'
       t.errorMessage = ev.error
       t.outerBlocks.push({
@@ -620,9 +643,11 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
       })
     } else if (ev.type === 'task_paused') {
       const t = turnForIteration(ev.iteration)
+      t.sources.push(ev)
       t.status = 'paused'
     } else if (ev.type === 'max_iterations_reached') {
       const t = turnForIteration(ev.iteration)
+      t.sources.push(ev)
       t.outerBlocks.push({
         kind: 'error',
         id: `${t.id}:error:maxiter:${ev.seq ?? t.outerBlocks.length}`,
@@ -637,6 +662,7 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
        * 「思考 8 次直接出最终结果」的直接对策：把模型/引擎中途得出的结论单独
        * 成块投到交互区，用户不必等收尾才知道进展。 */
       const t = turnForIteration(ev.iteration)
+      t.sources.push(ev)
       const text = ev.text?.trim()
       if (text) {
         insertBlockByTs(stepForIteration(t, ev.iteration).blocks, {
@@ -656,6 +682,7 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
        * 与给模型的 gate_hint（L1 system 通道）严格分离 —— 这里渲染的是
        * **面向用户的人话**，不含 [tree-sync-required] 等内部标记（TC-UI-006）。 */
       const t = turnForIteration(ev.iteration)
+      t.sources.push(ev)
       stepForIteration(t, ev.iteration).blocks.push({
         kind: 'notice',
         id: `${t.id}:s${ev.iteration}:gate-blocked:${ev.id}`,
@@ -772,7 +799,24 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
     return dflt
   }
 
-  return turns.map((t) => {
+  /* ---------- v0.46.0（PERF-2 W2）：turn 级引用缓存（结构共享） ----------
+   * 流式期间每个攒批 flush 都会重跑本函数；此缓存让「deps 全 ===」的已落定轮
+   * 复用上一轮投影的 FlowTurn 对象 —— 配合下游 React.memo（TurnView /
+   * BlockRenderer / Markdown），流式 flush 只重渲染真正在变的末轮。
+   * deps 语义：viewMode / showThinking / ui / planItems / steps 数组引用 +
+   * 本 turn 的 sources（item/step/event 引用）；末轮额外含流式缓冲文本、
+   * now 与 subagentGroups（三类输入只影响末轮的流式块/组卡/时间标签）。
+   * 缓存按 t.id（含 taskId，跨任务不串）；上限 400 条整表清空（防长会话缓涨）。 */
+  if (turnCache.size > 400) turnCache.clear()
+
+  return turns.map((t, turnIdx) => {
+    const isLastTurn = turnIdx === turns.length - 1
+    const deps: unknown[] = [viewMode, showThinking, ui, ...t.sources]
+    if (isLastTurn) deps.push(buf?.text, textBuf?.text, now, subChildren)
+    const cachedTurn = turnCache.get(t.id)
+    if (cachedTurn && cachedTurn.deps.length === deps.length && cachedTurn.deps.every((d, i) => d === deps[i])) {
+      return cachedTurn.turn
+    }
     const durationMs = t.steps.reduce((sum, s) => sum + s.durationMs, 0)
     const lastSayInTurn = t.lastSayId
     const applySayFlag = (blocks: FlowBlock[]) => {
@@ -790,7 +834,7 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
       blocks: s.blocks,
     }))
 
-    return {
+    const turn: FlowTurn = {
       id: t.id,
       header: {
         index: t.index,
@@ -827,6 +871,8 @@ export function projectConversation(input: ProjectInput): FlowTurn[] {
       },
       collapsed: ui?.turnUiState?.[t.id]?.collapsed ?? false,
     }
+    turnCache.set(t.id, { deps, turn })
+    return turn
   })
 }
 

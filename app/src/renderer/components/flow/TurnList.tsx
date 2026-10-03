@@ -15,6 +15,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../../store'
 import { projectConversation } from '../../flow/project'
+
+// v0.46.0（PERF-2 W2）：稳定空数组常量 —— `?? []` 每次渲染新引用会让投影缓存的
+// deps 恒失配（turn 级结构共享失效）。空态语义等价，引用必须稳定。
+const EMPTY_EVENTS: never[] = []
+const EMPTY_PLAN_ITEMS: never[] = []
+const EMPTY_SUBAGENT: never[] = []
 import type { FlowTurn } from '@shared/types/flow'
 import { TurnView } from './TurnView'
 import { SuggestionCards } from '../SuggestionCards'
@@ -45,12 +51,12 @@ export function TurnList() {
   // v0.36.0（F4.1）：并行子 agent 组（live-only，事件流落到 store 后进投影）
   const subagentGroups = useStore((s) =>
     s.selectedTaskId ? s.subagentGroups[s.selectedTaskId] : undefined,
-  )
+  ) ?? EMPTY_SUBAGENT
   // v0.38.0（A4/A5/A9）：阶段结论（note）/ 门禁通告（gate-blocked）—— 同为 live-only，
   // 但**不给投影层就永远不会显示**（块只能由 projectConversation 产出）。
   const flowEvents = useStore((s) =>
     s.selectedTaskId ? s.flowEvents[s.selectedTaskId] : undefined,
-  )
+  ) ?? EMPTY_EVENTS
 
   // B1 reasoning 通道缓冲（投影层在最后一轮追加 streaming ReasoningBlock）
   const streamBuffer = useStore((s) =>
@@ -70,12 +76,12 @@ export function TurnList() {
       taskId,
       items,
       steps,
-      events: flowEvents ?? [], // v0.38.0：阶段结论 / 门禁通告（此前恒为空数组，故两块从不显示）
+      events: flowEvents, // v0.38.0：阶段结论 / 门禁通告（空态用稳定常量，防 deps 恒失配）
       streamBuffers: {
         ...(streamBuffer ? { [`${taskId}:turn:reasoning`]: streamBuffer } : {}),
         ...(textStreamBuffer ? { [`${taskId}:turn:text`]: textStreamBuffer } : {}),
       },
-      planItems: task?.planItems ?? [],
+      planItems: task?.planItems ?? EMPTY_PLAN_ITEMS,
       viewMode: flow.viewMode,
       showThinking: flow.showThinking,
       ui: flow,
@@ -85,22 +91,16 @@ export function TurnList() {
     // now 刻意不入依赖：运行中轮的时长随 steps/buffer 更新自然刷新
   }, [taskId, items, steps, streamBuffer, textStreamBuffer, task?.planItems, flow, subagentGroups, flowEvents])
 
-  /* ---------- 内容签名：贴底跟随依赖（迁移 ConversationFlow :105-130） ---------- */
-  const contentSignature = useMemo(
-    () =>
-      items
-        .map((i) => {
-          const stepsSig = (i.steps ?? [])
-            .map(
-              (s) =>
-                `${s.id}:${s.status}:${s.resultSummary ?? ''}:${s.summary ?? ''}:${s.thought ?? ''}:${s.reasoning ?? ''}`,
-            )
-            .join('|')
-          return `${i.id}:${i.type}:${i.text ?? ''}:${stepsSig}`
-        })
-        .join(','),
-    [items],
-  )
+  /* ---------- 内容签名：贴底跟随依赖（迁移 ConversationFlow :105-130） ----------
+   * v0.46.0（PERF-2 W4）：此前每个 items 变更把全部正文拼成巨型字符串（O(全部文本)
+   * 的构建 + GC）。贴底跟随只需要「底部是否有新内容/增长」——改为 O(1) 签名：
+   * 条数 + 末条 id + 末条 steps 数 + 两条流式缓冲长度（流式增长即触发）。 */
+  const contentSignature = useMemo(() => {
+    const last = items[items.length - 1]
+    return `${items.length}:${last?.id ?? ''}:${last?.steps?.length ?? 0}:${
+      streamBuffer?.text.length ?? 0
+    }:${textStreamBuffer?.text.length ?? 0}`
+  }, [items, streamBuffer?.text.length, textStreamBuffer?.text.length])
 
   // 贴底时跟随内容变化；上翻则暂停。useLayoutEffect 流式更新无闪跳。
   useLayoutEffect(() => {

@@ -61,7 +61,10 @@ test('TC-PERF-003 window.ts 检测 GPU 状态并注入 perf-lite（含诊断日�
   const src = code('../window.ts')
   assert.match(src, /app\.getGPUFeatureStatus\(\)/, '必须读真实 GPU 特征状态')
   assert.match(src, /gpu_compositing/, '判定必须基于 gpu_compositing')
-  assert.match(src, /classList\.add\('perf-lite'\)/, '软件渲染时必须注入 perf-lite')
+  // v0.46.0（PERF-2 W15）改写（纪律㉔）：once→on + 幂等增删 —— 注入语义升级为
+  // 「perfLite 时 add，否则 remove」（热切换/reload 后 class 不残留），旧的单边
+  // add 断言随旧语义退役。
+  assert.match(src, /classList\.\$\{perfLite \? 'add' : 'remove'\}\('perf-lite'\)/, '软件渲染时注入 perf-lite；非降级时必须移除（幂等）')
   assert.match(src, /gpu status/, '必须留下可回报的 gpu status 诊断日志')
   assert.match(
     src,

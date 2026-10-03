@@ -12,7 +12,7 @@
  * 折叠态 = turn.collapsed（投影层已并入 flow.turnUiState）。
  * v0.42.0 P5（对标 ZCode）：StateRail 竖条退役 —— 过程行平铺无边框。
  * ============================================================ */
-import { useMemo } from 'react'
+import { memo, useMemo } from 'react'
 import { turnRenderSequence } from '../../flow/project'
 import { runHasFailure, runHasRunning, segmentFlow } from '@shared/utils/flow-fold'
 import type { FlowTurn } from '@shared/types/flow'
@@ -28,7 +28,11 @@ interface TurnViewProps {
   showActivity: boolean
 }
 
-export function TurnView({ turn, isLast, showActivity }: TurnViewProps) {
+/**
+ * v0.46.0（PERF-2 W2）：memo —— 投影层 turnCache 保证未变更轮的 turn 引用稳定
+ * （props 全为原始值 + 稳定引用），流式 flush 时已落定轮不再重渲染。
+ */
+export const TurnView = memo(function TurnView({ turn, isLast, showActivity }: TurnViewProps) {
   // 整轮渲染序列（outerBlocks + steps 按 ts 归并）→ 一体化分段（过程组 / 主块交替）
   const segments = useMemo(() => segmentFlow(turnRenderSequence(turn)), [turn])
 
@@ -51,4 +55,4 @@ export function TurnView({ turn, isLast, showActivity }: TurnViewProps) {
       {isLast && <TurnFooter turn={turn} showActivity={showActivity} />}
     </div>
   )
-}
+})

@@ -4,7 +4,7 @@
  * 设计文档 §8.6 列出的 SQLite 在 v2 切换
  * ============================================================ */
 import { app } from 'electron'
-import { mkdir, readFile, writeFile, rm, copyFile, unlink, rename } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, rm, copyFile, unlink, rename, stat } from 'node:fs/promises'
 import { existsSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
@@ -185,12 +185,46 @@ async function writeJson<T>(path: string, data: T): Promise<void> {
 }
 
 /** 通用集合存储 — 单文件 JSON 数组 */
+
+/* ============================================================
+ * v0.46.0（PERF-2 W8）：mtime 读缓存 —— 高频 list() 不再每次全量读盘+逐行 parse
+ *
+ * 背景：agent 引擎每轮迭代对 l1.jsonl 有 ≥3 次 list()（maybePrecallCompact /
+ * assembleMessages / maybeAutoCompress），tasks.json 也有每轮 getTask 与
+ * automation 调度器 30s tick 的 list()。此前每次都 readFile + JSON.parse，
+ * 会话越长每轮越重（O(会话长度)×每轮 → 整场 O(n²)）。
+ *
+ * 机制：stat 的 mtimeMs+size 为指纹 ——
+ *  - 命中 → 返回缓存数组的**浅拷贝**（防调用方原地 sort/push 污染缓存；
+ *    元素级修改仍是禁区，见下方「调用方契约」）；
+ *  - 写路径在同进程内增量/全量刷新缓存并重取 stat；
+ *  - 外部进程改写文件 → 指纹失配 → 自动穿透重读（无手动失效负担）。
+ * 调用方契约：不得原地修改 list() 返回数组的**元素对象**（浅拷贝只复制引用）。
+ */
+interface MtimeCache<T> {
+  mtimeMs: number
+  size: number
+  items: T[]
+}
+
+/** 取 stat 指纹；文件不存在/不可达返回 null（等价「无文件」语义） */
+async function statFingerprint(path: string): Promise<{ mtimeMs: number; size: number } | null> {
+  try {
+    const st = await stat(path)
+    return { mtimeMs: st.mtimeMs, size: st.size }
+  } catch {
+    return null
+  }
+}
+
 export class JsonCollection<T extends { id: string }> {
   constructor(private readonly filePath: string, private readonly seed: T[] = []) {}
 
   // v0.6.5 修复：互斥锁——串行化 read-modify-write 操作，防止并发 upsert/delete
   // 导致后写入者覆盖前者的结果（Lost Update），进而丢失 task 记录
   private writeChain: Promise<unknown> = Promise.resolve()
+
+  private listCache: MtimeCache<T> | null = null
 
   /** 串行化读-改-写操作 */
   private async runExclusive<R>(fn: () => Promise<R>): Promise<R> {
@@ -199,16 +233,35 @@ export class JsonCollection<T extends { id: string }> {
     return next
   }
 
+  /** 写路径后刷新缓存：以刚写入的 items 为准 + 重取 stat 指纹 */
+  private async refreshCache(items: T[]): Promise<void> {
+    const fp = await statFingerprint(this.filePath)
+    this.listCache = fp ? { ...fp, items } : null
+  }
+
   async list(): Promise<T[]> {
+    const fp = await statFingerprint(this.filePath)
+    if (!fp) {
+      this.listCache = null
+      // v0.46.0：返回副本 —— 原实现直接返回 seed 引用，首个 upsert 的 push 会
+      // 原地污染 seed（随后 clear() 把被污染的 seed 写回盘，清空失效）。
+      return [...this.seed]
+    }
+    if (this.listCache && this.listCache.mtimeMs === fp.mtimeMs && this.listCache.size === fp.size) {
+      return [...this.listCache.items]
+    }
     const data = await readJson<unknown>(this.filePath, this.seed)
     // v0.17.x 防御：tasks.json 可能被 Agent 误写为对象（如自建的清单 JSON），
     // 此时 readJson 会成功 parse 出非数组对象，导致调用方 items.findIndex 抛
     // "items.findIndex is not a function"。这里把非数组统一回退到 seed，避免崩溃。
     if (!Array.isArray(data)) {
       console.error(`[store] ${this.filePath} 不是 JSON 数组（可能被误写为对象），已回退到 seed`)
-      return this.seed
+      this.listCache = null
+      return [...this.seed]
     }
-    return data as T[]
+    const items = data as T[]
+    this.listCache = { ...fp, items }
+    return [...items]
   }
 
   async get(id: string): Promise<T | null> {
@@ -223,6 +276,7 @@ export class JsonCollection<T extends { id: string }> {
       if (idx >= 0) items[idx] = item
       else items.push(item)
       await writeJson(this.filePath, items)
+      await this.refreshCache(items)
     })
   }
 
@@ -235,6 +289,7 @@ export class JsonCollection<T extends { id: string }> {
         else items.push(item)
       }
       await writeJson(this.filePath, items)
+      await this.refreshCache(items)
     })
   }
 
@@ -243,12 +298,14 @@ export class JsonCollection<T extends { id: string }> {
       const items = await this.list()
       const next = items.filter((x) => x.id !== id)
       await writeJson(this.filePath, next)
+      await this.refreshCache(next)
     })
   }
 
   async clear(): Promise<void> {
     await this.runExclusive(async () => {
       await writeJson(this.filePath, this.seed)
+      await this.refreshCache([...this.seed])
     })
   }
 }
@@ -283,6 +340,8 @@ export class JsonlCollection<T extends { id: string }> {
   // 从 l1.jsonl 消失 → 对话气泡显示上一次输入）。
   private writeChain: Promise<unknown> = Promise.resolve()
 
+  private listCache: MtimeCache<T> | null = null
+
   /** 串行化写操作（读多写少，list 不上锁——rename 原子性已足够） */
   private async runExclusive<R>(fn: () => Promise<R>): Promise<R> {
     const next = this.writeChain.then(fn, fn)
@@ -290,16 +349,42 @@ export class JsonlCollection<T extends { id: string }> {
     return next
   }
 
+  /** 写路径后刷新缓存：以刚写入的全量 items 为准 + 重取 stat 指纹 */
+  private async refreshCache(items: T[]): Promise<void> {
+    const fp = await statFingerprint(this.filePath)
+    this.listCache = fp ? { ...fp, items } : null
+  }
+
+  /**
+   * 追加路径的缓存增量维护（v0.46.0 W8）：只在已有缓存时扩展（没读过就没缓存，
+   * 下次 list 全量建立）；重取 stat 指纹保证与磁盘一致。
+   */
+  private async extendCache(added: T[]): Promise<void> {
+    if (!this.listCache) return
+    const fp = await statFingerprint(this.filePath)
+    if (fp) this.listCache = { ...fp, items: [...this.listCache.items, ...added] }
+  }
+
   async list(): Promise<T[]> {
-    if (!existsSync(this.filePath)) return []
+    const fp = await statFingerprint(this.filePath)
+    if (!fp) {
+      this.listCache = null
+      return []
+    }
+    if (this.listCache && this.listCache.mtimeMs === fp.mtimeMs && this.listCache.size === fp.size) {
+      return [...this.listCache.items]
+    }
     try {
       const raw = await readFile(this.filePath, 'utf-8')
-      return raw
+      const items = raw
         .split('\n')
         .filter(Boolean)
         .map((line) => JSON.parse(line) as T)
+      this.listCache = { ...fp, items }
+      return [...items]
     } catch (err) {
       console.error(`[store] failed to read jsonl ${this.filePath}:`, err)
+      this.listCache = null
       return []
     }
   }
@@ -308,6 +393,7 @@ export class JsonlCollection<T extends { id: string }> {
     await this.runExclusive(async () => {
       await ensureDir(dirname(this.filePath))
       await writeFile(this.filePath, JSON.stringify(item) + '\n', { flag: 'a' })
+      await this.extendCache([item])
     })
   }
 
@@ -317,6 +403,7 @@ export class JsonlCollection<T extends { id: string }> {
       await ensureDir(dirname(this.filePath))
       const block = items.map((i) => JSON.stringify(i)).join('\n') + '\n'
       await writeFile(this.filePath, block, { flag: 'a' })
+      await this.extendCache(items)
     })
   }
 
@@ -346,6 +433,7 @@ export class JsonlCollection<T extends { id: string }> {
   private async rewriteLocked(items: T[]): Promise<void> {
     const block = items.map((i) => JSON.stringify(i)).join('\n') + '\n'
     await atomicWriteFile(this.filePath, block)
+    await this.refreshCache(items)
   }
 
   async delete(id: string): Promise<void> {
