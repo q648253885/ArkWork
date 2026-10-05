@@ -12,25 +12,23 @@ In most AI products the agent is a black box: you can't debug it, can't interven
 
 **[Download](https://github.com/q648253885/ArkWork/releases)** pre-built installers (macOS Apple Silicon / Intel, Windows, Linux) — or build from source below.
 
-## What's New — v0.45.0
+## What's New — v0.47.0
 
-> **Artifacts become first-class, every paragraph is copyable, and running tasks pulse** — files the agent actually wrote are listed on a clickable artifact card; every block in the chat stream gets a hover copy button; the Git panel finally has a friendly no-repo state; automation tasks show up in the sidebar the moment they start.
+> **Take over Codex projects and honor their conventions out of the box** — open any repo with an AGENTS.md and its project rules apply immediately; Codex global conventions (`~/.codex/AGENTS.md`) come along too. Installing a zip plugin now installs right after you confirm — no second file dialog.
 
-### v0.45.0 · Chat stream polish (ZCode-aligned)
+### v0.47.0 · AGENTS.md (Codex-compatible)
 
-- **Every paragraph is copyable** — the final answer (each layered section), stage notes, process narration, user messages, and expanded reasoning all get a hover copy button with a 1.5s "Copied" feedback. No more manual text selection.
+- **Global + repo root + subdirectories, full Codex semantics** — `~/.codex/AGENTS.md` and `~/.arkwork/` global layers, ancestor-chain root-down concatenation, 32KiB merged budget (Codex default); `AGENT.md` / `CLAUDE.md` / `CONTEXT.md` variants recognized too.
 
-- **Folders are not clickable** — path links now detect directories (artifact cards already know their kind): a folder renders as a non-interactive chip with a folder glyph and a "preview not supported" hint, because clicking a directory could never open anything.
+- **Nearest-wins for subdirectories** — when the agent touches files in a subdirectory, nested AGENTS.md along that chain (e.g. a monorepo's `packages/app/`) is injected on the next turn — no global-context pollution, no prompt prefix-cache breakage.
 
-### v0.45.0 · Artifacts, Git panel, sidebar
+- **Instruction sources card** — Settings → Workspace shows exactly which instruction files were loaded: layer (Codex global / ArkWork global / project), path, bytes and truncation state; the priority contract is explicit: user message > AGENTS.md > memory.md.
 
-- **Artifact card with write fallback** — files the agent actually wrote or edited (`file-writer` / `file-editor`) are collected even when the plan never declared them; the card hangs on the final answer with full-path clickable links (D112), deduped, declarations first.
+### v0.46.1 · Plugin install fix
 
-- **Git panel, no-repo edition** — a non-git workspace now shows a friendly empty state ("This workspace is not a Git repository") with a one-click **Initialize repository** action (host confirm dialog + audit, same as every write op); errors become a one-line plain-language bar with the raw stderr folded into expandable details.
+- **Confirm means install** — installing a zip plugin writes to disk right after you confirm the dialog (previously the file picker popped up a second time).
 
-- **Sidebar: running tasks pulse** — a running task gets a pulsing dot; automation-triggered and delegated tasks now appear in the sidebar in real time (previously visible only after an app restart); automation task names carry the trigger time (`10-02 11:45`) so repeated runs are distinguishable. Running several tasks in parallel has always been supported (per-task controllers).
-
-> Verified: `typecheck` exit 0 · **2555 cumulative tests, 0 code-fail** · version-doc gate all green · real-machine UI verification via dev+CDP (copy buttons, artifact card, Git empty state, path-kind channel).
+> Verified: `typecheck` exit 0 · **2612 cumulative test cases, 0 code failures** (the only red is a legacy test-env item) · version-docs gate green · packaged `.app` 0.47.0 + dev+CDP live verification (instruction sources card / discovery chain / install handshake).
 
 ## Official Website
 

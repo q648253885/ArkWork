@@ -16,8 +16,7 @@ import {
   getModel,
   type LlmMessage,
   type LlmTool,
-  type LlmCompleteResponse,
-  callLlmWithRetry,
+  type LlmCompleteResponse,  callLlmWithRetry,
   withLlmTimeout,
   isContextOverflowError,
   invokeSkill,
@@ -120,6 +119,9 @@ import {
 import { createGreetingLoopGuard, markEndpointUnhealthy } from '../../llm/normalize.js'
 // v0.31.0 D22：瞬时提示通道标签（技能体 vs 引擎提示，两类不得共用标签）
 import { labelEngineHint, labelSkillHint } from './hints.js'
+// v0.47.0（F2）：AGENTS.md 子目录就近注入 —— 触达文件后的下一轮瞬时提示
+import { isAbsolute, join as joinPath } from 'node:path'
+import { collectNestedInstructions } from '../instruction-sources.js'
 // v0.38.1（D177）：无工具答复的正则清单提取回退（与 task_plan 共用落库管线）
 // v0.39.0：正文解析统一走规划通道的解析器（纪律⑧：一份语义，不许两份实现）
 import { parsePlannerOutput } from '../planning/parse.js'
@@ -557,6 +559,9 @@ export async function runReActLoop(
     const chatMode = prepared.chatMode
     let pendingSystemHint = prepared.pendingSystemHint
     let iteration = startIter
+    // v0.47.0（F2）：本 run 已注入过嵌套指令的目录集合（AGENTS.md 子目录就近覆盖）。
+    // 同 run 只注入一次，防每轮重复刷屏；根文件已随 system 段加载，天然不在集合内。
+    const nestedInjectedDirs = new Set<string>()
     // v0.9.x：连续"只读探索"轮数（>=3 时注入产出提示，防空工作区无限探索）
     let consecutiveReadOnly = 0
     // v0.36.5（D126）：距上次写树动作（v0.38.0 起 = task_plan）的轮数。
@@ -1428,6 +1433,27 @@ export async function runReActLoop(
       // `[引擎提示]`，两类提示不再共用一个标签。
       for (const r of actResults) {
         if (r.additionalSystemHint) pendingSystemHint = labelSkillHint(r.additionalSystemHint)
+      }
+
+      // v0.47.0（F2）：AGENTS.md 子目录就近注入 —— 本轮文件工具触达了带嵌套指令
+      // 的子目录时，把该祖先链（根→叶）的局部规则经瞬时通道注入下一轮 Reason。
+      // 追加不覆盖（与 replanHint 同型，\n\n---\n 分隔）；同 run 同目录只注一次；
+      // 根文件已随 system 段加载（workspace 根天然被 collectNestedInstructions 排除）。
+      {
+        const touched = actions
+          .filter((a) => (a.tool === 'file-reader' || a.tool === 'file-writer' || a.tool === 'file-editor'))
+          .map((a) => a.args?.path)
+          .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+          .map((p) => (isAbsolute(p) ? p : joinPath(getWorkspaceDir(), p)))
+        if (touched.length > 0) {
+          const nested = collectNestedInstructions(getWorkspaceDir(), touched, nestedInjectedDirs)
+          // 目录先记账（含无指令文件的目录，防每轮重复探测）；有内容才占 hint 通道
+          for (const d of nested.dirs) nestedInjectedDirs.add(d)
+          if (nested.text) {
+            const block = `以下为触达目录的项目局部规则（AGENTS.md 子目录就近覆盖），请与本任务约定一并遵守：\n\n${nested.text}`
+            pendingSystemHint = pendingSystemHint ? `${pendingSystemHint}\n\n---\n${block}` : block
+          }
+        }
       }
 
       let lastObservationSummary = ''

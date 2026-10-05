@@ -252,7 +252,18 @@
       "removeConfirmTitle": "ワークスペースを削除",
       "removeConfirmBody": "ワークスペース「{{name}}」を削除しますか？タスクデータはディスクに残りますが、このリストには表示されなくなります。",
       "noFolderToast": "既定のワークスペースには関連するフォルダがありません",
-      "openFolderFail": "フォルダを開けませんでした：{{message}}"
+      "openFolderFail": "フォルダを開けませんでした：{{message}}",
+      "instructionTitle": "指示ソース（AGENTS.md · Codex 互換）",
+      "instructionScopeCodex": "グローバル · Codex",
+      "instructionScopeArkwork": "グローバル · ArkWork",
+      "instructionScopeProject": "プロジェクト",
+      "instructionKb": "{{kb}} KB",
+      "instructionBytes": "{{b}} バイト",
+      "instructionTruncated": "切り詰め済み",
+      "instructionBudget": "マージ {{merged}} / 上限 {{budget}}",
+      "instructionBudgetHit": "マージ {{merged}} — 上限 {{budget}} に達したため、残りは未読み込み",
+      "instructionEmpty": "現在のワークスペースに指示ファイルが見つかりません。ルートに AGENTS.md を作成すると、エージェントがプロジェクトの規約に従います（Codex / Claude Code 等と互換）。",
+      "instructionLoadFail": "指示ソースの読み取りに失敗しました — ログを確認してください"
     },
     "models": {
       "title": "大規模言語モデル設定",

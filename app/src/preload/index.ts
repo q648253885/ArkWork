@@ -387,6 +387,8 @@ const ark: ArkApi = {
     setSecret: (key, value) => ipcRenderer.invoke('settings:set-secret', { key, value }),
     pickWorkspace: () => ipcRenderer.invoke('settings:pick-workspace'),
     activateWorkspace: (path: string) => ipcRenderer.invoke('settings:activate-workspace', path),
+    // v0.47.0：指令源发现（AGENTS.md · Codex 兼容）
+    instructionSources: () => ipcRenderer.invoke('settings:instruction-sources'),
   },
   // v0.32.0：Workbench Profile（插件模式 · 垂直工作台）
   profile: {

@@ -816,6 +816,9 @@ export interface PluginInstallZipResult {
   /** needsConfirm 时的能力/权限预告（安装确认弹窗展示用） */
   capabilities?: string[]
   permissions?: string[]
+  /** needsConfirm 段回带用户已选的包路径；确认段必须原样传回 ——
+   *  否则 IPC 层见 zipPath 为空会再弹一次文件选择框（D222） */
+  zipPath?: string
   /** 已存在同 id 且版本相同 → 需 overwrite 才覆盖 */
   alreadyExists?: boolean
   /** 安装成功后的 id */
@@ -922,6 +925,34 @@ export interface CompactionSettings {
 export type Locale = 'zh' | 'en' | 'ja' | 'ko'
 
 export const SUPPORTED_LOCALES: Locale[] = ['zh', 'en', 'ja', 'ko']
+
+/* ============================================================
+ * ★ v0.47.0：指令源发现（AGENTS.md · Codex 兼容）
+ * 设计文档：docs/versions/v0.47.0/04-system-design.md §二/§三 W4
+ * ============================================================ */
+
+/** 指令源层级（与 main/agent/instruction-sources.ts 的 InstructionScope 对齐） */
+export type InstructionSourceScope = 'codex-global' | 'arkwork-global' | 'project-chain'
+
+/** 指令源摘要（只回元数据，不回正文 —— 防大文件整段进渲染层） */
+export interface InstructionSourceSummary {
+  scope: InstructionSourceScope
+  path: string
+  /** 项目链源相对工作区的路径；全局源为 null */
+  relPath: string | null
+  bytes: number
+  truncated: boolean
+}
+
+/** 指令源发现报告（settings:instruction-sources 出参） */
+export interface InstructionSourcesReport {
+  workspaceDir: string
+  sources: InstructionSourceSummary[]
+  mergedBytes: number
+  budgetExhausted: boolean
+  /** 合并预算（字节，对齐 Codex project_doc_max_bytes 默认 32KiB） */
+  budgetBytes: number
+}
 
 export interface AppSettings {
   workspaceDir: string
@@ -1565,6 +1596,8 @@ export interface ArkApi {
     setSecret: (key: string, value: string) => Promise<void>
     pickWorkspace: () => Promise<string | undefined>
     activateWorkspace: (path: string) => Promise<boolean>
+    /** v0.47.0：当前工作区的指令源发现（AGENTS.md · Codex 兼容；只回摘要） */
+    instructionSources: () => Promise<InstructionSourcesReport>
   }
   /** v0.32.0：Workbench Profile（插件模式 · 垂直工作台） */
   profile: {

@@ -1,7 +1,9 @@
 /* ============================================================
  * v0.24.x — workspace-context 单元测试
  *
- * 覆盖：envInfo / projectTree / stack detect / agentFiles 四块
+ * 覆盖：envInfo / projectTree / stack detect 三块
+ *       + 指令源集成（v0.47.0 起发现/渲染迁移至 instruction-sources.ts，
+ *         细粒度契约见 instruction-sources.test.ts；本文件只钉 buildWorkspaceContext 集成）
  *       + buildSystemSections 注入正确性
  *
  * 运行（cwd=app）：
@@ -19,8 +21,6 @@ import {
   renderProjectBlock,
   detectStack,
   renderStackBlock,
-  discoverAgentFiles,
-  renderAgentFilesBlock,
   buildWorkspaceContext,
 } from '../workspace-context.js'
 
@@ -158,74 +158,89 @@ test('renderStackBlock: Node + frameworks 渲染', () => {
   } finally { rmWs(ws) }
 })
 
-/* ---------- 4. AGENTS.md 自动发现 ---------- */
+/* ---------- 4. 指令源集成（v0.47.0：发现/渲染细节见 instruction-sources.test.ts）---------- */
 
-test('discoverAgentFiles: 找到工作区根 AGENTS.md', () => {
-  const ws = mkTmpWs('ark-md-agents')
+/** HOME 隔离（全局指令源来自 ~/.codex / ~/.arkwork，真实 HOME 会污染断言） */
+async function withHome<T>(fn: () => T | Promise<T>): Promise<T> {
+  const prev = process.env.HOME
+  const fakeHome = mkTmpWs('arkwork-home-empty')
+  process.env.HOME = fakeHome
   try {
-    writeFileSync(join(ws, 'AGENTS.md'), '# 项目规则\n不要写注释')
-    const files = discoverAgentFiles(ws)
-    assert.equal(files.projectFiles.length, 1)
-    assert.equal(files.projectFiles[0]!.name, 'AGENTS.md')
-    assert.match(files.projectFiles[0]!.content, /不要写注释/)
-  } finally { rmWs(ws) }
-})
+    return await fn()
+  } finally {
+    if (prev === undefined) delete process.env.HOME
+    else process.env.HOME = prev
+    rmSync(fakeHome, { recursive: true, force: true })
+  }
+}
 
-test('discoverAgentFiles: CLAUDE.md 优先级', () => {
-  const ws = mkTmpWs('ark-md-claude')
-  try {
-    writeFileSync(join(ws, 'AGENTS.md'), '# A')
-    writeFileSync(join(ws, 'CLAUDE.md'), '# C')
-    const files = discoverAgentFiles(ws)
-    // 项目级只取第一个找到的（按 AGENTS / CLAUDE / CONTEXT 顺序）
-    assert.equal(files.projectFiles.length, 1)
-    assert.match(files.projectFiles[0]!.name, /AGENTS\.md|CLAUDE\.md/)
-  } finally { rmWs(ws) }
-})
-
-test('discoverAgentFiles: 大于 8KB 截断', () => {
-  const ws = mkTmpWs('ark-md-big')
-  try {
-    const big = 'A'.repeat(10 * 1024)
-    writeFileSync(join(ws, 'AGENTS.md'), big)
-    const files = discoverAgentFiles(ws)
-    assert.equal(files.projectFiles.length, 1)
-    assert.match(files.projectFiles[0]!.content, /文件超过 8KB，已截断/)
-  } finally { rmWs(ws) }
-})
-
-test('renderAgentFilesBlock: 无文件时返回空字符串', () => {
-  const block = renderAgentFilesBlock({ projectFiles: [], globalFiles: [] })
-  assert.equal(block, '')
-})
-
-test('renderAgentFilesBlock: 有文件时含 AGENTS.md 标记', () => {
-  const block = renderAgentFilesBlock({
-    projectFiles: [{ name: 'AGENTS.md', relPath: 'AGENTS.md', content: '测试规则' }],
-    globalFiles: [],
+test('workspace-context: 根 AGENTS.md 进入 instructions 与 combined', async () => {
+  const ws = mkTmpWs('ark-inst-agents')
+  await withHome(async () => {
+    try {
+      writeFileSync(join(ws, 'AGENTS.md'), '# 项目规则\n不要写注释')
+      const ctx = buildWorkspaceContext(ws)
+      assert.equal(ctx.instructions.sources.length, 1)
+      assert.equal(ctx.instructions.sources[0]!.scope, 'project-chain')
+      assert.equal(ctx.instructions.sources[0]!.relPath, 'AGENTS.md')
+      assert.match(ctx.combined, /## 项目与全局指令/)
+      assert.match(ctx.combined, /不要写注释/)
+      assert.match(ctx.combined, /优先级：用户的当前消息/)
+    } finally { rmWs(ws) }
   })
-  assert.match(block, /## 项目规则/)
-  assert.match(block, /AGENTS\.md/)
-  assert.match(block, /测试规则/)
+})
+
+test('workspace-context: 无任何指令源时省略该段（诚实省 token）', async () => {
+  const ws = mkTmpWs('ark-inst-empty')
+  await withHome(async () => {
+    try {
+      const ctx = buildWorkspaceContext(ws)
+      assert.equal(ctx.instructions.sources.length, 0)
+      assert.ok(!ctx.combined.includes('项目与全局指令'))
+    } finally { rmWs(ws) }
+  })
+})
+
+test('workspace-context: Codex 全局 ~/.codex/AGENTS.md 被发现（接管 Codex 关键）', async () => {
+  const ws = mkTmpWs('ark-inst-codex-global')
+  const home = mkTmpWs('arkwork-home-codex')
+  const prev = process.env.HOME
+  process.env.HOME = home
+  try {
+    mkdirSync(join(home, '.codex'), { recursive: true })
+    writeFileSync(join(home, '.codex', 'AGENTS.md'), '# 全局 Codex 约定\n始终用 pnpm')
+    const ctx = buildWorkspaceContext(ws)
+    const codex = ctx.instructions.sources.find((s) => s.scope === 'codex-global')
+    assert.ok(codex, 'codex-global 源必须被发现')
+    assert.match(codex.content, /始终用 pnpm/)
+    assert.match(ctx.combined, /全局（Codex/)
+  } finally {
+    if (prev === undefined) delete process.env.HOME
+    else process.env.HOME = prev
+    rmSync(home, { recursive: true, force: true })
+    rmWs(ws)
+  }
 })
 
 /* ---------- 5. 总入口 buildWorkspaceContext ---------- */
 
-test('buildWorkspaceContext: 一次返回完整 combined 字符串', () => {
+test('buildWorkspaceContext: 一次返回完整 combined 字符串', async () => {
   const ws = mkTmpWs('ark-full')
-  try {
-    writeFileSync(join(ws, 'package.json'), JSON.stringify({ name: 'demo', dependencies: { react: '*' } }))
-    writeFileSync(join(ws, 'AGENTS.md'), 'test rule')
-    mkdirSync(join(ws, 'src'), { recursive: true })
-    const ctx = buildWorkspaceContext(ws)
-    assert.ok(ctx.combined.length > 100)
-    assert.match(ctx.combined, /## 环境信息/)
-    assert.match(ctx.combined, /## 技术栈/)
-    assert.match(ctx.combined, /## 项目结构/)
-    assert.match(ctx.combined, /## 项目规则/)
-    assert.match(ctx.combined, /React/)
-    assert.match(ctx.combined, /test rule/)
-  } finally { rmWs(ws) }
+  await withHome(async () => {
+    try {
+      writeFileSync(join(ws, 'package.json'), JSON.stringify({ name: 'demo', dependencies: { react: '*' } }))
+      writeFileSync(join(ws, 'AGENTS.md'), 'test rule')
+      mkdirSync(join(ws, 'src'), { recursive: true })
+      const ctx = buildWorkspaceContext(ws)
+      assert.ok(ctx.combined.length > 100)
+      assert.match(ctx.combined, /## 环境信息/)
+      assert.match(ctx.combined, /## 技术栈/)
+      assert.match(ctx.combined, /## 项目结构/)
+      assert.match(ctx.combined, /## 项目与全局指令/)
+      assert.match(ctx.combined, /React/)
+      assert.match(ctx.combined, /test rule/)
+    } finally { rmWs(ws) }
+  })
 })
 
 test('buildWorkspaceContext: 失败安全降级（不存在的目录 → 只丢 IO 部分，env/stack 仍可用）', () => {

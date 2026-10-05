@@ -218,6 +218,9 @@ export async function installPluginFromZip(opts: {
         ok: false,
         needsConfirm: true,
         alreadyExists: already,
+        // ★ D222：把包路径随预览回带，确认段必须原样传回 ——
+        //   否则 IPC 层见 zipPath 为空会再弹一次文件选择框
+        zipPath,
         manifest: {
           id: manifest.id,
           name: manifest.name,

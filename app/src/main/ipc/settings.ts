@@ -10,12 +10,14 @@ import { getArkworkDir } from '../store/db.js'
 // v0.29.0 F6：语言字段变更时同步主进程 i18n 缓存
 import { setCachedUiLocale } from '../i18n/messages.js'
 import { pickWorkspace, ensureWorkspace, assertWorkspaceWritable } from '../fs/workspace.js'
-import { setWorkspaceDir } from '../store/db.js'
+import { getWorkspaceDir, setWorkspaceDir } from '../store/db.js'
 import { resetTaskCollection, reconcileStaleTasks } from '../store/tasks.js'
 // ★ v0.35.0：工作区切换时重算插件运行时（workspace 级插件随工作区拆/建）
 import { onWorkspaceSwitchedPluginRuntime } from '../plugins/bootstrap.js'
 import { logger } from '../system/logger.js'
-import type { AppSettings, SecretKeys } from '@shared/types/ipc'
+import type { AppSettings, SecretKeys, InstructionSourcesReport } from '@shared/types/ipc'
+// v0.47.0（F3/W4）：指令源发现（AGENTS.md · Codex 兼容）—— 与引擎共用单一事实源
+import { discoverInstructionSources, INSTRUCTION_MERGE_BUDGET_BYTES } from '../agent/instruction-sources.js'
 
 const SETTINGS_FILE = () => join(getArkworkDir(), 'settings.json')
 const SECRETS_FILE = () => join(getArkworkDir(), 'secrets.json')
@@ -209,5 +211,31 @@ export function registerSettingsHandlers(): void {
       logger.warn('System', `[plugin] 工作区切换后重算插件失败：${String(err)}`)
     }
     return true
+  })
+
+  // v0.47.0（F3）：指令源发现（AGENTS.md · Codex 兼容）—— 设置 → 工作区「指令源」卡。
+  // 实调与引擎同一发现函数（单一事实源）；只回元数据不回正文（防大文件整段进渲染层）。
+  ipcMain.handle('settings:instruction-sources', (): InstructionSourcesReport => {
+    const workspaceDir = getWorkspaceDir()
+    try {
+      const d = discoverInstructionSources(workspaceDir)
+      return {
+        workspaceDir,
+        sources: d.sources.map((s) => ({
+          scope: s.scope,
+          path: s.path,
+          relPath: s.relPath,
+          bytes: s.bytes,
+          truncated: s.truncated,
+        })),
+        mergedBytes: d.mergedBytes,
+        budgetExhausted: d.budgetExhausted,
+        budgetBytes: INSTRUCTION_MERGE_BUDGET_BYTES,
+      }
+    } catch (err) {
+      // 发现失败不炸设置页：返回空报告（UI 走空态）
+      logger.warn('System', `[instruction-sources] 发现失败：${String(err)}`)
+      return { workspaceDir, sources: [], mergedBytes: 0, budgetExhausted: false, budgetBytes: INSTRUCTION_MERGE_BUDGET_BYTES }
+    }
   })
 }

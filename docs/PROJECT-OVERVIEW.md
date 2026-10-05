@@ -48,6 +48,7 @@ Reason（含子阶段） → Act（工具执行） → 阶段门禁 / 完成门�
   - 主循环两处接线：**轮首 tick**（每轮依据上一轮客观事实判定）+ **空回合兜底**（`pauseForEmptyResponses` 之前先给清单一次推进机会）。
   - `task_plan` 工具**保留但降级为可选快路径**（模型可见文案不再要求「必须调用」）——强模型继续用效果好，弱模型不用它清单照样推进。
 - **提示词四层**：L0 静态不变量 · L1 每轮注入（清单快照 + 恢复点）· L2 输出层次契约 · L3 运行期瞬时提示。
+- **工作区指令源（v0.47.0 · AGENTS.md Codex 兼容）**：全局 `~/.codex/AGENTS.md` + `~/.arkwork/*` + workspace 祖先链 root-down 拼接 → L0 system 段（run-static，32KiB 合并预算）；工作区子目录嵌套指令在 file-* 工具触达后经 L3 瞬时通道就近注入（同 run 去重）；优先级契约 = **用户当前消息 > AGENTS.md 指令 > memory.md**。单一事实源 `main/agent/instruction-sources.ts`，管理面在 设置→工作区「指令源」卡（`settings:instruction-sources` IPC）。
 
 ### 3.2 任务：TaskGraph + **TaskLedger**（v0.37.0 分界）
 

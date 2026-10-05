@@ -206,7 +206,8 @@ test('TC-PI-007 声明了 main 但文件缺失 → ENTRY_MISSING', async () => {
 
 test('TC-PI-008 预览段：needsConfirm=true + 元数据 + 能力/权限，且不落盘', async () => {
   const dir = makePluginDir()
-  const res = await installPluginFromZip({ zipPath: zipDir(dir) })
+  const zip = zipDir(dir)
+  const res = await installPluginFromZip({ zipPath: zip })
   assert.equal(res.ok, false, '预览段不是成功态（还没装）')
   assert.equal(res.needsConfirm, true)
   assert.equal(res.manifest?.id, PLUGIN_ID)
@@ -214,6 +215,8 @@ test('TC-PI-008 预览段：needsConfirm=true + 元数据 + 能力/权限，且�
   assert.equal(res.manifest?.version, '0.1.0')
   assert.deepEqual(res.permissions, [])
   assert.ok(res.capabilities?.some((c) => c.includes('命令')), '命令贡献要在预览里可见')
+  // ★ D222：预览段必须回带包路径 —— 确认弹窗全靠它把路径带回第二段
+  assert.equal(res.zipPath, zip, '预览段必须回带 zipPath（否则确认段会再弹文件选择框）')
   assert.equal(existsSync(TARGET()), false, '预览段绝不落盘')
 })
 
@@ -227,6 +230,28 @@ test('TC-PI-009 确认段：confirmed=true → ok，目录落盘，默认禁用'
   // ★ 安装 ≠ 启用：enabled map 必须显式记 false
   const enabled = await getEnabledMap('global')
   assert.equal(enabled[PLUGIN_ID], false)
+})
+
+test('TC-PI-019 ★ D222：两段式握手全链真执行 —— 预览回带 zipPath，确认段原样传回即直接落盘', async () => {
+  // 复刻 UI 实际调用序列：第一段（选完包）→ needsConfirm 预览；
+  // 第二段（确认弹窗「确认安装」）只允许用预览给出的字段再调一次。
+  // D222 缺陷 = 预览不回带 zipPath，确认段无路可传 → 主进程再弹一次文件选择框。
+  const dir = makePluginDir()
+  const zip = zipDir(dir)
+
+  const preview = await installPluginFromZip({ zipPath: zip })
+  assert.equal(preview.needsConfirm, true)
+  assert.equal(preview.zipPath, zip, '预览段必须回带 zipPath')
+
+  // 确认段严格使用预览回带的字段（不引入第二路径来源）
+  const done = await installPluginFromZip({
+    zipPath: preview.zipPath!,
+    confirmed: true,
+    overwrite: Boolean(preview.alreadyExists),
+  })
+  assert.equal(done.ok, true)
+  assert.equal(done.id, PLUGIN_ID)
+  assert.equal(existsSync(join(TARGET(), 'plugin.json')), true)
 })
 
 /* ============================================================

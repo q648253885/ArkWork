@@ -64,6 +64,8 @@
 | **v0.43.0** | **L-43-01…03**（见 四·J） | 下个补丁版 / 用户联测 | open（无阻塞项；均为实机门槛、无障碍面与测试环境欠账，非本版代码缺陷） |
 | **v0.43.1** | **L-43-04…05**（见 四·K） | 数据面立项 / 用户联测 | open（均为欠账登记，非本版代码缺陷）；**L-43-01 由本版实机证据闭合** |
 | **v0.46.0** | **L-46-01…02**（见 四·L） | 用户 VM 实测 / 触发式立项 | open（L-46-01 低配档实机门槛欠账；L-46-02 为 Scope Out 立项池） |
+| **v0.46.1** | **L-46-03**（见 四·M） | 触发式立项 | open（覆盖安装勾选不可达，独立 UX 问题，非本版引入） |
+| **v0.47.0** | **L-47-01…02**（见 四·N） | 触发式立项 | open（均为他家专有格式/高级特性 Scope Out，发现器单点已留注册位） |
 
 ---
 
@@ -277,6 +279,8 @@
 | v2.4 | 2026-09-28 | **v0.41.0 收口（终局补漏 D207 + Ollama qwen3.5 正文工具降级通道 D208 + 清单归档/层级 D209 + 交互区对齐 ZCode D210）**：① 全量 **2445 条**（逐文件实测 2446 − EXCLUSIONS 1）0 代码红（唯一红为存量 permission-rules-ui WIP）；反向核验 **5/5 报红**（D210 首轮判据不力 → 收紧 TC-FLW-005 后重做）；② **打包实机 UI 验收抓到 D211**：迁移层逐字段重建 PlanItem 漏 parentId → 重启后子任务层级静默消失（纪律㉜「新入口外设」的读取侧变体）→ 修复 + TC-FH-006 真执行契约 + 重打包复验（depth=1 / 缩进 24px / 编号 3.1）；③ 交付 x64 `.app`（0.41.0，557MB，无 `.arkwork` 残留）；④ 登记 **L-41-01…05**；⑤ 累计用例 **2397 → 2445**；✅ 已提交并推送（commit `095c96b` + tag `v0.41.0`） |
 | v2.3 | 2026-09-27 | **v0.39.0 打包交付 + 失败诊断复查（第五轮）**：① **交付 x64 `.app`**（`release/mac/ArkWork.app`，557 MB，asar 版本 0.39.0 / Electron 33.4.11，非依赖条目 23 条全在白名单内）；宿主是 Intel（`uname -m`=x86_64），**交叉打 arm64 会因缺 `@napi-rs/canvas-darwin-arm64` 产出坏包**故不做，并在 evidence 里写清判断依据；`tar-stream@undefined` 警告经证据链归因为上游 dugite 的**维护者侧脚本依赖** → cosmetic 不修；② **D194（产物夹带历史冒烟残留）**：asar 里有 `/out/.arkwork/b2-smoke/result.json`（354 B，一次 `ok:false` 的结果）—— 根因是 `dev/b2-smoke.ts` 早期用 `resolve(__dirname,'..','..','.arkwork',…)`，而 electron-vite 把主进程打进 `out/main/chunks/` → 落进**被收进 asar 的那棵树**；源码早改了 `app.getAppPath()` 但**现场没清**、`electron-vite build` 也不清 `out/` → 删现场 + 重打包（26 → 23 条）+ **TC-CLEAN-008/009**（含反向核验：注入反模式 `# fail 2`，还原 `# fail 0`）；**新增纪律 ㉟「修根因 ≠ 清现场」**（扫现场断言必须先自证"看的是对的那棵树"，并按改动顺序而非功能路径找残留）；；③ **D195（规划失败诊断两处静默退化）**：不可解析时只留分类词、**丢掉模型原文**（既有计划链从 v0.15 起一直记 200 字 `plan LLM raw`）→ 新通道没继承旧通道的诊断纪律；`skipped` 还借用 `'aborted'` 与"用户中止"混淆 → 新增 `clipRawForLog`（200 码点 / 裁首尾空白 / 换行折叠 / 不劈代理对）+ **原文只进日志不进用户面** + 新增 `'unparsable'`（TC-PLANCH-012/013）；④ **D196（纯转发壳导出 4 处）**：穷举 grep 证实零消费者后全删（含 `shared/types/graph.ts` 的 `assigneeLabel` 定义）→ **TC-CLEAN-010**。守卫首版**误报** `llm-call.ts → isContextOverflowError`（它是被 `engine-context.ts` 有意转发的**门面**）→ 补"本模块未被别处 `export {…} from` 转发"排除项后 0 命中；**Level 2 模块图因启发式误报率高（20 条候选抽查 4 条全有真实消费者）不入用例**，降级为人工清点 —— 与纪律㉞ 同源的又一例证；⑤ 新增 **L-39-10/11/12**；⑥ 用例 **+5** → 合计 **2363**（闭合：2357 + 2 回填 + 5 新增 − 1 EXCLUSIONS）；缺陷总数 **D178–D196（19 条）**；门禁 `validate_version_docs.py v0.39.0` 全绿（70 用例 ID / 9 组 / 42 张表 / 0 断链）；双 tsc `exit 0`；受影响子集 13 文件 `fail=0`；⑦ **新增纪律 ㊱「证据必须能指认来源：日志模板不是日志」** —— 本轮写 evidence 时曾把一节"实机日志分诊"按代码里的日志格式**脑补**成现场叙述（含编造的 Ollama 报错行与两条 UI 遗留），复核后整节删除、按纯静态证据重写并在文末留删除记录；规则落为"evidence 顶部必须有证据口径声明 + 混入脑补即整节重写"；**⚠️ commit / tag 待用户确认** |
 | v2.5 | 2026-10-03 | **v0.46.0 收口（PERF-2 性能与低配适配专版）**：三路审计（主进程热路径 / 渲染层重渲染链 / GPU 与性能模式）→ **W1–W17** 落地；缺陷 **D221**（`JsonCollection` seed 引用污染 —— 文件缺失分支直接返回 seed，首个 upsert 原地改写 seed 本体 → `clear()` 清空失效；本版新增 TC-STORE46-006 当场暴露，当版修复）；用例 2555 → **2596**（+41，6 新套件；改写 3 条旧形状契约，纪律㉔）；全量 224 文件唯一红 = 存量 permission-rules-ui（L-43-03）；门禁全绿；打包 mac `.app` + Windows 绿色 zip（142.1 → 134.6 MB）；实机热生效验收通过（perfMode 改三态无需重启）；登记 **L-46-01…02**；✅ 已提交并推送（commit `a825e3d` + tag `v0.46.0`，main 与 tag 均在 origin） |
+| v2.6 | 2026-10-05 | **v0.46.1 收口（D222 插件安装两段式握手修复）**：预览段回带 `zipPath` + 确认段原样传回（IPC 处理器零改动）；用例 2596 → **2599**（TC-PI-019 真执行 + TC-PIW 渲染接线契约 + TC-PI-008 改写）；反向核验报红 ✓；全量 225 文件唯一红 = 存量 permission-rules-ui；打包 `.app` 0.46.1 实机验证两段握手（35ms 直接落盘）；插曲：electron-builder 运行期间剥源 `package.json` scripts/devDeps（从 git 重建，已记证据 + 打包后必查 diff 的固定动作）；登记 **L-46-03**；✅ 与 v0.47.0 同 commit 整体发布（tag `v0.47.0`） |
+| v2.7 | 2026-10-05 | **v0.47.0 收口（AGENTS.md（Codex 兼容）指令源 + 提示词源管理）**：调研落盘（AGENTS.md 事实标准 + Codex root-down 拼接 + 32KiB 预算）；**F1** 发现器单点重写 `instruction-sources.ts`（全局补 `~/.codex/AGENTS.md` + 祖先链全收集根→叶 + AGENT.md 变体 + 32KiB 截断；旧 workspace-context 实现整体迁移不留壳）；**F2** 子目录就近注入（file-* 触达 → 祖先链嵌套指令经 pendingSystemHint 追加注入，同 run 去重）；**F3** 设置→工作区「指令源」管理卡（settings:instruction-sources IPC 复用同源，四语言，字节级显示）；**F4** 优先级契约显式化（用户消息 > AGENTS.md > memory.md）；用例 2599 → **2612**（新套件 TC-INS 15 + 集成回填 3 − 旧断言 5 + 改写 1）；反向核验 3 处缺陷注入 5 条报红 ✓；全量 226 文件唯一红 = 存量 permission-rules-ui；门禁全绿；打包 `.app` 0.47.0 + 实机验收（设置卡 + IPC + 截图证据）；登记 **L-47-01…02**；✅ 已提交（tag `v0.47.0`，main 与 tag 均已推送 origin） |
 
 ## 四·I、v0.42.0 遗留（L-42-01…02）
 
@@ -306,3 +310,16 @@
 |---|---|---|---|---|
 | L-46-01 | 低配档启动期行为未在真实软渲染 VM 实测：`disableHardwareAcceleration` + V8 堆上限 + perf-cache 粘滞判定（本机 macOS 有真 GPU，无法复现） | 低配档收益（GPU 进程开销消失 / 堆防失控）未获实机读数；流式流畅度提升体感未确认 | 用户云端 Windows VM 复测：第二次启动日志应见 `low-spec pre-ready mode ON (source=sticky)`；perf-lite 流式攒批 150–250ms 生效 | open |
 | L-46-02 | PERF-2 Scope Out 立项池：① tasks.json planItems 迁出 + 防抖落盘（架构级，崩溃一致性取舍）；② 启动窗口先行（先 show 后 bootstrap）；③ 后台浏览器 Tab LRU 销毁；④ dugite（~50MB 内嵌 git）按需分发；⑤ CodeRenderer 按行虚拟化 | 低配 VM 的进一步收益空间 | 触发式立项（按用户反馈优先级） | open |
+
+## 四·M、v0.46.1 遗留（L-46-03）
+
+| # | 项 | 影响 | 去向 | 状态 |
+|---|---|---|---|---|
+| L-46-03 | ALREADY_EXISTS 态的「覆盖已有」勾选在现有 UI 流中**不可达**：首段 `installZip({})` 命中同 id 已装时只返回 ALREADY_EXISTS + toast（`needsConfirm` 预览永远 `alreadyExists:false`），确认弹窗（含覆盖勾选）不打开 → 覆盖安装无 UI 入口 | 用户想覆盖装同 id 插件时只能先卸载再装 | 单独立项：首段 ALREADY_EXISTS 也进确认弹窗（预览回带 zipPath 的 D222 修复已铺平道路），或在 toast 里给「覆盖安装」动作按钮 | open |
+
+## 四·N、v0.47.0 遗留（L-47-01…02）
+
+| # | 项 | 影响 | 去向 | 状态 |
+|---|---|---|---|---|
+| L-47-01 | `.cursor/rules`（mdc frontmatter / glob 自动附加 / AI 自决）等其他家专有指令格式未支持 | 只影响从 Cursor 等工具迁入的场景；AGENTS.md（Codex）接管链已完整 | 发现器 `instruction-sources.ts` 已是单一事实源，按需在全局/项目层注册新格式 | open |
+| L-47-02 | CLAUDE.md `@import` 语法、指令预算设置项（`instructionMaxBytes`）、AGENTS.md 生成器（从 memory.md 反向导出骨架）均 Scope Out | 高级用法缺失；预算固定 32KiB（Codex 默认） | 触发式立项 | open |

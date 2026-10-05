@@ -177,7 +177,9 @@ export function CapabilityPluginsPanel() {
   }
 
   const onConfirmInstall = async () => {
-    const res = await installPlugin({ confirmed: true, overwrite })
+    // ★ D222：确认段必须把第一段选中的包路径原样传回 —— 否则主进程
+    //   见 zipPath 为空会再弹一次文件选择框（「确认安装后又弹选择框」缺陷）
+    const res = await installPlugin({ zipPath: pendingInstall?.zipPath, confirmed: true, overwrite })
     setPendingInstall(null)
     if (!res.ok && res.error !== 'CANCELLED' && res.message) {
       pushToast({ type: 'danger', message: `${installErrorText(t, res.error)}：${res.message}`, duration: 6000 })

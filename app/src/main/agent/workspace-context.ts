@@ -8,7 +8,8 @@
  * 三大块（每块都是「启动时构建、运行期不变」的稳定段，可放 system 命中前缀缓存）：
  *   1. <env> 环境信息：cwd / git repo / platform / date / node / os
  *   2. <project> 项目结构：前 2 层目录树 + 关键文件列表（package.json 等）
- *   3. <agents-md> 项目规则：cwd 向上找的 AGENTS.md / CLAUDE.md / CONTEXT.md 内容
+ *   3. <agents-md> 项目规则：指令源发现器（v0.47.0 起收敛到 instruction-sources.ts ——
+ *      AGENTS.md / Codex 兼容语义：全局 ~/.codex/AGENTS.md + 祖先链拼接 + 32KiB 预算）
  *   4. <stack> 技术栈：自动检测 package.json 的 dependencies / devDependencies
  *
  * 设计要点：
@@ -23,9 +24,14 @@
  *   - ArkWork: 全部一次性拼好（简单为先），保留全局 ~/.arkwork/AGENTS.md 兜底
  * ============================================================ */
 import { existsSync, readFileSync, statSync, readdirSync } from 'node:fs'
-import { join, relative, resolve, basename, dirname, sep } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { platform } from 'node:os'
+import {
+  discoverInstructionSources,
+  renderInstructionSourcesBlock,
+  type InstructionDiscovery,
+} from './instruction-sources.js'
 
 /* ---------- 1. <env> 环境信息 ---------- */
 
@@ -204,100 +210,10 @@ export function renderProjectBlock(tree: ProjectTree): string {
   return lines.join('\n')
 }
 
-/* ---------- 3. <agents-md> 项目规则（AGENTS.md / CLAUDE.md）---------- */
-
-const AGENT_FILE_NAMES = ['AGENTS.md', 'CLAUDE.md', 'CONTEXT.md'] as const
-const GLOBAL_AGENT_PATHS = [
-  // 全局兜底（类比 claude code 的 ~/.claude/CLAUDE.md）
-  // v0.25.0 F1 fix：原路径 join(HOME, '.arkworkAGENTS.md') 少了目录分隔符，
-  // 全局规则文件永不加载 —— 修正为 ~/.arkwork/AGENTS.md / ~/.arkwork/CLAUDE.md
-  join(process.env.HOME || '', '.arkwork', 'AGENTS.md'),
-  join(process.env.HOME || '', '.arkwork', 'CLAUDE.md'),
-]
-const MAX_AGENT_FILE_BYTES = 8 * 1024  // 单文件 8KB 上限（避免撑爆 system）
-
-export interface AgentFiles {
-  /** 从 cwd 向上找到的第一个文件（最具体优先），按优先级合并 */
-  projectFiles: Array<{ name: string; relPath: string; content: string }>
-  /** 全局兜底文件 */
-  globalFiles: Array<{ path: string; content: string }>
-}
-
-function findProjectAgentFile(workspaceDir: string): string | null {
-  // 从 workspaceDir 向上找 AGENTS.md / CLAUDE.md / CONTEXT.md，找到第一个存在的就停
-  let dir = resolve(workspaceDir)
-  const root = resolve(dir, sep)  // 根目录 sentinel
-  for (let depth = 0; depth < 6; depth++) {  // 最多向上 6 层
-    for (const name of AGENT_FILE_NAMES) {
-      const p = join(dir, name)
-      if (existsSync(p) && statSync(p).isFile()) {
-        return p
-      }
-    }
-    if (dir === root) break
-    const parent = dirname(dir)
-    if (parent === dir) break  // 到根了
-    dir = parent
-  }
-  return null
-}
-
-function safeRead(p: string): string | null {
-  try {
-    if (!existsSync(p) || !statSync(p).isFile()) return null
-    if (statSync(p).size > MAX_AGENT_FILE_BYTES) {
-      // 超大文件：截断并标注
-      const buf = readFileSync(p, 'utf-8').slice(0, MAX_AGENT_FILE_BYTES)
-      return buf + `\n\n... (文件超过 ${MAX_AGENT_FILE_BYTES / 1024}KB，已截断。完整内容请用 file-reader 读取)`
-    }
-    return readFileSync(p, 'utf-8')
-  } catch {
-    return null
-  }
-}
-
-export function discoverAgentFiles(workspaceDir: string): AgentFiles {
-  const projectFiles: AgentFiles['projectFiles'] = []
-  const found = findProjectAgentFile(workspaceDir)
-  if (found) {
-    const content = safeRead(found)
-    if (content) {
-      projectFiles.push({
-        name: basename(found),
-        relPath: relative(workspaceDir, found) || basename(found),
-        content,
-      })
-    }
-  }
-
-  const globalFiles: AgentFiles['globalFiles'] = []
-  for (const p of GLOBAL_AGENT_PATHS) {
-    const content = safeRead(p)
-    if (content) {
-      globalFiles.push({ path: p, content })
-    }
-  }
-  return { projectFiles, globalFiles }
-}
-
-export function renderAgentFilesBlock(files: AgentFiles): string {
-  if (files.projectFiles.length === 0 && files.globalFiles.length === 0) {
-    return ''  // 无规则时省略该段，节省 token
-  }
-  const lines: string[] = [
-    '## 项目规则（AGENTS.md / CLAUDE.md）',
-    '',
-    '工作区或全局规则文件被自动加载到 system prompt，请严格遵守：',
-    '',
-  ]
-  for (const f of files.projectFiles) {
-    lines.push(`### 项目级 ${f.name}（${f.relPath}）`, '', '```markdown', f.content.trim(), '```', '')
-  }
-  for (const f of files.globalFiles) {
-    lines.push(`### 全局 ${basename(f.path)}（${f.path}）`, '', '```markdown', f.content.trim(), '```', '')
-  }
-  return lines.join('\n').trimEnd()
-}
+/* ---------- 3. <agents-md> 项目规则（→ v0.47.0 起委托 instruction-sources.ts）---------- */
+// 实现整体迁移至 `instruction-sources.ts`（AGENTS.md / Codex 兼容语义的单一事实源）：
+// 全局 ~/.codex/AGENTS.md + ~/.arkwork/*，项目祖先链 root→叶拼接，32KiB 合并预算。
+// 此处只保留组装接线。
 
 /* ---------- 4. <stack> 技术栈检测 ---------- */
 
@@ -420,7 +336,8 @@ export interface WorkspaceContext {
   envInfo: EnvInfo
   tree: ProjectTree
   stack: StackInfo
-  agentFiles: AgentFiles
+  /** v0.47.0：指令源发现结果（AGENTS.md · Codex 兼容，见 instruction-sources.ts） */
+  instructions: InstructionDiscovery
   /** 拼接好的完整文本（可直接作为 PromptSection.text 注入 system） */
   combined: string
 }
@@ -433,20 +350,20 @@ export function buildWorkspaceContext(workspaceDir: string): WorkspaceContext {
   const envInfo = buildEnvInfo(workspaceDir)
   const tree = buildProjectTree(workspaceDir)
   const stack = detectStack(workspaceDir)
-  const agentFiles = discoverAgentFiles(workspaceDir)
+  const instructions = discoverInstructionSources(workspaceDir)
 
   const blocks: string[] = [
     renderEnvBlock(envInfo),
     renderStackBlock(stack),
     renderProjectBlock(tree),
-    renderAgentFilesBlock(agentFiles),
+    renderInstructionSourcesBlock(instructions),
   ].filter((b) => b.trim().length > 0)
 
   return {
     envInfo,
     tree,
     stack,
-    agentFiles,
+    instructions,
     combined: blocks.join('\n\n---\n\n'),
   }
 }

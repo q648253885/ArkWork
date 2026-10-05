@@ -252,7 +252,18 @@
       "removeConfirmTitle": "移除工作区",
       "removeConfirmBody": "确定移除工作区「{{name}}」吗？任务数据保留在磁盘，但不再显示在此列表中。",
       "noFolderToast": "默认工作区无关联文件夹",
-      "openFolderFail": "打开文件夹失败：{{message}}"
+      "openFolderFail": "打开文件夹失败：{{message}}",
+      "instructionTitle": "指令源（AGENTS.md · Codex 兼容）",
+      "instructionScopeCodex": "全局 · Codex",
+      "instructionScopeArkwork": "全局 · ArkWork",
+      "instructionScopeProject": "项目",
+      "instructionKb": "{{kb}} KB",
+      "instructionBytes": "{{b}} 字节",
+      "instructionTruncated": "已截断",
+      "instructionBudget": "已合并 {{merged}} / 预算 {{budget}}",
+      "instructionBudgetHit": "已合并 {{merged}}，已达预算 {{budget}} —— 超出部分未加载",
+      "instructionEmpty": "当前工作区未发现指令文件。在工作区根创建 AGENTS.md 即可让 agent 遵守项目约定（兼容 Codex / Claude Code 等工具）。",
+      "instructionLoadFail": "指令源读取失败，请查看日志"
     },
     "models": {
       "title": "大模型配置",

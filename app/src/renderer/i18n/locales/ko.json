@@ -252,7 +252,18 @@
       "removeConfirmTitle": "작업 공간 제거",
       "removeConfirmBody": "작업 공간 \"{{name}}\"을(를) 제거하시겠습니까? 작업 데이터는 디스크에 유지되지만 더 이상 이 목록에 표시되지 않습니다.",
       "noFolderToast": "기본 작업 공간에 연결된 폴더가 없습니다",
-      "openFolderFail": "폴더를 열지 못했습니다: {{message}}"
+      "openFolderFail": "폴더를 열지 못했습니다: {{message}}",
+      "instructionTitle": "지시 소스(AGENTS.md · Codex 호환)",
+      "instructionScopeCodex": "전역 · Codex",
+      "instructionScopeArkwork": "전역 · ArkWork",
+      "instructionScopeProject": "프로젝트",
+      "instructionKb": "{{kb}} KB",
+      "instructionBytes": "{{b}} B",
+      "instructionTruncated": "잘림",
+      "instructionBudget": "병합 {{merged}} / 예산 {{budget}}",
+      "instructionBudgetHit": "병합 {{merged}} — 예산 {{budget}} 도달, 나머지는 로드되지 않았습니다",
+      "instructionEmpty": "현재 워크스페이스에서 지시 파일을 찾지 못했습니다. 루트에 AGENTS.md를 만들면 에이전트가 프로젝트 규약을 따릅니다(Codex / Claude Code 등 호환).",
+      "instructionLoadFail": "지시 소스 읽기 실패 — 로그를 확인하세요"
     },
     "models": {
       "title": "LLM 구성",

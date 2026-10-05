@@ -252,7 +252,18 @@
       "removeConfirmTitle": "Remove workspace",
       "removeConfirmBody": "Remove workspace \"{{name}}\"? Task data stays on disk but will no longer appear in this list.",
       "noFolderToast": "The default workspace has no associated folder",
-      "openFolderFail": "Failed to open folder: {{message}}"
+      "openFolderFail": "Failed to open folder: {{message}}",
+      "instructionTitle": "Instruction sources (AGENTS.md · Codex-compatible)",
+      "instructionScopeCodex": "Global · Codex",
+      "instructionScopeArkwork": "Global · ArkWork",
+      "instructionScopeProject": "Project",
+      "instructionKb": "{{kb}} KB",
+      "instructionBytes": "{{b}} B",
+      "instructionTruncated": "truncated",
+      "instructionBudget": "{{merged}} merged / {{budget}} budget",
+      "instructionBudgetHit": "{{merged}} merged — budget of {{budget}} reached; the rest was not loaded",
+      "instructionEmpty": "No instruction files found in the current workspace. Create an AGENTS.md at the workspace root to give the agent your project conventions (compatible with Codex / Claude Code and more).",
+      "instructionLoadFail": "Failed to read instruction sources — see logs"
     },
     "models": {
       "title": "LLM configuration",

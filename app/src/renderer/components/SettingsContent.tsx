@@ -22,7 +22,7 @@ import { Icon } from '../icons'
 import { ark } from '../ipc/client'
 import type { PermissionMode } from '@shared/types/permission'
 import type { LlmModel, LlmProviderKind } from '@shared/types/agent'
-import type { Locale, TestModelResult } from '@shared/types/ipc'
+import type { Locale, TestModelResult, InstructionSourcesReport, InstructionSourceScope } from '@shared/types/ipc'
 
 // polish3 §Task 2.1：删除 shortcuts Tab；总表仅 HelpCenter 内展示
 // label/hint 为 i18n key（settings.tabs.*）
@@ -96,7 +96,12 @@ export function SettingsContent() {
       {/* 正文 */}
       <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
         {settingsTab === 'models' && <ModelsSection models={models} />}
-        {settingsTab === 'workspace' && <WorkspaceSection />}
+        {settingsTab === 'workspace' && (
+          <>
+            <WorkspaceSection />
+            <InstructionSourcesSection />
+          </>
+        )}
         {settingsTab === 'knowledge' && <KnowledgeSection />}
         {settingsTab === 'appearance' && <AppearanceSection />}
         {settingsTab === 'advanced' && <DeveloperSection />}
@@ -560,6 +565,98 @@ function WorkspaceSection() {
           </div>
         )}
       </div>
+    </section>
+  )
+}
+
+/* ============================================================
+ * Instruction Sources Section — v0.47.0（F3）：指令源（AGENTS.md · Codex 兼容）
+ * 设计文档：docs/versions/v0.47.0/04-system-design.md §三 W5
+ *
+ * 回答用户接管 Codex 项目时最关心的问题：「ArkWork 到底读到了哪些指令文件」。
+ * 数据 = settings:instruction-sources（与引擎共用同一发现函数，单一事实源）；
+ * 只回元数据不回正文（IPC 层保证）。空态给创建指引。
+ * ============================================================ */
+function InstructionSourcesSection() {
+  const { t } = useTranslation()
+  const [report, setReport] = useState<InstructionSourcesReport | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    void ark.settings
+      .instructionSources()
+      .then((r) => {
+        if (alive) setReport(r)
+      })
+      .catch(() => {
+        if (alive) setFailed(true)
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const scopeBadge = (scope: InstructionSourceScope): { label: string; cls: string } => {
+    if (scope === 'codex-global') {
+      return { label: t('settings.workspace.instructionScopeCodex'), cls: 'text-accent border-accent' }
+    }
+    if (scope === 'arkwork-global') {
+      return { label: t('settings.workspace.instructionScopeArkwork'), cls: 'text-text-secondary border-border-default' }
+    }
+    return { label: t('settings.workspace.instructionScopeProject'), cls: 'text-text-tertiary border-border-subtle' }
+  }
+
+  // <1KB 显示字节（「0.0 KB」对 45 B 的文件有误导），≥1KB 显示一位小数 KB
+  const size = (bytes: number): string =>
+    bytes < 1024
+      ? t('settings.workspace.instructionBytes', { b: bytes })
+      : t('settings.workspace.instructionKb', { kb: (bytes / 1024).toFixed(1) })
+
+  return (
+    <section className="mt-6" data-testid="instruction-sources-section">
+      <SectionLabel>{t('settings.workspace.instructionTitle')}</SectionLabel>
+      {failed && (
+        <div className="mt-2 text-xs text-danger rounded-md border border-danger bg-danger-soft p-2.5">
+          {t('settings.workspace.instructionLoadFail')}
+        </div>
+      )}
+      {!failed && report && (
+        <>
+          {report.sources.length === 0 ? (
+            <div className="mt-2 rounded-md border border-border-subtle bg-bg-overlay p-3">
+              <div className="text-xs text-text-secondary">{t('settings.workspace.instructionEmpty')}</div>
+              <div className="text-2xs text-text-faint mt-1 font-mono break-all">{report.workspaceDir}</div>
+            </div>
+          ) : (
+            <div className="mt-2 space-y-1">
+              {report.sources.map((s) => {
+                const badge = scopeBadge(s.scope)
+                return (
+                  <div
+                    key={s.path}
+                    className="flex items-center gap-2 rounded-md border border-border-subtle bg-bg-overlay px-2.5 py-1.5"
+                  >
+                    <span className={`text-2xs border rounded px-1 leading-4 flex-shrink-0 ${badge.cls}`}>{badge.label}</span>
+                    <span className="text-2xs text-text-primary font-mono truncate flex-1" title={s.path}>
+                      {s.relPath ?? s.path}
+                    </span>
+                    <span className="text-2xs text-text-tertiary flex-shrink-0">{size(s.bytes)}</span>
+                    {s.truncated && (
+                      <span className="text-2xs text-warning flex-shrink-0">{t('settings.workspace.instructionTruncated')}</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <div className="mt-1.5 text-2xs text-text-faint">
+            {report.budgetExhausted
+              ? t('settings.workspace.instructionBudgetHit', { merged: size(report.mergedBytes), budget: size(report.budgetBytes) })
+              : t('settings.workspace.instructionBudget', { merged: size(report.mergedBytes), budget: size(report.budgetBytes) })}
+          </div>
+        </>
+      )}
     </section>
   )
 }
