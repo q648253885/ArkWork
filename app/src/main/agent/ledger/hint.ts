@@ -48,6 +48,33 @@ export const PLAN_TOOL_HINT = {
 } as const
 
 /**
+ * 形状非法回执的出路后缀（v0.48.0 · D223，真值表用例见 TC-PEM 组）。
+ *
+ * 真机根因（公司部署 qwen3.8 27b）：模型提交 task_plan({items: []}) 后，引擎回执
+ * 只有「items 必须是非空数组。请重新提交完整清单」——三重缺陷：
+ *   ① 没说 task_plan 是可选快路径（D202 已降级为可选）；
+ *   ② 没附当前清单快照（模型不知道「完整清单」该长什么样）；
+ *   ③「请重新提交」恰好驱动**原样重试**（v0.39.0 W2：失败后最忌原样重试）——
+ *     同参数签名预算 5/5 耗尽后，模型在「被拦的 task_plan」与「被拦的
+ *     task_complete」之间空转，任务无法完成。
+ *
+ * 分场（与 endgameSuffixOf 同款真值表纪律）：
+ *  - 无清单（itemCount <= 0）→ 「可直接开始干活，引擎会自动建清单」——把模型从
+ *    重试循环里放出来，清单交给 PlanOps create 兜底；
+ *  - 有清单 → 快照 + 「清空不被允许；完成请调 task_complete；修正请交完整清单」。
+ *
+ * @param itemCount 当前账本项数（act.ts 形状非法分支经 loadLedger 求得）
+ * @param snapshot  当前清单快照文本（act.ts 用与成功路径同源的 renderOverview 渲染）
+ */
+export function invalidShapeSuffixOf(itemCount: number, snapshot: string): string {
+  if (itemCount <= 0) {
+    return `当前清单为空。请提交包含具体步骤的完整清单（items 非空）；也可以直接开始执行任务 —— 引擎会自动建立并维护清单，${PLAN_TOOL_NAME} 是可选的快路径。`
+  }
+  const snap = snapshot.trim()
+  return `清空清单是不被允许的操作。若任务已完成，请调用 task_complete 结束任务；若需修正清单，请重新提交修正后的完整清单（已完成项不会被回退）。当前清单（${itemCount} 项）：${snap ? `\n${snap}` : '（空）'}`
+}
+
+/**
  * 终局后缀纯函数（v0.42.1 · D212，真值表用例 TC-ENDG-001）。
  *
  * @param openCount 在途项数（`openItems(ledger).length`）

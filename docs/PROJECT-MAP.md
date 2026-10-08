@@ -22,15 +22,15 @@
 
 > ⚠️ `overview.md`（仓库根）是 **v0.17.0 的历史 UI 设计说明**，不是项目总览 —— 项目总览见 `docs/PROJECT-OVERVIEW.md`。
 
-## 二、`app/` 分层（实测 689 个源文件 · 2026-09-29）
+## 二、`app/` 分层（实测 724 个源文件 · 2026-10-08）
 
 > 计数口径：`app/src` 下 `*.ts` / `*.tsx` / `*.mjs` / `*.cjs`，排除 `node_modules`。
 
 | 目录 | 文件数 | 职责 |
 |---|---|---|
-| `app/src/main/` | 383 | **主进程**：agent 引擎、存储、IPC、插件、记忆、LLM、文件系统 |
-| `app/src/renderer/` | 225 | **渲染进程**：React 界面（交互区、面板、工作台、设置） |
-| `app/src/shared/` | 67 | **主/渲染共享**：类型定义 `types/` + 纯函数工具 `utils/`（含 v0.41.0 `finish-phrase.ts` 终局短语谓词；v0.44.1 `tool-name.ts` 工具名孪生拼写比较 `sameToolName` —— 读侧对落盘工具名一律经它比较，不得直接 `===` 正名，D219；无 Electron 依赖） |
+| `app/src/main/` | 403 | **主进程**：agent 引擎、存储、IPC、插件、记忆、LLM、文件系统 |
+| `app/src/renderer/` | 243 | **渲染进程**：React 界面（交互区、面板、工作台、设置） |
+| `app/src/shared/` | 69 | **主/渲染共享**：类型定义 `types/` + 纯函数工具 `utils/`（含 v0.41.0 `finish-phrase.ts` 终局短语谓词；v0.44.1 `tool-name.ts` 工具名孪生拼写比较 `sameToolName` —— 读侧对落盘工具名一律经它比较，不得直接 `===` 正名，D219；无 Electron 依赖） |
 | `app/src/preload/` | 3 | 预加载脚本（`window.ark.*` 能力面） |
 | `app/src/test/` | 6 | 测试基础设施：`electron-mock-loader.mjs`（统一 ESM loader）+ `electron-stub.mjs` + `logger.stub.mjs` + `repo-scan` 快照 + `tmp-cleanup.{mjs,cjs}`（v0.37.0 新增，由 runner 用 `NODE_OPTIONS --import` 注入，**进程退出时清扫临时工作区**，见 D148/D191） |
 | `app/scripts/` | — | 工程脚本：`run-tests.mjs`（统一测试 runner，v0.39.0 起临时目录/日志名带 **PID 命名空间**，见 D191）等 |
@@ -41,11 +41,11 @@
 | 模块 | 职责 | 备注 |
 |---|---|---|
 | `main/agent/` | **ReAct 引擎**（reason / act / turn-end / loop / gates / dispatch / messages / prompt）；**v0.47.0 新增 `instruction-sources.ts`** —— AGENTS.md（Codex 兼容）指令源单一事实源：全局 ~/.codex + 祖先链 root-down 发现、32KiB 预算、子目录就近注入 | 核心；子目录见下 |
-| ├ `agent/engine/` | 引擎阶段实现（`loop.ts` / `act.ts` / `reason-phase.ts` / `turn-end.ts` / `gates.ts` / `abort.ts` / `run-setup.ts` / `messages.ts`；**v0.46.0 增 `event-payload.ts`** —— act_end 广播剥 result 纯函数，session.jsonl 落盘不变）。**v0.38.0 新增**：`work-class.ts`（本 run 工作性质分类 —— **三份集合 + 三个守卫**：`PLAN_WRITE_TOOLS`「真正落账本」/ `RETIRED_PLAN_TOOLS`「已下架旧名」/ `PLAN_TOOLS`「清单族」；**不可合并**，见 D157）、`gate-channel.ts`（门禁双出口 `refuseViaGate` / `emitTurnNote` / `injectInputJudgement`）、`ledger-guard.ts`（`guardFinish` 纯判定）、`turn-note-policy.ts`（阶段结论节流）、`plan-tree-sync.ts`（陈旧提醒，改调 `isPlanWriteTool` 守卫）。**v0.39.0**：`loop.ts` 无工具分支重排为「伪调用 → 纯答复停滞 → 文本解析」（D179/D182）。**v0.41.0**：`prose-tool-call.ts`（Ollama qwen3.5 正文工具降级通道 —— 提取器/谓词/契约提示，D208）、失败摘要与阈值重排（W2）、`sealLedger` 覆盖五条终态路径（D184）；`stall.ts` / `pseudo-call.ts` 为对应守卫常量 | 引擎已从单文件拆分为目录 |
+| ├ `agent/engine/` | 引擎阶段实现（`loop.ts` / `act.ts` / `reason-phase.ts` / `turn-end.ts` / `gates.ts` / `abort.ts` / `run-setup.ts` / `messages.ts`；**v0.46.0 增 `event-payload.ts`** —— act_end 广播剥 result 纯函数，session.jsonl 落盘不变）。**v0.38.0 新增**：`work-class.ts`（本 run 工作性质分类 —— **三份集合 + 三个守卫**：`PLAN_WRITE_TOOLS`「真正落账本」/ `RETIRED_PLAN_TOOLS`「已下架旧名」/ `PLAN_TOOLS`「清单族」；**不可合并**，见 D157）、`gate-channel.ts`（门禁双出口 `refuseViaGate` / `emitTurnNote` / `injectInputJudgement`）、`ledger-guard.ts`（`guardFinish` 纯判定）、`turn-note-policy.ts`（阶段结论节流）、`plan-tree-sync.ts`（陈旧提醒，改调 `isPlanWriteTool` 守卫）。**v0.39.0**：`loop.ts` 无工具分支重排为「伪调用 → 纯答复停滞 → 文本解析」（D179/D182）。**v0.41.0**：`prose-tool-call.ts`（Ollama qwen3.5 正文工具降级通道 —— 提取器/谓词/契约提示，D208）、失败摘要与阈值重排（W2）、`sealLedger` 覆盖五条终态路径（D184）；`stall.ts` / `pseudo-call.ts` 为对应守卫常量。**v0.48.0（D223）**：`act.ts` task_plan 形状非法回执按账本现状分场给出路（消费 `ledger/hint.ts` 新增 `invalidShapeSuffixOf`，套件 `plan-shape-escape`） | 引擎已从单文件拆分为目录 |
 | ├ `agent/planning/` | **规划通道（v0.39.0 新增）**—— 一条**不带工具、短上下文、独立于 ReAct 轮次**的 LLM 调用，专做「现在该做什么、按什么顺序做」。`types.ts`（`PlannerTrigger` 由 `PLANNER_TRIGGERS` 推导 + 预算/上限常量）/ `policy.ts`（纯函数：预算 / 冷却 / 幂等 / `shouldCommitRegexDraft`）/ `prompt.ts`（契约与模板，**避开 ReAct 模板**）/ `parse.ts`（★核心：5 层降级 JSON→fence→repair→checklist→outline + S1–S5 安全不变量）/ `digest.ts`（失败摘要 + 下一步建议）/ `runner.ts`（`runPlannerPass`，`completeFn` 为测试接缝） | `docs/versions/v0.39.0/04-system-design.md` §3 |
 | ├ `agent/planning/ops/` | **清单操作通道 PlanOps（v0.40.0 新增）**—— 规划通道只管「生成」，本模块把清单的 `create` / `update` / `complete` / `cancel` / `replan` **各自做成一次独立的窄 LLM 请求**（无工具 / 低温 / 有界超时 / 2 次尝试），输出复用 `../parse.ts` 五层降级解析，**不依赖 function calling**。`types.ts`（`PLAN_OPS_KINDS` 由数组推导类型 + 预算常量）/ `policy.ts`（`pickPlanOpsKind` 选操作 + `shouldRunPlanOps` 节流三件套，**预算优先于一切豁免**）/ `prompt.ts`（五套窄 prompt **共享同一份输出契约** I-O7）/ `runner.ts`（`runPlanOps`，`completeFn` 测试接缝）。主循环接线在 `agent/engine/plan-ops-tick.ts`（v0.40.0 新增：轮首 tick + 空回合兜底） | `docs/versions/v0.40.0/04-system-design.md` §三–§七 |
 | ├ `agent/graph/` | **TaskGraph**（16 文件，富语义任务图）+ `plan-sync.ts` 图↔清单桥 | v0.37.0 起图是**派生镜像层** |
-| ├ `agent/ledger/` | **TaskLedger**（v0.37.0 新增）—— 清单**唯一真相源**：`engine.ts`（`mutate` 唯一写入口；`emptyLedger` 含 `round: 1`）/ `ops.ts`（算子表）/ `file.ts`（原子落盘）/ `project.ts`（唯一读出口，`toPlanItems` 带出 `round`）/ `resume.ts`（恢复点）/ `types.ts`。**v0.38.0 新增** `plan-diff.ts`（`diffPlan` 纯函数 —— 模型提交完整清单、引擎算差异；对外 5 态 ↔ 对内 9 态）。**v0.39.0 新增**：`audit.ts`（审计 JSONL 永久双写 + 终态归档快照 + 幂等，D187）、`hint.ts`（`PLAN_TOOL_HINT` —— 模型可见引导文案**唯一事实源**，D186/D189）；`ops.ts` 增 `reopen` 算子与**层级判据唯一执法点**（解析 → 判层级 → 落盘三步，D185）；`plan-diff.ts` 只管引用解析、**不判层级**。**v0.43.0**：`types.ts` 增 `LedgerFile.round`/`LedgerItem.round`/`LedgerFile.goal`；`ops.ts` plan-commit 增**轮次晋升 + goal 落库**与 `setStatus` 第 8 参数（I2 推广为全模式「done 需 artifact」）；`file.ts` `normalizeLedger` **必须保留 `round`**（漏收则读→写回抹平轮次） | `docs/versions/v0.37.0/04-system-design.md` / `v0.38.0` / `v0.39.0` / `v0.43.0` |
+| ├ `agent/ledger/` | **TaskLedger**（v0.37.0 新增）—— 清单**唯一真相源**：`engine.ts`（`mutate` 唯一写入口；`emptyLedger` 含 `round: 1`）/ `ops.ts`（算子表）/ `file.ts`（原子落盘）/ `project.ts`（唯一读出口，`toPlanItems` 带出 `round`）/ `resume.ts`（恢复点）/ `types.ts`。**v0.38.0 新增** `plan-diff.ts`（`diffPlan` 纯函数 —— 模型提交完整清单、引擎算差异；对外 5 态 ↔ 对内 9 态）。**v0.39.0 新增**：`audit.ts`（审计 JSONL 永久双写 + 终态归档快照 + 幂等，D187）、`hint.ts`（`PLAN_TOOL_HINT` —— 模型可见引导文案**唯一事实源**，D186/D189；**v0.48.0 增 `invalidShapeSuffixOf`** 形状非法出路，D223）；`ops.ts` 增 `reopen` 算子与**层级判据唯一执法点**（解析 → 判层级 → 落盘三步，D185）；`plan-diff.ts` 只管引用解析、**不判层级**。**v0.43.0**：`types.ts` 增 `LedgerFile.round`/`LedgerItem.round`/`LedgerFile.goal`；`ops.ts` plan-commit 增**轮次晋升 + goal 落库**与 `setStatus` 第 8 参数（I2 推广为全模式「done 需 artifact」）；`file.ts` `normalizeLedger` **必须保留 `round`**（漏收则读→写回抹平轮次） | `docs/versions/v0.37.0/04-system-design.md` / `v0.38.0` / `v0.39.0` / `v0.43.0` |
 | ├ `agent/prompt/` | 提示词分层 sections（L0 静态 / L1 每轮 / L2 契约 / L3 运行期） | |
 | ├ `agent/skills/` | 内置 skill（含 `react-core-skills` 阶段门禁） | |
 | └ `agent/__tests__/` | agent 相关套件 | |
@@ -54,7 +54,7 @@
 | `main/profile/` | Workbench Profile（垂直工作台） | |
 | `main/capability/` | CapabilityRegistry（工具装配唯一入口 `assembleTools`） | |
 | `main/memory/` | **L1–L4 记忆**（L1 工作记忆 / L2 会话 / L3 巩固 / L4 合成）+ skill-forge | |
-| `main/llm/` | 模型调用、流式、协议归一化、缓存 | |
+| `main/llm/` | 模型调用、流式、协议归一化、缓存。**v0.48.0 新增 `rate-limit.ts`** —— 模型级限频（`LlmRateLimitConfig.minIntervalMs` / `maxConcurrent`，FIFO promise 链 + 间隔闸 + 并发闸 + 调用前中止短路），`registry.buildAdapter` 统一 `wrapWithRateLimit` 包装（未配置 = 原样直通同一引用，零变化契约）；`error-classify.ts` 增 `extractRetryAfterMs`（429 Retry-After 解析，60s 封顶，经 `fault-tolerance/retry-core.ts` 新增 `delayFor` 注入 `callLlmWithRetry`）；新增套件 `llm/__tests__/rate-limit` / `rate-limit-registry-wiring` / `retry-after` | |
 | `main/fs/` | 文件系统：`workspace.ts` / `guard.ts` / `text.ts` / `write.ts`（自写登记）/ `agent-writes.ts`（agent 写盘登记）/ `watch.ts`（chokidar 监听 + 批次聚合） | |
 | `main/store/db.ts` | 持久层原子写 + **v0.46.0 mtime 读缓存**（`JsonCollection`/`JsonlCollection` 的 list 走 stat 指纹，浅拷贝防污染；外部改写自动穿透；缺失分支返回 seed 副本 —— D221） | |
 | `main/ipc/` | 主↔渲染 IPC 入口（`index.ts` 启动链、`task.ts`、`graph.ts`、`plan-items.ts`、`panel.ts`…） | |

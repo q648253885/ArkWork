@@ -59,7 +59,8 @@ test('TC-ENDG-002 ★ 纪律⑩反向核验：endgame 指引不得包含被拦�
 /* ---------------- 二、接线契约（纪律⑭：有写必须有读） ---------------- */
 
 test('TC-ENDG-003 ★ act.ts 消费接线：零变化分支 + 更新分支都接 endgameSuffixOf（openItems 判在途）', () => {
-  assert.match(ACT, /import \{ PLAN_TOOL_HINT, endgameSuffixOf \} from '\.\.\/ledger\/hint\.js'/, 'hint 导入存在')
+  // v0.48.0（D223）：import 行追加 invalidShapeSuffixOf —— 断言随之修订（继承用例的合法变更）
+  assert.match(ACT, /import \{ PLAN_TOOL_HINT, endgameSuffixOf, invalidShapeSuffixOf \} from '\.\.\/ledger\/hint\.js'/, 'hint 导入存在')
   assert.match(ACT, /import \{ openItems \} from '\.\.\/ledger\/project\.js'/, 'openItems 导入存在（在途判据唯一事实源）')
   assert.match(ACT, /const openCount = fresh \? openItems\(fresh\)\.length : 0/, '在途计数真实计算')
   // 零变化分支：open>0 → 在途推进文案；open=0 → endgame

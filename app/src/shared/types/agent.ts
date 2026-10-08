@@ -260,6 +260,23 @@ export interface McpTool {
 export type LlmProviderKind = 'openai' | 'anthropic' | 'ollama' | 'vllm'
 
 /**
+ * v0.48.0：模型级调用频率限制（客户端主动节流）。
+ *
+ * 背景：公司内网端点对请求频率敏感，引擎多通道并发（主循环 / 规划通道 / PlanOps /
+ * 标题生成 / 记忆巩固 / 子 agent…）同时打到端点时会收到 429 频率过快异常。
+ * 节流器在 `registry.getAdapter()` 层按模型包装（全部调用点零改动覆盖）。
+ *
+ * 两个字段**都可选、默认不限制** —— 未配置时包装直接透传，既有模型行为逐字节
+ * 不变（「模型适配不得影响其他模型」约束，纪律㊵同款「安全默认与放行分离」）。
+ */
+export interface LlmRateLimitConfig {
+  /** 同一模型两次请求之间的最小间隔（毫秒）；0/undefined = 不限制 */
+  minIntervalMs?: number
+  /** 同一模型的最大并发请求数；0/undefined = 不限制 */
+  maxConcurrent?: number
+}
+
+/**
  * 一个完整的 LLM 模型配置 — 每个 model 自带 url/key，无需分层 Provider。
  * - openai：OpenAI 官方或兼容端点；baseURL 留空用官方默认
  * - anthropic：Claude 系列模型
@@ -287,6 +304,8 @@ export interface LlmModel {
    * 未配置时：Ollama 形态端点（kind=ollama/vllm 或 baseURL 含 :11434）默认关闭。
    */
   think?: boolean
+  /** v0.48.0：调用频率限制（默认不配置 = 不限制，行为与旧版逐字节一致） */
+  rateLimit?: LlmRateLimitConfig
 }
 
 import type { TaskConfig } from './task'

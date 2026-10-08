@@ -133,7 +133,7 @@ import { isPlanTool, isRetiredPlanTool } from './work-class.js'
 // v0.38.1（D177）：清单落库共享管线（task_plan 与正则清单回退共用）
 import { commitPlanDraft } from './plan-commit-pipeline.js'
 // v0.42.1（D212）：终局指引 —— 清单收口/零变化时告诉弱模型「该结束了」
-import { PLAN_TOOL_HINT, endgameSuffixOf } from '../ledger/hint.js'
+import { PLAN_TOOL_HINT, endgameSuffixOf, invalidShapeSuffixOf } from '../ledger/hint.js'
 import { openItems } from '../ledger/project.js'
 import type { LedgerItemStatus } from '../ledger/types.js'
 
@@ -650,7 +650,24 @@ export async function executeAct(
         })
       }
       if (shapeErrors.length > 0) {
-        const errMsg = `task_plan 参数非法：${shapeErrors.slice(0, 3).join('；')}。请重新提交**完整**清单（items 非空，status 用 todo/doing/done/skipped/blocked）。`
+        // v0.48.0（D223）：形状非法的回执必须**给出路**，不能只说「请重新提交」——
+        // 真机（公司部署 qwen3.8 27b）items 为空时，模型在无出路的错误与同参数
+        // 拦截之间原样重试到 5/5，任务无法完成。按账本现状分场（快照与成功路径
+        // 同源 renderOverview；文案唯一事实源在 hint.ts invalidShapeSuffixOf）。
+        let wayOut: string
+        try {
+          const led = await import('../ledger/engine.js')
+          const cur = await led.loadLedger(placeholder.taskId)
+          const curItems = cur?.items ?? []
+          wayOut = invalidShapeSuffixOf(
+            curItems.length,
+            renderOverview(curItems.map((it) => ({ status: it.status, text: it.text }))),
+          )
+        } catch {
+          // 账本读不到 = 无清单场景（出路文案仍成立：引擎会自动建清单）
+          wayOut = invalidShapeSuffixOf(0, '')
+        }
+        const errMsg = `task_plan 参数非法：${shapeErrors.slice(0, 3).join('；')}。status 用 todo/doing/done/skipped/blocked。${wayOut}`
         logger.warn('Agent', errMsg, placeholder.taskId)
         return {
           completedStep: { ...placeholder, result: { error: errMsg }, resultSummary: errMsg, durationMs, status: 'failed', errorMessage: errMsg, softFail: true },

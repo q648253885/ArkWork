@@ -10,6 +10,9 @@ import { getArkworkDir } from '../store/db.js'
 import type { LlmAdapter } from './adapter.js'
 import { OpenAIAdapter, normalizeOpenAIBaseURL } from './openai.js'
 import { AnthropicAdapter } from './anthropic.js'
+// v0.48.0（D223 配套）：模型级调用频率限制 —— buildAdapter 是 18 个 getAdapter
+// 调用点的唯一汇聚处，在此包装即可零改动覆盖全部 LLM 通道
+import { wrapWithRateLimit } from './rate-limit.js'
 import { builtinModels } from '../store/seed.js'
 import type { LlmModel, LlmProviderKind } from '@shared/types/agent'
 import type { TestModelRequest, TestModelResult } from '@shared/types/ipc'
@@ -132,6 +135,12 @@ function resolveThink(model: LlmModel): boolean | undefined {
 }
 
 function buildAdapter(model: LlmModel): LlmAdapter {
+  // v0.48.0：模型级限频包装。rateLimit 未配置时 wrapWithRateLimit 原样透传
+  //（零开销直通），既有模型行为不变；配置后按模型排队节流。
+  return wrapWithRateLimit(buildRawAdapter(model), model, (msg) => logger.info('LLM', msg))
+}
+
+function buildRawAdapter(model: LlmModel): LlmAdapter {
   const kind: LlmProviderKind = model.kind
   const apiKey = model.apiKey ?? ''
   const baseURL = model.baseURL

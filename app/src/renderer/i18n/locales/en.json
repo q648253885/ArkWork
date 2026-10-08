@@ -301,6 +301,12 @@
         "apiKeyPlaceholderRequired": "Required",
         "contextWindowLabel": "Context Window (optional)",
         "contextWindowPlaceholder": "e.g. 128000",
+        "rateLimitLabel": "Rate Limiting",
+        "minIntervalLabel": "Min interval between calls (seconds)",
+        "minIntervalPlaceholder": "e.g. 2 or 0.5",
+        "maxConcurrentLabel": "Max concurrent requests",
+        "maxConcurrentPlaceholder": "e.g. 2",
+        "unlimitedHint": "Leave empty to disable; use these to throttle a model when the endpoint returns 429 (too many requests)",
         "enabled": "Enable",
         "cancel": "Cancel",
         "save": "Save"

@@ -931,6 +931,20 @@ function ModelEditor({
   const { t } = useTranslation()
   const isEdit = !!model.id
   const [draft, setDraft] = useState<LlmModel>(model)
+  // v0.48.0：限频两字段的输入串（留空 = 不限制；秒→ms 换算，非法输入视为未配置）
+  const [minIntervalSec, setMinIntervalSec] = useState<string>(
+    model.rateLimit?.minIntervalMs ? String(model.rateLimit.minIntervalMs / 1000) : '',
+  )
+  const [maxConcurrent, setMaxConcurrent] = useState<string>(
+    model.rateLimit?.maxConcurrent ? String(model.rateLimit.maxConcurrent) : '',
+  )
+
+  const setRateLimit = (patch: Partial<NonNullable<LlmModel['rateLimit']>>) => {
+    const next = { ...draft.rateLimit, ...patch }
+    // 两值均未配置时移除整个对象，保持 models.json 干净（不落 {minIntervalMs: undefined}）
+    const hasAny = (next.minIntervalMs ?? 0) > 0 || (next.maxConcurrent ?? 0) > 0
+    setDraft({ ...draft, rateLimit: hasAny ? next : undefined })
+  }
 
   const idError = !draft.id
     ? t('settings.models.editor.idRequired')
@@ -1004,6 +1018,50 @@ function ModelEditor({
             className="input"
             placeholder={t('settings.models.editor.contextWindowPlaceholder')}
           />
+        </Field>
+        {/* v0.48.0：调用频率限制（留空 = 不限制，默认零影响） */}
+        <Field label={t('settings.models.editor.rateLimitLabel')}>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span className="block text-2xs text-text-tertiary mb-1">{t('settings.models.editor.minIntervalLabel')}</span>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={minIntervalSec}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setMinIntervalSec(v)
+                  const num = Number(v)
+                  setRateLimit({
+                    minIntervalMs: v.trim() !== '' && Number.isFinite(num) && num > 0 ? Math.round(num * 1000) : undefined,
+                  })
+                }}
+                className="input"
+                placeholder={t('settings.models.editor.minIntervalPlaceholder')}
+              />
+            </label>
+            <label className="block">
+              <span className="block text-2xs text-text-tertiary mb-1">{t('settings.models.editor.maxConcurrentLabel')}</span>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={maxConcurrent}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setMaxConcurrent(v)
+                  const num = Number(v)
+                  setRateLimit({
+                    maxConcurrent: v.trim() !== '' && Number.isFinite(num) && num > 0 ? Math.floor(num) : undefined,
+                  })
+                }}
+                className="input"
+                placeholder={t('settings.models.editor.maxConcurrentPlaceholder')}
+              />
+            </label>
+          </div>
+          <p className="text-2xs text-text-tertiary mt-1">{t('settings.models.editor.unlimitedHint')}</p>
         </Field>
         <label className="flex items-center gap-2 text-sm">
           <input

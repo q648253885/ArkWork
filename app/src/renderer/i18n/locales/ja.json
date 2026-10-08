@@ -301,6 +301,12 @@
         "apiKeyPlaceholderRequired": "必須",
         "contextWindowLabel": "Context Window（任意）",
         "contextWindowPlaceholder": "例：128000",
+        "rateLimitLabel": "呼び出し頻度制限",
+        "minIntervalLabel": "最小呼び出し間隔（秒）",
+        "minIntervalPlaceholder": "例：2 または 0.5",
+        "maxConcurrentLabel": "最大同時リクエスト数",
+        "maxConcurrentPlaceholder": "例：2",
+        "unlimitedHint": "空欄 = 制限なし。エンドポイントが 429（頻度超過）を返す場合にこのモデルのリクエストを間引きします",
         "enabled": "有効",
         "cancel": "キャンセル",
         "save": "保存"

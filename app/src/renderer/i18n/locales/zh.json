@@ -301,6 +301,12 @@
         "apiKeyPlaceholderRequired": "必填",
         "contextWindowLabel": "Context Window（可选）",
         "contextWindowPlaceholder": "如 128000",
+        "rateLimitLabel": "调用频率限制",
+        "minIntervalLabel": "最小调用间隔（秒）",
+        "minIntervalPlaceholder": "如 2 或 0.5",
+        "maxConcurrentLabel": "最大并发请求数",
+        "maxConcurrentPlaceholder": "如 2",
+        "unlimitedHint": "留空 = 不限制；端点提示频率过快（429）时，用这两项为该模型排队限速",
         "enabled": "启用",
         "cancel": "取消",
         "save": "保存"

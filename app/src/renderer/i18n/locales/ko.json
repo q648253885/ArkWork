@@ -301,6 +301,12 @@
         "apiKeyPlaceholderRequired": "필수",
         "contextWindowLabel": "Context Window(선택 사항)",
         "contextWindowPlaceholder": "예: 128000",
+        "rateLimitLabel": "호출 빈도 제한",
+        "minIntervalLabel": "최소 호출 간격(초)",
+        "minIntervalPlaceholder": "예: 2 또는 0.5",
+        "maxConcurrentLabel": "최대 동시 요청 수",
+        "maxConcurrentPlaceholder": "예: 2",
+        "unlimitedHint": "비워 두면 제한 없음. 엔드포인트가 429(빈도 초과)를 반환할 때 이 모델의 요청을 조절합니다",
         "enabled": "활성화",
         "cancel": "취소",
         "save": "저장"

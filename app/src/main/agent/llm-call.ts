@@ -9,7 +9,7 @@ import type { LogEntry } from '@shared/types/ipc'
 import type { LlmCompleteResponse } from '../llm/adapter.js'
 // v0.36.0 F1.4：错误分类单一真源（retryableError / isContextOverflowError / LlmTimeoutError
 // 移入 llm/error-classify.ts，此处再导出保持既有 import 路径不破坏）
-import { retryableError, isContextOverflowError, LlmTimeoutError } from '../llm/error-classify.js'
+import { retryableError, isContextOverflowError, LlmTimeoutError, extractRetryAfterMs } from '../llm/error-classify.js'
 // v0.36.0 F1.4：重试统一走 fault-tolerance/retry-core.ts（纯模块 —— 不能 import
 // retry-with-backoff.ts，否则 i18n 模块图会拖进本文件的零依赖单测环境）
 import { retryCore } from '../fault-tolerance/retry-core.js'
@@ -141,6 +141,8 @@ export async function callLlmWithRetry(
     backoffMs,
     signal,
     isRetryable: retryableError,
+    // v0.48.0：服务端给出 Retry-After（429 频率过快）时按其等待；无则回落固定退避
+    delayFor: (_, err) => extractRetryAfterMs(err) ?? 0,
     onRetry: (attempt, delay, err) => {
       warnLog('Agent', `LLM call failed (retry ${attempt}/${backoffMs.length} in ${delay}ms): ${(err as Error).message}`)
     },

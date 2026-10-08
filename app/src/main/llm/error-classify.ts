@@ -34,6 +34,56 @@ export function isContextOverflowError(err: unknown): boolean {
 }
 
 /**
+ * v0.48.0：从 429 / rate limit 错误中提取服务端建议的等待时长（毫秒）。
+ *
+ * 提取顺序（优先级从高到低）：
+ *   ① `retry-after-ms` 头（毫秒，OpenAI / Anthropic SDK 的 APIError 均挂在 err.headers）
+ *   ② `retry-after` 头（秒数或 HTTP-date 两种格式，HTTP 规范）
+ *   ③ 错误消息文本（部分端点把 "retry after 5s" 写进 message）
+ *
+ * 一律封顶 60s：服务端给的等待若过长（如 HTTP-date 在几分钟后），
+ * 客户端不该傻等 —— 超出部分交给 retryCore 退避兜底。
+ * 无任何线索返回 null（调用方回落既有固定退避）。
+ */
+export function extractRetryAfterMs(err: unknown): number | null {
+  const MAX_MS = 60_000
+  // —— ①② 结构化 headers（OpenAI / Anthropic SDK APIError 均带）——
+  const headers = (err as { headers?: Record<string, unknown> | null } | null)?.headers
+  if (headers && typeof headers === 'object') {
+    const header = (name: string): string | undefined => {
+      for (const [k, v] of Object.entries(headers)) {
+        if (k.toLowerCase() === name && v != null) return String(v).trim()
+      }
+      return undefined
+    }
+    // ① retry-after-ms（毫秒，优先 —— 粒度最细）
+    const msRaw = header('retry-after-ms')
+    if (msRaw) {
+      const ms = Number(msRaw)
+      if (Number.isFinite(ms) && ms > 0) return Math.min(Math.ceil(ms), MAX_MS)
+    }
+    // ② retry-after：先按秒数解析，失败再按 HTTP-date
+    const raRaw = header('retry-after')
+    if (raRaw) {
+      const sec = Number(raRaw)
+      if (Number.isFinite(sec) && sec > 0) return Math.min(Math.ceil(sec * 1000), MAX_MS)
+      const at = Date.parse(raRaw)
+      if (!Number.isNaN(at)) return Math.min(Math.max(0, at - Date.now()), MAX_MS)
+    }
+  }
+  // —— ③ 错误消息文本（如 "rate limit exceeded, retry after 5s"）——
+  const msg = err instanceof Error ? err.message : String(err)
+  const m = /retry[ -_]?after[ :=]+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|sec|secs|seconds?|m|min|mins|minutes?)?/i.exec(msg)
+  if (m) {
+    const v = Number(m[1])
+    const unit = (m[2] ?? 's').toLowerCase()
+    const ms = unit.startsWith('ms') || unit.startsWith('milli') ? v : unit.startsWith('m') ? v * 60_000 : v * 1000
+    if (Number.isFinite(ms) && ms > 0) return Math.min(Math.ceil(ms), MAX_MS)
+  }
+  return null
+}
+
+/**
  * LLM 调用超时错误。
  * message 含 "timeout" 子串（retryableError 按 timeout 匹配 → 可重试）。
  * v0.36.0：类定义移入本模块（error-classify 单一真源），llm-call.ts 再导出 ——

@@ -54,6 +54,12 @@ export interface RetryCoreOptions {
   /** 每次决定重试前回调（attempt 从 1 计；delayMs 为本次等待） */
   onRetry?: (attempt: number, delayMs: number, err: unknown) => void
   /**
+   * v0.48.0：按次覆写等待时长（如尊重服务端 Retry-After）。attempt 从 1 计。
+   * 返回 > 0 时用返回值替代 backoffMs[attempt-1]；返回 0/null/undefined 或
+   * 未提供时回落既有退避序列 —— 未使用本通道的行为逐字节不变。
+   */
+  delayFor?: (attempt: number, err: unknown) => number
+  /**
    * 中止时抛出的错误（调用前已中止 / 调用期间中止 / backoff 期间中止）。
    * 入参 lastErr 为此前捕获的错误（可能 undefined）。缺省抛 Error('aborted')。
    */
@@ -82,7 +88,9 @@ export async function retryCore<T>(fn: () => Promise<T>, opts: RetryCoreOptions 
       // 调用期间用户中止 → 不重试
       if (opts.signal?.aborted) throw throwAborted(lastErr)
       if (!isRetryable(err) || attempt === maxAttempts - 1) break
-      const delay = backoffMs[attempt] ?? 0
+      // v0.48.0：delayFor 覆写优先（服务端 Retry-After），否则回落固定退避
+      const overridden = opts.delayFor?.(attempt + 1, err)
+      const delay = overridden != null && overridden > 0 ? overridden : (backoffMs[attempt] ?? 0)
       opts.onRetry?.(attempt + 1, delay, err)
       try {
         await sleep(delay, opts.signal)
