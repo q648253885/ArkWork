@@ -130,7 +130,144 @@ test('TC-LN-015 name 缺失 → 空串（不抛错，容错优先）', () => {
   assert.equal(call.malformed, false)
 })
 
+test('TC-LN-016 ★ arguments 为对象形态 → 直接采用（v0.48.1 D224 真机 qwen3.8 网关形态）', () => {
+  // 真机根因：兼容网关返回 arguments 为对象（OpenAI 规范是字符串），此前静默
+  // 降级 {} → items 在到达 act.ts 前消失 →「items 必须是非空数组」与事实不符。
+  const [call] = normalizeToolCalls([
+    {
+      id: 'call_x',
+      name: 'task_plan',
+      arguments: { items: [{ text: '调研', status: 'todo' }], reason: '开局' },
+    } as unknown as RawToolCall,
+  ])
+  assert.equal(call.id, 'call_x')
+  assert.equal(call.name, 'task_plan')
+  assert.equal(call.malformed, false, '对象形态是合法参数载体，不得标 malformed')
+  assert.deepEqual(call.args, { items: [{ text: '调研', status: 'todo' }], reason: '开局' })
+  assert.equal(
+    call.rawArguments,
+    JSON.stringify({ items: [{ text: '调研', status: 'todo' }], reason: '开局' }),
+    'rawArguments 保留对象序列化原文（诊断可回放）',
+  )
+})
+
+test('TC-LN-017 对象形态边界回归：数组 / null / 缺省不受新分支影响', () => {
+  // 数组：不是参数对象 → 不走对象直采分支，维持旧行为（arguments 视为缺失 → {}）
+  const [arr] = normalizeToolCalls([{ id: 'x', name: 't', arguments: [1, 2] } as unknown as RawToolCall])
+  assert.equal(arr.malformed, false)
+  assert.deepEqual(arr.args, {})
+  // null / 缺省：无参数语义，维持既有行为（空对象解析）
+  const [nil] = normalizeToolCalls([{ id: 'x', name: 't', arguments: null }])
+  assert.equal(nil.malformed, false)
+  assert.deepEqual(nil.args, {})
+  const [absent] = normalizeToolCalls([{ id: 'x', name: 't' }])
+  assert.equal(absent.malformed, false)
+  assert.deepEqual(absent.args, {})
+})
+
+test('TC-LN-018 ★ 字符串 arguments 夹带不可见字符 → 剥离重试一次（v0.48.1 D227 打包联测补遗）', () => {
+  // 真机表象：「arguments 不是合法 JSON（原始文本：{}）」而 JSON.parse("{}") 不可能
+  // 失败 → 原文夹带 BOM/零宽等不可见格式字符（恰被回显链路 trim/\s 折叠成干净的 {}）。
+  // 腿①：BOM 前缀 + 完整参数 → 剥离重试成功，args 完整采用（malformed=false）
+  const bomArgs = '\uFEFF{"items":[{"text":"调研","status":"todo"}],"reason":"开局"}'
+  const [bom] = normalizeToolCalls([{ id: 'x', name: 'task_plan', arguments: bomArgs }])
+  assert.equal(bom.malformed, false, 'BOM 毒化但剥离后可解析 → 不标 malformed')
+  assert.deepEqual(bom.args, { items: [{ text: '调研', status: 'todo' }], reason: '开局' })
+  assert.equal(bom.rawArguments, bomArgs, 'rawArguments 保留原始原文（诊断可回放）')
+  // 腿②：零宽字符夹在结构里 → 同样重试成功
+  const zwspArgs = '{\u200b"command":"ls"\u200d}'
+  const [zwsp] = normalizeToolCalls([{ id: 'y', name: 'shell', arguments: zwspArgs }])
+  assert.equal(zwsp.malformed, false)
+  assert.deepEqual(zwsp.args, { command: 'ls' })
+  // 腿③：真正常非法 JSON（无不可见字符）→ 重试仍失败，维持 _raw 降级且保留原文
+  const [broken] = normalizeToolCalls([{ id: 'z', name: 'write_file', arguments: '{"path": "a.txt", ' }])
+  assert.equal(broken.malformed, true)
+  assert.deepEqual(broken.args, { _raw: '{"path": "a.txt", ' })
+  assert.equal(broken.rawArguments, '{"path": "a.txt", ')
+  // 腿④：重试成功也不碰字符串值内容——值内的不可见字符原样保留
+  const inValue = '{"note":"a\uFEFFb"}'
+  const [val] = normalizeToolCalls([{ id: 'w', name: 't', arguments: inValue }])
+  assert.equal(val.malformed, false, '原样可解析 → 零干预，不剥离字符串值内容')
+  assert.deepEqual(val.args, { note: 'a\uFEFFb' })
+})
+
+test('TC-LN-041 ★ 整体双重编码剥离：arguments 是被二次 stringify 的参数对象（v0.48.2 D228①）', () => {
+  // 业界口径（vLLM tool parser 归一化层）：网关剥码。字段级双重编码由 act.ts items
+  // 抢救兜底（D225），本层收口「arguments 整体被二次序列化」形态：
+  // parse 出字符串、其内容再 parse 出对象 → 二次采用。
+  const inner = { items: [{ text: '调研', status: 'todo' }], reason: '开局' }
+  const twice = JSON.stringify(JSON.stringify(inner))
+  const [dbl] = normalizeToolCalls([{ id: 'x', name: 'task_plan', arguments: twice }])
+  assert.equal(dbl.malformed, false, '双层编码剥开后是合法参数对象 → 不标 malformed')
+  assert.deepEqual(dbl.args, inner)
+  assert.equal(dbl.rawArguments, twice, 'rawArguments 保留原始原文（诊断可回放）')
+  // 反例①：parse 出字符串但内容不是 JSON 对象 → 维持 _raw 降级（不误收）
+  const [plain] = normalizeToolCalls([{ id: 'y', name: 't', arguments: JSON.stringify('hello') }])
+  assert.equal(plain.malformed, true)
+  assert.deepEqual(plain.args, { _raw: JSON.stringify('hello') })
+  // 反例②：内层剥出来是数组 → 仍拒收（asRecord 不做隐式转换，与数组形态口径一致）
+  const [arr] = normalizeToolCalls([{ id: 'z', name: 't', arguments: JSON.stringify(JSON.stringify([1, 2])) }])
+  assert.equal(arr.malformed, true)
+})
+
+test('TC-LN-042 ★ 截断 JSON 闭合补全（v0.48.2 D228②；仅 allowTruncationRepair 开启时）', () => {
+  const truncated = '{"items": [{"text": "a"'
+  // 腿①：补全开启 → 闭合重验成功采用
+  const [fixed] = normalizeToolCalls([{ id: 'x', name: 'task_plan', arguments: truncated }], {
+    allowTruncationRepair: true,
+  })
+  assert.equal(fixed.malformed, false, '截断形态补全后可解析 → 采用')
+  assert.deepEqual(fixed.args, { items: [{ text: 'a' }] })
+  // 腿②：尾部悬空逗号也一并剥掉
+  const [comma] = normalizeToolCalls([{ id: 'y', name: 't', arguments: '{"command":"ls",' }], {
+    allowTruncationRepair: true,
+  })
+  assert.equal(comma.malformed, false)
+  assert.deepEqual(comma.args, { command: 'ls' })
+  // 腿③：默认（不传 opts）不补全 → 维持 _raw 降级（既有路径逐字节不变）
+  const [off] = normalizeToolCalls([{ id: 'w', name: 't', arguments: truncated }])
+  assert.equal(off.malformed, true, '未开启补全 → 旧行为')
+  assert.deepEqual(off.args, { _raw: truncated })
+  // 腿④：截断停在键名中间 → 补全产物不合法，parse 验证失败回落 _raw（宁缺毋滥）
+  const [midKey] = normalizeToolCalls([{ id: 'm', name: 't', arguments: '{"te' }], {
+    allowTruncationRepair: true,
+  })
+  assert.equal(midKey.malformed, true)
+  // 腿⑤：结构完整但语法非法（非截断形态）→ 不画蛇添足
+  const [broken] = normalizeToolCalls([{ id: 'b', name: 't', arguments: '{"bad' }], {
+    allowTruncationRepair: true,
+  })
+  assert.equal(broken.malformed, true)
+})
+
 /* ---------------- ③ normalizeResponse 聚合 ---------------- */
+
+test('TC-LN-043 ★ 截断补全安全阀：finish_reason=length 不补全（v0.48.2 D228② Pi agent loop 原则）', () => {
+  // 被输出长度截断的调用即使可补全也不执行 —— 半截参数比失败更危险。
+  // 腿①：length → 不补全，malformed + _raw 保留原文
+  const truncated = '{"items": [{"text": "a"'
+  const len = normalizeResponse(
+    { toolCalls: [{ id: 'x', name: 'task_plan', arguments: truncated }], finishReason: 'length' },
+    'openai',
+  )
+  assert.equal(len.finishReason, 'length')
+  assert.equal(len.toolCalls[0]!.malformed, true, 'length 截断 → 不补全')
+  assert.deepEqual(len.toolCalls[0]!.args, { _raw: truncated })
+  // 腿②：max_tokens（ollama 词表）同归 length → 同样不补全
+  const mt = normalizeResponse(
+    { toolCalls: [{ id: 'y', name: 't', arguments: truncated }], finishReason: 'max_tokens' },
+    'ollama',
+  )
+  assert.equal(mt.finishReason, 'length')
+  assert.equal(mt.toolCalls[0]!.malformed, true)
+  // 腿③：stop → 允许补全（同形态采用）
+  const ok = normalizeResponse(
+    { toolCalls: [{ id: 'z', name: 'task_plan', arguments: truncated }], finishReason: 'stop' },
+    'openai',
+  )
+  assert.equal(ok.toolCalls[0]!.malformed, false, '正常终止帧 → 补全开启')
+  assert.deepEqual(ok.toolCalls[0]!.args, { items: [{ text: 'a' }] })
+})
 
 test('TC-LN-020 聚合：text/reasoning/toolCalls/finishReason/usage 齐全', () => {
   const r = normalizeResponse(

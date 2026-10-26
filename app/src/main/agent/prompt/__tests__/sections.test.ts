@@ -9,6 +9,8 @@ import assert from 'node:assert/strict'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { writeFile, mkdtemp, rm } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   resetPromptSectionRegistry,
   registerPromptSection,
@@ -188,4 +190,40 @@ test('collectAlwaysOnSections 加载 instructionMd 并包装为契约段', async
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+/* ============================================================
+ * ★ D233 / F7c — 回答通道契约段（TC-SWALLOW-006）
+ *
+ * 背景（qwen3.8 27b 实机）：正式回答（代码）只写在思考流里，交互区拿不到
+ * 正文而模型自以为已输出。F7c 在 system prompt 里注册 answer-channel 段，
+ * 把「正式回答必须写在回复正文里」写进硬性契约（提示词侧防线，与引擎侧
+ * F7a/F7b 互补）。
+ *
+ * 本用例做源码断言而非装配断言：内置段在模块加载时注册，本文件 beforeEach
+ * 的 resetPromptSectionRegistry() 会清空注册表，装配路径测不到内置段；
+ * 源码锚点断言与 empty-response-guard.test.ts 同法（stripComments 不需要 ——
+ * 锚点均为代码/文案原文，注释里不含同字样）。
+ * ============================================================ */
+
+test('TC-SWALLOW-006 回答通道契约段（D233 / F7c）：注册在位 + 文案钉死', () => {
+  const src = readFileSync(fileURLToPath(new URL('../sections.ts', import.meta.url)), 'utf-8')
+
+  // 注册在位：SECTION_ORDER 槽位 + 注册体
+  assert.match(src, /answerChannel: 530/, 'SECTION_ORDER 必须有 answerChannel: 530 槽位')
+  assert.match(src, /id: 'answer-channel'/, 'answer-channel 段必须注册在位')
+  assert.match(
+    src,
+    /order: SECTION_ORDER\.answerChannel/,
+    '注册体的 order 必须引用 SECTION_ORDER.answerChannel（不许另写字面量）',
+  )
+
+  // 文案钉死：三条关键锚点（通道要求 + 思考通道边界 + 引擎退回后果）
+  assert.match(src, /必须写在回复\*\*正文\*\*里/, '必须明确「正式回答写在回复正文里」')
+  assert.match(src, /思考通道只放推理过程/, '必须明确「思考通道只放推理过程」')
+  assert.match(
+    src,
+    /正文为空的完成声明会被引擎退回/,
+    '必须写明后果（正文为空的完成声明会被引擎退回）—— 与 F7b 守卫闭环',
+  )
 })

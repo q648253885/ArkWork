@@ -347,3 +347,91 @@ test('TC-PS-011 Anthropic：空 content blocks → 不完整形态；tool_use �
     await toolMock.close()
   }
 })
+
+/* ============================================================
+ * 5. v0.48.2（D233 / F7a）截断吞正文标记真值表（TC-SWALLOW-002/003）
+ *
+ * qwen3.8 27b 实机：正式回答（代码）只写在思考流内，`<think>` 未闭合或
+ * 截断在闭合前 → 整段被吞进思考，content 空、此前无任何告警。
+ * ============================================================ */
+
+test('TC-SWALLOW-002 非流式：未闭合 <think> + finish=length → contentSwallowedByTruncation', async () => {
+  // 吞没腿：整段回复（含代码）在思考流内、未闭合、max_tokens 截断
+  const swallowMock = await startMock(
+    jsonHandler({
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: '<think>用户要一段代码……\nconst answer = 42' },
+          finish_reason: 'length',
+        },
+      ],
+      usage: { prompt_tokens: 100, completion_tokens: 512 },
+    }),
+  )
+  try {
+    const resp = await openaiAdapterOf(swallowMock.url).complete(REQ)
+    assert.equal(resp.finishReason, 'length')
+    assert.equal(resp.content, '', '未闭合截断 → 正文空（think-strip 容错语义）')
+    assert.equal(resp.contentSwallowedByTruncation, true, '必须标记吞没，引擎据此给人话回执')
+  } finally {
+    await swallowMock.close()
+  }
+  // 对照腿①：finish=stop 同形态（正常结束但忘闭合）→ 不标记（纯 think 惯性走 F7b/F7c 防线）
+  const stopMock = await startMock(
+    jsonHandler({
+      choices: [{ index: 0, message: { role: 'assistant', content: '<think>推理未闭合' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 20 },
+    }),
+  )
+  try {
+    const resp = await openaiAdapterOf(stopMock.url).complete(REQ)
+    assert.equal(resp.contentSwallowedByTruncation, false, 'finish≠length 不标记')
+  } finally {
+    await stopMock.close()
+  }
+  // 对照腿②：length 截断但正文已送达部分 → 不标记
+  const partialMock = await startMock(
+    jsonHandler({
+      choices: [{ index: 0, message: { role: 'assistant', content: '正文开头<think>推理' }, finish_reason: 'length' }],
+      usage: { prompt_tokens: 10, completion_tokens: 20 },
+    }),
+  )
+  try {
+    const resp = await openaiAdapterOf(partialMock.url).complete(REQ)
+    assert.equal(resp.contentSwallowedByTruncation, false, '正文已有部分送达时不标记')
+  } finally {
+    await partialMock.close()
+  }
+})
+
+test('TC-SWALLOW-003 流式：think 增量 + finish=length → contentSwallowedByTruncation', async () => {
+  const mk = (delta: Record<string, unknown>, finish?: string): Record<string, unknown> => ({
+    id: 'c1',
+    object: 'chat.completion.chunk',
+    choices: [{ index: 0, delta, ...(finish ? { finish_reason: finish } : {}) }],
+  })
+  // 吞没腿：全部增量在 <think> 内（未闭合），终止帧 length
+  const swallowMock = await startMock(
+    sseHandler([mk({ content: '<think>思考流……代码 const x = 1' }), mk({}, 'length')], true),
+  )
+  try {
+    const resp = await openaiAdapterOf(swallowMock.url).completeStream(REQ, { onText: () => {} })
+    assert.equal(resp.finishReason, 'length')
+    assert.equal(resp.content.trim(), '', '正文空（tail.think 已并入 reasoning）')
+    assert.equal(resp.contentSwallowedByTruncation, true, '流式同口径标记')
+  } finally {
+    await swallowMock.close()
+  }
+  // 对照腿：正常流（闭合 think + 有正文）→ 不标记
+  const okMock = await startMock(
+    sseHandler([mk({ content: '<think>推理</think>这是正文' }), mk({}, 'stop')], true),
+  )
+  try {
+    const resp = await openaiAdapterOf(okMock.url).completeStream(REQ, { onText: () => {} })
+    assert.equal(resp.content, '这是正文')
+    assert.equal(resp.contentSwallowedByTruncation, false)
+  } finally {
+    await okMock.close()
+  }
+})

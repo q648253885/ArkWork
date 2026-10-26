@@ -47,6 +47,14 @@ export function shouldRunPlanOps(args: {
   fingerprint: string
   /** 一次性操作（create / cancel）豁免轮间隔 */
   force?: boolean
+  /**
+   * v0.48.2（D231）：同参熔断代管豁免指纹 duplicate 拒绝。
+   * 「清单指纹未变」恰是同参死循环的常态（模型原地重复提交）——此时 update 若被
+   * duplicate 拦死，代管就是空转（实机回传：用户实测 v0.48.2「与 v0.48.1 没区别」
+   * 的主断点）。豁免后 update prompt 仍带 goal/snapshot/event，LLM 依据实际进展
+   * 收口。**预算仍绝对**（不豁免 budget，防无限代管调用）。
+   */
+  duplicateExempt?: boolean
 }): { run: boolean; reason: PlanOpsGateReason } {
   const { state, kind, round, fingerprint } = args
   if (state.passes >= MAX_PLAN_OPS_PER_RUN) return { run: false, reason: 'budget' }
@@ -56,7 +64,12 @@ export function shouldRunPlanOps(args: {
       return { run: false, reason: 'cooldown' }
     }
   }
-  if (kind === 'update' && state.lastFingerprint !== undefined && state.lastFingerprint === fingerprint) {
+  if (
+    kind === 'update' &&
+    !args.duplicateExempt &&
+    state.lastFingerprint !== undefined &&
+    state.lastFingerprint === fingerprint
+  ) {
     return { run: false, reason: 'duplicate' }
   }
   return { run: true, reason: 'ok' }
@@ -107,11 +120,19 @@ export function pickPlanOpsKind(args: {
   cancelRequested: boolean
   /** 上一轮是空响应（D197 路径） */
   emptyRound: boolean
+  /**
+   * v0.48.2（D230）：task_plan 同参熔断 —— 模型连续 ≥3 次提交完全相同的清单
+   * （业界软限 3：OpenHands StuckDetector 同形检测）。置位 → 强制 `update`
+   * 代管推进（豁免轮间隔、不豁免预算），把清单维护从模型手里接管过来。
+   */
+  planRepeatStalled?: boolean
 }): PlanOpsKind | null {
   // 取消优先：收尾形态必须留痕，不能让清单留一堆悬空的 doing
   if (args.cancelRequested) return 'cancel'
   // 没有清单就无从推进（开局或清单被整体作废）
   if (!args.hasPlan) return 'create'
+  // v0.48.2（D230）：同参熔断 → 代管同步（次高于失败/陈旧/空回合判定）
+  if (args.planRepeatStalled) return 'update'
   // 连续失败 → 重排（与 W2 同判据，出口统一到 PlanOps）
   if (args.failedCount >= PLAN_OPS_FAILURE_THRESHOLD) return 'replan'
   // 陈旧 → 重排（与 D126 的 itersSinceTreeTouch 同判据）

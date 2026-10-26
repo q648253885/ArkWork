@@ -491,3 +491,118 @@ test('TC-OPS-023 契约用例的检测器自检：能报红、不误报', () => 
   // 检测器 4：不误报 —— 正常源码不该命中「必须通过 task_plan」
   assert.equal(loop.includes('必须通过 task_plan'), false)
 })
+
+test('TC-OPS-028 ★ task_plan 同参熔断（v0.48.2 D230）：planRepeatStalled 强制代管，豁免冷却不豁免预算', () => {
+  // ---- 腿① pickPlanOpsKind：置位 → 'update'，且优先于失败/陈旧/空回合判定 ----
+  const p = (o: Partial<Parameters<typeof pickPlanOpsKind>[0]>) =>
+    pickPlanOpsKind({ round: 1, hasPlan: true, ...SIGNAL_BASE, ...o })
+  assert.equal(p({ planRepeatStalled: true }), 'update', '熔断 → 引擎代管同步')
+  assert.equal(
+    p({ planRepeatStalled: true, failedCount: PLAN_OPS_FAILURE_THRESHOLD, staleRounds: PLAN_OPS_STALE_ROUNDS }),
+    'update',
+    '熔断优先于失败/陈旧（代管同步是当下最该做的动作）',
+  )
+  assert.equal(p({ planRepeatStalled: true, hasPlan: false }), 'create', '无清单仍走 create')
+  assert.equal(p({ planRepeatStalled: true, cancelRequested: true }), 'cancel', '取消收尾优先级最高，不被熔断压过')
+  assert.equal(p({}), null, '未置位时既有真值表不变（SIGNAL_BASE 无该字段）')
+
+  // ---- 腿② shouldRunPlanOps：force 豁免冷却，预算仍然绝对（O7 同款） ----
+  const st = { ...initPlanOpsState(), passes: 0, lastRound: { update: 1 } }
+  const cooldown = shouldRunPlanOps({ state: st, kind: 'update', round: 2, fingerprint: 'f', force: false })
+  assert.equal(cooldown.run, false, '不豁免 → 撞冷却被拦（既有口径）')
+  const forced = shouldRunPlanOps({ state: st, kind: 'update', round: 2, fingerprint: 'f', force: true })
+  assert.equal(forced.run, true, '强制 → 豁免冷却')
+  const noBudget = { ...initPlanOpsState(), passes: MAX_PLAN_OPS_PER_RUN, lastRound: {} }
+  const budgeted = shouldRunPlanOps({ state: noBudget, kind: 'update', round: 2, fingerprint: 'f', force: true })
+  assert.equal(budgeted.run, false, '预算耗尽 → force 也不能越过（防无限代管调用）')
+
+  // ---- 腿②b（v0.48.2 D231 实机回传）：duplicateExempt 豁免指纹 duplicate 拒绝 ----
+  // 「清单没变」恰是同参死循环的常态 —— 指纹拒绝曾让置位代管空转（主断点）。
+  const dupState = { ...initPlanOpsState(), passes: 0, lastFingerprint: 'same-fp', lastRound: { update: 1 } }
+  const dupBlocked = shouldRunPlanOps({ state: dupState, kind: 'update', round: 2, fingerprint: 'same-fp', force: true })
+  assert.equal(dupBlocked.run, false, '指纹未变且未豁免 → duplicate 拒绝（既有口径不变）')
+  const dupExempt = shouldRunPlanOps({
+    state: dupState,
+    kind: 'update',
+    round: 2,
+    fingerprint: 'same-fp',
+    force: true,
+    duplicateExempt: true,
+  })
+  assert.equal(dupExempt.run, true, '同参熔断置位 → 豁免指纹拒绝，代管 update 真跑')
+  const dupBudget = shouldRunPlanOps({
+    state: { ...dupState, passes: MAX_PLAN_OPS_PER_RUN },
+    kind: 'update',
+    round: 2,
+    fingerprint: 'same-fp',
+    force: true,
+    duplicateExempt: true,
+  })
+  assert.equal(dupBudget.run, false, 'duplicateExempt 不豁免预算（预算仍绝对，防无限代管）')
+
+  // ---- 腿③ 接线：plan-ops-tick 把 signals.planRepeatStalled 透传给 pick / force / duplicateExempt ----
+  const tickSrc = src('src/main/agent/engine/plan-ops-tick.ts')
+  assert.ok(tickSrc.includes('planRepeatStalled: signals.planRepeatStalled === true'), 'pick 透传')
+  assert.ok(
+    tickSrc.includes('signals.planRepeatStalled === true') &&
+      /const force = .*signals\.planRepeatStalled === true/.test(tickSrc),
+    'force 接线',
+  )
+  assert.ok(
+    /shouldRunPlanOps\(\{[\s\S]*?duplicateExempt: signals\.planRepeatStalled === true[\s\S]*?\}\)/.test(tickSrc),
+    'duplicateExempt 接线（D231：置位代管必须越过指纹拒绝）',
+  )
+  // loop 侧：同签名第 3 次置位（含失败提交，D231 去 r.ok 门）+ 被拦置位 + 轮首 tick 消费
+  const loopSrc = src('src/main/agent/engine/loop.ts')
+  assert.ok(loopSrc.includes('planRepeatStalledNext = true'), '同参第 3 次置位')
+  assert.ok(
+    !/a\.tool === PLAN_TOOL_NAME && r\.ok\s*\n\s*\?\s*toolSignatureBudget/.test(loopSrc),
+    'D231：执行后熔断判定不再挂 r.ok 门（失败提交同样计数）',
+  )
+  assert.ok(
+    /PLAN_TOOL_NAME && signatureExhausted\) planRepeatStalledNext = true/.test(loopSrc),
+    'D231：清单族同参被拦同样置位（拦截路径不再是旁观者）',
+  )
+  assert.ok(/planCaretake[\s\S]{0,200}清单维护已交由引擎代管/.test(loopSrc), 'D231：被拦回执带代管宣告')
+  assert.ok(loopSrc.includes('planRepeatStalled: planRepeatStalledNext'), '轮首 tick 信号注入')
+  assert.ok(loopSrc.includes('planRepeatStalledNext = false'), '置位消费一次即清')
+})
+
+test('TC-OPS-029 ★ update prompt 补录引导（v0.48.2 D232 实机回传）：清单必须跟上实际工作', () => {
+  // 真机实测（qwen3.8 27b，2026-10-26）：「正在执行的任务没有在本轮任务内」——
+  // 旧 prompt 的「只改需要改的」+「现状合理就原样返回」口径抑制了补录，
+  // 弱模型干活但不提交 task_plan 时清单长期缺项。修复 = 三条补录引导。
+  const sys = buildPlanOpsSystem({
+    kind: 'update',
+    taskId: 'T-1',
+    goal: '写一个 CSV 折线图脚本',
+    snapshot: '1. [todo] 读取 CSV',
+    event: '已运行 python plot.py 生成了 chart.png',
+  })
+
+  // ① 补录引导本体：清单外实际工作必须补录，正在做的标 doing
+  assert.ok(sys.includes('补录检查'), '应有显式补录检查段')
+  assert.ok(sys.includes('必须补录成新项'), '补录是义务不是可选')
+  assert.ok(sys.includes('正在做的标 doing'), '进行中的实际工作要标 doing（否则清单与执行脱节）')
+  // ② 事实依据红线：只依据 event 里确实发生了的事
+  assert.ok(sys.includes('确实发生了'), '补录依据 = event 事实')
+  assert.ok(sys.includes('不得凭「打算做」编造'), '禁止凭意图编造条目')
+  // ③ 防幻觉红线不动：新补录项不得直接标 done（与输出契约的 done 红线同向）
+  assert.ok(sys.includes('不得直接标 done'), '新补录项禁直接 done（完成确认走 complete 通道）')
+  assert.ok(
+    PLANOPS_OUTPUT_CONTRACT.includes('只有清单里已经标着 done 的项可以保持 done'),
+    '输出契约 done 红线与补录红线共存不冲突',
+  )
+
+  // 抑制口径必须移除：「只改需要改的」正是 D232 病灶（诱导模型不动清单）
+  assert.equal(sys.includes('只改需要改的'), false, 'D232 病灶口径不得回潮')
+  // 「原样返回」出口保留但收紧：必须「没有遗漏」才可原样返回
+  assert.ok(sys.includes('没有遗漏，原样返回'), '原样返回出口仍在，但以无遗漏为前提')
+  // 既有红线不丢
+  assert.ok(sys.includes('不要删除任何已完成的项'), '保留已完成项红线仍在')
+
+  // 约束②不破：补录文案也不得引入任何工具名
+  for (const name of ['task_plan', 'turn_note', 'file-reader', 'shell', 'task_complete', 'ask_user']) {
+    assert.equal(sys.includes(name), false, `补录文案不该出现工具名 ${name}`)
+  }
+})

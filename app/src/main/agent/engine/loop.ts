@@ -137,7 +137,7 @@ import type { PlannerFailureDigest, PlannerRequestItem } from '../planning/types
 import { loadLedger } from '../ledger/engine.js'
 import { forceCloseOpenItems } from './ledger-guard.js'
 // v0.42.1（D212）：终局指引唯一文案源（清单族被拦时回执/system hint 复用）
-import { PLAN_TOOL_HINT } from '../ledger/hint.js'
+import { PLAN_TOOL_HINT, PLAN_TOOL_NAME } from '../ledger/hint.js'
 import { commitPlanDraft } from './plan-commit-pipeline.js'
 import { getUiLocale, tFor } from '../../i18n/messages.js'
 import { safeSlice, emitEvent, emitProgress } from './broadcast.js'
@@ -149,7 +149,13 @@ import { buildFallbackAskUserQuestion, markRunningPlanItemFailed, discardIncompl
 import { guardFinish, recordRefusal } from './ledger-guard.js'
 import { refuseViaGate, emitTurnNote } from './gate-channel.js'
 // v0.41.0（D208）：Ollama qwen3.5 正文工具降级通道（提取器 / 谓词 / 契约提示）
-import { extractProseToolCalls, isProseToolFallbackModel, proseToolContractHint } from './prose-tool-call.js'
+import {
+  extractProseToolCalls,
+  isProseToolFallbackModel,
+  proseToolContractHint,
+  createProseFallbackTrigger,
+  PROSE_FALLBACK_TRIGGER_THRESHOLD,
+} from './prose-tool-call.js'
 // v0.38.0（D150）：本 run 工作性质分类 —— 只读白名单唯一事实源（纪律⑧）
 import { classifyRunWork, isReadonlyTool, isPlanWriteTool, normalizeResponseToolNames } from './work-class.js'
 // v0.38.0（D156）：阶段结论兜底投递策略（连续多轮无输出 → 请求进展）
@@ -518,6 +524,11 @@ export async function runReActLoop(
   let refusalWriteFailures = 0
   /** 连续写失败达此次数即认为门禁计数已失能 → 有界放行（D180） */
   const MAX_REFUSAL_WRITE_FAILURES = 2
+  // v0.48.2（D233 / F7b）：空正文 task_complete 守卫 —— content/thought 全空却宣称
+  // 完成（正式回答可能只写在了思考里）。引导 N 次后放行并在收尾标注（防死循环，
+  // D180 有界放行同族口径）；上限常量与计数同为 run 级（与门禁计数同区管理）。
+  let emptyBodyCompleteGuides = 0
+  const EMPTY_BODY_COMPLETE_GUIDE_LIMIT = 2
 
   // 标记任务为 running
   const updatedTask = await updateTask(task.id, { status: 'running', startedAt: Date.now() })
@@ -585,6 +596,9 @@ export async function runReActLoop(
     // 一路烧到 D168 的 6 轮暂停，清单停在初始 4 项。
     let planOpsHadProse = false
     let planOpsLastEvent = ''
+    // v0.48.2（D230）：task_plan 同参熔断 —— 同签名提交第 3 次起置位，下一轮轮首
+    // 触发一次**强制** PlanOps 代管 tick（豁免轮间隔、不豁免预算），置位消费一次即清。
+    let planRepeatStalledNext = false
     // v0.36.0 F1.5：问候循环守卫 —— 基准 = 用户原始输入（task.input.text），
     // 连续 3 轮响应与基准同前缀 → 注入纠正指令 + endpoint unhealthy 计数（§3.3 泛化）
     const greetingGuard = createGreetingLoopGuard({ reference: task.input?.text ?? '' })
@@ -592,7 +606,11 @@ export async function runReActLoop(
     // v0.41.0（D208）：Ollama qwen3.5 正文工具降级通道 —— **run 级一次判定**。
     // 谓词默认关闭：非 ollama 形态 / 非 qwen3.5 模型，后续所有分支零变化
     //（纪律㊵：安全默认与放行开关分离；影响面见 04-system-design §2.3）。
+    // v0.48.2（D229）：`proseToolFallback` 现在只承载**请求体**语义（think 等，
+    // 按启动谓词不变）；解析层激活状态由 `proseTrigger` 承载 —— 运行中连续失败
+    // 可翻转激活（协议无关触发式降级，不看端点形态与模型名单）。
     const proseToolFallback = isProseToolFallbackModel(await getModel(opts.modelId))
+    const proseTrigger = createProseFallbackTrigger(proseToolFallback)
     if (proseToolFallback) {
       logger.info('Agent', 'prose tool fallback armed (ollama qwen3.5) — 正文工具降级通道已激活', task.id)
     }
@@ -646,9 +664,15 @@ export async function runReActLoop(
             hadProse: planOpsHadProse,
             cancelRequested: false,
             emptyRound: false,
+            // v0.48.2（D230）：task_plan 同参熔断 → 强制代管推进（豁免轮间隔）
+            planRepeatStalled: planRepeatStalledNext,
           },
-          event: planOpsLastEvent || '（本轮之前尚无进展记录）',
+          event:
+            planRepeatStalledNext
+              ? '模型连续多次提交完全相同的清单（同参熔断）——引擎代管推进一次，按当前实际进展同步清单状态'
+              : planOpsLastEvent || '（本轮之前尚无进展记录）',
         })
+        planRepeatStalledNext = false
         planOpsState = tick.state
         if (tick.changed) {
           // tick 真的写了账本 → 视同「本 run 触碰过清单」（与 D126 同口径，
@@ -769,8 +793,10 @@ export async function runReActLoop(
       //
       // 触发条件三要素（TC-PTL-002）：谓词命中 + 无原生 action + 无 pendingActions
       // —— 原生 tool_calls 永远优先，降级只兜「模型不会 function calling」的场。
+      // v0.48.2（D229）：激活判据改为 proseTrigger.active —— 谓词启动命中**或**
+      // 运行中连续失败触发翻转（协议无关），语义不变，覆盖面扩大。
       // ============================================================
-      if (proseToolFallback && !response.action && (response.actions?.length ?? 0) === 0) {
+      if (proseTrigger.active && !response.action && (response.actions?.length ?? 0) === 0) {
         const extracted = extractProseToolCalls(response.content)
         if (extracted.calls.length > 0) {
           const synthesized: ReActAction[] = extracted.calls.map((c) => ({ tool: c.tool, args: c.args }))
@@ -820,6 +846,56 @@ export async function runReActLoop(
         response.toolCallIds && response.toolCallIds.length === pendingActions.length
           ? response.toolCallIds
           : pendingActions.map((_, i) => `call_${iteration}_${i}`)
+
+      // ============================================================
+      // v0.48.2（D229）：触发式降级 —— 原生通道健康度观测（每轮恰一次）。
+      //   · 有原生调用且全部 malformed（args 仅 _raw）→ 失败信号；
+      //   · 有健康原生调用 → 清零（Cline consecutiveMistakeCount 范式）；
+      //   · 零原生调用但正文命中可解析白名单工具调用 → 失败信号（模型在用正文发
+      //     调用 —— 探测只为计数，不执行；执行仍由上方 proseTrigger.active 门控）；
+      //   · 普通正文答复 / 最终答复 → 中性，计数不动。
+      // 连续 ≥3 → 翻转激活（本 run 内单向不回切）：契约提示注入下一轮请求 +
+      // 787 门开始代为执行。协议无关 —— 不看端点形态与模型名单。
+      // ============================================================
+      if (!proseTrigger.active) {
+        if (pendingActions.length > 0) {
+          const allRaw = pendingActions.every(
+            (pa) =>
+              pa.args !== undefined &&
+              pa.args !== null &&
+              Object.keys(pa.args).length === 1 &&
+              '_raw' in pa.args,
+          )
+          if (allRaw) {
+            proseTrigger.noteNativeMalformedRound()
+            logger.info(
+              'Agent',
+              `prose fallback signal: native tool_calls all malformed (streak ${proseTrigger.streak}/${PROSE_FALLBACK_TRIGGER_THRESHOLD})`,
+              task.id,
+            )
+          } else {
+            proseTrigger.noteNativeHealthyRound()
+          }
+        } else if ((response.content ?? '').includes('{')) {
+          const probe = extractProseToolCalls(response.content)
+          if (probe.calls.length > 0) {
+            proseTrigger.noteProseCallAttempt()
+            logger.info(
+              'Agent',
+              `prose fallback signal: tool-call-shaped JSON in prose while native channel idle (streak ${proseTrigger.streak}/${PROSE_FALLBACK_TRIGGER_THRESHOLD})`,
+              task.id,
+            )
+          }
+        }
+        if (proseTrigger.consumeActivation()) {
+          logger.warn(
+            'Agent',
+            `prose tool fallback TRIGGERED: native channel failed ${PROSE_FALLBACK_TRIGGER_THRESHOLD} consecutive rounds — 正文工具降级通道已激活（协议无关触发式，run 内单向）`,
+            task.id,
+          )
+          pendingSystemHint = proseToolContractHint()
+        }
+      }
 
       // v0.36.0 F1.5：问候循环守卫观测（在无工具/有工具两分支之前）。
       // 触发 → 注入纠正指令（下一轮 Reason 生效）+ endpoint unhealthy 计数；
@@ -894,7 +970,7 @@ export async function runReActLoop(
           //（TC-PTL-004：命中分支不得再出现"请发起真实工具调用"这类无效措辞）
           const hint = greetingLoopTriggered && !outputTruncated
             ? (pendingSystemHint ?? unfinishedHint)
-            : proseToolFallback
+            : proseTrigger.active
               ? proseToolContractHint()
               : outputTruncated
                 ? truncatedHint + (unfinishedCount > 0 ? `\n${unfinishedHint}` : '')
@@ -929,7 +1005,8 @@ export async function runReActLoop(
             pendingSystemHint = labelEngineHint(
               // v0.41.0（D208）：降级通道激活 → 不再要求"发起真实工具调用"
               //（对不会 function calling 的模型是无效指令），改给正文协议契约
-              proseToolFallback
+              // v0.48.2（D229）：激活判据 proseTrigger.active（含触发翻转）
+              proseTrigger.active
                 ? proseToolContractHint()
                 : `【重要】你上一轮把工具调用写成了正文文字（例如 \`${pseudoTool}(…)\`），` +
                   `这类文字引擎**无法执行**。请改为发起真实工具调用（用系统提供的工具 / 函数），` +
@@ -1194,6 +1271,62 @@ export async function runReActLoop(
       // v0.14.0 Task 4：action 可能为 null（模型返回多个 pendingActions 时走下方并行 Act），
       // 单工具分支用可选链兜底，避免 null 穿透
       if (action?.tool === 'task_complete') {
+        // ============================================================
+        // v0.48.2（D233 / F7b）：空正文 task_complete 守卫。
+        //
+        // 实机（qwen3.8 27b）：正式回答（代码）只写在了思考流里，content/thought
+        // 全空，模型却调 task_complete 自以为已输出 —— 空响应补试（D197）判据
+        // 含 actions，被 tool_calls 绕过；此处若照常收尾，用户看到「任务完成」
+        // 但交互区没有正文。守卫三通道（与 D152 拒绝通道同构）：
+        //   ① 配对 observation「未受理」（防悬空 tool_calls 400）
+        //   ② 下轮 system hint 引导「正式回答必须写在回复正文里」
+        //   ③ turn_note 用户通告（引擎主动干预要可见，纪律⑨）
+        // 引导 EMPTY_BODY_COMPLETE_GUIDE_LIMIT 次仍空 → 放行并在收尾标注
+        //（防死循环，与 D180 有界放行同族）。say 是 1~3 句叙述通道、
+        // 从不承载正式回答，刻意不计入「有可见正文」判定。
+        // ============================================================
+        const emptyBodyComplete = !(response.content ?? '').trim() && !(response.thought ?? '').trim()
+        if (emptyBodyComplete && emptyBodyCompleteGuides < EMPTY_BODY_COMPLETE_GUIDE_LIMIT) {
+          emptyBodyCompleteGuides += 1
+          await appendPairedControlObservations({
+            taskId: task.id,
+            iteration,
+            actions: pendingActions,
+            actionIds: pendingActionIds,
+            controlTool: 'task_complete',
+            controlContent: '[task_complete] 未受理 —— 本轮没有可见回答正文（正式回答可能只写在了思考里）',
+            skipPrefix: '[skipped] 等待正式回答，跳过：',
+          })
+          pendingSystemHint =
+            '你调用了 task_complete，但本轮回复正文（正式回答）为空 —— 用户要看的正式回答（结论、代码、文件内容等）没有送达交互区，可能只写在了思考里。请把正式回答**完整写在回复正文里**（不要只写在思考里），然后再调用 task_complete。'
+          await emitTurnNote({
+            taskId: task.id,
+            iteration,
+            text: '（引擎守卫）模型宣称完成，但本轮没有可见回答正文 —— 已引导模型把正式回答写在回复正文里。',
+            via: 'gate-refusal',
+          })
+          logger.warn(
+            'Agent',
+            `task_complete with empty body (content/thought both empty) — guide ${emptyBodyCompleteGuides}/${EMPTY_BODY_COMPLETE_GUIDE_LIMIT}`,
+            task.id,
+          )
+          continue
+        }
+        if (emptyBodyComplete) {
+          // 引导 2 次仍空 → 放行收尾，但必须在收尾前标注（用户可见），否则
+          // 「任务完成 + 无正文」再次静默发生（D197 教训：静默是最大的缺陷面）。
+          logger.warn(
+            'Agent',
+            `task_complete 仍为空正文（已引导 ${emptyBodyCompleteGuides}/${EMPTY_BODY_COMPLETE_GUIDE_LIMIT} 次）— 按防死循环规则放行收尾（收尾标注）`,
+            task.id,
+          )
+          await emitTurnNote({
+            taskId: task.id,
+            iteration,
+            text: '（引擎守卫）多次引导后模型仍未在正文输出正式回答，按防死循环规则放行完成；如需完整答复请要求模型重新输出。',
+            via: 'gate-refusal',
+          })
+        }
         // v0.27.0 R2/F7：完成收尾（配对 observation / 完成态 / 里程碑 / 记忆钩子）→ turn-end.ts
         // v0.30.0：返回 true 表示"完成被验证门禁拦截，本回合不结束"（需先跑验证命令）
         // v0.38.0（D150/D151）：判据改为**客观事实** —— workClass（本 run 实际工具调用）
@@ -1297,6 +1430,10 @@ export async function runReActLoop(
         }
         if (signatureExhausted || categoryExhausted) {
           exhaustedIndices.add(i)
+          // v0.48.2（D231）：清单族同参被拦也计入熔断置位 —— 拦截路径此前完全绕过
+          // D230，5/5 拦截后只剩文案、无代管；被拦尝试同样是「模型原地打转」的信号。
+          // 置位后下一轮轮首代管 tick（预算内）替模型按实际进展收口清单。
+          if (a.tool === PLAN_TOOL_NAME && signatureExhausted) planRepeatStalledNext = true
           if (!budgetWarnedKeys.has(signatureKey)) {
             budgetWarnedKeys.add(signatureKey)
             const reason = signatureExhausted
@@ -1404,7 +1541,12 @@ export async function runReActLoop(
             // v0.42.1（D212）：清单族被拦 → 回执必须带终局指引（真机死循环根治）。
             // 指向 task_complete / 最终答复 = 换层次动作，不是被拦的那条调用（纪律⑩）。
             const planEndgame = isPlanWriteTool(toolName) ? `。${PLAN_TOOL_HINT.endgame}` : ''
-            const msg = `${toolName} ${reason}，请改用替代方法${planEndgame}`
+            // v0.48.2（D231）：同参被拦 → 回执宣告代管已介入，抑制模型继续撞 5/5。
+            const planCaretake =
+              toolName === PLAN_TOOL_NAME && signaturePrev >= 3
+                ? '。清单维护已交由引擎代管，无需再提交相同清单'
+                : ''
+            const msg = `${toolName} ${reason}，请改用替代方法${planCaretake}${planEndgame}`
             return Promise.resolve<ActExecutionResult>({
               completedStep: {
                 ...actSteps[i],
@@ -1518,7 +1660,34 @@ export async function runReActLoop(
         } else {
           failureDigest = failureDigest.filter((f) => f.tool !== a.tool)
         }
-        const observationSummary = buildObservationSummary(a.tool, r.result, r.resultSummary, r.ok)
+        // v0.48.2（D230）：task_plan 同参熔断提前 —— 同签名提交第 3 次起：
+        // ① observation 追加强制改道文案（原样重试无效 + 引擎代管宣告）；
+        // ② 置位 planRepeatStalledNext → 下一轮轮首强制 PlanOps 代管 tick。
+        // 硬限（签名 5/5 拦截 + endgame 后缀）不动，本机制只压缩 5 次执行期的
+        // 空转窗口（业界软限 3：OpenHands StuckDetector / Go agent 同参检测）。
+        // v0.48.2（D231）：拦截路径不再是旁观者 —— 清单族同参被拦同样置位（见 L1375）。
+        const observationSummaryBase = buildObservationSummary(a.tool, r.result, r.resultSummary, r.ok)
+        // v0.48.2（D231）：去掉 r.ok 门 —— 失败提交（items 形状非法等原样重试）同样计入
+        // 同参熔断；失败循环恰恰更需要代管（实机回传：失败路径此前完全绕过 D230）。
+        // 预算计数在执行前递增（L1390），故此处 get 值已含本次提交（成功与失败同口径）。
+        const sameSigExecCount =
+          a.tool === PLAN_TOOL_NAME
+            ? toolSignatureBudget.get(getToolCallKey(a.tool, a.args)) ?? 0
+            : 0
+        let observationSummary = observationSummaryBase
+        if (sameSigExecCount >= 3) {
+          planRepeatStalledNext = true
+          observationSummary +=
+            `\n\n🛑 【引擎提示 · 清单代管】这是你第 ${sameSigExecCount} 次提交完全相同的清单（同参数重试）。` +
+            '原样重试不会产生新结果：清单维护已交由引擎代管（引擎将按当前实际进展自动推进清单状态）。' +
+            '请不要再提交相同清单 —— 直接继续执行在途项对应的工具调用；' +
+            `若任务已全部完成，调用 task_complete 收尾。${PLAN_TOOL_HINT.endgame}`
+          logger.warn(
+            'Agent',
+            `task_plan same-signature commit #${sameSigExecCount} — 同参熔断介入：observation 升级 + 下一轮 PlanOps 代管`,
+            task.id,
+          )
+        }
         await appendL1({
           taskId: task.id,
           role: 'tool',

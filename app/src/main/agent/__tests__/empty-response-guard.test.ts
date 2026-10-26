@@ -265,3 +265,58 @@ test('TC-EMPTYG-006 ★ D197：task_complete 的 summary 兜底永不空（真�
     'task_complete 分支不得再内联兜底链（两级全空 = D197 的病灶）',
   )
 })
+
+/* ============================================================
+ * v0.48.2（D233）空响应守卫家族扩展（TC-SWALLOW-004/005）
+ *
+ * F7a：截断吞正文标记（contentSwallowedByTruncation）在 reason-phase 的消费；
+ * F7b：空正文 task_complete 守卫（正式回答只写在思考里 → 引导而非假成功收尾）。
+ * ============================================================ */
+
+test('TC-SWALLOW-004 F7a 消费接线：length 分支条件含吞没标记 + 人话占位（D233）', () => {
+  // ① 提额重试条件：contentSwallowedByTruncation 与 reasoningContent 并列
+  //   （吞没但 reasoning 为空的边角形态也覆盖，不再漏进「无出口」夹缝）
+  assert.match(
+    phaseSrc,
+    /\(response\.reasoningContent \|\| response\.contentSwallowedByTruncation\)/,
+    'length 专用重试条件必须含吞没标记',
+  )
+  // ② 占位符必须人话：说清「截断」与「正文未送达」两个事实 + 处方（精简/分步/写正文）
+  assert.match(
+    phaseSrc,
+    /回复因长度上限被截断，正文未送达交互区 —— 请精简思考或分步输出，正式回答必须写在回复正文里。/,
+    '截断吞没场景的占位答复必须是人话回执（不再误报「思考时间过长」）',
+  )
+  // ③ 两种形态分开记诊断日志（「思考烧尽预算」与「正文被吞」处方不同）
+  assert.match(
+    phaseSrc,
+    /正文被「未闭合 <think> \+ 长度截断」吞没/,
+    '诊断日志必须区分吞没形态',
+  )
+})
+
+test('TC-SWALLOW-005 F7b 空正文 task_complete 守卫（D233）：引导 → 放行标注真值表', () => {
+  const loopCode = stripComments(loopSrc)
+  // ① 判定与守卫在 task_complete 分支内、finishViaTaskComplete 之前
+  const iGuard = loopCode.indexOf('const emptyBodyComplete =')
+  const iFinish = loopCode.indexOf('await finishViaTaskComplete(')
+  assert.ok(iGuard > 0, '守卫判定必须在位')
+  assert.ok(iFinish > iGuard, '守卫必须在 finishViaTaskComplete 之前（拦不住就失去意义）')
+  // ② 引导腿：未受理 observation + system hint 引导 + turn_note 通告 + continue 不收尾
+  const guardBlock = loopCode.slice(iGuard, iFinish)
+  assert.match(guardBlock, /\[task_complete\] 未受理/, '① 配对 observation 必须宣告未受理（防悬空 tool_calls）')
+  assert.match(guardBlock, /完整写在回复正文里/, '② system hint 必须引导正文通道（不要只写在思考里）')
+  assert.match(guardBlock, /via: 'gate-refusal'/, '③ turn_note 用户通告必须在位（引擎主动干预要可见）')
+  assert.match(guardBlock, /continue/, '④ 引导轮必须 continue（不得收尾）')
+  // ③ 判据：content 与 thought 全空（say 是 1~3 句叙述通道、不承载正式回答，不计入）
+  assert.match(
+    loopCode,
+    /!\(response\.content \?\? ''\)\.trim\(\) && !\(response\.thought \?\? ''\)\.trim\(\)/,
+    '判据必须是 content/thought 全空',
+  )
+  // ④ 上限防死循环：run 级计数 + 限额 2 + 超限放行并给收尾标注（用户可见）
+  assert.match(loopCode, /let emptyBodyCompleteGuides = 0/, '引导计数必须 run 级在位')
+  assert.match(loopCode, /EMPTY_BODY_COMPLETE_GUIDE_LIMIT = 2/, '引导上限必须为 2')
+  assert.match(loopCode, /emptyBodyCompleteGuides < EMPTY_BODY_COMPLETE_GUIDE_LIMIT/, '引导必须受上限约束')
+  assert.match(loopCode, /多次引导后模型仍未在正文输出正式回答/, '超限放行必须给收尾标注（防再次静默）')
+})

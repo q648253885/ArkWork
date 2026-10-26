@@ -292,6 +292,10 @@ export class OpenAIAdapter implements LlmAdapter {
 
     // v0.25.0 F4：从 content 抽取 SAY 标记块（剥离后 thought 不污染内部思考）
     const { thought: cleanThought, say } = extractSayMarker(content)
+    // v0.48.2（D233 / F7a）：长度截断 + think 吞正文 → 标记（reason-phase 消费给人话回执）。
+    // 未闭合 `<think>` 时 stripThinkBlocks 把其余全部算思考（流截断容错）→ rest 恒空 ——
+    // qwen3.8 27b 实机：整段回复含代码被吞进思考，content 空且此前无任何告警。
+    const finishReason = mapFinishReason(choice.finish_reason)
     return {
       content,
       thought: cleanThought,
@@ -300,8 +304,9 @@ export class OpenAIAdapter implements LlmAdapter {
       tokensIn: completion.usage?.prompt_tokens ?? 0,
       tokensOut: completion.usage?.completion_tokens ?? 0,
       cache,
-      finishReason: mapFinishReason(choice.finish_reason),
+      finishReason,
       reasoningContent,
+      contentSwallowedByTruncation: finishReason === 'length' && think !== null && rest === '',
     }
   }
 
@@ -416,6 +421,9 @@ export class OpenAIAdapter implements LlmAdapter {
 
     const parsed = parseOpenAIToolCalls(rawCalls)
     const { thought: cleanThought, say } = extractSayMarker(content)
+    // v0.48.2（D233 / F7a）：流式同口径 —— 截断后正文为空、思考有货（tail.think
+    // 已并入 reasoning）→ 认定正文被 think 分流吞没（与 complete 同语义）
+    const finish = mapFinishReason(finishReason)
     return {
       content,
       thought: cleanThought,
@@ -424,8 +432,10 @@ export class OpenAIAdapter implements LlmAdapter {
       tokensIn: usage?.prompt_tokens ?? 0,
       tokensOut: usage?.completion_tokens ?? 0,
       cache: extractCacheUsage(usage),
-      finishReason: mapFinishReason(finishReason),
+      finishReason: finish,
       reasoningContent: reasoning || undefined,
+      contentSwallowedByTruncation:
+        finish === 'length' && content.trim() === '' && reasoning.trim() !== '',
     }
   }
 
@@ -707,6 +717,9 @@ function assembleOllamaNative(
   const parsed = parseOpenAIToolCalls(calls)
   const { thought: cleanThought, say } = extractSayMarker(finalContent)
   const hasToolCalls = (parsed.actions?.length ?? 0) > 0
+  // v0.48.2（D233 / F7a）：与 /v1 路径同口径 —— think:true 降级通道或老模型
+  // 把思考内嵌 content 且被截断吞没时，标记供 reason-phase 给人话回执
+  const finishReason = hasToolCalls ? 'tool_calls' : mapFinishReason(doneReason)
   return {
     content: finalContent,
     thought: cleanThought,
@@ -715,8 +728,9 @@ function assembleOllamaNative(
     tokensIn,
     tokensOut,
     // ollama 原生协议不报告缓存统计
-    finishReason: hasToolCalls ? 'tool_calls' : mapFinishReason(doneReason),
+    finishReason,
     reasoningContent,
+    contentSwallowedByTruncation: finishReason === 'length' && think !== null && rest === '',
   }
 }
 

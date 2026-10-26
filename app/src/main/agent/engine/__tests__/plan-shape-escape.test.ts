@@ -23,6 +23,7 @@ import { stripComments } from '@shared/utils/source-guard'
 const read = (rel: string): string => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf-8')
 const ACT = stripComments(read('../act.ts'))
 const HINT = stripComments(read('../../ledger/hint.ts'))
+const NORM = stripComments(read('../../../llm/normalize.ts'))
 
 /* ---------------- 一、纯函数真值表（真执行） ---------------- */
 
@@ -86,4 +87,67 @@ test('TC-PEM-004 消费者数量下限（纪律㊳：有文案必须有读者，
   assert.ok(consumers >= 3, `act.ts 至少 3 处消费（导入 1 + 主路径 1 + catch 兜底 1，实际 ${consumers}）`)
   assert.match(HINT, /export function invalidShapeSuffixOf/, 'hint.ts 定义存在')
   assert.match(HINT, /\$\{PLAN_TOOL_NAME\} 是可选的快路径/, '文案引用 PLAN_TOOL_NAME 常量（单一事实源）')
+})
+
+/* ---------------- 三、参数丢失自诊断（v0.48.1 · D225） ---------------- */
+
+test('TC-PEM-005 ★ 形状校验分场自诊断：_raw 回显原文 / items 缺失报实收键名 / 非数组报实际类型', () => {
+  // —— 场①：arguments 解析失败（args 只剩 {_raw}）→ 回显原文，模型能对着改 ——
+  assert.match(
+    ACT,
+    /const rawArgsJson = typeof args\._raw === 'string' \? args\._raw\.trim\(\) : ''/,
+    '_raw 存在性检查必须先于 items 判定（参数丢失 ≠ items 为空，两回事）',
+  )
+  assert.match(
+    ACT,
+    /arguments 不是合法 JSON，引擎没有收到任何字段（原始文本：/, // eslint-disable-line
+    '_raw 场必须点明「没收到任何字段」并回显原始文本（诚实诊断，不冒充 items 为空）',
+  )
+  // —— 场②：items 缺失 → 报实收参数键（模型才知道参数丢在哪一跳）——
+  assert.match(ACT, /items 缺失（实收参数键：/, '缺失场必须回显实收参数键')
+  assert.match(ACT, /Object\.keys\(args\)\.filter\(\(k\) => k !== '_raw'\)/, '实收键统计必须排除 _raw 本身')
+  assert.match(ACT, /items 缺失（未收到任何参数）/, '连键都没有 → 明说没收到任何参数')
+  // —— 场③：items 类型不对 → 报实际类型（空数组 / 字符串 / 其他），不再千篇一律 ——
+  assert.match(ACT, /items 必须是非空数组（实收 \$\{Array\.isArray\(rawItems\) \? '空数组' : typeof rawItems\}）/)
+})
+
+test('TC-PEM-006 ★ 双重编码自动抢救：字符串 items 一次解析 + 成功后回告模型（防原样重发）', () => {
+  // —— 抢救函数存在且只试一次、直解失败诚实放弃（不自建第二条 repair 管线，纪律⑧）——
+  assert.match(ACT, /const rescueItemsFromString = \(s: string\): unknown\[\] \| null =>/, '抢救函数定义存在')
+  assert.match(ACT, /JSON\.parse\(t\)/, '抢救 = 一次 JSON 直解')
+  assert.match(ACT, /Array\.isArray\(v\)\) return v/, '裸数组形态直接采用')
+  assert.match(ACT, /Array\.isArray\(\(v as Record<string, unknown>\)\.items\)\)/, '包裹形态 {items:[…]} 也抢救')
+  assert.match(ACT, /if \(!rawArgsJson && typeof rawItems === 'string'\)/, '抢救只在 arguments 合法且 items 为字符串时触发（互斥不越场）')
+  assert.match(ACT, /itemsRescued = true/, '抢救成功必须置位（有写必须有读，见下）')
+  // —— 抢救成功回告：两个 summary 分支都必须拼 rescueNote（否则下轮原样重发撞同参数预算）——
+  assert.match(
+    ACT,
+    /items 以字符串形态提交，引擎已自动解析为清单数组/, // eslint-disable-line
+    '回告文案存在：点明引擎已代为解析 + 要求直接输出 JSON 数组',
+  )
+  assert.match(ACT, /const rescueNote = itemsRescued/, 'rescueNote 由 itemsRescued 驱动（接线契约）')
+  assert.match(ACT, /\\n当前清单：\\n\$\{overview\}\$\{rescueNote\}/, 'changed===0 分支拼接 rescueNote')
+  assert.match(ACT, /\$\{endgame\}\$\{rescueNote\}/, 'changed>0 分支拼接 rescueNote')
+})
+
+test('TC-PEM-007 ★ 回显不可见字符转义 \\uXXXX（v0.48.1 D227 打包联测补遗）', () => {
+  // 真机表象：「原始文本：{}」却解析失败——BOM/零宽被空白折叠与渲染吞掉，无法定罪。
+  // clipRawArgs 必须把不可见字符转成 \uXXXX 字面（含 \ufeff），让下一次报错自带字节证据。
+  assert.match(
+    ACT,
+    /const invisibleChars = \/\[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F\\u00AD\\u200B-\\u200D\\u2060-\\u2064\\u200E\\u200F\\uFEFF\]\/g/,
+    '不可见字符集合与 normalize.ts 剥离集同源（BOM/零宽/变体选择符/双向标记/软连字符/C0 控制符）',
+  )
+  assert.match(
+    ACT,
+    /\\u\$\{ch\.charCodeAt\(0\)\.toString\(16\)\.padStart\(4, '0'\)\}/,
+    '逐字符转义为 \\uXXXX 四位十六进制字面（渲染不再吞字符）',
+  )
+  assert.match(ACT, /const escaped = s\.replace\(invisibleChars/, '转义发生在空白折叠与截断之前')
+  // —— 同源契约：normalize.ts 的 parse 剥离集与 act.ts 回显转义集保持一致（单一毒源清单）——
+  assert.match(
+    NORM,
+    /\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F\\u00AD\\u200B-\\u200D\\u2060-\\u2064\\u200E\\u200F\\uFEFF/,
+    'normalize.ts 剥离集存在（F4a parse 重试）',
+  )
 })

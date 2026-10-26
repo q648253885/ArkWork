@@ -1,5 +1,5 @@
 /* ============================================================
- * ArkWork — Ollama qwen3.5 正文工具调用提取器（v0.41.0 / D208）
+ * ArkWork — Ollama qwen3.5 正文工具调用提取器（v0.41.0 / D208；v0.48.1 D226 证伪关闭：真机 qwen3.8 走 OpenAI 协议，谓词不扩）
  * TC-PTC-001…015（矩阵 §二 模块 O）
  *
  * ★ 用例价值声明：TC-PTC-003 / 008 / 009 的 mock 数据取自用户提供的
@@ -14,6 +14,8 @@ import {
   extractProseToolCalls,
   isProseToolFallbackModel,
   proseToolContractHint,
+  createProseFallbackTrigger,
+  PROSE_FALLBACK_TRIGGER_THRESHOLD,
   PROSE_TOOL_CALL_LIMIT,
 } from '../prose-tool-call.js'
 
@@ -125,6 +127,10 @@ test('TC-PTC-013 谓词 isProseToolFallbackModel 真值表（默认关闭、只�
   const m = (id: string, kind: string, baseURL?: string) => ({ id, kind, baseURL } as never)
   assert.equal(isProseToolFallbackModel(m('qwen3.5:9b', 'ollama')), true)
   assert.equal(isProseToolFallbackModel(m('Qwen3.5-9B', 'ollama')), true, '大小写不敏感')
+  // v0.48.1（D226 证伪关闭）：qwen3.8 真机走 OpenAI 协议且原生 tool_calls 通达，
+  // 正文降级通道不适用 —— 谓词维持 3.5，qwen3.8 任何端点形态都不放行。
+  assert.equal(isProseToolFallbackModel(m('qwen3.8:27b', 'ollama')), false, 'qwen3.8 不扩（D226 关闭）')
+  assert.equal(isProseToolFallbackModel(m('qwen3.8:27b', 'openai', 'https://api.x.com/v1')), false, 'qwen3.8 OpenAI 协议（真机形态）→ false')
   assert.equal(isProseToolFallbackModel(m('qwen3.5:9b', 'openai', 'http://lan:11434')), true, '端点形态也算 ollama（:11434）')
   assert.equal(isProseToolFallbackModel(m('my-model', 'openai', 'http://lan:11434')), false, '端点形态但模型不是 qwen3.5 → false')
   assert.equal(isProseToolFallbackModel(m('qwen3:8b', 'ollama')), false, 'qwen3（无 .5）不放行')
@@ -160,4 +166,60 @@ test('TC-PTC-016 契约提示含格式样例与白名单工具名（模型侧唯
   assert.match(hint, /task_plan/)
   assert.match(hint, /file-writer/)
   assert.match(hint, /无法使用原生工具调用/)
+})
+
+/* ============================================================
+ * v0.48.2（D229）：触发式降级激活器 —— 协议无关（TC-PTC-017/018）
+ * 业界依据：Cline consecutiveMistakeCount（错误 +1 / 成功清零，达限 3 介入）、
+ * OpenHands StuckDetector（连续 N 组同形态失败判死循环）。
+ * ============================================================ */
+
+test('TC-PTC-017 ★ 触发器真值表：失败 +1 / 健康清零 / 中性不动 / 连续 3 翻转且单向', () => {
+  assert.equal(PROSE_FALLBACK_TRIGGER_THRESHOLD, 3, '业界典型 N=3，钉死防漂移')
+  // 腿①：未达阈值不激活
+  const t1 = createProseFallbackTrigger(false)
+  assert.equal(t1.active, false, '默认关闭')
+  t1.noteNativeMalformedRound()
+  t1.noteNativeMalformedRound()
+  assert.equal(t1.active, false)
+  assert.equal(t1.streak, 2)
+  // 腿②：健康原生轮清零（Cline 范式）
+  t1.noteNativeHealthyRound()
+  assert.equal(t1.streak, 0)
+  assert.equal(t1.active, false)
+  // 腿③：连续 3 次失败 → 翻转激活，consumeActivation 消费型（一次）
+  t1.noteNativeMalformedRound()
+  t1.noteNativeMalformedRound()
+  t1.noteNativeMalformedRound()
+  assert.equal(t1.active, true, '连续 3 → 激活')
+  assert.equal(t1.consumeActivation(), true, '翻转事件只报一次')
+  assert.equal(t1.consumeActivation(), false, '消费后不再报')
+  // 腿④：激活后单向不回切，健康轮不再清零、失败不再累计
+  t1.noteNativeHealthyRound()
+  assert.equal(t1.active, true, 'run 内单向不回切')
+  assert.equal(t1.streak, 3, '激活后计数冻结')
+  // 腿⑤：正文命中信号同样累计（模型在用正文发调用 = 原生通道异常）
+  const t2 = createProseFallbackTrigger(false)
+  t2.noteProseCallAttempt()
+  t2.noteProseCallAttempt()
+  t2.noteProseCallAttempt()
+  assert.equal(t2.active, true)
+  // 腿⑥：中性轮（普通正文答复）不动计数
+  const t3 = createProseFallbackTrigger(false)
+  t3.noteNativeMalformedRound()
+  // 中性轮不提供任何 note —— streak 不变即语义
+  t3.noteNativeMalformedRound()
+  assert.equal(t3.streak, 2, '中性轮既不清零也不累计')
+})
+
+test('TC-PTC-018 谓词启动激活路径：初始即 active、不产生触发翻转事件', () => {
+  // qwen3.5@ollama 启动即激活（D208 既有路径）—— 不得被当成「运行中翻转」上报
+  const t = createProseFallbackTrigger(true)
+  assert.equal(t.active, true)
+  assert.equal(t.consumeActivation(), false, '谓词启动激活 ≠ 触发翻转（不发重复契约提示）')
+  // 激活态下失败/健康信号都是 no-op
+  t.noteNativeMalformedRound()
+  t.noteNativeHealthyRound()
+  assert.equal(t.streak, 0)
+  assert.equal(t.active, true)
 })

@@ -84,21 +84,126 @@ function syntheticToolCallId(index: number, name: string, rawArguments: string):
 }
 
 /**
+ * v0.48.1（D227）不可见格式字符剥离（v0.48.2 提取为独立 helper，D228 截断修复复用；
+ * 正则与原内联版逐字节一致，行为不变）。
+ */
+function stripInvisibleFormatChars(s: string): string {
+  return s.replace(
+    /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u00AD\u200B-\u200D\u2060-\u2064\u200E\u200F\uFEFF]/g,
+    '',
+  )
+}
+
+/** 对象（非数组、非 null）→ Record；其余 → undefined（数组/标量不做隐式转换） */
+function asRecord(v: unknown): Record<string, unknown> | undefined {
+  return v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined
+}
+
+/**
+ * v0.48.2（D228①）：整体双重编码剥离 —— arguments 整体被二次 JSON.stringify
+ * （parse 出来是字符串，其内容才是真正的参数对象）。业界惯例（vLLM tool parser
+ * 的协议归一化层）：网关层剥码。字段级双重编码由 act.ts 的 items 抢救兜底
+ * （D225），本处收口整体形态。非字符串 / 内层解析不出对象 → 原样返回。
+ */
+function peelDoubleEncodedArgs(v: unknown): unknown {
+  if (typeof v !== 'string') return v
+  try {
+    const inner = JSON.parse(v)
+    if (inner !== null && typeof inner === 'object' && !Array.isArray(inner)) return inner
+  } catch {
+    // 不是双层编码形态，原样返回（交给上层按旧路径降级 _raw）
+  }
+  return v
+}
+
+/**
+ * v0.48.2（D228②）：截断 JSON 轻量闭合补全（partial-json 思路的静态版，业界
+ * vLLM tool parser 的流式增量解析同源）。字符串感知扫描未闭合引号与括号栈，
+ * 逆序补齐；尾部悬空的逗号/冒号一并剥掉。补全结果必须再过 JSON.parse 验证
+ * （调用方负责），验证失败即放弃 —— 宁可 _raw 回喂，不执行修不出来的半截参数。
+ *
+ * 已知不覆盖（有意从简）：截断停在**键名中间**（如 `{"te`）补出的 `{"te"}` 不合法，
+ * 验证失败自然回落 _raw；数组形态同理（asRecord 拒收数组）。
+ */
+function closeTruncatedJson(s: string): string | null {
+  const t = s.length > 200_000 ? '' : s.trim()
+  if (!t || (t[0] !== '{' && t[0] !== '[')) return null
+  const stack: string[] = []
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === '{' || ch === '[') stack.push(ch)
+    else if (ch === '}' || ch === ']') stack.pop()
+  }
+  // 结构已闭合就不是截断形态（是别的损坏），不画蛇添足
+  if (!inString && stack.length === 0) return null
+  let out = t
+  if (inString) out += '"'
+  out = out.replace(/[,:]\s*$/, '')
+  for (let i = stack.length - 1; i >= 0; i--) out += stack[i] === '{' ? '}' : ']'
+  return out
+}
+
+/** 单次解析 + 剥码（parse 失败 / 非对象形态 → undefined；null 按 '{}' 语义 = 空参数） */
+function parseArgsLoose(s: string): Record<string, unknown> | undefined {
+  try {
+    return asRecord(peelDoubleEncodedArgs(JSON.parse(s || '{}') ?? {}))
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * tool_calls 容错解析（openai 分片聚合后的完整调用数组 → NormalizedToolCall[]）：
  * - id 缺失 / 空串 → 按下标合成稳定 id（同轮内不冲突）；
  * - arguments 为 string → JSON.parse；失败保留原文于 args._raw 并标 malformed；
- * - arguments 为空串 → 按 '{}' 解析（兼容端点省略 arguments 的形态）。
+ * - arguments 为空串 → 按 '{}' 解析（兼容端点省略 arguments 的形态）；
+ * - v0.48.1（D224）：arguments 为**对象**（OpenAI 是 JSON 字符串，但兼容网关实测
+ *   存在对象形态；ollama 原生通道早有 `ollamaNativeCallsToRaw` 同款容错）→ 直接
+ *   作为 args 采用。此前被静默降级为 `{}` —— 模型提交的 items 等参数在到达
+ *   act.ts 前消失，报出与事实不符的「items 必须是非空数组」（真机 qwen3.8 27b）。
+ * - v0.48.2（D228，业界调研收口）：① 整体双重编码剥离（parse 出字符串且其内容
+ *   再 parse 出对象 → 二次采用）；② 截断闭合补全（`allowTruncationRepair` 开启时，
+ *   补齐未闭合引号/括号后重验）。**安全阀**：`finish_reason=length` 的响应上层
+ *   关闭 ② —— 被长度截断的调用即使可补全也不执行（Pi agent loop 原则：半截参数
+ *   比失败更危险）。
  */
 export function normalizeToolCalls(
   calls: Array<{ id?: string | null; name?: string | null; arguments?: string | null }>,
+  opts?: { allowTruncationRepair?: boolean },
 ): NormalizedToolCall[] {
   return calls.map((call, index) => {
     const name = typeof call.name === 'string' ? call.name : ''
     const rawArguments = typeof call.arguments === 'string' ? call.arguments : ''
     const id = typeof call.id === 'string' && call.id ? call.id : syntheticToolCallId(index, name, rawArguments)
+    // v0.48.1（D224）：对象形态 arguments 直接采用（数组 / null 不在此列，仍走下方解析路径）
+    const rawAny = call.arguments as unknown
+    if (rawAny !== null && typeof rawAny === 'object' && !Array.isArray(rawAny)) {
+      return {
+        id,
+        name,
+        args: rawAny as Record<string, unknown>,
+        malformed: false,
+        rawArguments: JSON.stringify(rawAny),
+      }
+    }
     try {
-      const args = (JSON.parse(rawArguments || '{}') ?? {}) as Record<string, unknown>
-      if (!args || typeof args !== 'object' || Array.isArray(args)) {
+      // v0.48.2（D228）：修复阶梯 = 直解（含剥码）→ 剥不可见字符重试（D227）→
+      // 截断闭合补全（仅 allowTruncationRepair）。每步都必须产出对象形态才算成功。
+      let args = parseArgsLoose(rawArguments) ?? parseArgsLoose(stripInvisibleFormatChars(rawArguments))
+      if (args === undefined && opts?.allowTruncationRepair === true) {
+        const closed = closeTruncatedJson(stripInvisibleFormatChars(rawArguments))
+        if (closed !== null) args = parseArgsLoose(closed)
+      }
+      if (args === undefined) {
         return { id, name, args: { _raw: rawArguments }, malformed: true, rawArguments }
       }
       return { id, name, args, malformed: false, rawArguments }
@@ -141,12 +246,17 @@ export interface NormalizedResponse {
 export function normalizeResponse(raw: RawProtocolResponse, kind: ProtocolKind): NormalizedResponse {
   const text = typeof raw.content === 'string' ? raw.content : ''
   const reasoning = typeof raw.reasoningContent === 'string' && raw.reasoningContent ? raw.reasoningContent : undefined
-  const toolCalls = normalizeToolCalls(Array.isArray(raw.toolCalls) ? raw.toolCalls : [])
+  const finishReason = normalizeFinishReason(kind, raw.finishReason)
+  // v0.48.2（D228②）安全阀：finish_reason=length 的截断调用不启用闭合补全
+  //（Pi agent loop 原则 —— 半截参数执行比失败更危险）；其余终止帧允许补全。
+  const toolCalls = normalizeToolCalls(Array.isArray(raw.toolCalls) ? raw.toolCalls : [], {
+    allowTruncationRepair: finishReason !== 'length',
+  })
   return {
     text,
     reasoning,
     toolCalls,
-    finishReason: normalizeFinishReason(kind, raw.finishReason),
+    finishReason,
     tokensIn: raw.usage?.tokensIn ?? 0,
     tokensOut: raw.usage?.tokensOut ?? 0,
     empty: !text.trim() && toolCalls.length === 0,

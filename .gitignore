@@ -79,6 +79,9 @@ app/index-*.js
 *.blockmap
 *.zip
 
+# Code signing certs & keys — never commit private key material
+app/build-resources/codesign/
+
 # Scratch / e2e / smoke test scripts
 app/_*.mjs
 app/_*.py

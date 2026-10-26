@@ -96,3 +96,19 @@ test('落定：空串安全', () => {
   assert.equal(r.think, null)
   assert.equal(r.rest, '')
 })
+
+// ============================================================
+// v0.48.2（D233 / TC-SWALLOW-001）：未闭合截断语义锁定（F7a 标记的前提）。
+// 实机（qwen3.8 27b）：代码写在思考流内、`<think>` 未闭合（截断发生在闭合前）
+// → 全部算思考、正文 rest 必须为空。openai.ts 的 contentSwallowedByTruncation
+// 判据（finish=length && think!==null && rest===''）依赖这条语义，语义漂移即标记失真。
+// ============================================================
+test('落定：未闭合截断（代码在 think 内）→ think 吞全部、rest 空（D233 F7a 前提语义）', () => {
+  const r = stripThinkBlocks('<think>先分析……然后给出代码：\nconst x = 1\nconsole.log(x)')
+  assert.equal(r.rest, '', '未闭合截断时正文必须为空（F7a 标记判据依赖）')
+  assert.ok(r.think && r.think.includes('const x = 1'), '代码必须被识别为思考（吞没事实）')
+  // 对照：正常闭合 → 闭合后的正文可见（不被吞）
+  const ok = stripThinkBlocks('<think>推理</think>\nconst x = 1')
+  assert.equal(ok.rest, 'const x = 1')
+  assert.equal(ok.think, '推理')
+})

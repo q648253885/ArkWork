@@ -226,6 +226,9 @@ export function extractProseToolCalls(raw: string | null | undefined): ProseTool
  * 降级通道**激活谓词**（默认关闭的唯一开关）：
  *   ollama 形态端点（kind=ollama/vllm 或 baseURL 含 :11434）+ 模型 id 含 qwen3.5。
  * 其余一切模型/端点 → false → 主循环、请求体、提示词零变化（I-P6）。
+ * v0.48.1：D226 **证伪关闭** —— 真机 qwen3.8 27b 走 OpenAI 协议（非 ollama 形态
+ * 端点），且原生 tool_calls 通达（引擎收到调用，只是 arguments 解析丢参，见
+ * llm/normalize.ts D224）；正文降级通道对该场景不适用，谓词维持 3.5 不扩。
  */
 export function isProseToolFallbackModel(model: LlmModel | null | undefined): boolean {
   if (!model || typeof model.id !== 'string') return false
@@ -247,4 +250,81 @@ export function proseToolContractHint(): string {
     '引擎会解析该 JSON 并真实执行对应工具、把结果回传给你。每次答复至多输出一个工具调用。' +
     `可用工具名包括：${names}。除该 JSON 外，不要输出伪代码，也不要描述"将要调用"——直接给出 JSON 即可。`
   )
+}
+
+/* ============================================================
+ * v0.48.2（D229）：触发式降级激活器 —— 协议无关、模型无关
+ *
+ * 为什么要有这个机制：
+ *   `isProseToolFallbackModel` 的双重门控（ollama 形态端点 + 模型名单）是
+ *   v0.41.0 针对**单一实机**（qwen3.5:9b@ollama）的静态快照。用户裁决（v0.48.2）：
+ *   「不用关注是否为 ollama，其他协议也会出现小模型的情况」—— OpenAI / Anthropic
+ *   协议的小模型原生 tool_calls 通道反复损坏时，永远轮不到正文通道。
+ *
+ * 业界依据（2026-10-22 调研）：
+ *   · Cline/Kilo `consecutiveMistakeCount`：错误 +1 / 成功清零，达限（默认 3）介入；
+ *   · OpenHands `StuckDetector`：连续 N 组同形态失败即判定卡死；
+ *   · 「原生通道连续失败 → 自动切换备选解析通道」无现成公开实现，属合理外推，
+ *     判定信号用**运行时行为**（连续解析失败计数），不用端点形态 / 模型名单。
+ *
+ * 语义（真值表见 TC-PTC-014…017）：
+ *   · 失败信号两种：原生调用**全部** malformed（args 仅 _raw）；零原生调用但
+ *     正文命中可解析白名单工具调用（模型在用正文发调用）；
+ *   · 有健康原生调用 → 清零；普通正文答复 / 最终答复 → 中性（计数不动）；
+ *   · 连续 ≥3（业界典型 N）→ 翻转激活，run 内**单向不回切**（行为抖动风险高，
+ *     回切记 BACKLOG）；
+ *   · 激活只影响**解析层**（正文提取 + 契约提示）；请求体（think 等）仍按启动
+ *     谓词 —— 对任何协议都是零请求变化的纯解析增益。
+ * ============================================================ */
+
+/** 连续失败阈值（业界典型 N=3：Cline consecutiveMistakeCount / browser-use max_failures） */
+export const PROSE_FALLBACK_TRIGGER_THRESHOLD = 3
+
+export interface ProseFallbackTrigger {
+  /** 当前是否激活（谓词启动命中 或 运行中触发翻转；run 内单向） */
+  readonly active: boolean
+  /** 当前连续失败计数（激活后不再累计） */
+  readonly streak: number
+  /** 触发翻转事件（区别于谓词启动激活）；消费型 —— 取走一次后不再返回 true */
+  consumeActivation(): boolean
+  /** 原生 tool_calls 全部 malformed（args 仅 _raw）→ 失败信号 */
+  noteNativeMalformedRound(): void
+  /** 有健康原生调用 → 清零 */
+  noteNativeHealthyRound(): void
+  /** 零原生调用但正文命中可解析白名单工具调用 → 失败信号 */
+  noteProseCallAttempt(): void
+}
+
+export function createProseFallbackTrigger(initialActive: boolean): ProseFallbackTrigger {
+  let active = initialActive
+  let streak = 0
+  let activationPending = false
+  const arm = (): void => {
+    active = true
+    activationPending = true
+  }
+  const noteFailure = (): void => {
+    if (active) return
+    streak += 1
+    if (streak >= PROSE_FALLBACK_TRIGGER_THRESHOLD) arm()
+  }
+  return {
+    get active() {
+      return active
+    },
+    get streak() {
+      return streak
+    },
+    consumeActivation(): boolean {
+      const fired = activationPending
+      activationPending = false
+      return fired
+    },
+    noteNativeMalformedRound: noteFailure,
+    noteProseCallAttempt: noteFailure,
+    noteNativeHealthyRound(): void {
+      if (active) return
+      streak = 0
+    },
+  }
 }

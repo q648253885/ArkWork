@@ -131,7 +131,7 @@ test('TC-RL-006 ★ 中止语义：排队等待期间中止 → 立即拒绝，f
   const p2 = lim.run(async () => { ran = true }, ctl.signal)
   await sleep(20)
   ctl.abort()
-  await assert.rejects(p2, undefined, '排队等待被中止 → 拒绝')
+  await assert.rejects(p2, '排队等待被中止 → 拒绝')
   release1()
   await p1
   assert.equal(ran, false, '被中止的请求不得执行 fn')

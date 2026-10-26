@@ -67,6 +67,7 @@
 | **v0.46.1** | **L-46-03**（见 四·M） | 触发式立项 | open（覆盖安装勾选不可达，独立 UX 问题，非本版引入） |
 | **v0.47.0** | **L-47-01…02**（见 四·N） | 触发式立项 | open（均为他家专有格式/高级特性 Scope Out，发现器单点已留注册位） |
 | **v0.48.0** | **L-48-01…02**（见 四·O） | 触发式立项 / 用户联测 | open（L-48-01 为 Scope Out；L-48-02 为实机联测欠账，非代码缺陷） |
+| **v0.48.2** | **L-48-05**（见 四·Q） | 触发式立项 | open（①②③ 三条均为 Scope Out 立项池 —— 本版 D228/D229/D230 三线 + 实机回传 D231/D232 补遗已覆盖 task_plan/解析层主病灶，信号面扩大与端点能力依赖另行立项；L-48-03 真机复测欠账：D231/D232 后需用 qwen3.8 27b 复测代管与清单补录） |
 
 ---
 
@@ -282,6 +283,9 @@
 | v2.5 | 2026-10-03 | **v0.46.0 收口（PERF-2 性能与低配适配专版）**：三路审计（主进程热路径 / 渲染层重渲染链 / GPU 与性能模式）→ **W1–W17** 落地；缺陷 **D221**（`JsonCollection` seed 引用污染 —— 文件缺失分支直接返回 seed，首个 upsert 原地改写 seed 本体 → `clear()` 清空失效；本版新增 TC-STORE46-006 当场暴露，当版修复）；用例 2555 → **2596**（+41，6 新套件；改写 3 条旧形状契约，纪律㉔）；全量 224 文件唯一红 = 存量 permission-rules-ui（L-43-03）；门禁全绿；打包 mac `.app` + Windows 绿色 zip（142.1 → 134.6 MB）；实机热生效验收通过（perfMode 改三态无需重启）；登记 **L-46-01…02**；✅ 已提交并推送（commit `a825e3d` + tag `v0.46.0`，main 与 tag 均在 origin） |
 | v2.6 | 2026-10-05 | **v0.46.1 收口（D222 插件安装两段式握手修复）**：预览段回带 `zipPath` + 确认段原样传回（IPC 处理器零改动）；用例 2596 → **2599**（TC-PI-019 真执行 + TC-PIW 渲染接线契约 + TC-PI-008 改写）；反向核验报红 ✓；全量 225 文件唯一红 = 存量 permission-rules-ui；打包 `.app` 0.46.1 实机验证两段握手（35ms 直接落盘）；插曲：electron-builder 运行期间剥源 `package.json` scripts/devDeps（从 git 重建，已记证据 + 打包后必查 diff 的固定动作）；登记 **L-46-03**；✅ 与 v0.47.0 同 commit 整体发布（tag `v0.47.0` / commit `6f3abe4`） |
 | v2.7 | 2026-10-05 | **v0.47.0 收口（AGENTS.md（Codex 兼容）指令源 + 提示词源管理）**：调研落盘（AGENTS.md 事实标准 + Codex root-down 拼接 + 32KiB 预算）；**F1** 发现器单点重写 `instruction-sources.ts`（全局补 `~/.codex/AGENTS.md` + 祖先链全收集根→叶 + AGENT.md 变体 + 32KiB 截断；旧 workspace-context 实现整体迁移不留壳）；**F2** 子目录就近注入（file-* 触达 → 祖先链嵌套指令经 pendingSystemHint 追加注入，同 run 去重）；**F3** 设置→工作区「指令源」管理卡（settings:instruction-sources IPC 复用同源，四语言，字节级显示）；**F4** 优先级契约显式化（用户消息 > AGENTS.md > memory.md）；用例 2599 → **2612**（新套件 TC-INS 15 + 集成回填 3 − 旧断言 5 + 改写 1）；反向核验 3 处缺陷注入 5 条报红 ✓；全量 226 文件唯一红 = 存量 permission-rules-ui；门禁全绿；打包 `.app` 0.47.0 + 实机验收（设置卡 + IPC + 截图证据）；登记 **L-47-01…02**；✅ 已提交并推送（commit `6f3abe4` + tag `v0.47.0`，main 与 tag 均在 origin） |
+| v2.8 | 2026-10-21 | **v0.48.0 收口补记**（收尾时变更记录漏更，此处补行）：task_plan 形状非法回执出路（D223，`invalidShapeSuffixOf` 分场出路文案）+ 模型级限频三层防线（`rate-limit.ts` 客户端节流 + Retry-After 尊重 + 固定退避兜底）；+21 用例 = **2633**；登记 **L-48-01…02**（多 key failover Scope Out / qwen3.8 真机复测欠账）；✅ 已提交并推送（commit `13ee47d` + tag `v0.48.0`） |
+| v2.9 | 2026-10-21 | **v0.48.1 收口（qwen3.8 27b task_plan 失败链根治：D224/D225 修复 + D226 证伪关闭）**：**D224** 对象形态 `arguments` 被 `normalizeToolCalls` 静默降级 `{}`（OpenAI 兼容网关实测形态，真机 OpenAI 协议）→ 对象直采分支；**D225** 形状报错不分场谎报「items 为空」→ 分场自诊断（`_raw` 回显 / 缺失报实收键 / 非数组报类型）+ 字符串 items 一次 JSON.parse 自动抢救 + 抢救后回告防原样重发；**D226〔证伪关闭〕** 用户澄清真机为 OpenAI 协议且原生 tool_calls 通达，prose 谓词零代码变更（回退开发中的扩展尝试），TC-PTC-013 补反向断言钉死；**D227 补遗（打包联测回传）** 不可见字符毒化 arguments → parse 剥离重试 + 回显转义 `\uXXXX`；用例 2633 → **2639**（+6：TC-LN-016/017/018 + TC-PEM-005/006/007，改写 TC-PTC-013）；门禁全绿；打包 mac `.app` + win 便携 zip；登记 **L-48-03…04**（真机复测承接 L-48-02 / ollama qwen3.8 正文丢失无证据不扩谓词）；**⚠️ commit / tag 待用户确认** |
+| v2.10 | 2026-10-22 | **v0.48.2 收口（弱模型 tool-call 韧性层：D228/D229/D230，业界调研驱动）**：**D228** 参数修复管道收口（`peelDoubleEncodedArgs` 双重编码剥离 + `closeTruncatedJson` 字符串感知括号栈闭合截断 JSON + 修复阶梯 + length 安全阀：`finishReason==='length'` 不开补全）；**D229** 触发式降级（`ProseFallbackTrigger` 运行时行为判定：连续 3 次工具调用失败翻转激活 prose 正文提取，健康清零、单向不回切、`consumeActivation()` 消费型；**协议无关 / 模型无关**，不做端点与模型名单门控）；**D230** 同参熔断提前（task_plan 同签名计数 ≥3 → observation 附「🛑 清单代管」+ PlanOps 轮首强制 update，force 豁免冷却不豁免预算）；用例 2639 → **2646**（+7：TC-LN-041/042/043 + TC-PTC-017/018 + TC-PTL-007 + TC-OPS-028，改写 4 条，纪律㉔）；门禁增 gate-holes 可审计豁免机制 + TC-LN 存量 13 条补登记；全量 230 文件 fail=1 = 存量 permission-rules-ui（L-43-03，零交集）；打包 mac `.app` + win 便携 zip；登记 **L-48-05**（三条 Scope Out：全局连续错误计数器 / 降级后试探切回 / strict schema·guided decoding）；**⚠️ commit / tag 待用户确认** |
 
 ## 四·I、v0.42.0 遗留（L-42-01…02）
 
@@ -331,3 +335,18 @@
 |---|---|---|---|---|
 | L-48-01 | 多 API key 轮换 / failover 未做（Scope Out）：同一端点多 key 轮询、429 后自动切换备用端点 | 单 key 触发 429 时只能靠限频参数排队（`rate-limit.ts` 三层防线已兜住单端点场景）；端点级故障只能人工切模型 | 触发式立项（`registry.buildAdapter` 包装层已留出 adapter 级换源位置） | open |
 | L-48-02 | 真机复测欠账：qwen3.8 27b 公司端点实测 ① D223 形状非法出路是否终止「同参数 5 次耗尽」；② 配置 minInterval/maxConcurrent 后 429 是否消失（冒烟 S48-2 人工项） | 两项修复的实效未经真实弱模型端点验证（本机只有单测证据） | 用户实机联测；打包 `.app` 后按冒烟 S48-1/S48-2 执行 | open |
+
+## 四·P、v0.48.1 遗留（L-48-03…04）
+
+| # | 项 | 影响 | 去向 | 状态 |
+|---|---|---|---|---|
+| L-48-03 | 真机复测欠账（承接 L-48-02）：qwen3.8 27b 公司端点（**OpenAI 协议**）实测 D224/D225 修复实效 —— task_plan 提交完整清单是否正常落库、不再出现「items 必须是非空数组」误报与同参数 5/5 空转（冒烟 S481-1 人工项） | 修复只有单测证据（对象形态 arguments 为网关实测形态，单测已钉死该形态）；真实端点联通性未验 | 用户实机联测；打包 `.app` 后执行 | open |
+| L-48-04 | ollama 形态端点的 qwen3.8 是否也存在 D208 同款「正文工具调用丢失」——无真机证据，prose 谓词**不扩**（D226 证伪关闭：OpenAI 协议场景不适用） | 仅影响「用 ollama 跑 qwen3.8 且正文丢工具调用」的假想场景（当前无用户报障） | 有真机证据再触发式立项（扩展 `isProseToolFallbackModel` + TC-PTC-013 反向断言同步改写） | open |
+
+## 四·Q、v0.48.2 遗留（L-48-05）
+
+| # | 项 | 影响 | 去向 | 状态 |
+|---|---|---|---|---|
+| L-48-05 | **Scope Out 转欠账**（三条，见 v0.48.2 release-goal）：① **全局连续错误计数器** —— 跨工具、跨轮次的 Cline 式总闸（`consecutiveMistakeCount` 同款），达到阈值主动降级介入 | 本版 D228（参数修复管道）/ D229（触发式降级）/ D230（同参熔断）已覆盖 task_plan 与解析层主病灶；全局计数器涉及信号面扩大（哪些失败计入、跨轮次衰减策略），需独立设计避免误伤合法重试 | 触发式立项（业界参照：Cline `consecutiveMistakeCount` / OpenHands `StuckDetector`，调研已落 v0.48.2 CHANGELOG） | open |
+| ② | **降级后试探切回** —— D229 触发式降级在当前 run 内**单向不回切**（防振荡）；强模型偶发失败被误降级后，剩余轮次失去原生 tool_calls | 单 run 生命周期内影响有限（触发即代表连续 3 次失败，回切大概率继续失败）；跨 run 天然复位，实际损失面小 | 「无损试错」设计（试探调用 + 失败即回降）成熟后触发式立项 | open |
+| ③ | **strict schema / guided decoding** —— 服务端约束输出（JSON schema 强制 / grammar 采样），从根上消灭畸形 tool_calls | 依赖端点能力差异（ollama format schema / vLLM guided_json / OpenAI structured outputs 各不相同），弱端点普遍不支持；客户端无法单方面受益 | 端点能力探测 + 协议适配调研后触发式立项 | open |

@@ -599,11 +599,62 @@ export async function executeAct(
       const reason = typeof args.reason === 'string' ? args.reason.slice(0, 200) : ''
 
       // ---------- ① 形状校验（失败即回**可执行** observation，不静默丢弃） ----------
-      const rawItems = args.items
+      // v0.48.1（D225）：参数丢失自诊断。适配器把 arguments 解析失败时 args 只剩
+      // {_raw}，模型明明提交了完整清单却收到「items 必须是非空数组」，无从自查只能
+      // 原样重试到同参数预算耗尽（真机 qwen3.8 27b）。现在：
+      //   ① args._raw 存在 → 直接告知「arguments 不是合法 JSON」并回显原文（截 200 字）；
+      //   ② items 是字符串 → 尝试一次解析自动抢救（双重编码形态，修好不报错）；
+      //   ③ 其余分场报「缺失 / 实际类型 + 实收参数键」，模型能对着改。
+      const rawArgsJson = typeof args._raw === 'string' ? args._raw.trim() : ''
+      // v0.48.1（D227）：不可见格式字符转义 \uXXXX 字面再回显——原文夹毒（BOM/零宽等）
+      // 会被下方空白折叠与终端渲染吞掉（真机表象：「原始文本：{}」却解析失败，无法定罪）
+      const invisibleChars = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u00AD\u200B-\u200D\u2060-\u2064\u200E\u200F\uFEFF]/g
+      const clipRawArgs = (s: string): string => {
+        const escaped = s.replace(invisibleChars, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`)
+        return escaped.replace(/\s+/g, ' ').slice(0, 200) + (escaped.length > 200 ? '…' : '')
+      }
+      const rescueItemsFromString = (s: string): unknown[] | null => {
+        const t = s.trim()
+        if (!t.startsWith('[') && !t.startsWith('{')) return null
+        try {
+          const v = JSON.parse(t) as unknown
+          if (Array.isArray(v)) return v
+          if (v && typeof v === 'object' && Array.isArray((v as Record<string, unknown>).items)) {
+            return (v as Record<string, unknown>).items as unknown[]
+          }
+        } catch {
+          /* 直解失败 = 放弃抢救，走下方分场报错（诚实诊断） */
+        }
+        return null
+      }
+      let itemsRescued = false
+      let rawItems: unknown = args.items
+      if (!rawArgsJson && typeof rawItems === 'string') {
+        const rescued = rescueItemsFromString(rawItems)
+        if (rescued) {
+          rawItems = rescued
+          itemsRescued = true
+        }
+      }
       const shapeErrors: string[] = []
       const draft: PlanDraftItem[] = []
-      if (!Array.isArray(rawItems) || rawItems.length === 0) {
-        shapeErrors.push('items 必须是非空数组')
+      if (rawArgsJson) {
+        shapeErrors.push(
+          `工具参数 arguments 不是合法 JSON，引擎没有收到任何字段（原始文本：${clipRawArgs(rawArgsJson)}）。请重新发起调用，arguments 必须是合法 JSON 对象`,
+        )
+      } else if (!Array.isArray(rawItems) || rawItems.length === 0) {
+        if (rawItems === undefined) {
+          const keys = Object.keys(args).filter((k) => k !== '_raw')
+          shapeErrors.push(
+            keys.length > 0
+              ? `items 缺失（实收参数键：${keys.slice(0, 6).join('、')}）—— items 必须是任务对象组成的非空数组`
+              : 'items 缺失（未收到任何参数）—— items 必须是任务对象组成的非空数组',
+          )
+        } else {
+          shapeErrors.push(
+            `items 必须是非空数组（实收 ${Array.isArray(rawItems) ? '空数组' : typeof rawItems}）`,
+          )
+        }
       } else {
         rawItems.forEach((it, i) => {
           const o = (it ?? {}) as Record<string, unknown>
@@ -722,12 +773,17 @@ export async function executeAct(
       const degradeText = graphSyncDegraded
         ? `\n\n⚠️ 注意：任务图通道本次未同步（清单账本已记录，以账本为准）。已完成项不要重做。`
         : ''
+      // v0.48.1（D224）：双重编码自动抢救成功后必须回告模型 —— 否则模型不知道自己
+      // 发的是字符串形态，下轮还会原样重发（同参数预算 5/5 的又一条死循环入口）。
+      const rescueNote = itemsRescued
+        ? '\n\n⚠️ items 以字符串形态提交，引擎已自动解析为清单数组 —— 请直接输出 JSON 数组，不要双重编码。'
+        : ''
       const summary =
         diff.changed === 0
           ? `清单已检视，无需变化（共 ${freshItems.length} 项）。${
               openCount > 0 ? `\n${endgameSuffixOf(openCount, freshItems.length)}` : ''
-            }\n当前清单：\n${overview}`
-          : `清单已更新（${diff.summary}）${protectedText}。\n当前清单：\n${overview}${warnText}${engineWarnText}${degradeText}${endgame}`
+            }\n当前清单：\n${overview}${rescueNote}`
+          : `清单已更新（${diff.summary}）${protectedText}。\n当前清单：\n${overview}${warnText}${engineWarnText}${degradeText}${endgame}${rescueNote}`
       // 落库日志已由共享管线输出（`${source}(ledger): changed=…`），此处不再重复
       return {
         completedStep: { ...placeholder, result: { changed: diff.changed, items: freshItems.length }, resultSummary: summary, durationMs, status: 'success' },

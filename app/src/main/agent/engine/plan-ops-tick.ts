@@ -45,6 +45,8 @@ export interface PlanOpsSignals {
   cancelRequested: boolean
   /** 上一轮是空响应（D197 路径） */
   emptyRound: boolean
+  /** v0.48.2（D230）：task_plan 同参熔断置位（连续 ≥3 次相同提交）→ 强制代管 tick */
+  planRepeatStalled?: boolean
 }
 
 export interface PlanOpsTickInput {
@@ -110,14 +112,26 @@ export async function planOpsTick(input: PlanOpsTickInput): Promise<PlanOpsTickR
     hadProse: signals.hadProse,
     cancelRequested: signals.cancelRequested,
     emptyRound: signals.emptyRound,
+    // v0.48.2（D230）：同参熔断 → 代管 update
+    planRepeatStalled: signals.planRepeatStalled === true,
   })
   if (!kind) return { state, changed: false, kind: null, reason: 'no-signal' }
 
   const fingerprint = draftFingerprint(items.map((i) => ({ text: i.text, status: i.status as 'todo' })))
   // create / cancel 是一次性收尾动作，豁免轮间隔；
-  // 空回合的 update 同样豁免（它是「清单不能停摆」的最后一道兜底）。
-  const force = kind === 'create' || kind === 'cancel' || signals.emptyRound
-  const gate = shouldRunPlanOps({ state, kind, round, fingerprint, force })
+  // 空回合的 update 同样豁免（它是「清单不能停摆」的最后一道兜底）；
+  // v0.48.2（D230）：同参熔断的 update 豁免轮间隔（强制代管）—— 预算仍绝对（O7 同款）。
+  // v0.48.2（D231）：同参熔断同时豁免指纹 duplicate 拒绝 —— 「清单没变」恰是死循环
+  // 常态，指纹拒绝会让置位代管空转（实机回传主断点）；预算仍绝对。
+  const force = kind === 'create' || kind === 'cancel' || signals.emptyRound || signals.planRepeatStalled === true
+  const gate = shouldRunPlanOps({
+    state,
+    kind,
+    round,
+    fingerprint,
+    force,
+    duplicateExempt: signals.planRepeatStalled === true,
+  })
   if (!gate.run) return { state, changed: false, kind, reason: gate.reason }
 
   state = notePlanOpsRun(state, kind, round, fingerprint)

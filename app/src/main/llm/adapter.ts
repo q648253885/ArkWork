@@ -97,6 +97,14 @@ export interface LlmCompleteResponse {
   reasoningContent?: string
   /** v0.36.0 F1.5：malformed tool call 数（arguments 非法 JSON，args 已降级 {_raw}；缺省=无） */
   malformedToolCallCount?: number
+  /**
+   * v0.48.2（D233 / F7a）：正文被「未闭合 `<think>` + 长度截断」吞没标记。
+   * finish=length 且整段响应全被 think 分流吞走（think!==null 且正文为空）时置 true ——
+   * qwen3.8 27b 实机：代码写在思考流内、`<think>` 未闭合或截断在闭合前，
+   * content 为空但引擎无任何告警，模型却自以为已输出。reason-phase 据此
+   * 提额重试并给出人话回执，不再静默放行（缺省 = 未发生）。
+   */
+  contentSwallowedByTruncation?: boolean
 }
 
 /** v0.27.0 R1：流式增量回调集合（渲染加速用；聚合结果仍以返回值为准） */

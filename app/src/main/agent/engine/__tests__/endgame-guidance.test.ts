@@ -77,10 +77,16 @@ test('TC-ENDG-003 ★ act.ts 消费接线：零变化分支 + 更新分支都接
 })
 
 test('TC-ENDG-004 ★ loop.ts 消费接线：清单族被拦（回执 + 两个 system hint）都带 endgame', () => {
-  assert.match(LOOP, /import \{ PLAN_TOOL_HINT \} from '\.\.\/ledger\/hint\.js'/, 'hint 导入存在')
+  // v0.48.2（D230，纪律㉔）：导入分支感知放宽 —— 同源合法新增 PLAN_TOOL_NAME（同参熔断文案），意图（hint 单源导入）不变
+  assert.match(LOOP, /import \{[^}]*\bPLAN_TOOL_HINT\b[^}]*\} from '\.\.\/ledger\/hint\.js'/, 'hint 导入存在')
   // 单条被拦回执：task_plan 同参数 5/5 → 回执含终局指引（真机死循环现场）
   assert.match(LOOP, /const planEndgame = isPlanWriteTool\(toolName\) \? `。\$\{PLAN_TOOL_HINT\.endgame\}` : ''/, '被拦回执按清单族特化')
-  assert.match(LOOP, /请改用替代方法\$\{planEndgame\}/, '拦截 msg 必须拼接 planEndgame')
+  // v0.48.2（D231，纪律㉔）：同参被拦回执加代管宣告 —— msg 拼接扩为 planCaretake + planEndgame
+  assert.match(
+    LOOP,
+    /请改用替代方法\$\{planCaretake\}\$\{planEndgame\}/,
+    '拦截 msg 必须拼接 planCaretake（代管宣告）+ planEndgame',
+  )
   // 两个 system hint（全部达上限 / 部分达上限）都接入
   assert.match(LOOP, /actions\.some\(\(a\) => isPlanWriteTool\(a\.tool\)\) \? PLAN_TOOL_HINT\.endgame : ''/, '全部达上限分支接入')
   assert.match(LOOP, /blocked\.some\(\(t\) => isPlanWriteTool\(t\)\) \? PLAN_TOOL_HINT\.endgame : ''/, '部分达上限分支接入')

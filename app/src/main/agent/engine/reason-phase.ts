@@ -329,13 +329,23 @@ export async function runReasonPhase(
 
     // v0.15.0 Task 5：思考模型输出预算被思考耗尽（finish=length + content 空 + 无 tool action）
     // → 提高 maxTokens 到 8192 重试一次；仍空则注入占位答复，避免任务静默 done 且无内容。
+    // v0.48.2（D233 / F7a）：`contentSwallowedByTruncation`（未闭合 <think> + 截断把
+    // 整段回复吞进思考）同样进入本分支 —— 提额重试给正文一次送达机会。
     if (
       response.finishReason === 'length' &&
       !response.content &&
       !(response.actions && response.actions.length > 0) &&
-      response.reasoningContent
+      (response.reasoningContent || response.contentSwallowedByTruncation)
     ) {
-      logger.warn('Agent', 'reasoning exhausted output budget (finish=length, empty content) — retry with maxTokens=8192', task.id)
+      // D233：两种形态分开记 —— 「思考烧尽预算」与「正文被 think 吞没」的处方不同
+      //（前者让模型省着想，后者要求模型把正文写出来）。
+      logger.warn(
+        'Agent',
+        response.contentSwallowedByTruncation
+          ? '正文被「未闭合 <think> + 长度截断」吞没（finish=length, content 空）— retry with maxTokens=8192'
+          : 'reasoning exhausted output budget (finish=length, empty content) — retry with maxTokens=8192',
+        task.id,
+      )
       await emitContextSizeReport({
         taskId: task.id,
         iteration,
@@ -349,7 +359,12 @@ export async function runReasonPhase(
       if (retryResp.content || (retryResp.actions && retryResp.actions.length > 0)) {
         response = retryResp
       } else {
-        const placeholder = '模型思考时间过长，未产出有效内容，请重试或更换模型'
+        // v0.48.2（D233 / F7a）：截断吞正文 → 人话回执（此前一律误报「思考时间过长」，
+        // 模型无从得知「正文没送达」这一事实）。占位答复同时进 content/thought：
+        // 内容经 guardFinish → 收尾 summary / turn_note 送达用户，且有后续轮可纠正。
+        const placeholder = response.contentSwallowedByTruncation
+          ? '回复因长度上限被截断，正文未送达交互区 —— 请精简思考或分步输出，正式回答必须写在回复正文里。'
+          : '模型思考时间过长，未产出有效内容，请重试或更换模型'
         response = { ...response, content: placeholder, thought: placeholder }
       }
     }
